@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest, macos-15-intel, ubuntu-24.04-arm]
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.os }}
+      - name: build
+        run: cargo build --verbose
+      - name: test
+        run: cargo test --no-fail-fast -- --test-threads=14 --nocapture
+        env:
+          RUST_BACKTRACE: 1
+          RUST_LOG: trace

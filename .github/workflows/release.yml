@@ -1,0 +1,26 @@
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-x86_64
+      - name: publish package to crates
+        run: |
+          cargo package
+          cargo publish --token ${{ secrets.CARGO_TOKEN }}

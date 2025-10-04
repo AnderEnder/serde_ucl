@@ -1,0 +1,7 @@
+/target/
+**/*.rs.bk
+**/*.iml
+/.idea/
+.DS_Store
+cobertura.xml
+travis_wait_*.log

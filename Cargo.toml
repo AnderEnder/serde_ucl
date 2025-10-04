@@ -1,0 +1,91 @@
+[package]
+name = "ucl-rust-lexer"
+version = "0.1.0"
+edition = "2024"
+authors = ["UCL Rust Lexer Contributors"]
+description = "A high-performance UCL (Universal Configuration Language) lexer and parser with serde integration"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/example/ucl-rust-lexer"
+keywords = ["ucl", "parser", "lexer", "serde", "configuration"]
+categories = ["parsing", "config"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+indexmap = { version = "2", features = ["serde"] }
+smallvec = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+serde_json = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[features]
+default = ["std"]
+std = []
+save-comments = []
+strict-unicode = []
+
+[lib]
+name = "ucl_lexer"
+path = "src/lib.rs"
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "performance_comparison"
+path = "examples/performance_comparison.rs"
+
+[[example]]
+name = "extensibility_demo"
+path = "examples/extensibility_demo.rs"
+
+[[example]]
+name = "web_server_config"
+path = "examples/web_server_config.rs"
+
+[[example]]
+name = "framework_integration"
+path = "examples/framework_integration.rs"
+
+[[example]]
+name = "advanced_features"
+path = "examples/advanced_features.rs"
+
+[[example]]
+name = "configuration_management"
+path = "examples/configuration_management.rs"
+
+[[example]]
+name = "number_parsing"
+path = "examples/number_parsing.rs"
+
+[[example]]
+name = "real_world_usage"
+path = "examples/real_world_usage.rs"
+
+[[bench]]
+name = "lexer_benchmarks"
+harness = false
+
+[[bench]]
+name = "parser_benchmarks"
+harness = false
+
+[[bench]]
+name = "zero_copy_benchmarks"
+harness = false
+
+[[bench]]
+name = "ucl_compatibility_benchmarks"
+harness = false
+
+[[bench]]
+name = "memory_efficiency_benchmarks"
+harness = false
+
+# Enable optimizations for performance tests while keeping other tests in debug mode
+# Performance tests check for this with #[cfg(debug_assertions)]
+[profile.test.package.ucl-rust-lexer]
+opt-level = 2
