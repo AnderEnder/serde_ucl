@@ -1427,22 +1427,10 @@ fn test_compatibility_with_existing_ucl_files() {
         }
     "#;
 
-    // Note: This test might not fully parse due to .include directives
-    // but should handle the basic UCL syntax
+    // libucl rejects this input: its golden dump is an error
+    // (tests/conformance/cases/migrated/integration_tests__compatibility_with_existing_ucl_files).
     let result = from_str::<serde_json::Value>(rspamd_config);
-    match result {
-        Ok(parsed) => {
-            assert!(parsed.is_object());
-            println!("Successfully parsed Rspamd-style config");
-        }
-        Err(e) => {
-            println!(
-                "Rspamd config parsing failed (expected due to .include): {}",
-                e
-            );
-            // This is acceptable as .include is a preprocessor directive
-        }
-    }
+    assert!(result.is_err(), "libucl rejects this input, got {result:?}");
 }
 
 #[test]

@@ -1,0 +1,8 @@
+
+            version = v1.2.3
+            port = 8080
+            mixed = abc123
+            hex_like = 0xabc
+            float_like = 3.14
+            scientific = 1e10
+        

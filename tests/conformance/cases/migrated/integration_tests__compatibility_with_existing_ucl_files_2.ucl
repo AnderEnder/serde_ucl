@@ -1,0 +1,30 @@
+
+        name: "pkg";
+        origin: "ports-mgmt/pkg";
+        version: "1.18.4";
+        comment: "Package manager";
+        maintainer: "pkg@FreeBSD.org";
+        www: "https://github.com/freebsd/pkg";
+        abi = "FreeBSD:13:amd64";
+        arch = "freebsd:13:x86:64";
+        prefix = "/usr/local";
+        sum = "sha256:1234567890abcdef...";
+        flatsize: 2097152;
+        path = "All/pkg-1.18.4.txz";
+        repopath = "All/pkg-1.18.4.txz";
+        
+        deps: {
+            libarchive: {
+                origin: "archivers/libarchive";
+                version: "3.6.1,1";
+            }
+        }
+        
+        categories = [ "ports-mgmt" ];
+        licenses = [ "BSD2CLAUSE" ];
+        
+        options = {
+            DOCS: "on";
+            NLS: "on";
+        }
+    

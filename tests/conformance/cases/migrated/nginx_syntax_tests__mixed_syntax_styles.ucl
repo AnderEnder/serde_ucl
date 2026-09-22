@@ -1,0 +1,13 @@
+
+            server {
+                listen = 80                    # Explicit with equals
+                server_name: "example.com"     # Explicit with colon
+                root /var/www/html             # Implicit bare word
+                
+                location / {                   # Implicit nested object
+                    try_files $uri $uri/ =404
+                }
+                
+                ssl_certificate = "/path/to/cert.pem"  # Explicit
+            }
+        

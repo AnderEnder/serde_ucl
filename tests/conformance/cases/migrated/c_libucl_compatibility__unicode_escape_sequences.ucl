@@ -1,0 +1,5 @@
+
+            unicode_basic = "Unicode: \u0041\u0042\u0043";
+            unicode_extended = "Emoji: \u{1F600}";
+            mixed_unicode = "Mixed: \u0041\u{1F600}\u0042";
+        

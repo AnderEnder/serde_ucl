@@ -1,0 +1,5 @@
+
+            content = <<EOF
+            This heredoc is never terminated
+            It should cause an error
+        

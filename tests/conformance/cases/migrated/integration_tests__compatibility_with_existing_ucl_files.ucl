@@ -1,0 +1,34 @@
+
+        # Rspamd configuration
+        .include "$CONFDIR/common.conf"
+        
+        options {
+            pidfile = "$RUNDIR/rspamd.pid";
+            .include "$CONFDIR/options.inc"
+            .include(try=true; priority=1,duplicate=merge) "$LOCAL_CONFDIR/local.d/options.inc"
+            .include(try=true; priority=10) "$LOCAL_CONFDIR/override.d/options.inc"
+        }
+        
+        logging {
+            type = "file";
+            filename = "$LOGDIR/rspamd.log";
+            level = "info";
+            .include "$CONFDIR/logging.inc"
+            .include(try=true; priority=1,duplicate=merge) "$LOCAL_CONFDIR/local.d/logging.inc"
+            .include(try=true; priority=10) "$LOCAL_CONFDIR/override.d/logging.inc"
+        }
+        
+        worker "normal" {
+            bind_socket = "localhost:11333";
+            .include "$CONFDIR/worker-normal.inc"
+            .include(try=true; priority=1,duplicate=merge) "$LOCAL_CONFDIR/local.d/worker-normal.inc"
+            .include(try=true; priority=10) "$LOCAL_CONFDIR/override.d/worker-normal.inc"
+        }
+        
+        worker "controller" {
+            bind_socket = "localhost:11334";
+            .include "$CONFDIR/worker-controller.inc"
+            .include(try=true; priority=1,duplicate=merge) "$LOCAL_CONFDIR/local.d/worker-controller.inc"
+            .include(try=true; priority=10) "$LOCAL_CONFDIR/override.d/worker-controller.inc"
+        }
+    

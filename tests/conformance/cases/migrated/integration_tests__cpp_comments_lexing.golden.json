@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"//","v":[{"t":"string","v":"This is a C++ comment"},{"t":"string","v":"Inline C++ comment"}]},{"k":"key1","v":[{"t":"string","v":"value1"}]},{"k":"key2","v":[{"t":"string","v":"value2"}]}]}

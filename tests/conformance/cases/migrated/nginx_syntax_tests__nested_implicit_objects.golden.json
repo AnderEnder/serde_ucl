@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"http","v":[{"t":"object","entries":[{"k":"server","v":[{"t":"object","entries":[{"k":"location","v":[{"t":"object","entries":[{"k":"/api/","v":[{"t":"object","entries":[{"k":"proxy_pass","v":[{"t":"string","v":"http://backend"}]},{"k":"proxy_timeout","v":[{"t":"time","v":"30"}]}]}]}]}]}]}]}]}]}]}

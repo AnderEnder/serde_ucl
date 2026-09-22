@@ -1,0 +1,13 @@
+
+            # Hash comment
+            key1 = "value1";
+            
+            /*
+             * Multi-line comment
+             */
+            key2 = "value2";
+            
+            key3 = "value3"; # End-of-line comment
+            
+            /* Inline comment */ key4 = "value4";
+        

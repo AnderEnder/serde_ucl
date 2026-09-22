@@ -1,0 +1,83 @@
+
+        # Rspamd-style UCL configuration
+        logging = {
+            type = "file";
+            filename = "/var/log/rspamd/rspamd.log";
+            level = "info";
+        }
+        
+        worker "normal" {
+            bind_socket = "localhost:11333";
+            .include "$CONFDIR/worker-normal.inc"
+        }
+        
+        worker "controller" {
+            bind_socket = "localhost:11334";
+            password = "$2$xu1581gidj5cyp4yjgo68qbj6jz1j8o3$j9yg4k5k9k5k9k5k9k5k9k5k9k5k9k5k";
+            enable_password = "$2$xu1581gidj5cyp4yjgo68qbj6jz1j8o3$j9yg4k5k9k5k9k5k9k5k9k5k9k5k9k5k";
+            secure_ip = ["127.0.0.1", "::1"];
+            static_dir = "${WWWDIR}";
+        }
+        
+        modules = {
+            path = "$PLUGINSDIR/lua/";
+        }
+        
+        lua = "$CONFDIR/lua/rspamd.lua";
+        
+        # Metric configuration
+        metric "default" {
+            actions = {
+                reject = 15;
+                add_header = 6;
+                greylist = 4;
+            }
+            
+            unknown_weight = 1;
+        }
+        
+        # Classifier configuration
+        classifier "bayes" {
+            tokenizer {
+                name = "osb-text";
+            }
+            
+            cache {
+                path = "${DBDIR}/learn_cache.sqlite";
+            }
+            
+            min_learns = 200;
+            backend = "sqlite3";
+            languages_enabled = true;
+            
+            statfile {
+                symbol = "BAYES_HAM";
+                path = "${DBDIR}/bayes.ham.sqlite";
+                spam = false;
+            }
+            
+            statfile {
+                symbol = "BAYES_SPAM";
+                path = "${DBDIR}/bayes.spam.sqlite";
+                spam = true;
+            }
+        }
+        
+        # Composites
+        composites = {
+            "FORGED_RECIPIENTS" = "FORGED_RECIPIENTS_MAILRU | FORGED_RECIPIENTS_GMAIL";
+            "SUSPICIOUS_RECIPS" = "SUSPICIOUS_RECIPS & !WHITELIST_SPF";
+        }
+        
+        # Groups configuration
+        group "policies" {
+            .include "$CONFDIR/policies.conf"
+        }
+        
+        # DNS configuration
+        dns {
+            nameserver = ["8.8.8.8", "8.8.4.4"];
+            retransmits = 5;
+            timeout = 1s;
+        }
+    

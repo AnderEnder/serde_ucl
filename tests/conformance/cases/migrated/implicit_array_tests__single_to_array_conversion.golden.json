@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"database_host","v":[{"t":"string","v":"primary.db.com"},{"t":"string","v":"secondary.db.com"}]},{"k":"timeout","v":[{"t":"int","v":"30"},{"t":"int","v":"60"}]}]}

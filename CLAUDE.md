@@ -22,28 +22,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - When making edits, include only minimal context in old_string
 - Batch related operations in single tool calls
 
+
 ## Project Overview
 
-A high-performance UCL (Universal Configuration Language) lexer and parser with seamless serde integration for Rust. UCL is a human-readable configuration format combining features from JSON, YAML, and NGINX configuration syntax.
+A UCL (Universal Configuration Language) parser for Rust with serde integration. The target is
+format compatibility with libucl, the reference implementation used by FreeBSD. Compatibility is
+defined by behaviour: the conformance suite in `tests/conformance/` and the behaviour spec in
+`docs/spec/`.
 
-This Rust implementation follows the design of the C libucl library, implementing a collection of specialized parsing functions that directly construct objects during parsing rather than producing a traditional token stream.
+## Clean-Room Rules
 
-## Quick Reference: File Locations
+The implementation in `src/` must not be derived from libucl's source code. Tests may be.
+Two teams: the spec team reads libucl source and writes the behaviour spec in `docs/spec/`; the
+implementation team has never read libucl source and works only from released spec versions. The
+rules below bind the implementation team; the spec team never edits `src/`.
 
-**Core Implementation:**
-- Lexer: `src/lexer.rs` (tokenization, character classification, number parsing)
-- Parser: `src/parser.rs` (UclValue construction, variable expansion, plugins)
-- Deserializer: `src/deserializer.rs` (serde integration)
-- Error handling: `src/error.rs` (UclError, Position, Span)
-
-**Testing:**
-- Integration tests: `tests/*.rs`
-- Benchmarks: `benches/*.rs`
-- Examples: `examples/*.rs`
-
-**Configuration:**
-- Dependencies: `Cargo.toml`
-- Feature flags: std, zero-copy, save-comments, strict-unicode
+- Do not read libucl source files (`*.c`, `*.h`) anywhere, including clones under
+  `target/libucl-oracle/` or temporary directories, or browse its source online.
+- Do not read branch `quarantine/*`, or use `REVIEW.md`, `PLAN.md` or `PROGRESS.md` as input for
+  implementation work.
+- Do not copy from `src/lexer.rs` or `src/parser.rs`; they are being replaced.
+- Allowed inputs for implementation: the released spec (`spec-vN` tag) in `docs/spec/`, `docs/clean-room/`, libucl's public format
+  documentation, the conformance cases and golden files, and running the oracle as a black box
+  (`scripts/regen-golden.sh`, `target/libucl-oracle/ucl-dump`).
+- Record provenance in `docs/clean-room/LOG.md`. The full protocol is in
+  `docs/clean-room/PROTOCOL.md`.
 
 ## Common Commands
 
@@ -102,169 +105,13 @@ cargo clippy
 cargo doc --open
 ```
 
-## Architecture
 
-### Core Components
+## Testing
 
-The codebase is organized into 4 main modules that form a processing pipeline:
-
-1. **Lexer** (`src/lexer.rs`) - Tokenizes UCL text into tokens
-   - Handles 3 string formats: JSON-style (`"..."`), single-quoted (`'...'`), and heredoc (`<<EOF...EOF`)
-   - Supports rich number parsing with suffixes (512mb, 30s, 2gb)
-   - Implements character classification using bitfield flags for performance
-   - Provides both regular and streaming lexer implementations
-
-2. **Parser** (`src/parser.rs`) - Converts tokens into structured `UclValue` tree
-   - Builds `UclValue` enum with variants: String, Integer, Float, Time, Boolean, Null, Object, Array
-   - Uses `IndexMap` for preserving key insertion order in objects
-   - Implements variable expansion with circular reference detection
-   - Supports custom hooks: `NumberSuffixHandler`, `StringPostProcessor`, `ValidationHook`
-   - Plugin system via `UclPlugin` trait and `PluginRegistry`
-
-3. **Deserializer** (`src/deserializer.rs`) - Bridges parser to serde
-   - Implements `serde::Deserializer` trait to enable `#[derive(Deserialize)]`
-   - Public API: `from_str()`, `from_str_with_variables()`
-   - Handles variable expansion through `VariableHandler` implementations
-
-4. **Error Handling** (`src/error.rs`) - Comprehensive error types
-   - `UclError` enum: Lex, Parse, Serde variants
-   - Position tracking with `Position` (line, column) and `Span` (start, end positions)
-   - All errors implement `std::error::Error` via `thiserror`
-
-### Data Flow
-
-```
-Input String → UclLexer → Token Stream → UclParser → UclValue Tree → UclDeserializer → Rust Struct
-                                             ↑
-                                      VariableHandler (optional)
-                                      ParsingHooks (optional)
-                                      Plugins (optional)
-```
-
-### Key Design Patterns
-
-**Zero-Copy Parsing**: When enabled via `LexerConfig.zero_copy = true`, strings use `Cow<'a, str>` to reference original input instead of allocating.
-
-**Streaming Support**: `StreamingUclLexer` processes large files with constant memory by reading from `BufReader`.
-
-**Variable Expansion**:
-- `VariableHandler` trait allows custom variable resolution
-- Built-in handlers: `EnvironmentVariableHandler`, `MapVariableHandler`, `ChainedVariableHandler`
-- Context tracking via `VariableContext` with expansion stack for circular reference detection
-
-**Extensibility**:
-- Hook system: `ParsingHooks` struct with `NumberSuffixHandler`, `StringPostProcessor`, `ValidationHook`
-- Plugin system: Implement `UclPlugin` trait, register via `PluginRegistry`, build parser with `UclParserBuilder`
-- Example plugins in parser module: `CssUnitsPlugin`, `PathProcessingPlugin`, `ConfigValidationPlugin`
-
-## Feature Flags
-
-- `std` (default): Standard library support
-- `zero-copy`: Zero-copy string parsing optimizations
-- `save-comments`: Preserve comments during parsing
-- `strict-unicode`: Enforce strict Unicode validation
-
-## Testing Strategy
-
-- Unit tests: Embedded in source files (e.g., `src/error_tests.rs`)
-- Integration tests: `tests/integration_tests.rs`, `tests/compatibility_tests.rs`, `tests/extensibility_tests.rs`, `tests/performance_tests.rs`
-- Benchmarks: `benches/lexer_benchmarks.rs`, `benches/parser_benchmarks.rs`, `benches/zero_copy_benchmarks.rs`
-- Examples serve as both documentation and functional tests
-
-## Number Suffix Parsing
-
-The lexer supports rich number formats:
-- Size suffixes (binary 1024-based): `kb`, `mb`, `gb`, `tb`
-- Size suffixes (decimal 1000-based): `kbps`, `mbps`, `gbps`
-- Time suffixes: `ms`, `s`, `min`, `h`, `d`
-- Special values: `inf`, `nan`
-- Number bases: hex (`0xFF`), binary (`0b1010`), octal (`0o755`)
-
-## String Format Handling
-
-Three distinct string formats with different escape semantics:
-1. **JSON-style (`"..."`)**: Full escape sequences including `\n`, `\t`, `\uXXXX`. Detects variable expansion during lexing but expands during parsing.
-2. **Single-quoted (`'...'`)**: Literal strings with only two escapes: `\'` for single quote and `\<newline>` for line continuation.
-3. **Heredoc (`<<EOF...EOF`)**: Multiline with uppercase-only terminator. Terminator must be on its own line. Preserves all whitespace.
-
-**Key Implementation Detail**: String unescaping is done in-place to avoid allocations (destination pointer starts at same position as source).
-
-## Variable Expansion
-
-Two-pass algorithm from C implementation:
-1. **Pass 1**: Scan for variables, calculate total expanded length
-2. **Pass 2**: Allocate buffer with exact size, expand variables into new buffer
-
-Variable formats:
-- **Braced** (`${VARNAME}`): Strict matching, stops at `}`
-- **Unbraced** (`$VARNAME`): Greedy matching of alphanumeric + `_`
-- **Escape**: `$$` → literal `$`
-- **Not found**: Preserve original (e.g., `${UNKNOWN}` stays as-is)
-
-Variable resolution order:
-1. Registered variables (exact/prefix match depending on format)
-2. Custom variable handler callback
-3. Not found → preserve original text
-
-## Comment Handling
-
-**Single-line**: `#` to end of line
-**Multi-line**: `/* ... */` with nesting support
-
-Nesting algorithm tracks depth counter:
-- `/*` increments depth
-- `*/` decrements depth
-- Comment ends when depth reaches 0
-
-When `save-comments` feature is enabled, comments are accumulated in parser and attached to the next parsed object.
-
-## Lexer Implementation Notes
-
-**Character Classification**: Uses 256-entry lookup table with bitfield flags for O(1) classification:
-```rust
-CharacterFlags {
-    WHITESPACE: 1 << 0,          // space, tab
-    WHITESPACE_UNSAFE: 1 << 1,   // newline, carriage return (affects line counting)
-    KEY_START: 1 << 2,           // [A-Za-z_/]
-    KEY: 1 << 3,                 // [A-Za-z0-9_/-]
-    VALUE_END: 1 << 4,           // Terminates unquoted values: , ; } ] # newline
-    VALUE_DIGIT: 1 << 5,         // [0-9]
-    ESCAPE: 1 << 6,              // Requires escaping: " \
-    JSON_UNSAFE: 1 << 7,         // Control characters requiring JSON escaping
-}
-```
-
-**Number Parsing State Machine**:
-1. **START**: Handle optional sign `-`
-2. **INTEGER**: Check for `0x` (hex) or parse decimal digits
-3. **HEX_DIGITS**: Parse hexadecimal (sets `allow_double = false`)
-4. **DECIMAL_DIGITS**: Parse decimal, check for `.` or `e`/`E`
-5. **FRACTION**: Parse digits after `.`, check for `e`/`E`
-6. **EXPONENT**: Parse `e`/`E` with optional sign and digits
-7. **SUFFIX**: Parse size/time suffixes:
-   - Size (binary 1024): `kb`, `mb`, `gb` (with 'b')
-   - Size (decimal 1000): `k`, `m`, `g` (without 'b')
-   - Time: `ms` (×0.001), `s` (×1), `min` (×60), `h` (×3600), `d` (×86400), `w` (×604800), `y` (×31536000)
-8. **TYPE DETERMINATION**:
-   - Time suffix + `allow_time` → `UCL_TIME`
-   - Decimal point or exponent → `UCL_FLOAT`
-   - Otherwise → `UCL_INT`
-
-**Atom Termination**: Unquoted values end at characters with `VALUE_END` flag: whitespace, `,`, `;`, `}`, `]`, `#`, or newline.
-
-**Performance Optimizations**:
-- Character table lookup instead of multiple conditionals
-- In-place string unescaping (destination pointer = source pointer, write result back to same buffer)
-- Zero-copy mode: strings reference input buffer directly with `Cow<'a, str>` (requires input to remain valid)
-- Inline small functions for hot paths
-
-**Error Handling**:
-All lexer functions return `Result` with position information:
-- `UnterminatedString { position }` - No closing quote
-- `InvalidEscape { sequence, position }` - Bad escape like `\q`
-- `InvalidUnicodeEscape { sequence, position }` - Bad `\uXXXX`
-- `UnterminatedComment { position }` - Unmatched `/*`
-- `InvalidNumber { message, position }` - Malformed number
+- Conformance: `cargo test --test conformance` compares every case in `tests/conformance/` with
+  golden files generated from libucl. Known failures are listed in `tests/conformance/xfail*.txt`
+  with a reason; the list may only shrink.
+- Unit tests live inline under `#[cfg(test)]`; integration tests in `tests/`; benchmarks in `benches/`.
 
 ## Task-Specific Workflows
 
@@ -305,23 +152,12 @@ All lexer functions return `Result` with position information:
 - Complex refactoring requiring multiple file coordination
 - Never for simple file reads or single-file edits
 
+
 ## Code Conventions
 
-**Error Handling:**
-- All public functions return `Result<T, UclError>`
-- Include position information in all errors
-- Use `thiserror` derive macro
-
-**Testing:**
-- Unit tests inline with `#[cfg(test)]`
-- Integration tests in `tests/` directory
-- Benchmark comparisons in `benches/`
-
-**Performance:**
-- Prefer in-place operations over allocations
-- Use `Cow<'a, str>` for zero-copy mode
-- Character classification via lookup table, not conditionals
-- Profile with `cargo bench` before optimizing
+- Public functions return `Result<T, UclError>`, with position information in errors.
+- Unit tests inline with `#[cfg(test)]`; integration tests in `tests/`.
+- Profile with `cargo bench` before optimizing.
 
 ---
 

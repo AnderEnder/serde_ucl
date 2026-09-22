@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"single_value","v":[{"t":"string","v":"alone"}]},{"k":"empty_strings","v":[{"t":"string","v":""},{"t":"string","v":""}]},{"k":"null_values","v":[{"t":"null"},{"t":"null"}]},{"k":"mixed_single","v":[{"t":"string","v":"first"},{"t":"null"},{"t":"string","v":""}]}]}

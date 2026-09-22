@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"server","v":[{"t":"string","v":"server1.example.com"},{"t":"string","v":"server2.example.com"},{"t":"string","v":"server3.example.com"}]},{"k":"port","v":[{"t":"int","v":"80"},{"t":"int","v":"443"},{"t":"int","v":"8080"}]}]}

@@ -1,0 +1,16 @@
+
+            decimal = 42;
+            hex = 0xFF;
+            octal = 0o755;
+            
+            float = 3.14159;
+            scientific = 1.23e-4;
+            
+            # Size suffixes
+            size_kb = 64kb;
+            size_mb = 512mb;
+            
+            # Time suffixes
+            time_sec = 30s;
+            time_min = 5min;
+        

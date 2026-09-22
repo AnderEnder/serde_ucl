@@ -1,0 +1,460 @@
+
+        # Microservices architecture configuration
+        version = "2.1"
+        
+        # Global settings
+        global {
+            cluster_name = "production-cluster"
+            region = "us-west-2"
+            environment = "production"
+            
+            # Default resource limits
+            default_limits = {
+                cpu = "500m"
+                memory = "512Mi"
+                storage = "10Gi"
+            }
+            
+            # Network configuration
+            network = {
+                service_mesh = "istio"
+                ingress_class = "nginx"
+                load_balancer = "aws-alb"
+            }
+        }
+        
+        # Service definitions
+        services = {
+            # API Gateway
+            api_gateway = {
+                image = "nginx:1.21-alpine"
+                replicas = 3
+                
+                ports = [
+                    { name = "http", port = 80, target_port = 8080 },
+                    { name = "https", port = 443, target_port = 8443 }
+                ]
+                
+                config = {
+                    upstream_timeout = "30s"
+                    client_max_body_size = "10m"
+                    rate_limit = "100r/s"
+                }
+                
+                routes = [
+                    {
+                        path = "/api/auth/*"
+                        service = "auth-service"
+                        timeout = "10s"
+                    },
+                    {
+                        path = "/api/users/*"
+                        service = "user-service"
+                        timeout = "15s"
+                    },
+                    {
+                        path = "/api/orders/*"
+                        service = "order-service"
+                        timeout = "20s"
+                    }
+                ]
+            }
+            
+            # Authentication Service
+            auth_service = {
+                image = "auth-service:v2.3.1"
+                replicas = 2
+                
+                environment = {
+                    JWT_SECRET = "${JWT_SECRET}"
+                    TOKEN_EXPIRY = "24h"
+                    REFRESH_TOKEN_EXPIRY = "7d"
+                    BCRYPT_ROUNDS = "12"
+                }
+                
+                database = {
+                    type = "postgresql"
+                    host = "auth-db.internal"
+                    port = 5432
+                    name = "auth_db"
+                    pool_size = 20
+                    max_connections = 100
+                }
+                
+                redis = {
+                    host = "auth-redis.internal"
+                    port = 6379
+                    db = 0
+                    ttl = "1h"
+                }
+                
+                health_check = {
+                    path = "/health"
+                    initial_delay = "30s"
+                    period = "10s"
+                    timeout = "5s"
+                    failure_threshold = 3
+                }
+            }
+            
+            # User Service
+            user_service = {
+                image = "user-service:v1.8.2"
+                replicas = 3
+                
+                environment = {
+                    CACHE_TTL = "300s"
+                    MAX_UPLOAD_SIZE = "5mb"
+                    AVATAR_STORAGE = "s3"
+                }
+                
+                database = {
+                    type = "postgresql"
+                    host = "user-db.internal"
+                    port = 5432
+                    name = "user_db"
+                    read_replicas = [
+                        "user-db-replica-1.internal:5432",
+                        "user-db-replica-2.internal:5432"
+                    ]
+                }
+                
+                storage = {
+                    provider = "aws-s3"
+                    bucket = "user-avatars-prod"
+                    region = "us-west-2"
+                    cdn_url = "https://cdn.example.com/avatars/"
+                }
+                
+                integrations = {
+                    email_service = {
+                        url = "http://email-service.internal:8080"
+                        timeout = "10s"
+                        retry_attempts = 3
+                    }
+                    
+                    analytics_service = {
+                        url = "http://analytics-service.internal:8080"
+                        async = true
+                        batch_size = 100
+                    }
+                }
+            }
+            
+            # Order Service
+            order_service = {
+                image = "order-service:v3.1.0"
+                replicas = 4
+                
+                environment = {
+                    ORDER_TIMEOUT = "30min"
+                    PAYMENT_TIMEOUT = "5min"
+                    INVENTORY_CHECK = "true"
+                }
+                
+                database = {
+                    type = "postgresql"
+                    host = "order-db.internal"
+                    port = 5432
+                    name = "order_db"
+                    connection_pool = {
+                        min_size = 5
+                        max_size = 50
+                        idle_timeout = "10min"
+                    }
+                }
+                
+                message_queue = {
+                    provider = "rabbitmq"
+                    host = "rabbitmq.internal"
+                    port = 5672
+                    vhost = "/orders"
+                    queues = [
+                        { name = "order.created", durable = true },
+                        { name = "order.updated", durable = true },
+                        { name = "order.cancelled", durable = true }
+                    ]
+                }
+                
+                external_apis = {
+                    payment_gateway = {
+                        url = "${PAYMENT_GATEWAY_URL}"
+                        api_key = "${PAYMENT_API_KEY}"
+                        timeout = "30s"
+                        retry_policy = {
+                            max_attempts = 3
+                            backoff = "exponential"
+                            initial_delay = "1s"
+                        }
+                    }
+                    
+                    inventory_service = {
+                        url = "http://inventory-service.internal:8080"
+                        timeout = "10s"
+                        circuit_breaker = {
+                            failure_threshold = 5
+                            recovery_timeout = "30s"
+                        }
+                    }
+                }
+            }
+            
+            # Email Service
+            email_service = {
+                image = "email-service:v1.4.3"
+                replicas = 2
+                
+                providers = {
+                    primary = {
+                        type = "sendgrid"
+                        api_key = "${SENDGRID_API_KEY}"
+                        from_email = "noreply@example.com"
+                        from_name = "Example App"
+                    }
+                    
+                    fallback = {
+                        type = "ses"
+                        region = "us-west-2"
+                        access_key = "${AWS_ACCESS_KEY}"
+                        secret_key = "${AWS_SECRET_KEY}"
+                    }
+                }
+                
+                templates = {
+                    welcome = {
+                        subject = "Welcome to Example App!"
+                        template_id = "d-1234567890abcdef"
+                    }
+                    
+                    password_reset = {
+                        subject = "Reset Your Password"
+                        template_id = "d-fedcba0987654321"
+                    }
+                    
+                    order_confirmation = {
+                        subject = "Order Confirmation #{{order_id}}"
+                        template_id = "d-abcdef1234567890"
+                    }
+                }
+                
+                rate_limiting = {
+                    per_minute = 100
+                    per_hour = 1000
+                    per_day = 10000
+                }
+            }
+        }
+        
+        # Infrastructure components
+        infrastructure = {
+            # Databases
+            databases = {
+                auth_db = {
+                    engine = "postgresql"
+                    version = "13.7"
+                    instance_class = "db.r5.large"
+                    storage = "100gb"
+                    backup_retention = "7d"
+                    multi_az = true
+                }
+                
+                user_db = {
+                    engine = "postgresql"
+                    version = "13.7"
+                    instance_class = "db.r5.xlarge"
+                    storage = "200gb"
+                    backup_retention = "30d"
+                    multi_az = true
+                    read_replicas = 2
+                }
+                
+                order_db = {
+                    engine = "postgresql"
+                    version = "13.7"
+                    instance_class = "db.r5.2xlarge"
+                    storage = "500gb"
+                    backup_retention = "30d"
+                    multi_az = true
+                    read_replicas = 3
+                }
+            }
+            
+            # Cache layers
+            cache = {
+                auth_redis = {
+                    engine = "redis"
+                    version = "6.2"
+                    node_type = "cache.r6g.large"
+                    num_cache_nodes = 2
+                    parameter_group = "default.redis6.x"
+                }
+                
+                session_redis = {
+                    engine = "redis"
+                    version = "6.2"
+                    node_type = "cache.r6g.xlarge"
+                    replication_group = true
+                    num_cache_clusters = 3
+                }
+            }
+            
+            # Message queues
+            messaging = {
+                rabbitmq = {
+                    version = "3.9"
+                    instance_type = "mq.m5.large"
+                    deployment_mode = "cluster"
+                    storage_type = "ebs"
+                    
+                    configuration = {
+                        vm_memory_high_watermark = "0.6"
+                        disk_free_limit = "2GB"
+                        log_levels = {
+                            connection = "info"
+                            channel = "info"
+                            queue = "info"
+                        }
+                    }
+                }
+            }
+        }
+        
+        # Monitoring and observability
+        monitoring = {
+            metrics = {
+                prometheus = {
+                    retention = "15d"
+                    scrape_interval = "15s"
+                    evaluation_interval = "15s"
+                }
+                
+                grafana = {
+                    admin_password = "${GRAFANA_ADMIN_PASSWORD}"
+                    plugins = ["grafana-piechart-panel", "grafana-worldmap-panel"]
+                }
+            }
+            
+            logging = {
+                elasticsearch = {
+                    version = "7.15"
+                    instance_type = "m6g.large.elasticsearch"
+                    instance_count = 3
+                    storage_size = "100gb"
+                    storage_type = "gp3"
+                }
+                
+                kibana = {
+                    version = "7.15"
+                    instance_type = "m6g.medium.elasticsearch"
+                }
+                
+                logstash = {
+                    version = "7.15"
+                    pipeline_workers = 4
+                    pipeline_batch_size = 125
+                }
+            }
+            
+            tracing = {
+                jaeger = {
+                    collector_replicas = 2
+                    query_replicas = 2
+                    storage_type = "elasticsearch"
+                    sampling_rate = 0.1
+                }
+            }
+            
+            alerting = {
+                alertmanager = {
+                    replicas = 2
+                    retention = "120h"
+                    
+                    routes = [
+                        {
+                            match = { severity = "critical" }
+                            receiver = "pagerduty"
+                            group_wait = "10s"
+                            group_interval = "5m"
+                            repeat_interval = "12h"
+                        },
+                        {
+                            match = { severity = "warning" }
+                            receiver = "slack"
+                            group_wait = "30s"
+                            group_interval = "10m"
+                            repeat_interval = "4h"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # Security configuration
+        security = {
+            # Network policies
+            network_policies = {
+                default_deny = true
+                
+                allowed_ingress = [
+                    {
+                        from = "api-gateway"
+                        to = ["auth-service", "user-service", "order-service"]
+                        ports = [8080]
+                    },
+                    {
+                        from = ["auth-service", "user-service", "order-service"]
+                        to = "email-service"
+                        ports = [8080]
+                    }
+                ]
+                
+                allowed_egress = [
+                    {
+                        from = "all"
+                        to = "external"
+                        ports = [80, 443]
+                    },
+                    {
+                        from = "services"
+                        to = "databases"
+                        ports = [5432]
+                    }
+                ]
+            }
+            
+            # TLS configuration
+            tls = {
+                min_version = "1.2"
+                cipher_suites = [
+                    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+                    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+                    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+                ]
+                
+                certificates = {
+                    api_gateway = {
+                        cert_manager = true
+                        issuer = "letsencrypt-prod"
+                        domains = ["api.example.com", "www.example.com"]
+                    }
+                }
+            }
+            
+            # RBAC configuration
+            rbac = {
+                service_accounts = {
+                    api_gateway = {
+                        permissions = ["ingress.read", "services.list"]
+                    }
+                    
+                    auth_service = {
+                        permissions = ["secrets.read", "configmaps.read"]
+                    }
+                    
+                    order_service = {
+                        permissions = ["secrets.read", "events.create"]
+                    }
+                }
+            }
+        }
+    

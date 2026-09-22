@@ -1,0 +1,5 @@
+
+        basic = "Unicode: \u0041\u0042";
+        extended = "Emoji: \u{1F600}";
+        mixed = "\u0041\u{1F600}";
+    

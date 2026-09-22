@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"server","v":[{"t":"string","v":"primary.example.com"},{"t":"string","v":"backup.example.com"},{"t":"string","v":"backup2.example.com"},{"t":"string","v":"emergency.example.com"}]},{"k":"//","v":[{"t":"string","v":"Another backup"}]}]}

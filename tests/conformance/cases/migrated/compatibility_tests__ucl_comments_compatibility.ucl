@@ -1,0 +1,33 @@
+
+        # Single-line comment
+        key1 = "value1";  # End-of-line comment
+        
+        /*
+         * Multi-line comment
+         * with multiple lines
+         */
+        key2 = "value2";
+        
+        /* Inline comment */ key3 = "value3";
+        
+        /*
+         * Nested comments test
+         * /* This is nested */
+         * Back to outer comment
+         */
+        key4 = "value4";
+        
+        // C++-style comment (if supported)
+        key5 = "value5";
+        
+        section {
+            # Comment inside section
+            nested_key = "nested_value";
+            
+            /*
+             * Multi-line comment
+             * inside section
+             */
+            another_key = "another_value";
+        }
+    

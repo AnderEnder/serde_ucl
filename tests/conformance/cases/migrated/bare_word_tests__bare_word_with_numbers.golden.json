@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"version","v":[{"t":"string","v":"v1.2.3"}]},{"k":"port","v":[{"t":"int","v":"8080"}]},{"k":"mixed","v":[{"t":"string","v":"abc123"}]},{"k":"hex_like","v":[{"t":"int","v":"2748"}]},{"k":"float_like","v":[{"t":"float","v":"3.1400000000000001"}]},{"k":"scientific","v":[{"t":"float","v":"10000000000"}]}]}

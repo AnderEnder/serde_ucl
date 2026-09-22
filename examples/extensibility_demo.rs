@@ -44,7 +44,8 @@ fn demo_builtin_plugins() -> Result<(), Box<dyn std::error::Error>> {
     match parser.parse_document()? {
         UclValue::Object(config) => {
             println!("Parsed configuration:");
-            for (key, value) in &config {
+            for (key, entry) in &config {
+                let value = entry.first();
                 match value {
                     UclValue::String(s) => println!("  {}: \"{}\"", key, s),
                     _ => println!("  {}: {:?}", key, value),
@@ -128,7 +129,8 @@ fn demo_plugin_configuration() -> Result<(), Box<dyn std::error::Error>> {
     match parser.parse_document() {
         Ok(UclValue::Object(config)) => {
             println!("Configuration validated successfully:");
-            for (key, value) in &config {
+            for (key, entry) in &config {
+                let value = entry.first();
                 match value {
                     UclValue::String(s) => println!("  {}: \"{}\"", key, s),
                     _ => println!("  {}: {:?}", key, value),

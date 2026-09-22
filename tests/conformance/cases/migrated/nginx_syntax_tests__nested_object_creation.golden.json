@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"upstream","v":[{"t":"object","entries":[{"k":"backend","v":[{"t":"object","entries":[{"k":"server","v":[{"t":"string","v":"127.0.0.1:3000"}]},{"k":"keepalive","v":[{"t":"int","v":"32"}]}]}]}]}]}]}

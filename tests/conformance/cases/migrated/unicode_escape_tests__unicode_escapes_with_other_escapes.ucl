@@ -1,0 +1,5 @@
+
+            combined = "Line 1\nUnicode: \u{1F600}\tTab\r\nLine 2"
+            quotes = "Quote: \"Hello \u{1F30D}\""
+            backslash = "Path\\to\\file \u{1F4C1}"
+        

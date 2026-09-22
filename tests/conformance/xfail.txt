@@ -1,0 +1,171 @@
+# Conformance cases known to fail (PLAN.md P0.5).
+#
+# Format: <case-id> <reason> [# note]
+#   <case-id>  path under tests/conformance without the extension
+#   <reason>   parser        the parser produces a different result or error: Phase 1/3
+#              macro         the case uses macros: Phase 4
+#              non-utf8, D2  input is not UTF-8; permanent divergence under decision D2 = (b)
+#   note       the PLAN.md item expected to fix it, where known
+#
+# The reason `model` (the value model could not express the result) was retired in P2.3: the
+# model now has times, multi-value entries and priorities.
+#
+# The list may only shrink. The runner fails when a listed case passes: delete its line.
+# New cases may be added here only together with the case itself.
+
+# --- cases/additions
+cases/additions/a01_plus_concat parser  # P3.5, D1
+cases/additions/a02_bare_float_inside parser  # P3.5
+cases/additions/a06_bare_var parser  # P3.8
+cases/additions/a07_value_trailing_comment parser  # P3.5
+cases/additions/a08_array_no_commas parser  # P3.5
+cases/additions/a09_array_objs_no_comma parser  # P3.5
+cases/additions/a10_numeric_key parser  # P3.2
+cases/additions/a13_case_bool parser  # P3.5
+cases/additions/a14_float_kb parser  # P3.6
+cases/additions/a15_hex_suffix parser  # P3.6
+cases/additions/a16_plus_num parser  # P3.6
+cases/additions/a17_neg_inf parser  # P3.6
+cases/additions/a21_space_before_suffix parser  # P3.5
+cases/additions/a24_int_float_exp_suffix parser  # P3.6
+cases/additions/a27_nested_dup_in_braces parser  # P3.4, P3.9
+cases/additions/a28_value_semicolon_space parser  # P3.5
+cases/additions/a30_heredoc_empty parser  # P3.7
+cases/additions/a31_heredoc_crlf parser  # P3.7
+cases/additions/a33_url_in_array parser  # P3.5
+cases/additions/a37_leading_dot_value parser  # P3.6
+cases/additions/a38_trailing_dot_num parser  # P3.6
+cases/additions/a39_leading_zero parser  # P3.6
+cases/additions/a42_key_quoted_single parser  # P3.4, D1
+cases/additions/a44_hash_in_value parser  # P3.3, P3.5
+cases/additions/a45_eq_in_value parser  # P3.5
+cases/additions/a46_colon_in_value parser  # P3.5
+cases/additions/a47_brace_in_value parser  # P3.5
+cases/additions/a48_ms_uppercase parser  # P3.6
+cases/additions/a49_min_upper parser  # P3.6
+cases/additions/a50_b_suffix parser  # P3.6
+cases/additions/v01_vars parser  # P3.8
+cases/additions/v03_prefix parser  # P3.8
+
+# --- cases/errors
+cases/errors/e05_unknown_macro parser  # P4.1
+
+# --- cases/migrated
+cases/migrated/bare_word_tests__bare_word_error_suggestions parser
+cases/migrated/bare_word_tests__bare_word_error_suggestions_2 parser
+cases/migrated/bare_word_tests__bare_word_error_suggestions_3 parser
+cases/migrated/bare_word_tests__bare_word_validation_errors_2 parser
+cases/migrated/bare_word_tests__bare_word_validation_errors_5 parser
+cases/migrated/bare_word_tests__bare_word_validation_errors_7 parser
+cases/migrated/bare_word_tests__bare_word_validation_errors_8 parser
+cases/migrated/bare_word_tests__null_keyword_conversion parser
+cases/migrated/bare_word_tests__reserved_keyword_handling parser
+cases/migrated/bare_word_tests__special_float_values parser
+cases/migrated/c_libucl_behavior_validation__behavior_validation_tests__test_comment_format_compatibility parser
+cases/migrated/c_libucl_behavior_validation__behavior_validation_tests__test_comment_format_compatibility_2 parser
+cases/migrated/c_libucl_behavior_validation__behavior_validation_tests__test_comprehensive_compatibility_report parser
+cases/migrated/c_libucl_behavior_validation__behavior_validation_tests__test_unicode_compatibility_validation parser
+cases/migrated/c_libucl_behavior_validation__behavior_validation_tests__test_unicode_compatibility_validation_3 parser
+cases/migrated/c_libucl_compatibility__bare_word_values parser
+cases/migrated/c_libucl_compatibility__cpp_style_comments parser
+cases/migrated/c_libucl_compatibility__number_formats_compatibility parser
+cases/migrated/c_libucl_compatibility__real_world_nginx_config parser
+cases/migrated/c_libucl_compatibility__string_formats_compatibility parser
+cases/migrated/c_libucl_compatibility__unicode_escape_sequences parser
+cases/migrated/c_libucl_compatibility_report__run_full_compatibility_report_2 parser
+cases/migrated/c_libucl_compatibility_report__run_full_compatibility_report_3 parser
+cases/migrated/c_libucl_compatibility_report__run_full_compatibility_report_7 parser
+cases/migrated/compatibility_tests__bare_word_validation_errors_2 parser
+cases/migrated/compatibility_tests__bare_word_validation_errors_3 parser
+cases/migrated/compatibility_tests__bare_word_validation_errors_4 parser
+cases/migrated/compatibility_tests__bare_word_validation_errors_5 parser
+cases/migrated/compatibility_tests__bare_word_validation_errors_6 parser
+cases/migrated/compatibility_tests__bare_word_validation_errors_7 parser
+cases/migrated/compatibility_tests__bare_word_values parser
+cases/migrated/compatibility_tests__error_handling_backward_compatibility parser
+cases/migrated/compatibility_tests__error_handling_backward_compatibility_4 parser
+cases/migrated/compatibility_tests__freebsd_ucl_compatibility parser
+cases/migrated/compatibility_tests__nginx_ucl_compatibility parser
+cases/migrated/compatibility_tests__rspamd_ucl_compatibility parser
+cases/migrated/compatibility_tests__ucl_comments_compatibility parser
+cases/migrated/compatibility_tests__ucl_number_formats_compatibility parser
+cases/migrated/compatibility_tests__ucl_string_formats_compatibility parser
+cases/migrated/heredoc_tests__heredoc_empty_content parser
+cases/migrated/heredoc_tests__heredoc_error_messages_2 parser
+cases/migrated/heredoc_tests__heredoc_in_nested_structures parser
+cases/migrated/heredoc_tests__heredoc_partial_terminator_matches parser
+cases/migrated/heredoc_tests__heredoc_preserves_internal_whitespace parser
+cases/migrated/heredoc_tests__heredoc_terminator_case_sensitivity parser
+cases/migrated/heredoc_tests__heredoc_with_both_leading_and_trailing_whitespace parser
+cases/migrated/heredoc_tests__heredoc_with_crlf_line_endings parser
+cases/migrated/heredoc_tests__heredoc_with_custom_terminators parser
+cases/migrated/heredoc_tests__heredoc_with_leading_whitespace_terminator parser
+cases/migrated/heredoc_tests__heredoc_with_lf_line_endings parser
+cases/migrated/heredoc_tests__heredoc_with_mixed_line_endings parser
+cases/migrated/heredoc_tests__heredoc_with_only_whitespace_lines parser
+cases/migrated/heredoc_tests__heredoc_with_special_characters_in_terminator parser
+cases/migrated/heredoc_tests__heredoc_with_trailing_whitespace_terminator parser
+cases/migrated/heredoc_tests__multiple_heredocs_in_same_config parser
+cases/migrated/implicit_array_tests__complex_implicit_array_scenario parser
+cases/migrated/implicit_array_tests__implicit_arrays_with_comments parser
+cases/migrated/implicit_array_tests__implicit_arrays_with_nginx_syntax parser
+cases/migrated/integration_tests__cpp_comments_lexing parser
+cases/migrated/integration_tests__cpp_comments_mixed_with_other_comments parser
+cases/migrated/integration_tests__cpp_comments_preservation parser
+cases/migrated/libucl_compatibility_tests__libucl_basic_10_named_sections parser
+cases/migrated/libucl_compatibility_tests__libucl_basic_2_variable_expansion parser
+cases/migrated/libucl_compatibility_tests__libucl_basic_4_heredoc_strings parser
+cases/migrated/nginx_syntax_tests__complex_nginx_config parser
+cases/migrated/real_world_ucl_configs__real_world_configs__test_dovecot_ucl_config parser
+cases/migrated/real_world_ucl_configs__real_world_configs__test_freebsd_pkg_real_config parser
+cases/migrated/real_world_ucl_configs__real_world_configs__test_rspamd_real_config parser
+cases/migrated/unicode_escape_tests__emoji_and_extended_unicode parser
+cases/migrated/unicode_escape_tests__mixed_unicode_escape_formats parser
+cases/migrated/unicode_escape_tests__unicode_boundary_values parser
+cases/migrated/unicode_escape_tests__unicode_case_sensitivity parser
+cases/migrated/unicode_escape_tests__unicode_escapes_in_arrays parser
+cases/migrated/unicode_escape_tests__unicode_escapes_in_keys parser
+cases/migrated/unicode_escape_tests__unicode_escapes_with_other_escapes parser
+cases/migrated/unicode_escape_tests__unicode_in_multiline_strings parser
+cases/migrated/unicode_escape_tests__unicode_normalization parser
+cases/migrated/unicode_escape_tests__variable_length_unicode_escapes parser
+
+# --- cases/review
+cases/review/01_url parser  # P3.5
+cases/review/02_brackets parser  # P3.5
+cases/review/03_numword parser  # P3.5
+cases/review/04_percent parser  # P3.5
+cases/review/05_backslash parser  # P3.5
+cases/review/06_ms parser  # P3.6
+cases/review/07_hexdot parser  # P3.6
+cases/review/08_hexbad parser  # P3.6
+cases/review/09_twonames parser  # P3.4
+cases/review/10_dupnested parser  # P3.9
+cases/review/11_slashslash parser  # P3.3
+cases/review/12_0b parser  # P3.6
+cases/review/13_0o parser  # P3.6
+cases/review/14_heredoc parser  # P3.7
+cases/review/15_dollardollar parser  # P3.8
+cases/review/16_dollarplain parser  # P3.8
+cases/review/18_emptykey parser  # P3.4
+
+# --- libucl/basic
+libucl/basic/1 parser  # P3.5, P3.6
+libucl/basic/10 parser  # P3.9
+libucl/basic/12 parser  # P3.5
+libucl/basic/13 macro  # P4.3
+libucl/basic/14 macro  # P4.3
+libucl/basic/15 macro  # P4.3
+libucl/basic/16 macro  # P4.3
+libucl/basic/17 parser  # P3.5
+libucl/basic/18 macro  # P4.4, P4.5
+libucl/basic/19 macro  # P4.3
+libucl/basic/2 parser  # P3.5, P3.6
+libucl/basic/22 non-utf8, D2  # permanent under D2 = (b)
+libucl/basic/23 macro  # P4.3
+libucl/basic/3 parser  # P3.4, P3.5
+libucl/basic/4 parser  # P3.7
+libucl/basic/8 parser  # P3.4
+libucl/basic/9 macro  # P4.3
+libucl/basic/issue319 parser  # P3.7
+libucl/basic/load macro  # P4.6

@@ -1,0 +1,16 @@
+
+grinning_face = "\u{1F600}"
+thumbs_up = "\u{1F44D}"
+rocket = "\u{1F680}"
+fire = "\u{1F525}"
+hundred_points = "\u{1F4AF}"
+
+# Mathematical symbols
+"infinity" = "\u{221E}"
+integral = "\u{222B}"
+
+# Various scripts
+chinese = "\u{4E2D}\u{6587}"
+arabic = "\u{0627}\u{0644}\u{0639}\u{0631}\u{0628}\u{064A}\u{0629}"
+russian = "\u{0440}\u{0443}\u{0441}\u{0441}\u{043A}\u{0438}\u{0439}"
+        

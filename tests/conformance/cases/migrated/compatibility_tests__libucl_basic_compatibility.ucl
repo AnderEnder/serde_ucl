@@ -1,0 +1,28 @@
+
+        # Basic UCL configuration compatible with libucl
+        param = value;
+        section {
+            flag = true;
+            number = 10k;
+            time = 0.2s;
+            string = "something";
+            subsection {
+                host = {
+                    host = "hostname";
+                    port = 900;
+                }
+            }
+        }
+        
+        # Array syntax
+        array = [
+            "item1",
+            "item2",
+            "item3"
+        ];
+        
+        # Multiple assignment (UCL feature)
+        servers = "server1";
+        servers = "server2";
+        servers = "server3";
+    

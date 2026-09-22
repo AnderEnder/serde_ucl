@@ -1,0 +1,10 @@
+
+        content = <<EOF
+This is heredoc content
+with multiple lines
+EOF
+        
+        indented = <<TERM
+Content here
+  TERM  
+    

@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"first","v":[{"t":"string","v":"Content of first heredoc"}]},{"k":"second","v":[{"t":"string","v":"Content of second heredoc"}]},{"k":"third","v":[{"t":"string","v":"Content of third heredoc"}]}]}

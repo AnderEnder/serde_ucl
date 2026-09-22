@@ -1,0 +1,5 @@
+
+            mixed_format = "Hello \u0041\u{42}\u0043 World \u{1F600}"
+            another_mix = "\u{48}\u0065\u{6C}\u006C\u{6F} \u{1F44B}"
+            complex_mix = "\u0048\u{65}\u006C\u{6C}\u006F\u{20}\u{1F30D}"
+        

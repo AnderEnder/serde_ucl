@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"multiline-key","v":[{"t":"string","v":"test\ntest\ntest\\n\n/* comment like */\n# Some invalid endings\n EOD\nEOD   \nEOF\n# This should be in content\n"}]},{"k":"normal-key","v":[{"t":"string","v":"value"}]}]}

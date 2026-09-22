@@ -1,0 +1,36 @@
+
+            # Load balancer configuration
+            upstream api_servers {
+                server 10.0.1.10:3000 weight=3
+                server 10.0.1.11:3000 weight=2
+                server 10.0.1.12:3000 weight=1
+                server 10.0.1.13:3000 backup
+            }
+            
+            server {
+                listen 80
+                listen 443 ssl
+                
+                server_name api.example.com
+                server_name www.api.example.com
+                
+                location /v1 {
+                    proxy_pass http://api_servers
+                    proxy_set_header Host $host
+                    proxy_set_header X-Real-IP $remote_addr
+                }
+                
+                location /v2 {
+                    proxy_pass http://api_servers
+                    proxy_set_header Host $host
+                }
+                
+                # SSL configuration
+                ssl_certificate /path/to/cert.pem
+                ssl_certificate_key /path/to/key.pem
+                
+                # Multiple SSL protocols
+                ssl_protocols TLSv1.2
+                ssl_protocols TLSv1.3
+            }
+        

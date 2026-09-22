@@ -1,0 +1,15 @@
+
+            simple_array = ["item1", "item2", "item3"];
+            
+            mixed_array = [1, "string", true, 3.14];
+            
+            nested_array = [
+                ["a", "b"],
+                ["c", "d"]
+            ];
+            
+            object_array = [
+                { name = "obj1", value = 1 },
+                { name = "obj2", value = 2 }
+            ];
+        

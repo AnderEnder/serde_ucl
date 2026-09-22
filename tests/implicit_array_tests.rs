@@ -47,13 +47,14 @@ mod implicit_array_tests {
 
         let result: Value = from_str(config).expect("Should extend existing arrays");
 
+        // libucl does not flatten: the explicit array is the first of three values
+        // (tests/conformance/cases/migrated/implicit_array_tests__array_extension_behavior.golden.json).
         assert!(result["items"].is_array());
         let items = result["items"].as_array().unwrap();
-        assert_eq!(items.len(), 4);
-        assert_eq!(items[0], "item1");
-        assert_eq!(items[1], "item2");
-        assert_eq!(items[2], "item3");
-        assert_eq!(items[3], "item4");
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], serde_json::json!(["item1", "item2"]));
+        assert_eq!(items[1], "item3");
+        assert_eq!(items[2], "item4");
     }
 
     #[test]
@@ -253,13 +254,13 @@ mod implicit_array_tests {
         assert_eq!(implicit[0], "item1");
         assert_eq!(implicit[1], "item2");
 
-        // Mixed array
+        // Mixed: libucl keeps the explicit array as the first of three values
+        // (tests/conformance/cases/migrated/implicit_array_tests__explicit_vs_implicit_arrays.golden.json).
         let mixed = result["mixed_array"].as_array().unwrap();
-        assert_eq!(mixed.len(), 4);
-        assert_eq!(mixed[0], "initial1");
-        assert_eq!(mixed[1], "initial2");
-        assert_eq!(mixed[2], "added1");
-        assert_eq!(mixed[3], "added2");
+        assert_eq!(mixed.len(), 3);
+        assert_eq!(mixed[0], serde_json::json!(["initial1", "initial2"]));
+        assert_eq!(mixed[1], "added1");
+        assert_eq!(mixed[2], "added2");
     }
 
     #[test]

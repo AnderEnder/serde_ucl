@@ -1,0 +1,17 @@
+
+            # Single assignment (should not create array)
+            single_value = "alone"
+            
+            # Empty string assignments
+            empty_strings = ""
+            empty_strings = ""
+            
+            # Null assignments
+            null_values = null
+            null_values = null
+            
+            # Mixed with single value
+            mixed_single = "first"
+            mixed_single = null
+            mixed_single = ""
+        

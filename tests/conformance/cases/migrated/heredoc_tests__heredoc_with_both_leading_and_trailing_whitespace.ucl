@@ -1,0 +1,5 @@
+content = <<DELIMITER
+Line 1 content
+Line 2 content
+    DELIMITER   
+DELIMITER

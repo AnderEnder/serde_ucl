@@ -102,31 +102,10 @@ mod real_world_configs {
             }
         "#;
 
+        // libucl rejects this input: its golden dump is an error (tests/conformance/cases/migrated/
+        // real_world_ucl_configs__real_world_configs__test_nginx_real_config).
         let result = from_str::<Value>(config);
-        match result {
-            Ok(parsed) => {
-                println!("✅ NGINX config parsed successfully");
-
-                // Verify basic structure
-                assert!(parsed.is_object());
-                let obj = parsed.as_object().unwrap();
-
-                assert_eq!(obj["user"], "nginx");
-                assert_eq!(obj["worker_processes"], "auto");
-
-                assert!(obj["events"].is_object());
-                assert!(obj["http"].is_object());
-
-                let http = obj["http"].as_object().unwrap();
-                assert!(http["gzip_types"].is_array());
-                assert!(http["upstream"].is_object());
-                assert!(http["server"].is_object());
-            }
-            Err(e) => {
-                println!("❌ NGINX config failed: {}", e);
-                // Don't panic, just log for analysis
-            }
-        }
+        assert!(result.is_err(), "libucl rejects this input, got {result:?}");
     }
 
     #[test]
@@ -251,9 +230,7 @@ SCRIPT
                 assert!(obj["categories"].is_array());
                 assert!(obj["licenses"].is_array());
             }
-            Err(e) => {
-                println!("❌ FreeBSD pkg config failed: {}", e);
-            }
+            Err(e) => panic!("FreeBSD pkg config failed: {e}"),
         }
     }
 
@@ -414,9 +391,7 @@ SCRIPT
                     println!("Composites configuration found");
                 }
             }
-            Err(e) => {
-                println!("❌ Rspamd config failed: {}", e);
-            }
+            Err(e) => panic!("Rspamd config failed: {e}"),
         }
     }
 
@@ -563,9 +538,7 @@ SCRIPT
                     println!("Service configuration found");
                 }
             }
-            Err(e) => {
-                println!("❌ Dovecot config failed: {}", e);
-            }
+            Err(e) => panic!("Dovecot config failed: {e}"),
         }
     }
 
@@ -679,9 +652,7 @@ SCRIPT
                     println!("Listen configuration found");
                 }
             }
-            Err(e) => {
-                println!("❌ HAProxy config failed: {}", e);
-            }
+            Err(e) => panic!("HAProxy config failed: {e}"),
         }
     }
 }

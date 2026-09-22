@@ -441,8 +441,11 @@ pub enum UclError {
     Lex(#[from] LexError),
 
     /// Parsing error
+    ///
+    /// Converting a `ParseError` into `UclError` unwraps `ParseError::Lex`, so a lexical error
+    /// always surfaces as `UclError::Lex`.
     #[error("Parse error: {0}")]
-    Parse(#[from] ParseError),
+    Parse(#[source] ParseError),
 
     /// Serde deserialization error
     #[error("Serde error: {0}")]
@@ -454,7 +457,7 @@ pub enum UclError {
 }
 
 /// Lexical analysis errors
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum LexError {
     /// Unexpected character encountered
     #[error("Unexpected character '{character}' at {position}")]
@@ -522,8 +525,12 @@ pub enum LexError {
 }
 
 /// Parsing errors
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum ParseError {
+    /// Lexical error raised while parsing; carries the lexer's own position
+    #[error(transparent)]
+    Lex(#[from] LexError),
+
     /// Unexpected token encountered
     #[error("Unexpected token {token} at {position}, expected {expected}")]
     UnexpectedToken {
@@ -591,6 +598,15 @@ pub enum ParseError {
         position: Position,
         suggestion: String,
     },
+}
+
+impl From<ParseError> for UclError {
+    fn from(err: ParseError) -> Self {
+        match err {
+            ParseError::Lex(lex_error) => UclError::Lex(lex_error),
+            other => UclError::Parse(other),
+        }
+    }
 }
 
 /// Serde integration errors

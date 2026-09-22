@@ -1,0 +1,11 @@
+first = <<FIRST
+Content of first heredoc
+FIRST
+
+second = <<SECOND
+Content of second heredoc
+SECOND
+
+third = <<THIRD
+Content of third heredoc
+THIRD

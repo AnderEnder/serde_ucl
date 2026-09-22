@@ -1,0 +1,5 @@
+k = "${ABI}"
+j = $ABI
+m = "$ABI$ABI"
+n = "${ABIX}"
+o = "$ABIX"

@@ -1,0 +1,9 @@
+
+            # Combining characters
+            e_acute = "\u{0065}\u{0301}"
+            # Precomposed character
+            e_acute_precomposed = "\u{00E9}"
+            
+            # Surrogate pair equivalent (should be handled as single code point)
+            emoji_pair = "\u{1F600}"
+        

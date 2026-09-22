@@ -5,8 +5,6 @@
 
 use crate::error::{ParseError, Position};
 use crate::lexer::{LexerConfig, Token, UclLexer};
-use indexmap::IndexMap;
-use smallvec::SmallVec;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 
@@ -86,111 +84,8 @@ impl Default for ParserConfig {
     }
 }
 
-/// UCL value types
-#[derive(Debug, Clone, PartialEq)]
-pub enum UclValue {
-    String(String),
-    Integer(i64),
-    Float(f64),
-    Boolean(bool),
-    Null,
-    Object(UclObject),
-    /// Arrays use Box<SmallVec> to avoid infinite size recursion
-    /// SmallVec stores ≤4 elements inline without heap allocation
-    Array(Box<UclArray>),
-}
-
-impl UclValue {
-    /// Returns true if the value is an object
-    pub fn is_object(&self) -> bool {
-        matches!(self, UclValue::Object(_))
-    }
-
-    /// Returns true if the value is an array
-    pub fn is_array(&self) -> bool {
-        matches!(self, UclValue::Array(_))
-    }
-
-    /// Returns true if the value is a string
-    pub fn is_string(&self) -> bool {
-        matches!(self, UclValue::String(_))
-    }
-
-    /// Returns a reference to the object if this is an Object variant
-    pub fn as_object(&self) -> Option<&UclObject> {
-        if let UclValue::Object(obj) = self {
-            Some(obj)
-        } else {
-            None
-        }
-    }
-
-    /// Returns a reference to the array if this is an Array variant
-    pub fn as_array(&self) -> Option<&UclArray> {
-        if let UclValue::Array(arr) = self {
-            Some(arr)
-        } else {
-            None
-        }
-    }
-
-    /// Returns a reference to the string if this is a String variant
-    pub fn as_str(&self) -> Option<&str> {
-        if let UclValue::String(s) = self {
-            Some(s.as_str())
-        } else {
-            None
-        }
-    }
-
-    /// Returns the integer value if this is an Integer variant
-    pub fn as_integer(&self) -> Option<i64> {
-        if let UclValue::Integer(i) = self {
-            Some(*i)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the float value if this is a Float variant
-    pub fn as_float(&self) -> Option<f64> {
-        if let UclValue::Float(f) = self {
-            Some(*f)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the time value if this is a Float variant (time values are stored as floats)
-    pub fn as_time(&self) -> Option<f64> {
-        if let UclValue::Float(f) = self {
-            Some(*f)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the boolean value if this is a Boolean variant
-    pub fn as_bool(&self) -> Option<bool> {
-        if let UclValue::Boolean(b) = self {
-            Some(*b)
-        } else {
-            None
-        }
-    }
-
-    /// Returns true if this is a Null variant
-    pub fn is_null(&self) -> bool {
-        matches!(self, UclValue::Null)
-    }
-}
-
-/// UCL object type (preserves insertion order)
-pub type UclObject = IndexMap<String, UclValue>;
-
-/// UCL array type - uses SmallVec to avoid heap allocation for small arrays (≤4 elements)
-/// Most UCL arrays in practice have ≤4 elements (tags, options, etc.)
-pub type UclArray = SmallVec<[UclValue; 4]>;
+use crate::value::{DuplicateStrategy, ParserFlags};
+pub use crate::value::{UclArray, UclObject, UclValue};
 
 /// Context information for variable expansion
 #[derive(Debug, Clone)]
@@ -1346,6 +1241,9 @@ pub struct UclParser<'a> {
     config: ParserConfig,
     current_depth: usize,
     parsing_hooks: ParsingHooks,
+    /// Lexer error on the first token, lexed by the constructor. Kept so that every parse call
+    /// returns it instead of reporting the input as an empty document.
+    start_error: Option<ParseError>,
 }
 
 impl<'a> UclParser<'a> {
@@ -1360,10 +1258,14 @@ impl<'a> UclParser<'a> {
             config: ParserConfig::default(),
             current_depth: 0,
             parsing_hooks: ParsingHooks::new(),
+            start_error: None,
         };
 
-        // Load the first token
-        parser.advance_token().ok();
+        // Load the first token. A lexer error here is kept and returned by the first parse
+        // call (see `check_start_error`) rather than dropped.
+        if let Err(err) = parser.advance_token() {
+            parser.start_error = Some(err);
+        }
         parser
     }
 
@@ -1378,10 +1280,14 @@ impl<'a> UclParser<'a> {
             config: ParserConfig::default(),
             current_depth: 0,
             parsing_hooks: ParsingHooks::new(),
+            start_error: None,
         };
 
-        // Load the first token
-        parser.advance_token().ok();
+        // Load the first token. A lexer error here is kept and returned by the first parse
+        // call (see `check_start_error`) rather than dropped.
+        if let Err(err) = parser.advance_token() {
+            parser.start_error = Some(err);
+        }
         parser
     }
 
@@ -1447,6 +1353,17 @@ impl<'a> UclParser<'a> {
         self.parsing_hooks.add_validation_hook(hook);
     }
 
+    /// Returns the lexer error from the first token, if there was one.
+    ///
+    /// Called by every parse entry point. After that error the parser has no current token, so
+    /// it must fail on every call rather than report the input as an empty document.
+    fn check_start_error(&self) -> Result<(), ParseError> {
+        match &self.start_error {
+            Some(err) => Err(err.clone()),
+            None => Ok(()),
+        }
+    }
+
     /// Advances to the next token
     fn advance_token(&mut self) -> Result<(), ParseError> {
         match self.lexer.next_token() {
@@ -1482,11 +1399,13 @@ impl<'a> UclParser<'a> {
 
     /// Peeks at the next token without consuming it
     pub fn peek_token(&mut self) -> Result<Option<&Token<'a>>, ParseError> {
+        self.check_start_error()?;
         Ok(self.current_token())
     }
 
     /// Expects a specific token and consumes it
     pub fn expect_token(&mut self, expected: &Token<'a>) -> Result<Token<'a>, ParseError> {
+        self.check_start_error()?;
         match self.current_token() {
             Some(token) if std::mem::discriminant(token) == std::mem::discriminant(expected) => {
                 let consumed_token = token.clone();
@@ -1511,6 +1430,7 @@ impl<'a> UclParser<'a> {
         &mut self,
         expected: &Token<'a>,
     ) -> Result<Option<Token<'a>>, ParseError> {
+        self.check_start_error()?;
         match self.current_token() {
             Some(token) if std::mem::discriminant(token) == std::mem::discriminant(expected) => {
                 let consumed_token = token.clone();
@@ -1531,6 +1451,7 @@ impl<'a> UclParser<'a> {
 
     /// Skips whitespace and comments
     pub fn skip_whitespace_and_comments(&mut self) -> Result<(), ParseError> {
+        self.check_start_error()?;
         while let Some(token) = self.current_token() {
             match token {
                 Token::Comment(_) => {
@@ -1944,16 +1865,11 @@ impl<'a> UclParser<'a> {
                 } else {
                     let ucl_value = UclValue::Float(float_val);
                     let validated_value = self.parsing_hooks.validate_value(&ucl_value, context)?;
-                    #[cfg(test)]
-                    println!(
-                        "parse_value_with_context float={} is_finite={}",
-                        float_val,
-                        float_val.is_finite()
-                    );
                     Ok(validated_value)
                 }
             }
-            Some(Token::Time(_)) => {
+            Some(Token::Time(time_val)) => {
+                let time_val = *time_val;
                 let start = self
                     .current_token_start()
                     .unwrap_or_else(|| self.current_position());
@@ -1973,8 +1889,7 @@ impl<'a> UclParser<'a> {
                     let validated = self.parsing_hooks.validate_value(&ucl_value, context)?;
                     Ok(validated)
                 } else {
-                    let processed = self.parsing_hooks.process_string(&raw, context)?;
-                    let ucl_value = UclValue::String(processed);
+                    let ucl_value = UclValue::Time(time_val);
                     let validated_value = self.parsing_hooks.validate_value(&ucl_value, context)?;
                     Ok(validated_value)
                 }
@@ -2253,16 +2168,11 @@ impl<'a> UclParser<'a> {
                 let validated_value = self.parsing_hooks.validate_value(&ucl_value, &context)?;
                 Ok(validated_value)
             }
-            Some(Token::Time(_)) => {
-                let start = self
-                    .current_token_start()
-                    .unwrap_or_else(|| self.current_position());
-                let end = self.current_token_end().unwrap_or(start);
-                let raw = self.token_text_from_positions(start, end);
+            Some(Token::Time(time_val)) => {
+                let time_val = *time_val;
                 self.advance_token()?;
                 let context = VariableContext::new(self.current_position());
-                let processed = self.parsing_hooks.process_string(&raw, &context)?;
-                let ucl_value = UclValue::String(processed);
+                let ucl_value = UclValue::Time(time_val);
 
                 // Apply validation hooks
                 let validated_value = self.parsing_hooks.validate_value(&ucl_value, &context)?;
@@ -2311,6 +2221,7 @@ impl<'a> UclParser<'a> {
         &mut self,
         context: &mut VariableContext,
     ) -> Result<UclValue, ParseError> {
+        self.check_start_error()?;
         self.current_depth += 1;
         if self.current_depth > self.config.max_depth {
             return Err(ParseError::MaxDepthExceeded {
@@ -2467,46 +2378,17 @@ impl<'a> UclParser<'a> {
             }
 
             // Handle duplicate keys based on configuration
-            if let Some(existing_value) = object.get_mut(&key) {
-                if let UclValue::Object(existing_map) = existing_value
-                    && let UclValue::Object(ref new_map) = value
-                {
-                    for (nested_key, nested_value) in new_map.iter() {
-                        existing_map.insert(nested_key.clone(), nested_value.clone());
-                    }
-                    continue;
+            if let Some(existing_value) = object.get_mut(&key)
+                && let UclValue::Object(existing_map) = existing_value
+                && let UclValue::Object(new_map) = value
+            {
+                // Shallow merge of a repeated object (not libucl behaviour; PLAN.md P3.9)
+                for (nested_key, nested_entry) in new_map {
+                    existing_map.insert_entry(nested_key, nested_entry);
                 }
-
-                match self.config.duplicate_key_behavior {
-                    DuplicateKeyBehavior::Error => {
-                        return Err(ParseError::DuplicateKey {
-                            key,
-                            position: self.current_position(),
-                        });
-                    }
-                    DuplicateKeyBehavior::ImplicitArray => {
-                        let existing_value = object.shift_remove(&key).unwrap();
-                        let new_array = match existing_value {
-                            UclValue::Array(mut arr) => {
-                                arr.push(value);
-                                UclValue::Array(arr)
-                            }
-                            other => {
-                                let mut arr = SmallVec::new();
-                                arr.push(other);
-                                arr.push(value);
-                                UclValue::Array(Box::new(arr))
-                            }
-                        };
-                        object.insert(key, new_array);
-                    }
-                    DuplicateKeyBehavior::Override => {
-                        object.insert(key, value);
-                    }
-                }
-            } else {
-                object.insert(key, value);
+                continue;
             }
+            self.insert_duplicate_aware(&mut object, key, value)?;
 
             self.skip_whitespace_and_comments()?;
 
@@ -2578,26 +2460,48 @@ impl<'a> UclParser<'a> {
 
     /// Deep merge two objects (for named section hierarchy)
     fn deep_merge_objects(mut target: UclObject, source: UclObject) -> UclObject {
-        for (key, value) in source {
-            if let Some(existing) = target.get_mut(&key) {
-                // If both are objects, merge them recursively
-                if existing.is_object() && value.is_object() {
-                    if let (UclValue::Object(existing_obj), UclValue::Object(new_obj)) =
-                        (existing.clone(), value)
-                    {
-                        let merged = Self::deep_merge_objects(existing_obj, new_obj);
-                        *existing = UclValue::Object(merged);
-                    }
-                } else {
-                    // Otherwise replace
-                    *existing = value;
+        for (key, entry) in source {
+            let both_objects = !entry.is_multi()
+                && entry.first().is_object()
+                && target
+                    .entry(&key)
+                    .is_some_and(|e| !e.is_multi() && e.first().is_object());
+            if both_objects {
+                // Both are objects: merge them recursively
+                let existing = target.get_mut(&key).unwrap();
+                if let (UclValue::Object(existing_obj), UclValue::Object(new_obj)) = (
+                    std::mem::replace(existing, UclValue::Null),
+                    entry.into_value(),
+                ) {
+                    *existing = UclValue::Object(Self::deep_merge_objects(existing_obj, new_obj));
                 }
             } else {
-                // Key doesn't exist, insert it
-                target.insert(key, value);
+                // Otherwise replace (or insert)
+                target.insert_entry(key, entry);
             }
         }
         target
+    }
+
+    /// Inserts a key that may already be present, following `duplicate_key_behavior`:
+    /// a repeated key adds a value to the entry (implicit array), replaces it, or is an error.
+    fn insert_duplicate_aware(
+        &self,
+        object: &mut UclObject,
+        key: String,
+        value: UclValue,
+    ) -> Result<(), ParseError> {
+        let strategy = match self.config.duplicate_key_behavior {
+            DuplicateKeyBehavior::Error => DuplicateStrategy::Error,
+            DuplicateKeyBehavior::ImplicitArray => DuplicateStrategy::Append,
+            DuplicateKeyBehavior::Override => DuplicateStrategy::Rewrite,
+        };
+        object
+            .insert_with_strategy(key, value, 0, strategy, ParserFlags::DEFAULT)
+            .map_err(|e| ParseError::DuplicateKey {
+                key: e.key,
+                position: self.current_position(),
+            })
     }
 
     /// Parses a key path for named sections (e.g., "section foo bar" -> ["section", "foo", "bar"])
@@ -2685,6 +2589,7 @@ impl<'a> UclParser<'a> {
 
     /// Parses an implicit object (key-value pairs without braces)
     pub fn parse_implicit_object(&mut self) -> Result<UclValue, ParseError> {
+        self.check_start_error()?;
         let mut object = UclObject::new();
         let mut context = VariableContext::new(self.current_position());
 
@@ -2775,53 +2680,22 @@ impl<'a> UclParser<'a> {
             // Use the first key for insertion into the top-level object
             let top_key = &key_path[0];
 
-            // Handle duplicate keys based on configuration
-            if object.contains_key(top_key) {
-                match self.config.duplicate_key_behavior {
-                    DuplicateKeyBehavior::Error => {
-                        return Err(ParseError::DuplicateKey {
-                            key: top_key.clone(),
-                            position: self.current_position(),
-                        });
-                    }
-                    DuplicateKeyBehavior::ImplicitArray => {
-                        let existing_value = object.shift_remove(top_key).unwrap();
-
-                        // If both are objects and we have a nested path, deep merge them
-                        if key_path.len() > 1
-                            && existing_value.is_object()
-                            && final_value.is_object()
-                        {
-                            if let (UclValue::Object(existing_obj), UclValue::Object(new_obj)) =
-                                (existing_value, final_value)
-                            {
-                                // Deep merge the objects
-                                let merged = Self::deep_merge_objects(existing_obj, new_obj);
-                                object.insert(top_key.clone(), UclValue::Object(merged));
-                            }
-                        } else {
-                            // Simple duplicate key -> create array
-                            let new_array = match existing_value {
-                                UclValue::Array(mut arr) => {
-                                    arr.push(final_value);
-                                    UclValue::Array(arr)
-                                }
-                                other => {
-                                    let mut arr = SmallVec::new();
-                                    arr.push(other);
-                                    arr.push(final_value);
-                                    UclValue::Array(Box::new(arr))
-                                }
-                            };
-                            object.insert(top_key.clone(), new_array);
-                        }
-                    }
-                    DuplicateKeyBehavior::Override => {
-                        object.insert(top_key.clone(), final_value);
-                    }
+            // Repeated multi-name sections are deep-merged (not libucl behaviour; PLAN.md P3.9)
+            let deep_merge = key_path.len() > 1
+                && self.config.duplicate_key_behavior == DuplicateKeyBehavior::ImplicitArray
+                && final_value.is_object()
+                && object
+                    .entry(top_key)
+                    .is_some_and(|e| !e.is_multi() && e.first().is_object());
+            if deep_merge {
+                let existing = object.get_mut(top_key).unwrap();
+                if let (UclValue::Object(existing_obj), UclValue::Object(new_obj)) =
+                    (std::mem::replace(existing, UclValue::Null), final_value)
+                {
+                    *existing = UclValue::Object(Self::deep_merge_objects(existing_obj, new_obj));
                 }
             } else {
-                object.insert(top_key.clone(), final_value);
+                self.insert_duplicate_aware(&mut object, top_key.clone(), final_value)?;
             }
 
             self.skip_whitespace_and_comments()?;
@@ -2845,6 +2719,7 @@ impl<'a> UclParser<'a> {
         context: &mut VariableContext,
         explicit_separator: bool,
     ) -> Result<UclValue, ParseError> {
+        self.check_start_error()?;
         if self.current_depth >= self.config.max_depth {
             return Err(ParseError::MaxDepthExceeded {
                 position: self.current_position(),
@@ -2955,7 +2830,7 @@ impl<'a> UclParser<'a> {
                     _ => unreachable!("Expected time token"),
                 };
                 self.advance_token()?;
-                let ucl_value = UclValue::Float(time_val);
+                let ucl_value = UclValue::Time(time_val);
 
                 let validated_value = self.parsing_hooks.validate_value(&ucl_value, context)?;
                 Ok(validated_value)
@@ -2996,6 +2871,7 @@ impl<'a> UclParser<'a> {
         &mut self,
         context: &mut VariableContext,
     ) -> Result<UclValue, ParseError> {
+        self.check_start_error()?;
         self.current_depth += 1;
         if self.current_depth > self.config.max_depth {
             return Err(ParseError::MaxDepthExceeded {
@@ -3013,7 +2889,7 @@ impl<'a> UclParser<'a> {
         if let Some(Token::ArrayEnd) = self.current_token() {
             self.advance_token()?;
             self.current_depth -= 1;
-            return Ok(UclValue::Array(Box::new(array)));
+            return Ok(UclValue::Array(array));
         }
 
         let mut index = 0;
@@ -3066,7 +2942,7 @@ impl<'a> UclParser<'a> {
         self.expect_token(&Token::ArrayEnd)?;
         self.current_depth -= 1;
 
-        Ok(UclValue::Array(Box::new(array)))
+        Ok(UclValue::Array(array))
     }
 
     /// Safe variable expansion with context that handles missing handlers gracefully
@@ -3452,32 +3328,32 @@ impl<'a> UclParser<'a> {
     }
 }
 
-// Convert LexError to ParseError
-impl From<crate::error::LexError> for ParseError {
-    fn from(lex_error: crate::error::LexError) -> Self {
-        match lex_error {
-            crate::error::LexError::UnexpectedCharacter {
-                character,
-                position,
-            } => ParseError::UnexpectedToken {
-                token: character.to_string(),
-                position,
-                expected: "valid character".to_string(),
-            },
-            _ => {
-                ParseError::InvalidObject {
-                    message: format!("Lexer error: {}", lex_error),
-                    position: Position::new(), // Default position
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::Value;
+
+    #[test]
+    fn test_first_token_lex_error_is_reported() {
+        // A lexer error on the very first token used to be dropped, and the input then parsed
+        // as an empty document (REVIEW.md §5.3).
+        for input in [
+            "\"abc",
+            "\"\\q\"",
+            "\\",
+            "\u{0}key = 1",
+            "/* never closed\nk = 1\n",
+        ] {
+            let mut parser = UclParser::new(input);
+            assert!(parser.parse_document().is_err(), "input {input:?}");
+            // The parser has no current token after the failure, so a second call must not
+            // report success either.
+            assert!(
+                parser.parse_document().is_err(),
+                "second call, input {input:?}"
+            );
+        }
+    }
 
     #[test]
     fn test_environment_variable_handler() {
@@ -3704,15 +3580,22 @@ mod tests {
         let mut parser = UclParser::new(r#"{ "key": "value1", "key": "value2" }"#);
         let result = parser.parse_value().unwrap();
 
+        // A repeated key is one entry with two values (libucl's implicit array), not an array.
         match result {
-            UclValue::Object(obj) => match obj.get("key") {
-                Some(UclValue::Array(arr)) => {
-                    assert_eq!(arr.len(), 2);
-                    assert_eq!(arr[0], UclValue::String("value1".to_string()));
-                    assert_eq!(arr[1], UclValue::String("value2".to_string()));
-                }
-                _ => panic!("Expected implicit array, got {:?}", obj.get("key")),
-            },
+            UclValue::Object(obj) => {
+                let values: Vec<_> = obj.get_all("key").cloned().collect();
+                assert_eq!(
+                    values,
+                    vec![
+                        UclValue::String("value1".to_string()),
+                        UclValue::String("value2".to_string())
+                    ]
+                );
+                assert_eq!(
+                    obj.get("key"),
+                    Some(&UclValue::String("value1".to_string()))
+                );
+            }
             _ => panic!("Expected object, got {:?}", result),
         }
     }

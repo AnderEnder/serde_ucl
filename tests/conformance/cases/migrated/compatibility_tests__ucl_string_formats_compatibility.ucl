@@ -1,0 +1,37 @@
+
+        # String format compatibility tests
+        strings = {
+            # Double-quoted strings with escapes
+            double_quoted = "Hello\nWorld\t!";
+            unicode_escape = "Unicode: \u{1F600}";
+            hex_escape = "Hex: \x41\x42\x43";
+            
+            # Single-quoted strings (literal)
+            single_quoted = 'No\nescapes\there';
+            single_with_quotes = 'Can contain "double quotes"';
+            
+            # Heredoc strings
+            heredoc_simple = <<EOF
+This is a heredoc string
+that preserves formatting
+and whitespace.
+EOF
+            
+            heredoc_custom = <<CUSTOM_DELIMITER
+Custom delimiter heredoc
+can use any delimiter name.
+CUSTOM_DELIMITER
+            
+            # Multiline strings (alternative syntax)
+            multiline = """
+            This is a multiline string
+            using triple quotes.
+            """;
+        }
+        
+        # String concatenation (if supported)
+        concatenated = "Hello " + "World";
+        
+        # Strings with variables (basic test)
+        templated = "Value: ${some_var}";
+    

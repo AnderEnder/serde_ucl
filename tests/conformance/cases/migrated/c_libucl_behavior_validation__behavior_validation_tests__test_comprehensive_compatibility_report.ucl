@@ -1,0 +1,50 @@
+
+            # Comprehensive UCL configuration test
+            
+            // C++ style comment
+            worker_processes = auto;
+            
+            events {
+                worker_connections = 1024;
+                use = epoll;
+            }
+            
+            http {
+                sendfile = true;
+                gzip = on;
+                
+                upstream backend {
+                    server "127.0.0.1:8080";
+                    keepalive = 32;
+                }
+                
+                server {
+                    listen = 80;
+                    server_name = "example.com";
+                    
+                    location "/" {
+                        try_files = "$uri $uri/ =404";
+                    }
+                }
+            }
+            
+            # Unicode test
+            message = "Hello \u{1F600} World";
+            
+            # Heredoc test
+            description = <<EOF
+This is a multi-line
+description with heredoc.
+EOF
+            
+            # Number formats
+            decimal = 42;
+            hex = 0xFF;
+            size = 64kb;
+            time = 30s;
+            
+            # Arrays
+            servers = "server1";
+            servers = "server2";
+            servers = "server3";
+        

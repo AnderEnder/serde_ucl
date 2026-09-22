@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"key1","v":[{"t":"string","v":"value1"}]},{"k":"key2","v":[{"t":"string","v":"value2"}]},{"k":"nested","v":[{"t":"object","entries":[{"k":"inner_key","v":[{"t":"int","v":"42"}]},{"k":"another","v":[{"t":"string","v":"test"}]}]}]},{"k":"array","v":[{"t":"array","v":[{"t":"int","v":"1"},{"t":"int","v":"2"},{"t":"int","v":"3"}]}]}]}

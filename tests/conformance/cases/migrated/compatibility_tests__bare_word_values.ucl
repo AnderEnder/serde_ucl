@@ -1,0 +1,26 @@
+
+        # Boolean keywords
+        enabled = true
+        disabled = false
+        active = yes
+        inactive = no
+        power = on
+        standby = off
+        
+        # Null value
+        empty = null
+        
+        # Special float values
+        positive_infinity = inf
+        negative_infinity = -inf
+        not_a_number = nan
+        
+        # Regular bare words as strings
+        environment = production
+        mode = debug
+        protocol = http
+        
+        # Mixed with quoted strings
+        name = "quoted string"
+        type = bare_word
+    

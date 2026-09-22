@@ -1,0 +1,5 @@
+
+keyvar = "$ABI";
+keyvar = "${ABI}";
+keyvar = "$ABI$ABI";
+keyvar = "$$ABI";

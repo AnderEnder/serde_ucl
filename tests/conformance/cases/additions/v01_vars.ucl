@@ -1,0 +1,5 @@
+# Variables
+keyvar = "$ABItest";
+keyvar = "${ABI}$ABI${ABI}${$ABI}";
+keyvar = "${some}$no${}$$test$$$$$$$";
+keyvar = "$ABI$$ABI$$$ABI$$$$";

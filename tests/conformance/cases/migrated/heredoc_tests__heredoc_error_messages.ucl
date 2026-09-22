@@ -1,0 +1,2 @@
+content = <<MISSING
+            This heredoc is missing its terminator

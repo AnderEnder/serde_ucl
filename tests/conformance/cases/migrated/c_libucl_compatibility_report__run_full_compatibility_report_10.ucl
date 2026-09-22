@@ -1,0 +1,7 @@
+
+        # Hash comment
+        key1 = "value1";
+        
+        /* Multi-line comment */
+        key2 = "value2";
+    

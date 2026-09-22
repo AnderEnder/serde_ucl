@@ -1,0 +1,10 @@
+
+            server = "server1";
+            server = "server2";
+            server = "server3";
+            
+            upstream {
+                backend = "backend1";
+                backend = "backend2";
+            }
+        

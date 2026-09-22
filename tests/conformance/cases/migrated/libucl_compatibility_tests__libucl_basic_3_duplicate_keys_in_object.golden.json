@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"ALIAS","v":[{"t":"object","entries":[{"k":"leaf","v":[{"t":"string","v":"query -e '%a == 0' '%n-%v'"},{"t":"string","v":"query -e '%a == 0' '%n-%v'"}]}]}]}]}

@@ -1,0 +1,6 @@
+
+/* outer comment
+   /* nested comment */
+   still in outer
+*/
+key = value

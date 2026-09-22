@@ -1,0 +1,3 @@
+
+multiline = "First line with emoji: \u{1F600}\nSecond line with Greek: \u{03B1}\u{03B2}\u{03B3}\nThird line with Chinese: \u{4E2D}\u{6587}"
+        

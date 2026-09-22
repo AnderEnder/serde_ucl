@@ -1,0 +1,13 @@
+
+            emoji_array = [
+                "\u{1F600}",
+                "\u{1F601}",
+                "\u{1F602}"
+            ]
+            
+            mixed_array = [
+                "Hello \u{1F30D}",
+                "\u0048\u{65}\u006C\u{6C}\u006F",
+                "\u{1F44B} World"
+            ]
+        

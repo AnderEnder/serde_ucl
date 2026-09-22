@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"environment","v":[{"t":"string","v":"production"}]},{"k":"log_level","v":[{"t":"string","v":"debug"}]},{"k":"server_name","v":[{"t":"string","v":"nginx"}]},{"k":"worker_processes","v":[{"t":"string","v":"auto"}]},{"k":"database_host","v":[{"t":"string","v":"localhost"}]},{"k":"file_path","v":[{"t":"string","v":"/var/log/app.log"}]}]}

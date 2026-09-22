@@ -1,0 +1,16 @@
+
+            # These should be treated as their respective types
+            bool_true = true
+            bool_false = false
+            null_value = null
+            
+            # These should be treated as strings when quoted
+            string_true = "true"
+            string_false = "false"
+            string_null = "null"
+            
+            # Test ambiguous cases
+            word_true = True
+            word_false = False
+            word_null = Null
+        

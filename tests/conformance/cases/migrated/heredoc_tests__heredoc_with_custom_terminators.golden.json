@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"sql_query","v":[{"t":"string","v":"SELECT * FROM users\nWHERE active = true\nORDER BY created_at DESC"}]},{"k":"html_content","v":[{"t":"string","v":"<div class=\"container\">\n    <h1>Hello World</h1>\n    <p>This is a paragraph.</p>\n</div>"}]},{"k":"script_content","v":[{"t":"string","v":"#!/bin/bash\necho \"Hello World\"\nexit 0"}]}]}

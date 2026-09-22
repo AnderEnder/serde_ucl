@@ -1,0 +1,6 @@
+
+            lowercase = "\u{1f600}"
+            uppercase = "\u{1F600}"
+            mixed_case = "\u{1F60a}"
+            mixed_case2 = "\u{1f60A}"
+        

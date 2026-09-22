@@ -1,0 +1,3 @@
+
+content = <<EOF
+This heredoc has no terminator

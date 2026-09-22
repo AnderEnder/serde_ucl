@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"double","v":[{"t":"string","v":"double quoted"}]},{"k":"single","v":[{"t":"string","v":"single quoted"}]},{"k":"escaped","v":[{"t":"string","v":"line1\nline2\ttab"}]}]}

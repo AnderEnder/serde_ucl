@@ -1,0 +1,16 @@
+
+            flag1 = true
+            flag2 = false
+            flag3 = yes
+            flag4 = no
+            flag5 = on
+            flag6 = off
+            
+            # Test case variations
+            flag7 = True
+            flag8 = False
+            flag9 = YES
+            flag10 = NO
+            flag11 = ON
+            flag12 = OFF
+        

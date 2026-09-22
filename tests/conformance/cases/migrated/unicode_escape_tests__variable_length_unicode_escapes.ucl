@@ -1,0 +1,8 @@
+
+            single_digit = "\u{A}"
+            two_digits = "\u{41}"
+            three_digits = "\u{3B1}"
+            four_digits = "\u{1F60}"
+            five_digits = "\u{1F600}"
+            six_digits = "\u{10FFFF}"
+        

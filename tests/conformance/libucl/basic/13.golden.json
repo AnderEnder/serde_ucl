@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"key","v":[{"t":"string","v":"value_orig"},{"t":"string","v":"value1"},{"t":"string","v":"value2"},{"t":"string","v":"value3"}]},{"k":"key_pri","v":[{"t":"string","v":"priority2","pri":2}]},{"k":"key_trace1","v":[{"t":"string","v":"pri1","pri":1}]},{"k":"key_trace2","v":[{"t":"string","v":"pri2","pri":2}]}]}

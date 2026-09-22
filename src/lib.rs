@@ -185,21 +185,19 @@
 //! ```rust
 //! use ucl_lexer::{from_str, UclError, LexError};
 //!
-//! let invalid_ucl = r#"
-//!     key = "unterminated string
-//! "#;
+//! let invalid_ucl = "\nkey = \"unterminated string";
 //!
 //! match from_str::<serde_json::Value>(invalid_ucl) {
 //!     Err(UclError::Lex(lex_error)) => {
 //!         // Extract position from the specific error variant
 //!         let pos = match &lex_error {
 //!             LexError::UnterminatedString { position } => position,
-//!             _ => panic!("Expected UnterminatedString error"),
+//!             other => panic!("expected UnterminatedString, got {other}"),
 //!         };
 //!         println!("Lexical error at line {}, column {}: {}",
 //!                  pos.line, pos.column, lex_error);
 //!     }
-//!     Err(other) => println!("Other error: {}", other),
+//!     Err(other) => panic!("expected a lexical error, got {other}"),
 //!     Ok(_) => unreachable!(),
 //! }
 //! ```
@@ -265,23 +263,28 @@
 //! - `performance_comparison.rs`: Performance benchmarking
 //! - `number_parsing.rs`: Rich number format examples
 
-pub mod c_libucl_compatibility;
-pub mod deserializer;
+pub mod de;
 pub mod error;
 pub mod lexer;
 pub mod parser;
+pub mod time;
+pub mod value;
 
 #[cfg(test)]
 mod error_tests;
 
 // Re-export main types and functions
-pub use deserializer::{UclDeserializer, from_str, from_str_with_variables};
+pub use de::{UclDeserializer, from_str, from_str_with_variables};
 pub use error::{LexError, ParseError, UclError};
 pub use lexer::{
     LexerConfig, StreamingUclLexer, StringFormat, Token, UclLexer, streaming_lexer_from_file,
     streaming_lexer_from_reader,
 };
-pub use parser::{DuplicateKeyBehavior, ParserConfig, UclArray, UclObject, UclParser, UclValue};
+pub use parser::{DuplicateKeyBehavior, ParserConfig, UclParser};
+pub use value::{
+    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Slot, UclArray, UclObject, UclValue,
+    Values,
+};
 
 // Re-export position types
 pub use error::{Position, Span};

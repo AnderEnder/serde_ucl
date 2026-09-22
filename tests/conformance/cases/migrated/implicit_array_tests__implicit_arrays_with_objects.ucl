@@ -1,0 +1,14 @@
+
+            upstream_server = {
+                host = "server1.com"
+                weight = 3
+            }
+            upstream_server = {
+                host = "server2.com"
+                weight = 2
+            }
+            upstream_server = {
+                host = "server3.com"
+                weight = 1
+            }
+        

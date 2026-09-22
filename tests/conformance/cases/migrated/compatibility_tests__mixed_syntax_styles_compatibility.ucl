@@ -1,0 +1,14 @@
+
+        {
+            # Explicit syntax
+            explicit_key = "explicit_value",
+            explicit_nested: {
+                key1 = "value1",
+                key2: "value2"
+            },
+            
+            # Implicit syntax (when NGINX-style is implemented)
+            # For now, these should still parse as explicit since separators are present
+            implicit_test = "still_explicit"
+        }
+    

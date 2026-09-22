@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"explicit_key","v":[{"t":"string","v":"explicit_value"}]},{"k":"explicit_nested","v":[{"t":"object","entries":[{"k":"key1","v":[{"t":"string","v":"value1"}]},{"k":"key2","v":[{"t":"string","v":"value2"}]}]}]},{"k":"implicit_test","v":[{"t":"string","v":"still_explicit"}]}]}

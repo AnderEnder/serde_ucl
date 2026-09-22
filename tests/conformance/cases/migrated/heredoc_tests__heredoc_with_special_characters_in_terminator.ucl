@@ -1,0 +1,7 @@
+content1 = <<END_OF_DATA
+Some content here
+END_OF_DATA
+
+content2 = <<MARKER123
+More content here
+MARKER123

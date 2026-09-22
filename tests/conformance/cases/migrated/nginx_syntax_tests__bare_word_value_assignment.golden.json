@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"worker_processes","v":[{"t":"string","v":"auto"}]},{"k":"error_log","v":[{"t":"string","v":"/var/log/nginx/error.log"}]},{"k":"pid","v":[{"t":"string","v":"/run/nginx.pid"}]}]}

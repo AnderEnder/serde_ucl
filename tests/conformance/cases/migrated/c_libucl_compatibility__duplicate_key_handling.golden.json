@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"server","v":[{"t":"string","v":"server1"},{"t":"string","v":"server2"},{"t":"string","v":"server3"}]},{"k":"upstream","v":[{"t":"object","entries":[{"k":"backend","v":[{"t":"string","v":"backend1"},{"t":"string","v":"backend2"}]}]}]}]}

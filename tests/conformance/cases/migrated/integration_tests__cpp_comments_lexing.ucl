@@ -1,0 +1,5 @@
+
+        // This is a C++ comment
+        key1 = "value1";  // Inline C++ comment
+        key2 = "value2";
+    

@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"param","v":[{"t":"string","v":"value"}]},{"k":"number","v":[{"t":"int","v":"42"}]},{"k":"boolean","v":[{"t":"bool","v":true}]},{"k":"section","v":[{"t":"object","entries":[{"k":"nested","v":[{"t":"string","v":"test"}]}]}]},{"k":"array","v":[{"t":"array","v":[{"t":"int","v":"1"},{"t":"int","v":"2"},{"t":"int","v":"3"}]}]}]}

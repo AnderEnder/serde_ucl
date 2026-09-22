@@ -1,0 +1,9 @@
+
+            // C++ style comment
+            key1 = "value1";
+            
+            key2 = "value2"; // End-of-line C++ comment
+            
+            # Mixed comment styles
+            key3 = "value3";
+        

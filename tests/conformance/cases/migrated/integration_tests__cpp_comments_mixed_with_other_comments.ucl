@@ -1,0 +1,8 @@
+
+        // C++ style comment
+        key1 = "value1";  // Inline C++ comment
+        # Hash comment
+        key2 = "value2";  # Inline hash comment
+        /* Multi-line comment */
+        key3 = "value3";
+    

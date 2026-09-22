@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"keyvar","v":[{"t":"string","v":"unknowntest"},{"t":"string","v":"unknownunknownunknown${unknown}"},{"t":"string","v":"${some}$no${}$$test$$$$$$$"},{"t":"string","v":"unknown$ABI$unknown$$"}]}]}

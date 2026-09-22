@@ -1,0 +1,50 @@
+
+        # Number format compatibility tests
+        integers = {
+            decimal = 42;
+            hex = 0xFF;
+            octal = 0o755;
+            binary = 0b11010101;
+        }
+        
+        floats = {
+            simple = 3.14159;
+            scientific = 1.23e-4;
+            negative_exp = 2.5e-10;
+            positive_exp = 1.5e+6;
+        }
+        
+        # Size suffixes (binary)
+        sizes_binary = {
+            bytes = 1024b;
+            kilobytes = 64kb;
+            megabytes = 512mb;
+            gigabytes = 2gb;
+            terabytes = 1tb;
+        }
+        
+        # Size suffixes (decimal)
+        sizes_decimal = {
+            kilobytes_decimal = 1000k;
+            megabytes_decimal = 100m;
+            gigabytes_decimal = 5g;
+        }
+        
+        # Time suffixes
+        times = {
+            milliseconds = 500ms;
+            seconds = 30s;
+            minutes = 5min;
+            hours = 2h;
+            days = 7d;
+            weeks = 2w;
+            years = 1y;
+        }
+        
+        # Special values
+        special = {
+            infinity = inf;
+            negative_infinity = -inf;
+            not_a_number = nan;
+        }
+    

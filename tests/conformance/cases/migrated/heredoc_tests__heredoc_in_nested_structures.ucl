@@ -1,0 +1,13 @@
+database = {
+    migrations = [
+        {
+            name = "create_users"
+            sql = <<SQL
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL
+);
+SQL
+        }
+    ]
+}

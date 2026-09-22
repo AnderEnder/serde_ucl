@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/example/ucl-rust-lexer"
 keywords = ["ucl", "parser", "lexer", "serde", "configuration"]
 categories = ["parsing", "config"]
+include = ["/src/**/*", "/Cargo.toml", "/README.md", "/LICENSE*"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

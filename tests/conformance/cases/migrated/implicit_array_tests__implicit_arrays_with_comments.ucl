@@ -1,0 +1,15 @@
+
+            # First server
+            server = "primary.example.com"
+            
+            # Backup server
+            server = "backup.example.com"
+            
+            // Another backup
+            server = "backup2.example.com"
+            
+            /*
+             * Emergency fallback
+             */
+            server = "emergency.example.com"
+        

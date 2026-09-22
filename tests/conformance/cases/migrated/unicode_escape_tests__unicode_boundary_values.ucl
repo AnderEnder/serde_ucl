@@ -1,0 +1,8 @@
+
+            min_value = "\u{0}"
+            ascii_max = "\u{7F}"
+            latin1_max = "\u{FF}"
+            bmp_max = "\u{FFFF}"
+            astral_min = "\u{10000}"
+            unicode_max = "\u{10FFFF}"
+        

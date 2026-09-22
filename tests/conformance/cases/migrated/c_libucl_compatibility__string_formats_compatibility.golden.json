@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"double_quoted","v":[{"t":"string","v":"Hello World"}]},{"k":"single_quoted","v":[{"t":"string","v":"Hello World"}]},{"k":"escaped_string","v":[{"t":"string","v":"Line 1\nLine 2\tTabbed"}]},{"k":"heredoc_string","v":[{"t":"string","v":"This is a heredoc string\nwith multiple lines"}]}]}

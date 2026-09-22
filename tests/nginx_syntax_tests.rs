@@ -170,7 +170,9 @@ mod nginx_syntax_tests {
         let result: Value = from_str(config).expect("Should parse nested implicit objects");
         let location = &result["http"]["server"]["location"]["/api/"];
         assert_eq!(location["proxy_pass"], "http://backend");
-        assert_eq!(location["proxy_timeout"], "30s");
+        // A time value: 30 seconds, as libucl parses it
+        // (tests/conformance/cases/migrated/nginx_syntax_tests__nested_implicit_objects.golden.json).
+        assert_eq!(location["proxy_timeout"], 30.0);
     }
 
     #[test]

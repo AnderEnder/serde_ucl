@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"enabled","v":[{"t":"bool","v":true}]},{"k":"disabled","v":[{"t":"bool","v":false}]},{"k":"environment","v":[{"t":"string","v":"production"}]},{"k":"empty","v":[{"t":"null"}]},{"k":"infinity","v":[{"t":"float","v":"inf"}]}]}

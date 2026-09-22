@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"explicit_array","v":[{"t":"array","v":[{"t":"string","v":"item1"},{"t":"string","v":"item2"}]}]},{"k":"implicit_array","v":[{"t":"string","v":"item1"},{"t":"string","v":"item2"}]},{"k":"mixed_array","v":[{"t":"array","v":[{"t":"string","v":"initial1"},{"t":"string","v":"initial2"}]},{"t":"string","v":"added1"},{"t":"string","v":"added2"}]}]}
