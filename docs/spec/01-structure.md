@@ -4,16 +4,42 @@ Cases: `tests/conformance/cases/spec/01-structure/`.
 
 ## 1.1 The root value
 
-The root value may be preceded by whitespace (space, tab, LF, CR, VT, FF) and comments (§2). Then:
-
-- If the next byte is `[`, the root is an **array** (`top_array`).
-- If it is `{`, the root is an **object written with braces** (`top_braced`, `top_braced_json`,
+- A root that starts with `[` is an **array** (`top_array`).
+- A root that starts with `{` is an **object written with braces** (`top_braced`, `top_braced_json`,
   `libucl/basic/1`, `libucl/basic/11`).
 - Otherwise the root is an **object without braces**: entries run to the end of the input
   (`top_implicit`).
 
+**Quirk: what may come before the bracket.** A leading `[` or `{` starts the root only in two
+arrangements:
+
+- after whitespace alone (space, tab, LF, CR, VT, FF): `⏎⇥ [1]` → `[int 1]`
+  (`root_bracket_after_leading_whitespace`);
+- directly after one or more comments at the very start of the input, with nothing between the
+  comments and nothing between the last comment and the bracket. A line comment includes its LF,
+  so the bracket may start the next line: `# c⏎# d⏎/* e */{a = 1}` → `{ a: int 1 }`,
+  `# c␍⏎[1]` → `[int 1]` (`root_bracket_directly_after_comment_group`,
+  `root_bracket_after_line_comment_crlf`).
+
+In every other arrangement the bracket stands where the first key should start, which is an
+error:
+
+- a comment, then a blank line: `# header⏎⏎{⏎  "a": 1⏎}` → **error**
+  (`root_bracket_after_comment_and_blank_line_error`)
+- a comment, then spaces: `# c⏎ [1]` → **error** (`root_bracket_after_comment_and_space_error`)
+- whitespace, then a comment: `⏎# c⏎{a = 1}` → **error**
+  (`root_bracket_after_whitespace_and_comment_error`)
+- a block comment, then a line break: `/* c */⏎{a = 1}` → **error**
+  (`root_bracket_after_block_comment_and_newline_error`)
+- two comments separated by a space: `/* c */ /* d */[1]` → **error**
+  (`root_bracket_between_spaced_comments_error`)
+
+A root without braces is not affected: `# header⏎⏎a = 1` → `{ a: int 1 }`
+(`root_unbraced_after_comment_and_blank_line`).
+
 An empty document, or one with only whitespace and comments, gives an empty object `{}`
-(`empty_document`, `whitespace_only_document`, `comment_only_document`).
+(`empty_document`, `whitespace_only_document`, `comment_only_document`). The exception is a `#`
+that is the last byte of the input (§2.2).
 
 **Quirk.** Once the closing `]` or `}` of a braced root has been read, the rest of the input is
 ignored, whatever it contains:
@@ -96,27 +122,54 @@ breaks).
 - Object and array elements need none: `[[1] [2]]`, `[{x = 1} {y = 2}]` (`array_containers_need_no_separator`,
   `cases/additions/a09_array_objs_no_comma`).
 - Comments may appear between elements (`array_comment_inside`; the `"2"` there is §5.6).
+  Comments after a separator are skipped: `[1, /* c */ 2]` → `[int 1, int 2]`
+  (`array_first_element_after_comment_group`).
+- **Quirk: comments before the first element.** Whitespace, line breaks included, after `[` is
+  skipped. If comments follow, one directly after another (a line comment includes its LF), the
+  first element starts right after the last of them, so whitespace after them is part of the
+  element: `[ /* c */ 1]` → `[" 1"]`, `[ # c⏎ 2]` → `[" 2"]`, `[⏎# c⏎ 3]` → `[" 3"]`,
+  `[ /* c */ "s"]` → `[" \"s\""]`, `[ /* c */ {x = 1}]` → `[" {x = 1}"]`. With nothing between
+  the comments and the element, it is an ordinary element: `[/* c */1]` → `[int 1]`,
+  `[/* c */[1]]` → `[[int 1]]`, and `[ /* c */]` → `[]` (`array_first_element_after_comment_group`).
+  The element is then empty, which is an error, when the comments are followed by spaces and `]`,
+  by a line break, or by a space and another comment: `[ /* c */ ]`, `[ /* c */⏎ x]`,
+  `[ /* c */ /* d */ x ]` (`array_comment_group_then_space_close_error`,
+  `array_comment_group_then_newline_error`, `array_comment_group_spaced_comments_error`).
 - A missing `]` is an error, and so is a `}` closing an array (`unterminated_array_error`,
   `mismatched_close_array_error`, `cases/errors/e07_unterminated_array`).
 - Macros are not recognised inside arrays (§9.1).
 
 ## 1.6 Missing values
 
-- A bare key followed by a line break, `;` or the end of input, with no separator, is an error: `a⏎`,
-  `a;` (`key_without_value_error`, `key_semicolon_error`, `cases/additions/a19_key_only`). A quoted key
-  may be followed by a line break (§3.2).
+- A bare key followed directly by a line break or by `;`, with no separator, is an error: `a⏎`,
+  `a;` (`key_without_value_error`, `key_semicolon_error`, `cases/additions/a19_key_only`). So is a
+  bare key at the end of input, with or without spaces, tabs or comments after it: `a `, `a # c⏎`
+  at the end (`key_space_at_end_error`, `key_line_comment_at_end_error`).
+- A bare key followed by at least one space, tab or comment, and then a line break, takes its
+  value from a following line, by the quirk below. So does a quoted key followed by a line break
+  (§3.2).
 - A separator followed by a terminator is an error (empty value): `a = ;` (`key_equals_semicolon_error`,
   `cases/additions/a18_empty_value`).
 - A value without a key is an error: `= 1` (`value_without_key_error`).
 
-**Quirk: a separator with nothing after it on its line.** Spaces, tabs and comments after the
-separator are not part of the value; a line comment includes its line break.
+**Quirk: nothing after the key on its line.** This applies after a separator (`a =`), after a
+bare key followed by a space, tab or comment and no separator (`a ␠`), and after a quoted key
+(§3.2). Spaces, tabs and comments that follow are not part of the value; a line comment includes
+its line break. A *line break* here is LF, CR, VT or FF: `a ␠<VT>= 1`, `a ␠<FF>= 1` and
+`a =<VT>= 1` → `{ a: "= 1" }` (`key_vertical_tab_is_line_break`, `key_form_feed_is_line_break`,
+`separator_vertical_tab_is_line_break`). After a quoted value, VT and FF are not line breaks
+(`a = "x"<VT>` is an error, `quoted_value_then_vertical_tab_error`), and inside an unquoted value
+they are ordinary bytes (§2.1).
 
-- If the input ends within them, the document is an error: `a =`, `a = `, `a = /* c */` and
-  `a = # c⏎` at the end of input (`key_equals_eof_error`, `empty_value_space_at_end_error`,
-  `empty_value_block_comment_at_end_error`, `empty_value_line_comment_at_end_error`).
+- If the input ends within them, the document is an error: `a =`, `a = `, `a = /* c */`,
+  `a = # c⏎` and `a # c⏎` at the end of input (`key_equals_eof_error`,
+  `empty_value_space_at_end_error`, `empty_value_block_comment_at_end_error`,
+  `empty_value_line_comment_at_end_error`, `key_line_comment_at_end_error`).
 - If they are followed by anything other than a line break, the value starts there:
-  `b = # c⏎ 2` → `{ b: int 2 }` (`cases/spec/02-comments/between_separator_and_value`).
+  `b = # c⏎ 2` → `{ b: int 2 }` (`cases/spec/02-comments/between_separator_and_value`);
+  `a # c⏎b = 1` → `{ a: "b = 1" }` (`key_line_comment_value_next_line`). After a key without a
+  separator, a separator may stand there and still counts as one: `a # c⏎= 1` → `{ a: int 1 }`
+  (`key_line_comment_then_separator`). Section names may stand there too (§3.4).
 - If they are followed by a line break, the value is on a following line. Blank lines and
   whitespace before it are not part of the value, and neither is a group of comments directly
   after them, one right after another. The value starts immediately after that group, so
@@ -129,7 +182,14 @@ separator are not part of the value; a line comment includes its line break.
   - `a =⏎# c⏎  v` → `{ a: "  v" }` (`empty_value_next_line_comment_then_spaces`)
   - `a =⏎/* c */ v` → `{ a: " v" }` (`empty_value_next_line_block_comment_then_space`)
   - `a =⏎/* c */⏎b = 1` is an error (`empty_value_next_line_block_comment_then_newline_error`)
-- If the input ends in that following text, the value is `null`: `a = ⏎`, `a = /* c */⏎` and
-  `a =⏎# c⏎` → `{ a: null }` (`empty_value_at_end_is_null`,
+  - Without a separator: `a ⏎b = 1` → `{ a: "b = 1" }`, `a /* c */⏎b = 1` → `{ a: "b = 1" }`,
+    `a ⏎{ b = 1 }` → `{ a: { b: int 1 } }`, `a ⏎# c⏎  v` → `{ a: "  v" }`, and
+    `a ⏎/* c */⏎b = 1` is an error (`key_space_newline_value_next_line`,
+    `key_block_comment_newline_value_next_line`, `key_space_newline_object`,
+    `key_space_newline_comment_then_spaces`, `key_space_newline_block_comment_newline_error`).
+    On the following line a separator is part of the value: `a ⏎= 1` → `{ a: "= 1" }`
+    (`key_space_newline_separator_is_value`).
+- If the input ends in that following text, the value is `null`: `a = ⏎`, `a = /* c */⏎`,
+  `a =⏎# c⏎` and `a ⏎` → `{ a: null }` (`key_space_newline_at_end_is_null`, `empty_value_at_end_is_null`,
   `empty_value_block_comment_then_newline_at_end`, `empty_value_next_line_comment_at_end`,
   `cases/spec/09-macros/include_empty_value_is_null`).

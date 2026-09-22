@@ -87,8 +87,17 @@ The same holds for unquoted values: `$ABI$$x` → `"unknown$x"`, `$$x` → `"$$x
 
 - In **double-quoted** strings, escapes are decoded before expansion, so `"\$ABI"` → `"unknown"`
   (`backslash_dollar`).
-- **Quirk.** In **unquoted** values, a backslash before `$` prevents expansion and is removed:
-  `\$ABI` → `"$ABI"` (`backslash_dollar`).
+- **Quirk.** In **unquoted** values, escapes are decoded first too (§4.7), so `\$` becomes `$`.
+  Expansion then happens only if the value as written has at least one `$` that is not written as
+  `\$`; otherwise the decoded text is kept as it is (`backslash_dollar`,
+  `backslash_dollar_unquoted_mixed`):
+  - every `$` written as `\$`, so nothing is expanded: `\$ABI` → `"$ABI"`, `x\$ABI` → `"x$ABI"`,
+    `\$A\$ABI` → `"$A$ABI"`, `\\\$ABI` → `"\\$ABI"`;
+  - some other `$`, so the decoded text is expanded as a whole: `$ABI\$ABI` → `"unknownunknown"`,
+    `\$ABI$ABI` → `"unknownunknown"`, `\$ABIc$` → `"unknownc$"`, `\$ABI $` → `"unknown $"`,
+    `${\$ABI` → `"${unknown"`;
+  - the `$$` rule of §7.5 applies to the decoded text: `x$\$ABI` → `"x$$ABI"`;
+  - a `$` after an escaped backslash is not escaped: `\\$ABI` → `"\\unknown"`.
 
 ## 7.7 Variable handler
 
@@ -99,10 +108,12 @@ An application may install a handler, a callback that resolves names that are no
 - Registered variables take precedence (`registered_wins_over_handler`).
 - If the handler refuses, the reference is left as it is (`handler_refuses`).
 
-**Uncertain.** When a handler-resolved reference shares its string with other text, before or
-after it, libucl's output is corrupted: text is lost, NUL bytes appear, or the reference stays
-unexpanded. The implementation should substitute the handler's value in place, as for registered
-variables, and record the choice. No case pins this.
+**Uncertain (undefined in libucl).** When a handler-resolved reference shares its string with
+other text, before or after it, libucl's result depends on memory contents: text after the
+reference is dropped, text before it can cut the result short or leave the reference unexpanded,
+and bytes that were never written can appear in the value. No case pins this, because the golden
+file would not be reproducible. The project substitutes the handler's value in place, as for
+registered variables (README, *Divergences decided by the project*).
 
 ## 7.8 File variables
 

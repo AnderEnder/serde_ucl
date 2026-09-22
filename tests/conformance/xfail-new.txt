@@ -7,6 +7,8 @@
 #               the first macro the core rejects
 #     non-utf8  the case holds bytes that are not UTF-8; the project rejects them
 #               (spec README "Divergences decided by the project", §11.3)
+#     spec-v3   the case was added with spec-v3 (answers to QUESTIONS.md #5-#16) and the core
+#               predates it; the note names the spec section
 #
 # The runner applies each case's .flags file. A rejection with Error::is_unsupported() never
 # counts as a pass, so macro cases whose golden file is an error stay listed until C3.
@@ -144,3 +146,42 @@ libucl/basic/22 non-utf8  # the key is the single byte 0xFF
 libucl/basic/23 macro  # .include
 libucl/basic/9 macro  # .include
 libucl/basic/load macro  # .load
+
+# --- added with spec-v3
+cases/spec/01-structure/root_bracket_after_block_comment_and_newline_error spec-v3  # §1.1
+cases/spec/01-structure/root_bracket_after_comment_and_blank_line_error spec-v3  # §1.1
+cases/spec/01-structure/root_bracket_after_comment_and_space_error spec-v3  # §1.1
+cases/spec/01-structure/root_bracket_after_whitespace_and_comment_error spec-v3  # §1.1
+cases/spec/01-structure/root_bracket_between_spaced_comments_error spec-v3  # §1.1
+cases/spec/02-comments/block_comment_escaped_quote_outside_quotes spec-v3  # §2.3
+cases/spec/02-comments/block_comment_quote_after_backslash_pair_error spec-v3  # §2.3
+cases/spec/02-comments/hash_last_byte_after_comment_and_space_error spec-v3  # §2.2
+cases/spec/02-comments/hash_last_byte_after_leading_newline_error spec-v3  # §2.2
+cases/spec/02-comments/hash_last_byte_after_leading_space_error spec-v3  # §2.2
+cases/spec/03-keys/section_path_left_open_closed_by_array spec-v3  # §3.4
+cases/spec/03-keys/section_path_left_open_closed_by_object spec-v3  # §3.4
+cases/spec/03-keys/section_path_left_open_closed_by_section spec-v3  # §3.4
+cases/spec/03-keys/section_path_left_open_inner_container spec-v3  # §3.4
+cases/spec/03-keys/section_path_left_open_inside_braces_closed spec-v3  # §3.4
+cases/spec/03-keys/section_path_left_open_nested_paths spec-v3  # §3.4
+cases/spec/03-keys/section_path_left_open_two_names spec-v3  # §3.4
+cases/spec/04-atoms/backslash_short_unicode_at_end spec-v3  # §4.8
+cases/spec/05-numbers/hex_after_fraction_or_exponent spec-v3  # §5.2
+cases/spec/05-numbers/malformed_before_range_is_string spec-v3  # §5.8
+cases/spec/07-variables/backslash_dollar_unquoted_mixed spec-v3  # §7.6
+cases/spec/09-macros/macro_args_then_end_error spec-v3  # §9.1, §9.2; also needs C3 for the error to count
+cases/spec/09-macros/macro_dot_at_end_ignored spec-v3  # §9.1, §9.2
+cases/spec/09-macros/macro_known_name_then_comment_at_end_ignored spec-v3  # §9.1, §9.2
+cases/spec/09-macros/macro_known_name_then_whitespace_at_end_ignored spec-v3  # §9.1, §9.2
+cases/spec/09-macros/macro_name_at_end_ignored spec-v3  # §9.1, §9.2
+cases/spec/09-macros/macro_name_with_punctuation_at_end_ignored spec-v3  # §9.1, §9.2
+cases/spec/09-macros/macro_word_after_section_name_ignored spec-v3  # §9.1, §9.2
+cases/spec/12-flags/comments_attach_to_next_value spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_block_comment_saved_with_next_byte spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_line_comment_keeps_cr spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_only_attach_to_root spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_repeated_key spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_section_path_close spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_trailing_at_container_close spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/comments_trailing_at_end spec-v3  # §12.5; the runner does not dump comments yet
+cases/spec/12-flags/key_lowercase_before_escapes spec-v3  # §12.1

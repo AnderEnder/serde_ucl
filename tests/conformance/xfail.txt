@@ -456,3 +456,61 @@ cases/spec/12-flags/no_filevars flags
 cases/spec/12-flags/no_time flags
 cases/spec/12-flags/save_comments_no_effect_on_values flags
 cases/spec/12-flags/zerocopy_no_effect flags
+
+# --- added with spec-v3
+cases/spec/01-structure/array_comment_group_spaced_comments_error parser  # spec-v3 §1.5
+cases/spec/01-structure/array_comment_group_then_space_close_error parser  # spec-v3 §1.5
+cases/spec/01-structure/array_first_element_after_comment_group parser  # spec-v3 §1.5
+cases/spec/01-structure/key_form_feed_is_line_break parser  # spec-v3 §1.6
+cases/spec/01-structure/key_space_newline_at_end_is_null parser  # spec-v3 §1.6
+cases/spec/01-structure/key_space_newline_block_comment_newline_error parser  # spec-v3 §1.6
+cases/spec/01-structure/key_space_newline_comment_then_spaces parser  # spec-v3 §1.6
+cases/spec/01-structure/key_space_newline_separator_is_value parser  # spec-v3 §1.6
+cases/spec/01-structure/key_vertical_tab_is_line_break parser  # spec-v3 §1.6
+cases/spec/01-structure/root_bracket_after_block_comment_and_newline_error parser  # spec-v3 §1.1
+cases/spec/01-structure/root_bracket_after_comment_and_blank_line_error parser  # spec-v3 §1.1
+cases/spec/01-structure/root_bracket_after_comment_and_space_error parser  # spec-v3 §1.1
+cases/spec/01-structure/root_bracket_after_whitespace_and_comment_error parser  # spec-v3 §1.1
+cases/spec/01-structure/root_bracket_between_spaced_comments_error parser  # spec-v3 §1.1
+cases/spec/01-structure/separator_vertical_tab_is_line_break parser  # spec-v3 §1.6
+cases/spec/02-comments/block_comment_escaped_quote_outside_quotes parser  # spec-v3 §2.3
+cases/spec/02-comments/block_comment_quote_after_backslash_pair_error parser  # spec-v3 §2.3
+cases/spec/02-comments/block_comment_single_quote_not_special parser  # spec-v3 §2.3
+cases/spec/02-comments/block_comment_single_quotes_do_not_protect_error parser  # spec-v3 §2.3
+cases/spec/02-comments/hash_last_byte_after_comment_and_space_error parser  # spec-v3 §2.2
+cases/spec/02-comments/hash_last_byte_after_leading_newline_error parser  # spec-v3 §2.2
+cases/spec/02-comments/hash_last_byte_after_leading_space_error parser  # spec-v3 §2.2
+cases/spec/03-keys/quoted_key_comment_adjacent parser  # spec-v3 §3.2
+cases/spec/03-keys/quoted_key_heredoc_adjacent parser  # spec-v3 §3.2
+cases/spec/03-keys/section_lookahead_counts_comment_text_error parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_closed_by_array parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_closed_by_object parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_closed_by_section parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_inner_container parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_inside_braces_closed parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_nested_paths parser  # spec-v3 §3.4
+cases/spec/03-keys/section_path_left_open_two_names parser  # spec-v3 §3.4
+cases/spec/03-keys/section_quoted_name_then_separator parser  # spec-v3 §3.4
+cases/spec/04-atoms/backslash_short_unicode_at_end parser  # spec-v3 §4.8
+cases/spec/05-numbers/hex_after_fraction_or_exponent parser  # spec-v3 §5.2
+cases/spec/05-numbers/malformed_before_range_is_string parser  # spec-v3 §5.8
+cases/spec/05-numbers/range_error_underflow_before_suffix parser  # spec-v3 §5.8
+cases/spec/07-variables/backslash_dollar_unquoted_mixed parser  # spec-v3 §7.6
+cases/spec/09-macros/macro_dot_at_end_ignored parser  # spec-v3 §9.1, §9.2
+cases/spec/09-macros/macro_known_name_then_comment_at_end_ignored macro  # spec-v3 §9.1, §9.2
+cases/spec/09-macros/macro_known_name_then_whitespace_at_end_ignored macro  # spec-v3 §9.1, §9.2
+cases/spec/09-macros/macro_name_at_end_ignored parser  # spec-v3 §9.1, §9.2
+cases/spec/09-macros/macro_name_with_punctuation_at_end_ignored parser  # spec-v3 §9.1, §9.2
+cases/spec/09-macros/macro_word_after_section_name_error parser  # spec-v3 §9.1, §9.2
+cases/spec/09-macros/macro_word_after_section_name_ignored parser  # spec-v3 §9.1, §9.2
+cases/spec/12-flags/comments_after_braced_root_ignored flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_attach_to_next_value flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_block_comment_saved_with_next_byte flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_line_comment_keeps_cr flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_only_attach_to_root flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_repeated_key flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_section_path_close flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_trailing_at_container_close flags  # spec-v3 §12.5
+cases/spec/12-flags/comments_trailing_at_end flags  # spec-v3 §12.5
+cases/spec/12-flags/disable_macro_name_at_end_error flags  # spec-v3 §12.6
+cases/spec/12-flags/key_lowercase_before_escapes flags  # spec-v3 §12.1

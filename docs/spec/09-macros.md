@@ -17,6 +17,11 @@ the top level of an object, the root included, or inside `{…}`
 - as a value: `k = .include "files/a.inc"` → `{ k: ".include \"files/a.inc\"" }`
   (`macro_not_recognised_as_value`)
 
+A key position includes the one after a section name (§3.4): `a .b {c = 1}` is an error, because
+`.b` is an unknown macro inside the new object `a` (`macro_word_after_section_name_error`);
+`"a".51"x{y"z` → `{ a: {} }`, because `.51"x{y"z` is a macro whose name runs to the end of input
+(§9.2; `macro_word_after_section_name_ignored`).
+
 With `disable-macro` set, a macro is a syntax error (§12.6).
 
 ## 9.2 Syntax
@@ -29,6 +34,17 @@ With `disable-macro` set, a macro is a syntax error (§12.6).
   registered. An unknown name is an error (`unknown_macro_error`, `macro_space_after_dot_error`,
   `macro_name_case_sensitive_error`, `cases/errors/e05_unknown_macro`,
   `cases/errors/e06_unknown_macro_with_args`).
+- **Quirk: a macro at the end of input.** If the input ends inside NAME, the macro is ignored,
+  whatever NAME is, and there is no error: `a = 1⏎.foo` → `{ a: int 1 }`, `.` → `{}`, and
+  `.foo;` → `{}`, the `;` being part of the name (`macro_name_at_end_ignored`,
+  `macro_dot_at_end_ignored`, `macro_name_with_punctuation_at_end_ignored`). The same holds for a
+  known NAME followed only by whitespace and comments up to the end of input: `.priority⏎` and
+  `.include # c⏎` do nothing (`macro_known_name_then_whitespace_at_end_ignored`,
+  `macro_known_name_then_comment_at_end_ignored`). An unknown NAME followed by whitespace or `(`
+  is an error even then: `.foo⏎` (`macro_unknown_name_then_newline_error`). After an argument
+  list, a missing value is an error: `.priority(priority=2)` at the end of input
+  (`macro_args_then_end_error`). With `disable-macro`, every macro is an error, at the end of input
+  too (§12.6).
 - **ARGUMENTS**, optional, may be preceded by whitespace: `.include (try=true) …` works
   (`include_space_before_args`). The text between `(` and the matching `)` is a UCL document read
   with the same flags; its root object holds the parameters. Nested parentheses must balance, and a
@@ -54,7 +70,9 @@ With `disable-macro` set, a macro is a syntax error (§12.6).
 - VALUE may be followed by whitespace, line breaks and `;`, after which the next entry may start on
   the same line (`include_then_keys`).
 - Variables are expanded in the value (§7.2; `macro_value_variables`, `include_curdir`).
-- A missing value at the end of input is an error (`priority_missing_value_error`).
+- A value on a following line is taken as the value even when it was meant as an entry:
+  `.priority⏎a = 1` is an error, because `a = 1` is not a priority (`priority_missing_value_error`).
+  A missing value at the end of input is covered by the quirk under NAME above.
 
 ## 9.3 File paths
 
@@ -142,7 +160,9 @@ before it keep theirs.
   (`priority_args_only`). When both are present, the value wins: `.priority(priority=6) 5` → 5
   (`priority_forms`).
 - A value that is not an integer, including trailing characters, is an error (`priority_invalid_error`).
-  A missing value is an error (`priority_missing_value_error`).
+  A value on the next line is still the value: `.priority⏎a = 1` is an error
+  (`priority_missing_value_error`); with nothing left in the input, `.priority` does nothing
+  (§9.2).
 - Numbers are kept modulo 16 (§8.3).
 - Cases: `libucl/basic/18`, `cases/spec/08-duplicates/priority_*`.
 

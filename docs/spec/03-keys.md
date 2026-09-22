@@ -29,12 +29,20 @@ Cases: `tests/conformance/cases/spec/03-keys/`.
 - The empty key is an error: `"" = 1` (`quoted_empty_error`, `cases/review/18_emptykey`).
 - Single-quoted keys are an error: `'k' = 1` (`single_quoted_error`,
   `cases/additions/a42_key_quoted_single`).
-- A quoted key may be followed directly by `{`, `[`, `=` or `:`: `"a"{b = 1}`, `"c"[1]`
-  (`quoted_brace_directly_after`).
+- Whitespace after a quoted key is optional. It may be followed directly by `{`, `[`, `=` or `:`
+  (`"a"{b = 1}`, `"c"[1]`; `quoted_brace_directly_after`), by its value in any form
+  (`"a"x` → `{ a: "x" }`, `"b"1` → `{ b: int 1 }`, `"c"'q'` → `{ c: "q" }`, `"d""r"` → `{ d: "r" }`,
+  `"e"true` → `{ e: true }`, `quoted_key_value_adjacent`; `"a"<<EOD⏎x⏎EOD` → `{ a: "x" }`,
+  `quoted_key_heredoc_adjacent`), by a comment (`"a"#c⏎v` → `{ a: "v" }`, `"b"/*c*/w` →
+  `{ b: "w" }`, `quoted_key_comment_adjacent`), or by section names (`"a"b {c = 1}` →
+  `{ a: { b: { c: int 1 } } }`, `quoted_key_names_adjacent`).
+- A quoted key at the end of input, with or without spaces after it, is an error: `"a"`, `"a" `
+  (`quoted_key_at_end_error`, `quoted_key_space_at_end_error`).
 - **Quirk.** A quoted key may be followed by a line break. The value then starts on the next line,
   and a separator there becomes part of the value: `"a"⏎= 1` → `{ a: "= 1" }`
   (`quoted_newline_before_separator`).
-- A quoted key followed by a quoted value with no separator is an error: `"a" "b" = 1`
+- A quoted value after a quoted key must be followed by a terminator like any quoted value
+  (§1.3): `"a" "b" = 1` is an error because ` = 1` follows the value `"b"`
   (`quoted_followed_by_quoted_value_error`).
 
 ## 3.3 Keys that need a value
@@ -56,8 +64,20 @@ A key followed by further names and then `{` or `[` creates nested objects, one 
   (`section_array_value`).
 - `libucl/basic/8` and `libucl/basic/10` use this form throughout.
 
-Which words are names. This applies to a key written without a separator. For any word, "the
-rest of its line" is the text after it up to the first LF, CR, `,` or `;`.
+Which words are names. This applies to a key written without a separator; the first key may be
+bare or double-quoted: `"a" b {x = 1}` → `{ a: { b: { x: int 1 } } }` (`section_quoted_first_key`).
+For any word, "the rest of its line" starts at the next word, after the spaces, tabs and comments
+that follow the word, and runs to the first LF, CR, `,` or `;`. A line comment includes its line
+break, so the next word may be on a later line. Comments inside the rest of the line are part of
+it, so a bracket in them counts:
+
+- `a # {⏎b = 1` → `{ a: "b = 1" }`: the comment is not part of the rest of the line, which starts
+  at `b` and has no bracket (`section_lookahead_after_line_comment`).
+- `a /* { */ b = 1` → `{ a: "b = 1" }`; `x /* { */ y {c = 1}` → `{ x: { y: { c: int 1 } } }`
+  (`section_lookahead_after_block_comment`).
+- `k v # {` → **error**: the rest of the line from `v` contains the `{` of the comment, so `k` is a
+  name, and `v` is then a key with no value (`section_lookahead_counts_comment_text_error`).
+
 
 - The key is a section name if and only if the rest of its line contains `{` or `[` anywhere,
   including inside quotes or inside a word. Otherwise the rest of the line is the key's value:
@@ -75,11 +95,32 @@ rest of its line" is the text after it up to the first LF, CR, `,` or `;`.
   word itself, which is then an ordinary key. `a "x{y"⏎` → `{ a: { "x{y": null } }`: a quoted key
   may be followed by a line break (§3.2), and the end of input then gives `null` (§1.6)
   (`section_path_brace_inside_quotes`). The objects created for such names have no closing
-  bracket, so every later entry of the document goes into the innermost one:
+  bracket, so they stay open, and later entries go into the innermost one:
   `x = 1⏎c "x{y" z⏎d = 1` → `{ x: int 1, c: { "x{y": "z", d: int 1 } }` (`section_path_left_open`).
-  Inside braces, the enclosing `}` is then an error (`section_path_left_open_inside_braces_error`).
+  They close when one of these happens:
+  - A container written with brackets that was opened in them closes: an object or array value,
+    or the objects of another section path. Then every object left open this way closes with it,
+    back to the nearest enclosing object written with a bracket, or to the root, and later entries
+    go there. `x "y{" z⏎a { b = 1 }⏎d = 1` → `{ x: { "y{": "z", a: { b: int 1 } }, d: int 1 }`
+    (`section_path_left_open_closed_by_object`); the same with `a = [1]` or `a b { x = 1 }` in
+    place of `a { b = 1 }` (`section_path_left_open_closed_by_array`,
+    `section_path_left_open_closed_by_section`), with two left-open names `p q "y{" z`
+    (`section_path_left_open_two_names`), and with a second left-open path inside the first, which
+    both close (`section_path_left_open_nested_paths`). Inside braces, they close back to the
+    braced object: `k { c "x{y" z⏎a { b = 1 }⏎}⏎m = 1` →
+    `{ k: { c: { "x{y": "z", a: { b: int 1 } } }, m: int 1 }`
+    (`section_path_left_open_inside_braces_closed`). Containers nested deeper do not close them:
+    `c "x{y" z⏎d { e { f = 1 } g = 2 }⏎h = 1` →
+    `{ c: { "x{y": "z", d: { e: { f: int 1 }, g: int 2 } }, h: int 1 }`
+    (`section_path_left_open_inner_container`).
+  - The input ends.
+  A `}` that arrives while they are open is an error (`section_path_left_open_inside_braces_error`,
+  `section_path_left_open_extra_close_error`).
 - **Quirk.** A `=` or `:` after a word that follows a name is ignored, and that word is a name too:
   `a b = c {d = 1}` → `{ a: { b: { c: { d: int 1 } } } }` (`section_path_separator_is_ignored`).
+  The word may be quoted: `a "x{" = y {z = 1}` → `{ a: { "x{": { y: { z: int 1 } } } }`, while
+  `a "x{" = y` is an error, because `y` is then a key with no value
+  (`section_quoted_name_then_separator`, `section_quoted_name_then_separator_error`).
   Since such a word never holds the value itself, `a b = [1]` and `a b = {d = 1}` are errors
   (`section_path_separator_after_name_error`, `section_path_separator_after_name_object_error`).
 - The bracket must be on the same line: `a b⏎{ c = 1 }` is an error, because `b` is the value of

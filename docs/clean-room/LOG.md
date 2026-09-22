@@ -224,3 +224,26 @@
       comment is saved with its text and position, without attaching it to a value.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-23 — Role: spec team. Item: C0, release `spec-v3` (tag on `ebd0b04`). Answers implementer
+  questions #5–#16 from C2 (`docs/clean-room/QUESTIONS.md`). Inputs consulted: libucl source at the
+  pinned commit (comment skipping, the start-of-document handling, container closing, macro-name
+  handling, unescaping, variable expansion, number reading, comment attachment), black-box oracle
+  runs, the conformance corpus, and `spec-v2`. Where the implementer had kept the spec against the
+  oracle (#10–#14, #16), the spec was wrong and is corrected: §1.1 (a bracketed root only after
+  whitespace alone or directly after a leading comment group), §2.2 (a last-byte `#` after
+  whitespace before the first key is an error), §3.4 (left-open section objects close with the next
+  bracketed container opened in them), §7.6 (`\$` blocks expansion only when every `$` is written
+  `\$`), §9.1/§9.2 (a macro whose name runs to the end of input is ignored; a known name followed
+  only by whitespace and comments to the end too), §12.1 (quoted keys are lowercased before escapes
+  are decoded). Where the implementer followed the oracle (#5–#9, #15), the reading is confirmed
+  and written down: §1.5, §1.6, §2.3 (corrected in one detail: a `"` directly after `\` never
+  toggles a quoted part), §3.2, §3.4, §5.8. Also new: §5.2 quirk for `x` after a fraction or
+  exponent. Uncertain items: §4.8 resolved (short `\u` escapes are deterministic); §12.5 resolved
+  (comment text and attachment rules, recorded through a new oracle option `-c` /
+  `dump-comments`), except the byte saved after a block comment that ends the input, which is
+  undefined; §7.7 stays undefined in libucl (memory-dependent) and the implementer's choice
+  becomes a project divergence (README). 94 new cases with golden files from the oracle; the old
+  parser fails 56 of them (`xfail.txt`), the new core 37 (`xfail-new.txt`, reason `spec-v3`).
+  Both runners green. Commits: `547a893`, `ebd0b04`. The spec contains behaviour only: no libucl
+  code, internal names, or procedures.

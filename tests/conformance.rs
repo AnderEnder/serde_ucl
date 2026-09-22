@@ -219,6 +219,9 @@ fn setup(case: &Case) -> Setup {
             "no-time" => Some(ParserFlags::NO_TIME),
             "no-implicit-arrays" => Some(ParserFlags::NO_IMPLICIT_ARRAYS),
             "save-comments" => Some(ParserFlags::SAVE_COMMENTS),
+            // Also asks the oracle to record the attached comments in the dump ("c"/"ca" keys,
+            // tests/conformance/README.md); the crate's dump has none yet, so such cases fail.
+            "dump-comments" => Some(ParserFlags::SAVE_COMMENTS),
             "disable-macro" => Some(ParserFlags::DISABLE_MACRO),
             "no-filevars" => Some(ParserFlags::NO_FILEVARS),
             _ => None,

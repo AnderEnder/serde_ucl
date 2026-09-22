@@ -100,8 +100,15 @@ value of the hex digits before the first non-hex character among the four, or 0 
 - `x\u1ZZZ` → `"x\u0010"`, `x\u12ZZ` → `"x\u0120"`, `x\u123Z` → `"x\u1230"`
   (`backslash_invalid_unicode_prefixes`)
 
-**Uncertain.** With fewer than four characters after `\u`, libucl's result depends on the
-surrounding bytes. The implementation may choose.
+When fewer than four characters of the value follow `\u`:
+
+- With three, the code point is found the same way, with the end of the value counting as a
+  fourth, non-hex character, and the three characters are part of the escape:
+  `x\u123` → `"x\u1230"`, `x\u1Z2` → `"x\u0010"` (`backslash_short_unicode_at_end`).
+- **Quirk.** With two or fewer, the `\` is dropped, the `u` is kept, the first character after
+  it is dropped, and the rest of the value follows unchanged, its own escapes decoded: `x\u12` → `"xu2"`, `x\u41` → `"xu1"`,
+  `x\u1` → `"xu"`, `x\uZ` → `"xu"`, `x\u` → `"xu"`, `a\u\n` → `"aun"`
+  (`backslash_short_unicode_at_end`).
 
 ## 4.9 `$` in unquoted values
 

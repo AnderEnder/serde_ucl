@@ -68,6 +68,7 @@ flag_opts() {
 			no-time) opts="$opts -T" ;;
 			no-implicit-arrays) opts="$opts -I" ;;
 			save-comments) opts="$opts -C" ;;
+			dump-comments) opts="$opts -c" ;;
 			disable-macro) opts="$opts -M" ;;
 			no-filevars) opts="$opts -F" ;;
 			variable-handler) opts="$opts -H" ;;

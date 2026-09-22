@@ -24,7 +24,9 @@ None of them is written by hand.
   `tools/ucl-dump`.
 - `<case>.flags` (optional) lists parser settings, one per line:
   `key-lowercase`, `zerocopy`, `no-time`, `no-implicit-arrays`, `save-comments`, `disable-macro`,
-  `no-filevars` (the parser flags); `var:NAME=VALUE` (register an extra variable after `ABI`, in
+  `no-filevars` (the parser flags); `dump-comments` (like `save-comments`, and the golden file also
+  records the comments attached to each value: `"c"` for comments written before it, `"ca"` for
+  comments written after it, see `tools/ucl-dump/ucl_dump.c`); `var:NAME=VALUE` (register an extra variable after `ABI`, in
   file order); `variable-handler` (install the test handler: any braced name starting with `H_`
   resolves to `[handled]`, every other name is refused); `priority:N` and `strategy:NAME` (the
   priority and duplicate strategy of the input chunk; strategies are `append`, `merge`, `rewrite`,

@@ -74,6 +74,9 @@ These settings are part of every expected result:
 - `string-input` parses the case as if it were given as a string rather than a file (§7.8).
 - Parser flags are off unless `.flags` names them: `key-lowercase`, `zerocopy`, `no-time`,
   `no-implicit-arrays`, `save-comments`, `disable-macro`, `no-filevars` (§12).
+- `dump-comments` turns on `save-comments` and also records, in the golden file, the comments
+  attached to each value: `"c"` for comments attached before it, `"ca"` for comments attached after
+  it (§12.5).
 
 Only whether a case fails is compared, never the wording of the error. **Error message wording is
 not part of this specification** (§11.1).
@@ -102,17 +105,23 @@ behaviour, and each place says so:
   points (§6).
 - `.includes` returns an "unsupported" error in the project (§9).
 - `.load` is available only behind a default-off feature in the project (§9).
+- A variable-handler result that shares its string with other text is substituted in place in the
+  project. libucl's result there depends on memory contents (§7.7).
 
 ## Uncertain behaviour (summary)
 
-- Variable-handler results combined with other text in one string (§7.7).
-- `\u` escapes with fewer than four characters left, inside unquoted values (§4.8).
-- How saved comments attach to values under `save-comments` (§12.5).
+Only behaviour that is undefined in libucl, because it depends on memory contents, is left
+uncertain:
+
+- Variable-handler results combined with other text in one string (§7.7); the project's choice is
+  listed under *Divergences decided by the project*.
+- The byte saved after a block comment that ends the input, under `save-comments` (§12.5).
 
 ## Known gaps
 
-All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed, and
-`spec-v2` answers the implementer questions in `docs/clean-room/QUESTIONS.md` (#1–#4). Two rules
+All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed. `spec-v2`
+answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, and `spec-v3` answers
+#5–#16. Two rules
 are stated but have no committed case, because their golden files cannot be
 committed:
 
@@ -123,7 +132,7 @@ committed:
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 757 cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 882 cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - The mappings for `cases/review/`, `cases/additions/`, `cases/errors/` and `libucl/basic/` were
@@ -415,10 +424,14 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/review/30_inline_comment` | §2 |
 | `cases/spec/01-structure/array_atoms_with_spaces` | §1 |
 | `cases/spec/01-structure/array_basic` | §1 |
+| `cases/spec/01-structure/array_comment_group_spaced_comments_error` | §1 |
+| `cases/spec/01-structure/array_comment_group_then_newline_error` | §1 |
+| `cases/spec/01-structure/array_comment_group_then_space_close_error` | §1 |
 | `cases/spec/01-structure/array_comment_inside` | §1 |
 | `cases/spec/01-structure/array_containers_need_no_separator` | §1 |
 | `cases/spec/01-structure/array_double_comma` | §1 |
 | `cases/spec/01-structure/array_empty_forms` | §1 |
+| `cases/spec/01-structure/array_first_element_after_comment_group` | §1 |
 | `cases/spec/01-structure/array_key_without_separator` | §1 |
 | `cases/spec/01-structure/array_leading_comma_error` | §1 |
 | `cases/spec/01-structure/array_nested` | §1 |
@@ -443,9 +456,22 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/01-structure/empty_value_skips_blank_lines` | §1 |
 | `cases/spec/01-structure/empty_value_space_at_end_error` | §1 |
 | `cases/spec/01-structure/empty_value_takes_next_line` | §1 |
+| `cases/spec/01-structure/key_block_comment_newline_value_next_line` | §1 |
 | `cases/spec/01-structure/key_equals_eof_error` | §1 |
 | `cases/spec/01-structure/key_equals_semicolon_error` | §1 |
+| `cases/spec/01-structure/key_form_feed_is_line_break` | §1 |
+| `cases/spec/01-structure/key_line_comment_at_end_error` | §1 |
+| `cases/spec/01-structure/key_line_comment_then_separator` | §1 |
+| `cases/spec/01-structure/key_line_comment_value_next_line` | §1 |
 | `cases/spec/01-structure/key_semicolon_error` | §1 |
+| `cases/spec/01-structure/key_space_at_end_error` | §1 |
+| `cases/spec/01-structure/key_space_newline_at_end_is_null` | §1 |
+| `cases/spec/01-structure/key_space_newline_block_comment_newline_error` | §1 |
+| `cases/spec/01-structure/key_space_newline_comment_then_spaces` | §1 |
+| `cases/spec/01-structure/key_space_newline_object` | §1 |
+| `cases/spec/01-structure/key_space_newline_separator_is_value` | §1 |
+| `cases/spec/01-structure/key_space_newline_value_next_line` | §1 |
+| `cases/spec/01-structure/key_vertical_tab_is_line_break` | §1 |
 | `cases/spec/01-structure/key_without_value_error` | §1 |
 | `cases/spec/01-structure/mismatched_close_array_error` | §1 |
 | `cases/spec/01-structure/mismatched_close_object_error` | §1 |
@@ -460,9 +486,19 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/01-structure/object_on_next_line_after_equals` | §1 |
 | `cases/spec/01-structure/object_trailing_separators` | §1 |
 | `cases/spec/01-structure/object_value_needs_no_delimiter` | §1 |
+| `cases/spec/01-structure/quoted_value_then_vertical_tab_error` | §1 |
+| `cases/spec/01-structure/root_bracket_after_block_comment_and_newline_error` | §1 |
+| `cases/spec/01-structure/root_bracket_after_comment_and_blank_line_error` | §1 |
+| `cases/spec/01-structure/root_bracket_after_comment_and_space_error` | §1 |
+| `cases/spec/01-structure/root_bracket_after_leading_whitespace` | §1 |
+| `cases/spec/01-structure/root_bracket_after_line_comment_crlf` | §1 |
+| `cases/spec/01-structure/root_bracket_after_whitespace_and_comment_error` | §1 |
+| `cases/spec/01-structure/root_bracket_between_spaced_comments_error` | §1 |
+| `cases/spec/01-structure/root_bracket_directly_after_comment_group` | §1 |
 | `cases/spec/01-structure/root_leading_comma_error` | §1 |
 | `cases/spec/01-structure/root_leading_semicolon_error` | §1 |
 | `cases/spec/01-structure/root_leading_terminator_after_newline_error` | §1 |
+| `cases/spec/01-structure/root_unbraced_after_comment_and_blank_line` | §1 |
 | `cases/spec/01-structure/sep_colon` | §1 |
 | `cases/spec/01-structure/sep_colon_equals_error` | §1 |
 | `cases/spec/01-structure/sep_double_equals_error` | §1 |
@@ -471,6 +507,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/01-structure/sep_no_spaces` | §1 |
 | `cases/spec/01-structure/sep_none` | §1 |
 | `cases/spec/01-structure/sep_space_before_only` | §1 |
+| `cases/spec/01-structure/separator_vertical_tab_is_line_break` | §1 |
 | `cases/spec/01-structure/term_comma` | §1 |
 | `cases/spec/01-structure/term_crlf` | §1 |
 | `cases/spec/01-structure/term_newline_then_semicolon` | §1 |
@@ -494,13 +531,28 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/02-comments/between_key_and_separator` | §2 |
 | `cases/spec/02-comments/between_separator_and_value` | §2 |
 | `cases/spec/02-comments/block_comment_after_value` | §2 |
+| `cases/spec/02-comments/block_comment_escaped_quote_inside_quotes` | §2 |
+| `cases/spec/02-comments/block_comment_escaped_quote_outside_quotes` | §2 |
 | `cases/spec/02-comments/block_comment_mid_value_error` | §2 |
+| `cases/spec/02-comments/block_comment_open_inside_quotes` | §2 |
+| `cases/spec/02-comments/block_comment_quote_after_backslash_pair_error` | §2 |
+| `cases/spec/02-comments/block_comment_single_quote_not_special` | §2 |
+| `cases/spec/02-comments/block_comment_single_quotes_do_not_protect_error` | §2 |
+| `cases/spec/02-comments/block_comment_unmatched_quote_error` | §2 |
 | `cases/spec/02-comments/carriage_return_terminates` | §2 |
 | `cases/spec/02-comments/form_feed_between_entries` | §2 |
 | `cases/spec/02-comments/hash_at_end_of_input` | §2 |
 | `cases/spec/02-comments/hash_ends_unquoted_value` | §2 |
 | `cases/spec/02-comments/hash_inside_quotes` | §2 |
+| `cases/spec/02-comments/hash_last_byte_after_comment_and_space_error` | §2 |
+| `cases/spec/02-comments/hash_last_byte_after_entry` | §2 |
+| `cases/spec/02-comments/hash_last_byte_after_leading_newline_error` | §2 |
+| `cases/spec/02-comments/hash_last_byte_after_leading_space_error` | §2 |
+| `cases/spec/02-comments/hash_last_byte_at_start` | §2 |
+| `cases/spec/02-comments/hash_last_byte_directly_after_comment` | §2 |
 | `cases/spec/02-comments/hash_line` | §2 |
+| `cases/spec/02-comments/hash_then_newline_after_leading_newline` | §2 |
+| `cases/spec/02-comments/hash_then_space_after_leading_newline` | §2 |
 | `cases/spec/02-comments/hash_to_end_of_line` | §2 |
 | `cases/spec/02-comments/multiline` | §2 |
 | `cases/spec/02-comments/nested` | §2 |
@@ -528,13 +580,22 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/03-keys/quoted_empty_error` | §3 |
 | `cases/spec/03-keys/quoted_escapes` | §3 |
 | `cases/spec/03-keys/quoted_followed_by_quoted_value_error` | §3 |
+| `cases/spec/03-keys/quoted_key_at_end_error` | §3 |
+| `cases/spec/03-keys/quoted_key_comment_adjacent` | §3 |
+| `cases/spec/03-keys/quoted_key_heredoc_adjacent` | §3 |
+| `cases/spec/03-keys/quoted_key_names_adjacent` | §3 |
+| `cases/spec/03-keys/quoted_key_space_at_end_error` | §3 |
+| `cases/spec/03-keys/quoted_key_value_adjacent` | §3 |
 | `cases/spec/03-keys/quoted_newline_before_separator` | §3 |
 | `cases/spec/03-keys/quoted_no_variable_expansion` | §3 |
 | `cases/spec/03-keys/quoted_value_after_bare_key_error` | §3 |
 | `cases/spec/03-keys/section_any_keyword` | §3 |
 | `cases/spec/03-keys/section_array_value` | §3 |
+| `cases/spec/03-keys/section_lookahead_after_block_comment` | §3 |
+| `cases/spec/03-keys/section_lookahead_after_line_comment` | §3 |
 | `cases/spec/03-keys/section_lookahead_brace_in_value_error` | §3 |
 | `cases/spec/03-keys/section_lookahead_brace_later_on_line_error` | §3 |
+| `cases/spec/03-keys/section_lookahead_counts_comment_text_error` | §3 |
 | `cases/spec/03-keys/section_lookahead_stops_at_newline` | §3 |
 | `cases/spec/03-keys/section_lookahead_stops_at_semicolon` | §3 |
 | `cases/spec/03-keys/section_mixed_names` | §3 |
@@ -545,10 +606,21 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/03-keys/section_one_name` | §3 |
 | `cases/spec/03-keys/section_path_brace_inside_quotes` | §3 |
 | `cases/spec/03-keys/section_path_left_open` | §3 |
+| `cases/spec/03-keys/section_path_left_open_closed_by_array` | §3 |
+| `cases/spec/03-keys/section_path_left_open_closed_by_object` | §3 |
+| `cases/spec/03-keys/section_path_left_open_closed_by_section` | §3 |
+| `cases/spec/03-keys/section_path_left_open_extra_close_error` | §3 |
+| `cases/spec/03-keys/section_path_left_open_inner_container` | §3 |
+| `cases/spec/03-keys/section_path_left_open_inside_braces_closed` | §3 |
 | `cases/spec/03-keys/section_path_left_open_inside_braces_error` | §3 |
+| `cases/spec/03-keys/section_path_left_open_nested_paths` | §3 |
+| `cases/spec/03-keys/section_path_left_open_two_names` | §3 |
 | `cases/spec/03-keys/section_path_separator_after_name_error` | §3 |
 | `cases/spec/03-keys/section_path_separator_after_name_object_error` | §3 |
 | `cases/spec/03-keys/section_path_separator_is_ignored` | §3 |
+| `cases/spec/03-keys/section_quoted_first_key` | §3 |
+| `cases/spec/03-keys/section_quoted_name_then_separator` | §3 |
+| `cases/spec/03-keys/section_quoted_name_then_separator_error` | §3 |
 | `cases/spec/03-keys/section_quoted_names` | §3 |
 | `cases/spec/03-keys/section_single_quoted_name_error` | §3 |
 | `cases/spec/03-keys/section_two_names` | §3 |
@@ -562,6 +634,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/04-atoms/backslash_escapes` | §4 |
 | `cases/spec/04-atoms/backslash_invalid_unicode` | §4 |
 | `cases/spec/04-atoms/backslash_invalid_unicode_prefixes` | §4 |
+| `cases/spec/04-atoms/backslash_short_unicode_at_end` | §4 |
 | `cases/spec/04-atoms/bool_false_forms` | §4 |
 | `cases/spec/04-atoms/bool_lookalikes_are_strings` | §4 |
 | `cases/spec/04-atoms/bool_true_forms` | §4 |
@@ -580,6 +653,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/04-atoms/url` | §4 |
 | `cases/spec/04-atoms/value_ends_at_terminators` | §4 |
 | `cases/spec/04-atoms/value_with_dollar` | §4 |
+| `cases/spec/05-numbers/big_integer_with_fraction_is_float` | §5 |
 | `cases/spec/05-numbers/binary_multipliers` | §5 |
 | `cases/spec/05-numbers/decimal_multipliers` | §5 |
 | `cases/spec/05-numbers/exponent_forms` | §5 |
@@ -591,6 +665,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/05-numbers/float_underflow_error` | §5 |
 | `cases/spec/05-numbers/floats` | §5 |
 | `cases/spec/05-numbers/hex` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_or_exponent` | §5 |
 | `cases/spec/05-numbers/hex_digits_before_x_ignored` | §5 |
 | `cases/spec/05-numbers/hex_malformed_become_strings` | §5 |
 | `cases/spec/05-numbers/hex_more_malformed` | §5 |
@@ -601,6 +676,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/05-numbers/int_underflow_error` | §5 |
 | `cases/spec/05-numbers/integers` | §5 |
 | `cases/spec/05-numbers/malformed_become_strings` | §5 |
+| `cases/spec/05-numbers/malformed_before_range_is_string` | §5 |
 | `cases/spec/05-numbers/min_normal` | §5 |
 | `cases/spec/05-numbers/multiplier_overflow_wraps` | §5 |
 | `cases/spec/05-numbers/negative_multipliers` | §5 |
@@ -612,6 +688,12 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/05-numbers/number_then_hash` | §5 |
 | `cases/spec/05-numbers/number_then_text_is_string` | §5 |
 | `cases/spec/05-numbers/plain_number_trailing_whitespace` | §5 |
+| `cases/spec/05-numbers/range_error_before_fraction` | §5 |
+| `cases/spec/05-numbers/range_error_before_letters` | §5 |
+| `cases/spec/05-numbers/range_error_before_suffix_text` | §5 |
+| `cases/spec/05-numbers/range_error_before_trailing_space_text` | §5 |
+| `cases/spec/05-numbers/range_error_hex_before_trailing_x` | §5 |
+| `cases/spec/05-numbers/range_error_underflow_before_suffix` | §5 |
 | `cases/spec/05-numbers/subnormal_error` | §5 |
 | `cases/spec/05-numbers/suffix_before_closing_brackets` | §5 |
 | `cases/spec/05-numbers/suffix_before_separator` | §5 |
@@ -681,6 +763,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/06-strings/sq_unterminated_error` | §6 |
 | `cases/spec/06-strings/triple_quote_error` | §6 |
 | `cases/spec/07-variables/backslash_dollar` | §7 |
+| `cases/spec/07-variables/backslash_dollar_unquoted_mixed` | §7 |
 | `cases/spec/07-variables/braced` | §7 |
 | `cases/spec/07-variables/dollar_escape_in_unquoted` | §7 |
 | `cases/spec/07-variables/dollar_escape_only_when_expanding` | §7 |
@@ -841,13 +924,22 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/09-macros/load_unknown_target_inserts_nothing` | §9 |
 | `cases/spec/09-macros/load_without_key_error` | §9 |
 | `cases/spec/09-macros/macro_args_no_variables` | §9 |
+| `cases/spec/09-macros/macro_args_then_end_error` | §9 |
+| `cases/spec/09-macros/macro_dot_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_comment_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_whitespace_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_name_at_end_ignored` | §9 |
 | `cases/spec/09-macros/macro_name_case_sensitive_error` | §9 |
+| `cases/spec/09-macros/macro_name_with_punctuation_at_end_ignored` | §9 |
 | `cases/spec/09-macros/macro_not_recognised_as_value` | §9 |
 | `cases/spec/09-macros/macro_not_recognised_in_arrays` | §9 |
 | `cases/spec/09-macros/macro_quoted_value_not_unescaped` | §9 |
 | `cases/spec/09-macros/macro_space_after_dot_error` | §9 |
 | `cases/spec/09-macros/macro_unbalanced_args_error` | §9 |
+| `cases/spec/09-macros/macro_unknown_name_then_newline_error` | §9 |
 | `cases/spec/09-macros/macro_value_variables` | §9 |
+| `cases/spec/09-macros/macro_word_after_section_name_error` | §9, §3 |
+| `cases/spec/09-macros/macro_word_after_section_name_ignored` | §9, §3 |
 | `cases/spec/09-macros/priority_args_only` | §9 |
 | `cases/spec/09-macros/priority_forms` | §9 |
 | `cases/spec/09-macros/priority_invalid_error` | §9 |
@@ -888,10 +980,21 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/11-errors/lone_bracket_error` | §11 |
 | `cases/spec/11-errors/object_depth_limit_error` | §11 |
 | `cases/spec/11-errors/unexpected_close_top_error` | §11 |
+| `cases/spec/12-flags/comments_after_braced_root_ignored` | §12 |
+| `cases/spec/12-flags/comments_attach_to_next_value` | §12 |
+| `cases/spec/12-flags/comments_block_comment_saved_with_next_byte` | §12 |
+| `cases/spec/12-flags/comments_line_comment_keeps_cr` | §12 |
+| `cases/spec/12-flags/comments_only_attach_to_root` | §12 |
+| `cases/spec/12-flags/comments_repeated_key` | §12 |
+| `cases/spec/12-flags/comments_section_path_close` | §12 |
+| `cases/spec/12-flags/comments_trailing_at_container_close` | §12 |
+| `cases/spec/12-flags/comments_trailing_at_end` | §12 |
+| `cases/spec/12-flags/disable_macro_name_at_end_error` | §12, §9 |
 | `cases/spec/12-flags/disable_macro_no_variables` | §12 |
 | `cases/spec/12-flags/disable_macro_priority_error` | §12 |
 | `cases/spec/12-flags/disable_macro_rejects_macros` | §12 |
 | `cases/spec/12-flags/key_lowercase` | §12 |
+| `cases/spec/12-flags/key_lowercase_before_escapes` | §12, §3 |
 | `cases/spec/12-flags/key_lowercase_merges_case` | §12 |
 | `cases/spec/12-flags/key_lowercase_non_ascii` | §12 |
 | `cases/spec/12-flags/no_filevars` | §12 |

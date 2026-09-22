@@ -1,0 +1,10 @@
+a = x\$ABI
+b = \$A\$ABI
+c = $ABI\$ABI
+d = \$ABI$ABI
+e = \$ABIc$
+f = ${\$ABI
+g = x$\$ABI
+h = \\$ABI
+i = \\\$ABI
+j = \$ABI $

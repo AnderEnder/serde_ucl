@@ -19,6 +19,16 @@ Cases: `tests/conformance/cases/spec/02-comments/`.
 (`hash_to_end_of_line`, `hash_at_end_of_input`, `hash_line`, `cases/review/30_inline_comment`,
 `libucl/basic/6`).
 
+**Quirk: a `#` that is the last byte of the input.** Where the first key of the root should
+start, a `#` that is the very last byte of the input is an error when whitespace comes directly
+before it: `⏎#`, ` #`, `# c⏎ #` are **errors** (`hash_last_byte_after_leading_newline_error`,
+`hash_last_byte_after_leading_space_error`, `hash_last_byte_after_comment_and_space_error`). It is
+an ordinary comment when it is the whole input, when it directly follows a comment, and after an
+entry: `#` and `# c⏎#` → `{}`, `a = 1⏎ #` → `{ a: int 1 }` (`hash_last_byte_at_start`,
+`hash_last_byte_directly_after_comment`, `hash_last_byte_after_entry`). Any byte after it, even a
+space, makes it an ordinary comment: `⏎#⏎` and `⏎# ` → `{}`
+(`hash_then_newline_after_leading_newline`, `hash_then_space_after_leading_newline`).
+
 A `#` ends an unquoted value immediately, even with no space before it: `a = x#y` →
 `{ a: "x" }`; `b = 1#2` → `{ b: int 1 }` (`hash_ends_unquoted_value`,
 `cases/additions/a44_hash_in_value`). Inside quoted strings `#` is an ordinary character
@@ -29,8 +39,21 @@ A `#` ends an unquoted value immediately, even with no space before it: `a = x#y
 `/*` starts a comment that ends at the matching `*/` (`multiline`).
 
 - Block comments nest: every `/*` inside needs its own `*/` (`nested`, `nested_deep`).
-- A `*/` between double quotes inside a block comment does not end it: `/* "*/" still comment */`
-  is one comment (`quoted_close_inside_comment`).
+- Double quotes inside a block comment mark quoted parts. A `"` that does not directly follow a
+  `\` begins or ends one. Inside a quoted part, `*/` and `/*` have no effect:
+  `/* "*/" still comment */` is one comment (`quoted_close_inside_comment`),
+  `/* "/*" */ a = 1` → `{ a: int 1 }` (`block_comment_open_inside_quotes`), and
+  `/* "a\"*/" */ a = 1` → `{ a: int 1 }` (`block_comment_escaped_quote_inside_quotes`).
+- **Quirk.** A `"` directly after a `\` never begins or ends a quoted part, even when that `\`
+  itself follows another `\`: `/* \" */ a = 1` → `{ a: int 1 }`
+  (`block_comment_escaped_quote_outside_quotes`), but `/* "a\\" */ a = 1` is an **error**: its
+  last `"` does not end the quoted part, so the comment is never closed
+  (`block_comment_quote_after_backslash_pair_error`).
+- A quoted part that is still open when the input ends leaves the comment unterminated, which is
+  an error: `/* a " b */ c = 1` (`block_comment_unmatched_quote_error`).
+- Single quotes have no effect: `/* ' */ a = 1` → `{ a: int 1 }`, and `/* '*/' */ a = 1` is an
+  **error**, because the comment ends at the first `*/` (`block_comment_single_quote_not_special`,
+  `block_comment_single_quotes_do_not_protect_error`).
 - A block comment that is not closed is an error (`unterminated_error`, `unterminated_nested_error`,
   `cases/errors/e10_unterminated_comment`).
 - `libucl/basic/comments` combines these forms.

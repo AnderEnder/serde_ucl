@@ -18,6 +18,10 @@
  *             (UCL_OBJECT_MULTIVALUE); an explicit array is a single node of
  *             type "array".
  *   Any node whose libucl priority is non-zero carries "pri":<n>.
+ *   With -c, a node that has saved comments attached also carries
+ *   "c":["<comment>",...] (comments libucl's config output writes before the
+ *   value) or "ca":[...] (comments it writes after the value), in order, each
+ *   exactly as it appears in the input.
  *
  * A parse failure prints {"error":true}. The message is deliberately left out:
  * it contains absolute paths, and the conformance runner compares only whether
@@ -47,6 +51,7 @@
  *   -p N  add the input chunk with priority N (default 0)
  *   -s STRATEGY  add the input chunk with duplicate strategy STRATEGY:
  *       append (default), merge, rewrite or error
+ *   -c  save comments (implies -C) and add them to the typed dump as "c"/"ca"
  *   -e  instead of the typed dump, print libucl's own output for the parsed
  *       object in FORMAT: config, json, json-compact or yaml (exact bytes, as
  *       ucl_object_emit returns them). A parse failure prints "error\n".
@@ -173,6 +178,37 @@ put_bytes_field(const char *name, const char *hexname, const unsigned char *s, s
 
 static void dump_node(const ucl_object_t *obj);
 
+/* Comments saved by the parser, when -c is given. */
+static const ucl_object_t *g_comments = NULL;
+
+static void
+dump_comments(const ucl_object_t *obj)
+{
+	const ucl_object_t *cm, *cur;
+	bool first = true;
+
+	if (g_comments == NULL) {
+		return;
+	}
+	cm = ucl_comments_find(g_comments, obj);
+	if (cm == NULL) {
+		return;
+	}
+	/* An inherited-flagged comment list is written after the value */
+	printf(",\"%s\":[", (cm->flags & UCL_OBJECT_INHERITED) ? "ca" : "c");
+	for (cur = cm; cur != NULL; cur = cur->next) {
+		size_t len = 0;
+		const char *s = ucl_object_tolstring(cur, &len);
+
+		if (!first) {
+			putchar(',');
+		}
+		first = false;
+		put_json_string((const unsigned char *) s, len);
+	}
+	putchar(']');
+}
+
 static void
 dump_object(const ucl_object_t *obj)
 {
@@ -270,6 +306,7 @@ dump_node(const ucl_object_t *obj)
 	if (pri != 0) {
 		printf(",\"pri\":%u", pri);
 	}
+	dump_comments(obj);
 	putchar('}');
 }
 
@@ -333,6 +370,7 @@ main(int argc, char **argv)
 	const char *vars[64];
 	int nvars = 0;
 	bool handler = false;
+	bool dump_comm = false;
 	unsigned priority = 0;
 	enum ucl_duplicate_strategy strat = UCL_DUPLICATE_APPEND;
 	struct ucl_parser *parser;
@@ -340,7 +378,7 @@ main(int argc, char **argv)
 	size_t len = 0;
 	ucl_object_t *top;
 
-	while ((opt = getopt(argc, argv, "lzTICMFSe:v:Hp:s:")) != -1) {
+	while ((opt = getopt(argc, argv, "lzTICMFSce:v:Hp:s:")) != -1) {
 		switch (opt) {
 		case 'l':
 			flags |= UCL_PARSER_KEY_LOWERCASE;
@@ -359,6 +397,10 @@ main(int argc, char **argv)
 			break;
 		case 'M':
 			flags |= UCL_PARSER_DISABLE_MACRO;
+			break;
+		case 'c':
+			flags |= UCL_PARSER_SAVE_COMMENTS;
+			dump_comm = true;
 			break;
 		case 'F':
 			flags |= UCL_PARSER_NO_FILEVARS;
@@ -415,12 +457,12 @@ main(int argc, char **argv)
 			}
 			break;
 		default:
-			fprintf(stderr, "usage: %s [-lzTICMFSH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
+			fprintf(stderr, "usage: %s [-lzTICMFScH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
 			return 2;
 		}
 	}
 	if (optind != argc - 1) {
-		fprintf(stderr, "usage: %s [-lzTICMFSH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
+		fprintf(stderr, "usage: %s [-lzTICMFScH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
 		return 2;
 	}
 
@@ -481,6 +523,9 @@ main(int argc, char **argv)
 			fputs("{\"error\":true}\n", stdout);
 		}
 		else {
+			if (dump_comm) {
+				g_comments = ucl_parser_get_comments(parser);
+			}
 			dump_node(top);
 			putchar('\n');
 			ucl_object_unref(top);

@@ -36,6 +36,12 @@ Not numbers, so strings: `.5`, `-.5`, `+1`, `--1`, `-`, `-a`, `1_000`, `1e`, `1e
 - **Quirk.** The `x` may follow any run of decimal digits, and those digits are ignored:
   `12x34` → `int 52` (0x34); `9x1f` → `int 31`. A leading `-` negates the result: `-12x34` →
   `int -52`. `x10` and `1x` are strings (`hex_digits_before_x_ignored`, `hex_more_malformed`).
+- **Quirk.** After a number with a `.` or an exponent, the hex digits after an `x` are taken as a
+  decimal number: `1.5x10` → `int 0`, `1e5x10` → `int 0`, `1.x5` → `int 0`,
+  `1.5x1e5` → `int 0`. The value is `int 0`, except with a binary multiplier (§5.4), which gives
+  that decimal number, truncated, times the multiplier: `1.5x10kb` → `int 10240`. When the hex
+  digits do not form a decimal number followed by what §5.5 allows, the value is a string:
+  `1.5x1f`, `1e5x`, `1.5x10.5` (`hex_after_fraction_or_exponent`).
 - There is no binary or octal syntax: `0b1010` and `0o755` are strings (`no_binary_or_octal`,
   `cases/review/12_0b`, `cases/review/13_0o`).
 
@@ -145,3 +151,20 @@ Numbers are recognised only as whole unquoted values. A key such as `123` is the
 These inputs make the whole document fail: an int or hex value outside 64-bit signed range, and a
 float that overflows or falls below the smallest normal double (§5.3). Every other malformed
 number is a string.
+
+**Range errors and the text after a number.** The *number text* is an optional `-` followed either
+by decimal digits with at most one `.` and at most one exponent (`e` or `E`, an optional sign,
+digits), or by the hex form of §5.2. When the number text is within the length limit of §5.3 and
+its value is out of range, the document fails whatever follows the number text: a suffix, spaces,
+or other text. The rules of §5.5 that would otherwise make the value a string do not apply:
+`99999999999999999999 x`, `1e999.5`, `1e999b`, `99999999999999999999k5`, `1e-400mins` and
+`0x8000000000000000x` are **errors** (`range_error_before_trailing_space_text`,
+`range_error_before_fraction`, `range_error_before_letters`, `range_error_before_suffix_text`,
+`range_error_underflow_before_suffix`, `range_error_hex_before_trailing_x`). The value is a
+string, with no range error, when the number text is malformed: when it goes on with a second `.`,
+a second exponent, an `e` or `E` not followed by a digit or sign, or an `x` or `X` after decimal
+digits not followed by a hex digit: `1e999x`, `1e999e`, `99999999999999999999X`,
+`99999999999999999999e` and `1e999..` are strings (`malformed_before_range_is_string`). A large
+integer with a fraction or an exponent is a float, not an error: `99999999999999999999.5` →
+`float 1e+20`, `99999999999999999999E5` → `float 1.0000000000000001e+25`
+(`big_integer_with_fraction_is_float`).
