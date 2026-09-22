@@ -1,0 +1,5 @@
+b = 1
+b = 2
+.include(duplicate="merge") "files/b_5.inc"
+.include(duplicate="rewrite") "files/b_7.inc"
+b = 6

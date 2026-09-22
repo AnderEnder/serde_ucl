@@ -1,0 +1,7 @@
+a = 1
+.priority 3
+a = 2
+.priority 1
+a = 3
+.priority 3
+a = 4

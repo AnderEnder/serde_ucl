@@ -75,7 +75,11 @@ These settings are part of every expected result:
 - Parser flags are off unless `.flags` names them: `key-lowercase`, `zerocopy`, `no-time`,
   `no-implicit-arrays`, `save-comments`, `disable-macro`, `no-filevars` (§12).
 
-Only whether a case fails is compared, never the wording of the error.
+Only whether a case fails is compared, never the wording of the error. **Error message wording is
+not part of this specification** (§11.1).
+
+The dumps also record two priorities that have no observable effect, that of the root object and
+those of array elements (§8.7). The conformance runner ignores them.
 
 ### Terms
 
@@ -105,10 +109,11 @@ behaviour, and each place says so:
 - `\u` escapes with fewer than four characters left, inside unquoted values (§4.8).
 - How saved comments attach to values under `save-comments` (§12.5).
 
-## Known gaps (fix in spec-v2)
+## Known gaps
 
-All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed in this
-version. Two rules are stated but have no committed case, because their golden files cannot be
+All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed, and
+`spec-v2` answers the implementer questions in `docs/clean-room/QUESTIONS.md` (#1–#4). Two rules
+are stated but have no committed case, because their golden files cannot be
 committed:
 
 - B-10: a `var:` entry for `FILENAME` or `CURDIR` has no effect when the document comes from a
@@ -705,8 +710,37 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/07-variables/upstream_mix` | §7 |
 | `cases/spec/08-duplicates/chunk_priority` | §8 |
 | `cases/spec/08-duplicates/explicit_array_not_flattened` | §8 |
+| `cases/spec/08-duplicates/include_merge_scalar_quirk_default_mode` | §8 |
+| `cases/spec/08-duplicates/inherit_kept_after_merge_object` | §8 |
+| `cases/spec/08-duplicates/inherit_kept_after_merge_scalar` | §8 |
+| `cases/spec/08-duplicates/inherit_merge_equal_adds` | §8 |
+| `cases/spec/08-duplicates/inherit_merge_higher_replaces` | §8 |
+| `cases/spec/08-duplicates/inherit_merge_lower_dropped` | §8 |
+| `cases/spec/08-duplicates/inherit_merge_objects` | §8 |
+| `cases/spec/08-duplicates/inherit_strategy_error` | §8 |
+| `cases/spec/08-duplicates/inherit_strategy_rewrite` | §8 |
 | `cases/spec/08-duplicates/keeps_first_position` | §8 |
+| `cases/spec/08-duplicates/merge_include_first_array_only` | §8 |
+| `cases/spec/08-duplicates/merge_include_first_value_only` | §8 |
+| `cases/spec/08-duplicates/merge_include_first_value_scalar` | §8 |
+| `cases/spec/08-duplicates/merge_nested_priority_higher` | §8 |
+| `cases/spec/08-duplicates/merge_nested_priority_lower` | §8 |
 | `cases/spec/08-duplicates/mixed_types` | §8 |
+| `cases/spec/08-duplicates/nia_chunk_priority` | §8 |
+| `cases/spec/08-duplicates/nia_collection_has_priority_0` | §8 |
+| `cases/spec/08-duplicates/nia_collection_replaced_higher_value` | §8 |
+| `cases/spec/08-duplicates/nia_collection_replaced_lower_value` | §8 |
+| `cases/spec/08-duplicates/nia_include_merge_array_then_repeat` | §8 |
+| `cases/spec/08-duplicates/nia_include_merge_scalar` | §8 |
+| `cases/spec/08-duplicates/nia_include_merge_scalar_then_higher` | §8 |
+| `cases/spec/08-duplicates/nia_include_merge_scalar_then_object_error` | §8 |
+| `cases/spec/08-duplicates/nia_include_merge_scalar_then_repeat_error` | §8 |
+| `cases/spec/08-duplicates/nia_include_merge_scalar_then_rewrite` | §8 |
+| `cases/spec/08-duplicates/nia_inherited_replaced` | §8 |
+| `cases/spec/08-duplicates/nia_merge_array_extends_collection` | §8 |
+| `cases/spec/08-duplicates/nia_merge_quirk_then_repeat_error` | §8 |
+| `cases/spec/08-duplicates/nia_merge_scalar_replaces_collection` | §8 |
+| `cases/spec/08-duplicates/nia_priorities_compared_first` | §8 |
 | `cases/spec/08-duplicates/no_implicit_arrays_objects` | §8 |
 | `cases/spec/08-duplicates/no_implicit_arrays_scalars` | §8 |
 | `cases/spec/08-duplicates/no_implicit_arrays_with_arrays` | §8 |
@@ -729,6 +763,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/08-duplicates/strategy_merge_array_then_scalar` | §8 |
 | `cases/spec/08-duplicates/strategy_merge_arrays` | §8 |
 | `cases/spec/08-duplicates/strategy_merge_arrays_ignore_priority` | §8 |
+| `cases/spec/08-duplicates/strategy_merge_first_scalar_of_several` | §8 |
 | `cases/spec/08-duplicates/strategy_merge_object_then_array_error` | §8 |
 | `cases/spec/08-duplicates/strategy_merge_object_then_scalar` | §8 |
 | `cases/spec/08-duplicates/strategy_merge_objects` | §8 |
@@ -840,6 +875,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 757 cases
 | `cases/spec/10-output/nested_implicit_arrays` | §10 |
 | `cases/spec/10-output/objects` | §10 |
 | `cases/spec/10-output/priorities_not_emitted` | §10 |
+| `cases/spec/10-output/priority_not_emitted` | §10 |
 | `cases/spec/10-output/scalars` | §10 |
 | `cases/spec/10-output/single_quoted_kept` | §10 |
 | `cases/spec/10-output/string_control_chars` | §10 |

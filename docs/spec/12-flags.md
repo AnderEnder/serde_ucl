@@ -33,6 +33,8 @@ The multipliers `k`, `kb` and so on are unaffected (`no_time`).
 ## 12.4 `no-implicit-arrays`
 
 Repeated keys collect their values into an explicit array instead of a multi-value entry (§8.5).
+§8.5 also covers how priorities, `merge` and inherited values interact with the collected array,
+including two quirks.
 
 ## 12.5 `save-comments`
 

@@ -122,6 +122,41 @@ fn dump_node(value: &UclValue, priority: u8) -> J {
     node
 }
 
+/// Removes the priorities the spec says are not observable (`docs/spec/08-duplicates.md` §8.7):
+/// that of the root object and those of array elements. libucl's dumps record them, but they never
+/// affect a parse result or any output format.
+fn strip_unobservable_priorities(node: &mut J, is_root: bool) {
+    if is_root {
+        if let Some(map) = node.as_object_mut() {
+            map.remove("pri");
+        }
+    }
+    match node.get("t").and_then(J::as_str) {
+        Some("array") => {
+            if let Some(items) = node.get_mut("v").and_then(J::as_array_mut) {
+                for item in items {
+                    if let Some(map) = item.as_object_mut() {
+                        map.remove("pri");
+                    }
+                    strip_unobservable_priorities(item, false);
+                }
+            }
+        }
+        Some("object") => {
+            if let Some(entries) = node.get_mut("entries").and_then(J::as_array_mut) {
+                for entry in entries {
+                    if let Some(values) = entry.get_mut("v").and_then(J::as_array_mut) {
+                        for value in values {
+                            strip_unobservable_priorities(value, false);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn parse_with_crate(case: &Case) -> Result<Result<J, String>, &'static str> {
     let bytes = fs::read(&case.input).unwrap();
     let Ok(text) = std::str::from_utf8(&bytes) else {
@@ -238,7 +273,8 @@ fn evaluate(case: &Case) -> Outcome {
             };
         }
     };
-    let golden: J = serde_json::from_str(&golden_text).expect("golden files are valid JSON");
+    let mut golden: J = serde_json::from_str(&golden_text).expect("golden files are valid JSON");
+    strip_unobservable_priorities(&mut golden, true);
     let golden_is_error = golden.get("error").is_some();
 
     let actual = match parse_with_crate(case) {

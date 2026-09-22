@@ -14,8 +14,8 @@ None of them is written by hand.
 - `cases/additions/` holds the 53 cases behind PLAN.md §5.
 - `cases/errors/` holds inputs libucl rejects.
 - `cases/spec/NN-topic/` holds the cases cited by the behaviour spec in `docs/spec/`, one directory
-  per spec section. `cases/spec/09-macros/files/` holds files that those cases include or load;
-  they are not cases themselves. Cases in `cases/spec/10-output/` also have libucl's own output
+  per spec section. `cases/spec/09-macros/files/` and `cases/spec/08-duplicates/files/` hold files
+  that those cases include or load (`*.inc`); they are not cases themselves. Cases in `cases/spec/10-output/` also have libucl's own output
   in every text format: `<case>.config.golden`, `<case>.json.golden`, `<case>.json-compact.golden`
   and `<case>.yaml.golden` (exact bytes of `ucl_object_emit` for the parsed value).
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results

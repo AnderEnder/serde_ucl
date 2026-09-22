@@ -1,0 +1,2 @@
+d { a { x = 1 } }
+e { .inherit "d"; .include(duplicate="merge") "files/a_5.inc"; a = 7 }

@@ -140,3 +140,18 @@
     collection arrays of QUESTIONS.md #3) cannot be represented yet.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-22 — Role: spec team. Item: C0, release `spec-v2` (tag on `17b0b85`). Answers implementer
+  questions #1–#4 from C1 (`docs/clean-room/QUESTIONS.md`). Inputs consulted: libucl source at the
+  pinned commit (duplicate-key handling), black-box oracle runs, the conformance corpus, and
+  `spec-v1`. Changes: §8.3 (the inherited-value rule applies under `append` only; behaviour under
+  `merge`, `rewrite`, `error`; values stay inherited after a merge), §8.4 (merge uses only the
+  first value of an entry; nested entries are compared by priority), §8.5 (the collected array has
+  priority 0, a quirk; the error after a merge replaces a collected array with a scalar, a quirk
+  matched per D4), new §8.7 (root and array-element priorities have no observable effect), §11.1
+  and README (error message wording is not specified), §12.4 (pointer to §8.5). 31 new cases
+  (30 in `cases/spec/08-duplicates/`, 1 in `cases/spec/10-output/`) with 8 include files; all 31 fail
+  on the current parser and are in `xfail.txt` (macro or flags). The conformance runner now ignores
+  the root object's priority and array elements' priorities, as §8.7 states. Commits: `a7344ce`,
+  `4d8e863`, `17b0b85`. The spec contains behaviour only: no libucl code, internal names, or
+  procedures.

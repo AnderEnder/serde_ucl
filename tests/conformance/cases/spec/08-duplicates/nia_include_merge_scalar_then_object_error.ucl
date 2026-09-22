@@ -1,0 +1,4 @@
+b = 1
+b = 2
+.include(duplicate="merge") "files/b_5.inc"
+b { x = 6 }

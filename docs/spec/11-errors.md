@@ -10,6 +10,11 @@ are not errors: there, the part parsed so far is the result.) The conformance su
 whether a document fails, not the message or position. The implementation should still report a
 line and column.
 
+**The wording of error messages is not part of this specification.** Implementations write their
+own messages. What is specified is whether a document is accepted or rejected, and, only where a
+section says so explicitly, the kind of error and its position. No section currently fixes an
+error kind or an exact position, so an error's kind and position are the implementation's choice.
+
 Error conditions, by section:
 
 | Condition | Section | Examples |

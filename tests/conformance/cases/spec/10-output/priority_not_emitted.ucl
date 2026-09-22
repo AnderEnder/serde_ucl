@@ -1,0 +1,4 @@
+.priority 3
+a = [1, {x = 1}]
+.priority 1
+b = [2]

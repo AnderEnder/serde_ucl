@@ -1,0 +1,4 @@
+b = 1
+b = 2
+.include(duplicate="merge") "files/b_arr3.inc"
+b = 4
