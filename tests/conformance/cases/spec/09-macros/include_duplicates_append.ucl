@@ -1,0 +1,3 @@
+x = 0
+.include "files/a.inc"
+x = 9

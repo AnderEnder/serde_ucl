@@ -1,0 +1,2 @@
+.load(key="t"; multiline=true) "../09-macros/files/text.txt"
+.load(key="u") "../09-macros/files/text.txt"

@@ -29,13 +29,27 @@
  *   - variable ABI is registered as "unknown";
  *   - file variables (FILENAME, CURDIR) are set from the input path with
  *     realpath expansion, unless -F is given;
- *   - the input is added as one chunk, priority 0, UCL_DUPLICATE_APPEND.
+ *   - the input is added as one chunk, priority 0, UCL_DUPLICATE_APPEND
+ *     (changeable with -p and -s).
  *
- * Usage: ucl-dump [-l] [-z] [-T] [-I] [-C] [-M] [-F] <file>
+ * Usage: ucl-dump [-l] [-z] [-T] [-I] [-C] [-M] [-F] [-e FORMAT] <file>
  *   -l  UCL_PARSER_KEY_LOWERCASE      -z  UCL_PARSER_ZEROCOPY
  *   -T  UCL_PARSER_NO_TIME            -I  UCL_PARSER_NO_IMPLICIT_ARRAYS
  *   -C  UCL_PARSER_SAVE_COMMENTS      -M  UCL_PARSER_DISABLE_MACRO
  *   -F  UCL_PARSER_NO_FILEVARS (and do not set file variables)
+ *   -S  do not set the file variables from the input path, as for a document
+ *       given as a string (libucl then defines FILENAME as "undef" and
+ *       CURDIR as the working directory, unless -F)
+ *   -v NAME=VALUE  register an extra variable (after ABI, before the file
+ *       variables); may be repeated, registration order is kept
+ *   -H  install a variable handler that resolves any name starting with "H_"
+ *       to the text "[handled]" and refuses every other name
+ *   -p N  add the input chunk with priority N (default 0)
+ *   -s STRATEGY  add the input chunk with duplicate strategy STRATEGY:
+ *       append (default), merge, rewrite or error
+ *   -e  instead of the typed dump, print libucl's own output for the parsed
+ *       object in FORMAT: config, json, json-compact or yaml (exact bytes, as
+ *       ucl_object_emit returns them). A parse failure prints "error\n".
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -259,6 +273,22 @@ dump_node(const ucl_object_t *obj)
 	putchar('}');
 }
 
+static bool
+test_var_handler(const unsigned char *data, size_t len, unsigned char **replace,
+				 size_t *replace_len, bool *need_free, void *ud)
+{
+	static const char text[] = "[handled]";
+
+	(void) ud;
+	if (len >= 2 && data[0] == 'H' && data[1] == '_') {
+		*replace = (unsigned char *) text;
+		*replace_len = sizeof(text) - 1;
+		*need_free = false;
+		return true;
+	}
+	return false;
+}
+
 static unsigned char *
 read_file(const char *path, size_t *out_len)
 {
@@ -299,12 +329,18 @@ main(int argc, char **argv)
 {
 	int opt, flags = UCL_PARSER_DEFAULT;
 	bool filevars = true;
+	int emit = -1;
+	const char *vars[64];
+	int nvars = 0;
+	bool handler = false;
+	unsigned priority = 0;
+	enum ucl_duplicate_strategy strat = UCL_DUPLICATE_APPEND;
 	struct ucl_parser *parser;
 	unsigned char *buf;
 	size_t len = 0;
 	ucl_object_t *top;
 
-	while ((opt = getopt(argc, argv, "lzTICMF")) != -1) {
+	while ((opt = getopt(argc, argv, "lzTICMFSe:v:Hp:s:")) != -1) {
 		switch (opt) {
 		case 'l':
 			flags |= UCL_PARSER_KEY_LOWERCASE;
@@ -328,13 +364,63 @@ main(int argc, char **argv)
 			flags |= UCL_PARSER_NO_FILEVARS;
 			filevars = false;
 			break;
+		case 'v':
+			if (nvars < 64 && strchr(optarg, '=') != NULL) {
+				vars[nvars++] = optarg;
+			}
+			break;
+		case 'H':
+			handler = true;
+			break;
+		case 'S':
+			filevars = false;
+			break;
+		case 'p':
+			priority = (unsigned) strtoul(optarg, NULL, 10);
+			break;
+		case 's':
+			if (strcmp(optarg, "append") == 0) {
+				strat = UCL_DUPLICATE_APPEND;
+			}
+			else if (strcmp(optarg, "merge") == 0) {
+				strat = UCL_DUPLICATE_MERGE;
+			}
+			else if (strcmp(optarg, "rewrite") == 0) {
+				strat = UCL_DUPLICATE_REWRITE;
+			}
+			else if (strcmp(optarg, "error") == 0) {
+				strat = UCL_DUPLICATE_ERROR;
+			}
+			else {
+				fprintf(stderr, "unknown strategy '%s'\n", optarg);
+				return 2;
+			}
+			break;
+		case 'e':
+			if (strcmp(optarg, "config") == 0) {
+				emit = UCL_EMIT_CONFIG;
+			}
+			else if (strcmp(optarg, "json") == 0) {
+				emit = UCL_EMIT_JSON;
+			}
+			else if (strcmp(optarg, "json-compact") == 0) {
+				emit = UCL_EMIT_JSON_COMPACT;
+			}
+			else if (strcmp(optarg, "yaml") == 0) {
+				emit = UCL_EMIT_YAML;
+			}
+			else {
+				fprintf(stderr, "unknown format '%s'\n", optarg);
+				return 2;
+			}
+			break;
 		default:
-			fprintf(stderr, "usage: %s [-lzTICMF] <file>\n", argv[0]);
+			fprintf(stderr, "usage: %s [-lzTICMFSH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
 			return 2;
 		}
 	}
 	if (optind != argc - 1) {
-		fprintf(stderr, "usage: %s [-lzTICMF] <file>\n", argv[0]);
+		fprintf(stderr, "usage: %s [-lzTICMFSH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
 		return 2;
 	}
 
@@ -350,15 +436,44 @@ main(int argc, char **argv)
 		return 2;
 	}
 	ucl_parser_register_variable(parser, "ABI", "unknown");
+	for (int i = 0; i < nvars; i++) {
+		char name[256];
+		const char *eq = strchr(vars[i], '=');
+		size_t nlen = (size_t) (eq - vars[i]);
+
+		if (nlen >= sizeof(name)) {
+			nlen = sizeof(name) - 1;
+		}
+		memcpy(name, vars[i], nlen);
+		name[nlen] = '\0';
+		ucl_parser_register_variable(parser, name, eq + 1);
+	}
+	if (handler) {
+		ucl_parser_set_variables_handler(parser, test_var_handler, NULL);
+	}
 	if (filevars) {
 		ucl_parser_set_filevars(parser, argv[optind], true);
 	}
 
-	ucl_parser_add_chunk_full(parser, buf, len, 0, UCL_DUPLICATE_APPEND, UCL_PARSE_UCL);
+	ucl_parser_add_chunk_full(parser, buf, len, priority, strat, UCL_PARSE_UCL);
 
 	if (ucl_parser_get_error(parser) != NULL) {
 		fprintf(stderr, "libucl: %s\n", ucl_parser_get_error(parser));
-		fputs("{\"error\":true}\n", stdout);
+		fputs(emit >= 0 ? "error\n" : "{\"error\":true}\n", stdout);
+	}
+	else if (emit >= 0) {
+		top = ucl_parser_get_object(parser);
+		if (top == NULL) {
+			fputs("error\n", stdout);
+		}
+		else {
+			unsigned char *out = ucl_object_emit(top, (enum ucl_emitter) emit);
+			if (out != NULL) {
+				fputs((const char *) out, stdout);
+				free(out);
+			}
+			ucl_object_unref(top);
+		}
 	}
 	else {
 		top = ucl_parser_get_object(parser);

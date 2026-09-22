@@ -70,6 +70,11 @@ flag_opts() {
 			save-comments) opts="$opts -C" ;;
 			disable-macro) opts="$opts -M" ;;
 			no-filevars) opts="$opts -F" ;;
+			variable-handler) opts="$opts -H" ;;
+			string-input) opts="$opts -S" ;;
+			var:*=*) opts="$opts -v ${line#var:}" ;;
+			priority:*) opts="$opts -p ${line#priority:}" ;;
+			strategy:*) opts="$opts -s ${line#strategy:}" ;;
 			*) echo "error: unknown flag '$line' in $1" >&2; exit 1 ;;
 			esac
 		done < "$1"
@@ -99,6 +104,16 @@ for case in $list; do
 	# shellcheck disable=SC2086
 	(cd "$dir" && "$DUMP" $opts "$base" 2>/dev/null) > "$dir/$stem.golden.json"
 	count=$((count + 1))
+	# Output-format cases also get libucl's own output in every text format.
+	case "$dir" in
+	*/cases/spec/10-output)
+		for fmt in config json json-compact yaml; do
+			# shellcheck disable=SC2086
+			(cd "$dir" && "$DUMP" $opts -e "$fmt" "$base" 2>/dev/null) > "$dir/$stem.$fmt.golden"
+			count=$((count + 1))
+		done
+		;;
+	esac
 done
 
 # Golden files must not depend on where the repository is checked out.

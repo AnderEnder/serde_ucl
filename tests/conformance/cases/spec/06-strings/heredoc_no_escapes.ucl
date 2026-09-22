@@ -1,0 +1,3 @@
+a = <<EOD
+a\nb "q"
+EOD

@@ -1,0 +1,3 @@
+x = 0
+.include(priority=2) "files/a.inc"
+x = 9

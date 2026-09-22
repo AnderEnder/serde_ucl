@@ -1,0 +1,4 @@
+a = "x\uFFFDy";
+b = "x\uFFFDy";
+c = "x\u000Bz";
+d = "\uFFFD";

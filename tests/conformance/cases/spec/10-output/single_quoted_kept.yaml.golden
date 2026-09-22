@@ -1,0 +1,5 @@
+a: "sq"
+b: "it's"
+c: "back\\\\slash"
+d: "a\\\\'b"
+e: "line\nbreak"

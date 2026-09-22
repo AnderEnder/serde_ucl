@@ -1,0 +1,3 @@
+a = "${ABI}$ABI${ABI}${$ABI}"
+b = "${some}$no${}$$test$$$$$$$"
+c = "$ABI$$ABI$$$ABI$$$$"

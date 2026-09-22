@@ -1,0 +1,2 @@
+pfx = 1
+.include(prefix=true; key="pfx"; target="array") "files/a.inc"

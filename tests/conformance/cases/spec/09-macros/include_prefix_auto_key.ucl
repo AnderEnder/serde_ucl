@@ -1,0 +1,2 @@
+.include(prefix=true) "files/a.inc"
+.include(prefix=true) "files/c.conf"

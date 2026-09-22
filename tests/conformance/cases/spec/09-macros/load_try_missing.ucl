@@ -1,0 +1,2 @@
+.load(key="t"; try=true) "files/missing.txt"
+k = 1

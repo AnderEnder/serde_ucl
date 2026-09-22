@@ -1,0 +1,6 @@
+a = <<EOD
+x
+EOD;
+b = <<END
+y
+END,

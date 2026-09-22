@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":"$$test"}]},{"k":"b","v":[{"t":"string","v":"$$"}]},{"k":"c","v":[{"t":"string","v":"$$ABI"}]},{"k":"d","v":[{"t":"string","v":"unknown$ABI"}]},{"k":"e","v":[{"t":"string","v":"unknown$"}]},{"k":"f","v":[{"t":"string","v":"unknown$$"}]}]}

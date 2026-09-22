@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":"sq"}]},{"k":"b","v":[{"t":"string","v":"it's"}]},{"k":"c","v":[{"t":"string","v":"back\\\\slash"}]},{"k":"d","v":[{"t":"string","v":"a\\\\'b"}]},{"k":"e","v":[{"t":"string","v":"line\nbreak"}]}]}

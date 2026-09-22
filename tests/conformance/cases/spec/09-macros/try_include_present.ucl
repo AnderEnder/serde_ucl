@@ -1,0 +1,2 @@
+.try_include "files/a.inc"
+k = 1

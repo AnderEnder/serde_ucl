@@ -1,0 +1,2 @@
+.include(glob=true, try=true) "files/glob/none*.inc"
+k = 1

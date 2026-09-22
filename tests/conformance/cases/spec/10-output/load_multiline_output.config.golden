@@ -1,0 +1,5 @@
+t = <<EOD
+  hello world  
+
+EOD;
+u = "  hello world  \n";

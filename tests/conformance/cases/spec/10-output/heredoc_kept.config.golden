@@ -1,0 +1,5 @@
+a = <<EOD
+line 1
+line 2
+EOD;
+b = "single";

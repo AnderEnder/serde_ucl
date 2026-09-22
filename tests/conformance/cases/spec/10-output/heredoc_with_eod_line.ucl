@@ -1,0 +1,5 @@
+a = <<END
+x
+EOD
+y
+END

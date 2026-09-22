@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"a","v":[{"t":"float","v":"nan"}]},{"k":"b","v":[{"t":"float","v":"inf"}]},{"k":"c","v":[{"t":"string","v":"NaN"}]},{"k":"d","v":[{"t":"string","v":"Inf"}]},{"k":"e","v":[{"t":"string","v":"-inf"}]},{"k":"f","v":[{"t":"string","v":"+inf"}]},{"k":"g","v":[{"t":"string","v":"infinity"}]}]}

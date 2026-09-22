@@ -1,0 +1,2 @@
+.include(prefix=true; key="pfx"; target="array") "files/a.inc"
+.include(prefix=true; key="pfx"; target="array") "files/b.inc"

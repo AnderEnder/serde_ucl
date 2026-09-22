@@ -1,0 +1,2 @@
+o { a = 1 }
+.include(duplicate="merge") "files/obj.inc"

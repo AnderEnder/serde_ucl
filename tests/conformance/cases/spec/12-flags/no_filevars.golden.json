@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":"$FILENAME"}]},{"k":"b","v":[{"t":"string","v":"$CURDIR"}]},{"k":"c","v":[{"t":"string","v":"unknown"}]}]}

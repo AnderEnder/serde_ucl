@@ -1,0 +1,3 @@
+a = 30s # comment
+b = 30kb # comment
+c = 30s /* comment */

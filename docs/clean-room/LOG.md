@@ -24,3 +24,70 @@
 ## Sessions
 
 (Append entries here: date, role, work item, inputs consulted, commits, attestation.)
+
+- 2026-09-22 — **Spec team, C0 (behaviour specification).**
+  - Inputs consulted: libucl source at the pinned commit `24c8b399062ae4691168c243e3b7345ef7f31956`
+    (parser, emitter and utility sources, character tables, `tests/test_basic.c`); libucl's public
+    documentation (`README.md`, `doc/*.md`); the conformance suite; black-box runs of the oracle
+    (`tools/ucl-dump`, `scripts/regen-golden.sh`, and libucl's `test_basic` to confirm that the
+    upstream `.res` files reproduce).
+  - Commits: `3927c3e` (oracle options `-e`, `-v`, `-H`, `-p`, `-s`; 385 spec cases), `415d06b`
+    and `dab710f` (more cases; `-S` oracle option), `b56135b` (`docs/spec/` sections 01–12 and a
+    coverage table for all 716 cases; more cases), and this entry.
+  - Result: `docs/spec/` describes observable behaviour only: accepted inputs, resulting values,
+    rejected inputs and output bytes. Each rule cites conformance cases whose golden files come from
+    the oracle. It contains no libucl code or pseudo-code and no internal libucl names; the only
+    libucl identifiers are the public parser-flag names in §12, plus case file names in the coverage
+    table. Sections follow format features, not libucl's source files.
+  - Test state: `xfail.txt` lists the 225 new cases that the pre-C1 parser (commit `03b2756`) fails,
+    by the runner's suggested reason (parser 134, macro 58, flags 33). Checked by running the
+    conformance test at `03b2756` with the new cases: 716 cases, 344 pass, 372 expected failures,
+    green. At the branch head, `insert_with_strategy` is still `todo!()` until C1, so the runner
+    reports extra failures there.
+  - Not yet done: review of the spec for prohibited content, and the `spec-v1` tag (PROTOCOL.md,
+    *Release*).
+
+- 2026-09-22 — **Spec reviewer, C0 review (candidate `spec-v1`).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`;
+    - `docs/spec/README.md` and `01-*.md` … `12-*.md` at `c9e1dd5`;
+    - `tests/conformance/` (case inputs, `.flags`, golden files, `xfail.txt`, README);
+    - `cargo test --test conformance`;
+    - black-box runs of `target/libucl-oracle/ucl-dump` on scratch inputs, to probe claims that
+      no case covers.
+  - Not consulted: libucl source, `tools/ucl-dump/ucl_dump.c`, anything under
+    `target/libucl-oracle/libucl/`, `REVIEW.md`, `PLAN.md`, `PROGRESS.md`, `quarantine/*`.
+  - Present in this session's context without being sought: the main checkout's working copy of
+    `CLAUDE.md` (uncommitted changes there). It still contains implementation notes that look
+    libucl-derived: a number-parsing state machine with an internal-looking variable name, a
+    "two-pass algorithm from C implementation", a character-flag table and in-place unescaping.
+    This branch's `CLAUDE.md` does not contain them. Implementer sessions started from the main
+    checkout would receive that content.
+  - Commits: `5c98e5b` (`docs/clean-room/reviews/spec-v1.md`), `4cdca6e` (this entry), and a
+    follow-up `C0 review:` commit that corrects the B-2 count in the review's verdict.
+  - Result: verdict **Release after fixes**.
+    - Bar A: seven minor wording findings, no blockers.
+    - Bar B: six majors and fourteen minors.
+    - Citations: all 636 resolve; 339 checked against golden content, including every citation in
+      §05, §07, §08 and §10.
+    - `spec-v1` is not tagged. The spec team fixes the bar-A findings and the bar-B majors first.
+  - Attestation: I did not read libucl source code.
+
+- 2026-09-22 — **Spec team, C0 fixes after review; release `spec-v1`.**
+  - Inputs consulted: the review `docs/clean-room/reviews/spec-v1.md`; libucl source at the pinned
+    commit (parser, emitter, utility and test-harness sources); black-box runs of the oracle; the
+    conformance suite.
+  - Commits: `52ae390` (41 new cases, golden files from the oracle; `object_depth_limit_error`
+    changed to 1024 objects; 28 new `xfail.txt` entries for cases the pre-C1 parser fails),
+    `2ddb2d6` (spec text: A-1 … A-7, B-1 … B-20), `3b2e183` (`docs/clean-room/reviews/spec-v1-response.md`,
+    mapping each finding to its commit).
+  - Tag: `spec-v1` → `3b2e183` (lightweight, local only).
+  - Result: all review findings fixed, none deferred. *Known gaps* in `docs/spec/README.md` lists
+    two rules without a committable case (B-10 file input, B-20 depth 1023). The spec still
+    contains behaviour only. Self-check greps: no `ucl_`/`UCL_` outside §12's public flag names,
+    no `.c`/`.h` references, no code blocks. All citations resolve, and every `cases/spec/` case is
+    cited. At `03b2756` with the new cases, the conformance test is green: 757 cases, 357 pass,
+    400 expected failures.
+  - Cause of B-2, recorded for future sessions: the tool used to write files replaced each
+    backslash-`u` escape followed by four hex digits with the decoded character. Text with such
+    escapes must be written through a placeholder and checked afterwards.

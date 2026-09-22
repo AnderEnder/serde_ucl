@@ -1,0 +1,4 @@
+a = <<EOD
+  indented
+	tab  
+EOD

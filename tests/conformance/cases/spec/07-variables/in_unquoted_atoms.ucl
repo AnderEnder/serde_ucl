@@ -1,0 +1,3 @@
+a = $ABI/x
+b = ${ABI}
+c = [ $ABI, "${ABI}" ]

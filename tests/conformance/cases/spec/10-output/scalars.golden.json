@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"i","v":[{"t":"int","v":"1"}]},{"k":"n","v":[{"t":"int","v":"-5"}]},{"k":"b","v":[{"t":"bool","v":true}]},{"k":"f","v":[{"t":"bool","v":false}]},{"k":"z","v":[{"t":"null"}]},{"k":"s","v":[{"t":"string","v":"str"}]}]}

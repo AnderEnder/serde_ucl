@@ -1,0 +1,6 @@
+.priority 3
+a = 1
+.priority "4"
+b = 1
+.priority(priority=6) 5
+c = 1

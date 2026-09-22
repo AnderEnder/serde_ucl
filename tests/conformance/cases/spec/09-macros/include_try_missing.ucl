@@ -1,0 +1,2 @@
+.include(try=true) "files/missing.inc"
+k = 1

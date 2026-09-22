@@ -1,0 +1,2 @@
+a = "$AB $ABI $ABIX"
+b = "${AB}${ABI}"

@@ -1,0 +1,4 @@
+.priority 2
+d { a = 1 }
+.priority 1
+e { .inherit "d" }

@@ -1,0 +1,6 @@
+a = "$$test"
+b = "$$"
+c = "$$ABI"
+d = "$ABI$$ABI"
+e = "$ABI$$"
+f = "$ABI$$$"

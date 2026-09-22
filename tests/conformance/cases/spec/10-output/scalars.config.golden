@@ -1,0 +1,6 @@
+i = 1;
+n = -5;
+b = true;
+f = false;
+z = null;
+s = "str";

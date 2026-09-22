@@ -1,0 +1,2 @@
+x { a = 1 }
+.include(duplicate="merge", priority=2) "files/xobj.inc"

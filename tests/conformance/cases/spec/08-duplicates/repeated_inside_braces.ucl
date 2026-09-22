@@ -1,0 +1,2 @@
+top { s foo bar { k = v }
+s foo { bar = lol } }

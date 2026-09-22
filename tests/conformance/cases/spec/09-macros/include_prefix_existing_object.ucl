@@ -1,0 +1,2 @@
+pfx { old = 1 }
+.include(prefix=true; key="pfx") "files/a.inc"

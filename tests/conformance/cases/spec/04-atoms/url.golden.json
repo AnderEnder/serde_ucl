@@ -1,0 +1,1 @@
+{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":"http://pkg.freebsd.org/latest"}]},{"k":"b","v":[{"t":"string","v":"https://x.y:8080/p?q=1&r=2"}]}]}

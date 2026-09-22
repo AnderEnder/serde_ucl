@@ -1,0 +1,2 @@
+.load(key="t"; target="float") "files/num.txt"
+k = 1

@@ -1,0 +1,2 @@
+.include "files/a.inc";k = 1
+.include "files/b.inc" j = 2

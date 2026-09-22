@@ -1,0 +1,3 @@
+.include "${CURDIR}/files/a.inc"
+.priority $PRI
+a = 1
