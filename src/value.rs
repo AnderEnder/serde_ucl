@@ -256,7 +256,7 @@ pub struct DuplicateKeyError {
 
 impl fmt::Display for DuplicateKeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "duplicate key '{}'", self.key)
+        write!(f, "duplicate element for key '{}' found", self.key)
     }
 }
 
@@ -407,6 +407,113 @@ impl Entry {
         &self.slots[0]
     }
 
+    /// Resolves a repeated key by priority (spec §8.3), comparing with the first value: a higher
+    /// priority replaces the entry, a lower one is dropped, and an equal one is added (§8.2), or
+    /// collected into an explicit array under `NO_IMPLICIT_ARRAYS` (§8.5). With
+    /// `replace_inherited`, an inherited first value is replaced whatever the priorities.
+    fn add_by_priority(
+        &mut self,
+        key: &str,
+        slot: Slot,
+        replace_inherited: bool,
+        flags: ParserFlags,
+    ) -> Result<(), DuplicateKeyError> {
+        let head = self.head();
+        if (replace_inherited && head.inherited) || slot.priority > head.priority {
+            *self = Entry::from_slot(slot);
+        } else if slot.priority == head.priority {
+            if flags.contains(ParserFlags::NO_IMPLICIT_ARRAYS) {
+                return self.collect(key, slot);
+            }
+            self.slots.push(slot);
+        }
+        Ok(())
+    }
+
+    /// Adds a repeated value under `NO_IMPLICIT_ARRAYS` (spec §8.5). The first repeat replaces the
+    /// entry with an explicit array of the old and new values; later repeats are appended to it.
+    ///
+    /// Two details follow the oracle rather than the spec text (QUESTIONS.md #3, #4):
+    /// - The collection array has priority 0, whatever its elements' priorities, so a later value
+    ///   with a priority above 0 replaces it.
+    /// - If `merge` has replaced the collection array with a scalar, a later repeat is an error.
+    fn collect(&mut self, key: &str, slot: Slot) -> Result<(), DuplicateKeyError> {
+        if self.head().collected {
+            return match &mut self.slots[0].value {
+                UclValue::Array(items) => {
+                    items.push(slot.value);
+                    Ok(())
+                }
+                _ => Err(DuplicateKeyError {
+                    key: key.to_owned(),
+                }),
+            };
+        }
+        let mut items: UclArray = std::mem::take(&mut self.slots)
+            .into_iter()
+            .map(|s| s.value)
+            .collect();
+        items.push(slot.value);
+        *self = Entry::from_slot(Slot {
+            collected: true,
+            ..Slot::new(UclValue::Array(items), 0)
+        });
+        Ok(())
+    }
+
+    /// Resolves a repeated key under [`DuplicateStrategy::Merge`] (spec §8.4), by the type of the
+    /// first value. Only the first value takes part; any other values of the entry are kept
+    /// (QUESTIONS.md #1).
+    ///
+    /// - Object and object: the new object's values are inserted into the first value one by one,
+    ///   with `Merge`. The first value keeps its priority.
+    /// - Array and array: the new elements are appended. The array keeps its priority.
+    /// - Object and array, or array and object: error.
+    /// - Object or array, and a scalar (**quirk**): the scalar takes the container's place and
+    ///   keeps the container's priority and inherited mark.
+    /// - Scalar first: resolved by priority as under `Append`. An inherited first value is not
+    ///   replaced unconditionally here (QUESTIONS.md #2).
+    fn merge(
+        &mut self,
+        key: &str,
+        slot: Slot,
+        flags: ParserFlags,
+    ) -> Result<(), DuplicateKeyError> {
+        let head = &mut self.slots[0];
+        if !is_container(&head.value) {
+            return self.add_by_priority(key, slot, false, flags);
+        }
+        if !is_container(&slot.value) {
+            head.value = slot.value;
+            return Ok(());
+        }
+        match (&mut head.value, slot.value) {
+            (UclValue::Object(target), UclValue::Object(source)) => {
+                for (name, entry) in source {
+                    for inner in entry.slots {
+                        target.insert_slot_with_strategy(
+                            name.as_str(),
+                            inner,
+                            DuplicateStrategy::Merge,
+                            flags,
+                        )?;
+                    }
+                }
+                Ok(())
+            }
+            (UclValue::Array(target), UclValue::Array(source)) => {
+                target.extend(source);
+                Ok(())
+            }
+            _ => Err(DuplicateKeyError {
+                key: key.to_owned(),
+            }),
+        }
+    }
+}
+
+fn is_container(value: &UclValue) -> bool {
+    matches!(value, UclValue::Object(_) | UclValue::Array(_))
 }
 
 /// Iterator over the values of an [`Entry`].
@@ -543,7 +650,8 @@ impl UclObject {
     }
 
     /// Inserts `value` under `key`, resolving an existing key by `strategy` and `priority`,
-    /// and applying `flags`. Behaviour is specified in `docs/spec/` (duplicate keys).
+    /// and applying `flags`. Behaviour is specified in `docs/spec/08-duplicates.md`; see
+    /// [`UclObject::insert_slot_with_strategy`].
     pub fn insert_with_strategy(
         &mut self,
         key: impl Into<String>,
@@ -556,6 +664,21 @@ impl UclObject {
     }
 
     /// [`UclObject::insert_with_strategy`] for a prepared slot.
+    ///
+    /// Under [`ParserFlags::KEY_LOWERCASE`] the key is lowercased first, ASCII letters only
+    /// (spec §8.6, §12.1). A new key is added at the end. A key already present keeps its
+    /// position, and `strategy` decides the outcome (spec §8.2–§8.5):
+    ///
+    /// - [`DuplicateStrategy::Append`]: an inherited first value is replaced. Otherwise the new
+    ///   priority is compared with the first value's: higher replaces the entry, lower is
+    ///   dropped, equal adds the value (or collects it under [`ParserFlags::NO_IMPLICIT_ARRAYS`]).
+    /// - [`DuplicateStrategy::Rewrite`]: the entry is replaced by the new value.
+    /// - [`DuplicateStrategy::Error`]: [`DuplicateKeyError`], with the object unchanged.
+    /// - [`DuplicateStrategy::Merge`]: containers are merged, and a scalar first value is
+    ///   resolved as under `Append` (see the rules on `Entry::merge` in the source).
+    ///
+    /// Under `Merge`, an object is merged into entry by entry, so when a nested insert fails the
+    /// entries before it have already been merged.
     pub fn insert_slot_with_strategy(
         &mut self,
         key: impl Into<String>,
@@ -563,8 +686,23 @@ impl UclObject {
         strategy: DuplicateStrategy,
         flags: ParserFlags,
     ) -> Result<(), DuplicateKeyError> {
-        let _ = (key.into(), slot, strategy, flags);
-        todo!("clean-room reimplementation pending (docs/clean-room/WORKLIST.md, C1)")
+        let mut key = key.into();
+        if flags.contains(ParserFlags::KEY_LOWERCASE) {
+            key.make_ascii_lowercase();
+        }
+        let Some(entry) = self.entries.get_mut(&key) else {
+            self.entries.insert(key, Entry::from_slot(slot));
+            return Ok(());
+        };
+        match strategy {
+            DuplicateStrategy::Append => entry.add_by_priority(&key, slot, true, flags),
+            DuplicateStrategy::Merge => entry.merge(&key, slot, flags),
+            DuplicateStrategy::Rewrite => {
+                *entry = Entry::from_slot(slot);
+                Ok(())
+            }
+            DuplicateStrategy::Error => Err(DuplicateKeyError { key }),
+        }
     }
 }
 
@@ -806,6 +944,330 @@ mod tests {
         .unwrap();
         assert!(obj.contains_key("alias"));
         assert!(!obj.contains_key("ALIAS"));
+    }
+
+    fn object(pairs: &[(&str, UclValue)]) -> UclValue {
+        UclValue::Object(pairs.iter().cloned().collect())
+    }
+
+    fn priorities(obj: &UclObject, key: &str) -> Vec<u8> {
+        obj.entry(key)
+            .unwrap()
+            .slots()
+            .iter()
+            .map(Slot::priority)
+            .collect()
+    }
+
+    fn insert_slot(obj: &mut UclObject, key: &str, slot: Slot, s: DuplicateStrategy) {
+        obj.insert_slot_with_strategy(key, slot, s, ParserFlags::DEFAULT)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_rewrite_takes_the_new_priority() {
+        let mut obj = UclObject::new();
+        insert(&mut obj, "k", int(1), 3, DuplicateStrategy::Rewrite);
+        insert(&mut obj, "k", int(2), 1, DuplicateStrategy::Rewrite);
+        assert_eq!(values(&obj, "k"), vec![int(2)]);
+        assert_eq!(priorities(&obj, "k"), vec![1]);
+    }
+
+    #[test]
+    fn test_error_strategy_rejects_repeat_of_inherited_value() {
+        let mut obj = UclObject::new();
+        insert_slot(
+            &mut obj,
+            "k",
+            Slot::inherited(int(1), 0),
+            DuplicateStrategy::Error,
+        );
+        let err = obj
+            .insert_with_strategy(
+                "k",
+                int(2),
+                0,
+                DuplicateStrategy::Error,
+                ParserFlags::DEFAULT,
+            )
+            .unwrap_err();
+        assert_eq!(err.key, "k");
+        assert_eq!(values(&obj, "k"), vec![int(1)]);
+    }
+
+    #[test]
+    fn test_merge_container_then_scalar_keeps_container_priority() {
+        // spec §8.4, strategy_merge_scalar_keeps_container_priority
+        let mut obj = UclObject::new();
+        insert(
+            &mut obj,
+            "a",
+            object(&[("x", int(1))]),
+            3,
+            DuplicateStrategy::Merge,
+        );
+        insert(&mut obj, "a", int(2), 1, DuplicateStrategy::Merge);
+        assert_eq!(values(&obj, "a"), vec![int(2)]);
+        assert_eq!(priorities(&obj, "a"), vec![3]);
+
+        insert(
+            &mut obj,
+            "b",
+            UclValue::Array(vec![int(1)]),
+            1,
+            DuplicateStrategy::Merge,
+        );
+        insert(&mut obj, "b", int(2), 3, DuplicateStrategy::Merge);
+        assert_eq!(values(&obj, "b"), vec![int(2)]);
+        assert_eq!(priorities(&obj, "b"), vec![1]);
+    }
+
+    #[test]
+    fn test_merge_container_type_mismatch_is_an_error() {
+        let arr = UclValue::Array(vec![int(1)]);
+        let obj_value = object(&[("x", int(1))]);
+        for (first, second) in [(arr.clone(), obj_value.clone()), (obj_value, arr)] {
+            let mut obj = UclObject::new();
+            insert(&mut obj, "a", first, 0, DuplicateStrategy::Merge);
+            let err = obj
+                .insert_with_strategy(
+                    "a",
+                    second,
+                    0,
+                    DuplicateStrategy::Merge,
+                    ParserFlags::DEFAULT,
+                )
+                .unwrap_err();
+            assert_eq!(err.key, "a");
+        }
+    }
+
+    #[test]
+    fn test_merge_arrays_keep_the_existing_priority() {
+        // spec §8.4, strategy_merge_arrays_ignore_priority
+        let mut obj = UclObject::new();
+        insert(
+            &mut obj,
+            "a",
+            UclValue::Array(vec![int(1)]),
+            3,
+            DuplicateStrategy::Merge,
+        );
+        insert(
+            &mut obj,
+            "a",
+            UclValue::Array(vec![int(2)]),
+            1,
+            DuplicateStrategy::Merge,
+        );
+        assert_eq!(
+            values(&obj, "a"),
+            vec![UclValue::Array(vec![int(1), int(2)])]
+        );
+        assert_eq!(priorities(&obj, "a"), vec![3]);
+    }
+
+    #[test]
+    fn test_merge_nested_values_resolve_by_their_own_priority() {
+        // spec §8.4, include_merge_lower_priority_still_merges; a nested scalar with a higher
+        // priority replaces (oracle probe, QUESTIONS.md #1).
+        let mut inner = UclObject::new();
+        insert(&mut inner, "a", int(1), 3, DuplicateStrategy::Append);
+        let mut obj = UclObject::new();
+        insert(
+            &mut obj,
+            "x",
+            UclValue::Object(inner),
+            3,
+            DuplicateStrategy::Append,
+        );
+
+        let mut lower = UclObject::new();
+        insert(&mut lower, "b", int(2), 1, DuplicateStrategy::Append);
+        insert(
+            &mut obj,
+            "x",
+            UclValue::Object(lower),
+            1,
+            DuplicateStrategy::Merge,
+        );
+        let mut higher = UclObject::new();
+        insert(&mut higher, "a", int(9), 5, DuplicateStrategy::Append);
+        insert(
+            &mut obj,
+            "x",
+            UclValue::Object(higher),
+            5,
+            DuplicateStrategy::Merge,
+        );
+
+        assert_eq!(priorities(&obj, "x"), vec![3]);
+        let merged = obj.get("x").unwrap().as_object().unwrap();
+        assert_eq!(merged.keys().collect::<Vec<_>>(), vec!["a", "b"]);
+        assert_eq!(values(merged, "a"), vec![int(9)]);
+        assert_eq!(priorities(merged, "a"), vec![5]);
+        assert_eq!(priorities(merged, "b"), vec![1]);
+    }
+
+    #[test]
+    fn test_merge_uses_only_the_first_value() {
+        // Oracle probe, QUESTIONS.md #1: other values of the entry are kept.
+        let mut obj = UclObject::new();
+        insert(
+            &mut obj,
+            "a",
+            object(&[("x", int(1))]),
+            0,
+            DuplicateStrategy::Append,
+        );
+        insert(
+            &mut obj,
+            "a",
+            object(&[("y", int(2))]),
+            0,
+            DuplicateStrategy::Append,
+        );
+        insert(
+            &mut obj,
+            "a",
+            object(&[("z", int(3))]),
+            0,
+            DuplicateStrategy::Merge,
+        );
+        assert_eq!(
+            values(&obj, "a"),
+            vec![
+                object(&[("x", int(1)), ("z", int(3))]),
+                object(&[("y", int(2))])
+            ]
+        );
+        insert(&mut obj, "a", int(5), 0, DuplicateStrategy::Merge);
+        assert_eq!(values(&obj, "a"), vec![int(5), object(&[("y", int(2))])]);
+    }
+
+    #[test]
+    fn test_merge_scalar_first_follows_append_priorities() {
+        // spec §8.4, strategy_merge_scalars_append, strategy_merge_scalar_then_object
+        let mut obj = UclObject::new();
+        insert(&mut obj, "a", int(1), 2, DuplicateStrategy::Merge);
+        insert(
+            &mut obj,
+            "a",
+            object(&[("y", int(2))]),
+            2,
+            DuplicateStrategy::Merge,
+        );
+        insert(&mut obj, "a", int(3), 1, DuplicateStrategy::Merge);
+        assert_eq!(values(&obj, "a"), vec![int(1), object(&[("y", int(2))])]);
+        insert(&mut obj, "a", int(4), 5, DuplicateStrategy::Merge);
+        assert_eq!(values(&obj, "a"), vec![int(4)]);
+    }
+
+    #[test]
+    fn test_merge_does_not_replace_inherited_values() {
+        // Oracle probes, QUESTIONS.md #2: an inherited scalar gets another value, an inherited
+        // object is merged into and stays inherited.
+        let mut obj = UclObject::new();
+        insert_slot(
+            &mut obj,
+            "s",
+            Slot::inherited(int(1), 0),
+            DuplicateStrategy::Append,
+        );
+        insert(&mut obj, "s", int(2), 0, DuplicateStrategy::Merge);
+        assert_eq!(values(&obj, "s"), vec![int(1), int(2)]);
+
+        let inherited = Slot::inherited(object(&[("x", int(1))]), 0);
+        insert_slot(&mut obj, "o", inherited, DuplicateStrategy::Append);
+        insert(
+            &mut obj,
+            "o",
+            object(&[("y", int(2))]),
+            0,
+            DuplicateStrategy::Merge,
+        );
+        assert_eq!(
+            values(&obj, "o"),
+            vec![object(&[("x", int(1)), ("y", int(2))])]
+        );
+        insert(
+            &mut obj,
+            "o",
+            object(&[("z", int(3))]),
+            0,
+            DuplicateStrategy::Append,
+        );
+        assert_eq!(values(&obj, "o"), vec![object(&[("z", int(3))])]);
+    }
+
+    #[test]
+    fn test_no_implicit_arrays_priorities() {
+        // Oracle probes, QUESTIONS.md #3: priorities are compared first; the collection array
+        // has priority 0, so a later value with a higher priority replaces it.
+        let flags = ParserFlags::NO_IMPLICIT_ARRAYS;
+        let mut obj = UclObject::new();
+        for (v, pri) in [(1, 0), (2, 3), (3, 1), (4, 3)] {
+            obj.insert_with_strategy("a", int(v), pri, DuplicateStrategy::Append, flags)
+                .unwrap();
+        }
+        assert_eq!(
+            values(&obj, "a"),
+            vec![UclValue::Array(vec![int(2), int(4)])]
+        );
+        assert_eq!(priorities(&obj, "a"), vec![0]);
+        obj.insert_with_strategy("a", int(5), 3, DuplicateStrategy::Append, flags)
+            .unwrap();
+        assert_eq!(values(&obj, "a"), vec![int(5)]);
+        assert_eq!(priorities(&obj, "a"), vec![3]);
+
+        // An inherited value is replaced, not collected.
+        let mut obj = UclObject::new();
+        obj.insert_slot_with_strategy(
+            "a",
+            Slot::inherited(int(1), 0),
+            DuplicateStrategy::Append,
+            flags,
+        )
+        .unwrap();
+        obj.insert_with_strategy("a", int(2), 0, DuplicateStrategy::Append, flags)
+            .unwrap();
+        assert_eq!(values(&obj, "a"), vec![int(2)]);
+    }
+
+    #[test]
+    fn test_no_implicit_arrays_under_merge() {
+        // Oracle probes, QUESTIONS.md #4: the collection array is an ordinary array for `merge`.
+        let flags = ParserFlags::NO_IMPLICIT_ARRAYS;
+        let merge = DuplicateStrategy::Merge;
+        let mut obj = UclObject::new();
+        for v in [int(1), int(2), UclValue::Array(vec![int(3)])] {
+            obj.insert_with_strategy("b", v, 0, merge, flags).unwrap();
+        }
+        assert_eq!(
+            values(&obj, "b"),
+            vec![UclValue::Array(vec![int(1), int(2), int(3)])]
+        );
+        obj.insert_with_strategy("b", int(5), 0, merge, flags)
+            .unwrap();
+        assert_eq!(values(&obj, "b"), vec![int(5)]);
+        // The scalar took the collection array's place; a later repeat is an error.
+        assert!(
+            obj.insert_with_strategy("b", int(6), 0, DuplicateStrategy::Append, flags)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_key_lowercase_merges_keys_that_differ_in_case() {
+        // spec §8.6, §12.1: ASCII letters only.
+        let flags = ParserFlags::KEY_LOWERCASE;
+        let mut obj = UclObject::new();
+        for key in ["A", "a", "É"] {
+            obj.insert_with_strategy(key, int(1), 0, DuplicateStrategy::Append, flags)
+                .unwrap();
+        }
+        assert_eq!(obj.keys().collect::<Vec<_>>(), vec!["a", "É"]);
+        assert_eq!(values(&obj, "a"), vec![int(1), int(1)]);
     }
 
     #[test]

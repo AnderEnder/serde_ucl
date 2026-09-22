@@ -91,3 +91,52 @@
   - Cause of B-2, recorded for future sessions: the tool used to write files replaced each
     backslash-`u` escape followed by four hex digits with the decoded character. Text with such
     escapes must be written through a placeholder and checked afterwards.
+
+- 2026-09-22 — **Implementation team, C1 (duplicate-key insertion).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `WORKLIST.md`, `LOG.md`, `QUESTIONS.md`;
+    - spec `spec-v1` (`git show spec-v1:…`; the working-tree copy was identical): §8, §9.4–§9.7,
+      §12 and `README.md`;
+    - the current `src/value.rs` (the file edited), `tests/conformance.rs`,
+      `tests/conformance/README.md` and the header of `xfail.txt`;
+    - case inputs, `.flags` and golden files: `cases/spec/08-duplicates/` `strategy_merge_arrays_ignore_priority`,
+      `strategy_merge_scalar_keeps_container_priority`, `priority_applies_to_containers`,
+      `keeps_first_position`, `priority_higher_replaces`, `no_implicit_arrays_with_arrays`;
+      `cases/spec/09-macros/` `include_merge_ignores_priority`,
+      `include_merge_lower_priority_still_merges`, `inherit_replaced_whatever_priority`;
+    - black-box runs of `target/libucl-oracle/ucl-dump`: its usage message, and 18 probes on
+      scratch inputs (options `-s merge|error|rewrite` and `-I`), with the inputs and results
+      recorded in `QUESTIONS.md` #1–#4, except these five:
+      - `-s rewrite`, `.priority 3⏎a = 1⏎.priority 1⏎a = 2` → `a: int 2 @1`;
+      - default strategy, `a = 1⏎a = 2⏎.include(duplicate="merge") "f"` with f = `a { z = 3 }`
+        → `a: ⟨int 1 | int 2 | {z: int 3}⟩`;
+      - `-I`, `.priority 3⏎a = 1⏎a = 2⏎.priority 1⏎a = 3` → `a: int 3 @1` (also added to #3);
+      - `-I`, `a = 1⏎a = 2⏎.priority 2⏎a = 3` → `a: int 3 @2` (also added to #3);
+      - `-I`, `a = [1]⏎a = 2⏎a = 3` → `a: [[int 1], int 2, int 3]`;
+    - the worktree's `CLAUDE.md` (loaded automatically; the clean version);
+    - `cargo build`, `cargo test`, `cargo clippy` output.
+  - Seen without opening the file: a grep over `src/`, `tests/`, `examples/` and `benches/` for the
+    insertion function names printed one line of `src/parser.rs` (line 2500, the only call site).
+    `src/parser.rs` was not opened.
+  - Not consulted: libucl source, anything under `target/libucl-oracle/` other than running
+    `ucl-dump` (no `libucl/`, `build/` or `build.log`), the oracle tool sources,
+    `scripts/regen-golden.sh` (neither read nor run), `REVIEW.md`, `PLAN.md`, `PROGRESS.md`,
+    `quarantine/*`, history of `src/` before `ef8007e`, history of `CLAUDE.md`, `src/lexer.rs`,
+    `src/parser.rs`. The PLAN.md references in existing comments and in `xfail.txt` were not
+    followed.
+  - Commits:
+    - `9babe6e`: implementation and unit tests;
+    - `fb7ebf3`: QUESTIONS.md #1–#4;
+    - this entry.
+  - Result:
+    - `cargo test` is green (395 tests), and `cargo build --examples --benches` builds.
+    - Conformance before: 757 cases, 96 pass, 400 expected failures, 261 unexpected failures
+      (`todo!()` panics). After: 357 pass, 400 expected failures. `xfail.txt` is unchanged.
+    - Where the spec is silent, behaviour follows the oracle probes (QUESTIONS.md #1–#4).
+    - The `DuplicateKeyError` message, "duplicate element for key '…' found", is taken from the
+      existing unit test `test_rewrite_and_error`.
+  - Model gap for C2: `UclArray` elements carry no priority. Golden files with a priority per array
+    element (`priority_applies_to_containers`, `strategy_merge_arrays_ignore_priority`, and the
+    collection arrays of QUESTIONS.md #3) cannot be represented yet.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
