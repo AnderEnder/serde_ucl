@@ -1,0 +1,146 @@
+# Conformance cases the new parser core (src/parse/, work item C2) is known to fail.
+#
+# Format: <case-id> <reason> [# note]
+#   <case-id>  path under tests/conformance without the extension
+#   <reason>   one of
+#     macro     the case needs macros, which come with work item C3 (spec §9); the note names
+#               the first macro the core rejects
+#     non-utf8  the case holds bytes that are not UTF-8; the project rejects them
+#               (spec README "Divergences decided by the project", §11.3)
+#
+# The runner applies each case's .flags file. A rejection with Error::is_unsupported() never
+# counts as a pass, so macro cases whose golden file is an error stay listed until C3.
+#
+# The list may only shrink. The runner fails when a listed case passes: delete its line.
+# New cases may be added here only together with the case itself.
+
+cases/migrated/compatibility_tests__rspamd_ucl_compatibility macro  # .include
+cases/migrated/integration_tests__compatibility_with_existing_ucl_files macro  # .include
+cases/spec/08-duplicates/include_merge_scalar_quirk_default_mode macro  # .include
+cases/spec/08-duplicates/inherit_kept_after_merge_object macro  # .inherit
+cases/spec/08-duplicates/inherit_kept_after_merge_scalar macro  # .inherit
+cases/spec/08-duplicates/inherit_merge_equal_adds macro  # .inherit
+cases/spec/08-duplicates/inherit_merge_higher_replaces macro  # .priority
+cases/spec/08-duplicates/inherit_merge_lower_dropped macro  # .priority
+cases/spec/08-duplicates/inherit_merge_objects macro  # .inherit
+cases/spec/08-duplicates/inherit_strategy_error macro  # .inherit
+cases/spec/08-duplicates/inherit_strategy_rewrite macro  # .inherit
+cases/spec/08-duplicates/merge_include_first_array_only macro  # .include
+cases/spec/08-duplicates/merge_include_first_value_only macro  # .include
+cases/spec/08-duplicates/merge_include_first_value_scalar macro  # .include
+cases/spec/08-duplicates/merge_nested_priority_higher macro  # .priority
+cases/spec/08-duplicates/merge_nested_priority_lower macro  # .priority
+cases/spec/08-duplicates/nia_collection_has_priority_0 macro  # .priority
+cases/spec/08-duplicates/nia_collection_replaced_higher_value macro  # .priority
+cases/spec/08-duplicates/nia_collection_replaced_lower_value macro  # .priority
+cases/spec/08-duplicates/nia_include_merge_array_then_repeat macro  # .include
+cases/spec/08-duplicates/nia_include_merge_scalar macro  # .include
+cases/spec/08-duplicates/nia_include_merge_scalar_then_higher macro  # .include
+cases/spec/08-duplicates/nia_include_merge_scalar_then_object_error macro  # .include
+cases/spec/08-duplicates/nia_include_merge_scalar_then_repeat_error macro  # .include
+cases/spec/08-duplicates/nia_include_merge_scalar_then_rewrite macro  # .include
+cases/spec/08-duplicates/nia_inherited_replaced macro  # .inherit
+cases/spec/08-duplicates/nia_priorities_compared_first macro  # .priority
+cases/spec/08-duplicates/priority_15 macro  # .priority
+cases/spec/08-duplicates/priority_16_is_0 macro  # .priority
+cases/spec/08-duplicates/priority_applies_to_containers macro  # .priority
+cases/spec/08-duplicates/priority_equal_appends macro  # .priority
+cases/spec/08-duplicates/priority_higher_replaces macro  # .priority
+cases/spec/08-duplicates/priority_lower_ignored macro  # .priority
+cases/spec/08-duplicates/priority_modulo_16 macro  # .priority
+cases/spec/08-duplicates/priority_negative macro  # .priority
+cases/spec/08-duplicates/strategy_merge_arrays_ignore_priority macro  # .priority
+cases/spec/08-duplicates/strategy_merge_scalar_keeps_container_priority macro  # .priority
+cases/spec/09-macros/include_bare macro  # .include
+cases/spec/09-macros/include_braces macro  # .include
+cases/spec/09-macros/include_braces_variables macro  # .include
+cases/spec/09-macros/include_curdir macro  # .include
+cases/spec/09-macros/include_duplicate_error macro  # .include
+cases/spec/09-macros/include_duplicate_merge macro  # .include
+cases/spec/09-macros/include_duplicate_rewrite macro  # .include
+cases/spec/09-macros/include_duplicates_append macro  # .include
+cases/spec/09-macros/include_empty_args macro  # .include
+cases/spec/09-macros/include_empty_value_is_null macro  # .include
+cases/spec/09-macros/include_glob macro  # .include
+cases/spec/09-macros/include_glob_no_match_stops_parsing macro  # .include
+cases/spec/09-macros/include_glob_try_no_match macro  # .include
+cases/spec/09-macros/include_inside_object macro  # .include
+cases/spec/09-macros/include_key_without_prefix macro  # .include
+cases/spec/09-macros/include_merge_ignores_priority macro  # .include
+cases/spec/09-macros/include_merge_lower_priority_still_merges macro  # .priority
+cases/spec/09-macros/include_merge_scalar_higher_priority_replaces macro  # .priority
+cases/spec/09-macros/include_merge_scalar_lower_priority_dropped macro  # .priority
+cases/spec/09-macros/include_missing_error macro  # .include
+cases/spec/09-macros/include_nested macro  # .include
+cases/spec/09-macros/include_nesting_limit_error macro  # .include
+cases/spec/09-macros/include_nesting_limit_ok macro  # .include
+cases/spec/09-macros/include_param_prefix_names macro  # .include
+cases/spec/09-macros/include_pattern_without_glob_error macro  # .include
+cases/spec/09-macros/include_prefix_array_existing_scalar macro  # .include
+cases/spec/09-macros/include_prefix_array_target macro  # .include
+cases/spec/09-macros/include_prefix_auto_key macro  # .include
+cases/spec/09-macros/include_prefix_existing_array_error macro  # .include
+cases/spec/09-macros/include_prefix_existing_object macro  # .include
+cases/spec/09-macros/include_prefix_existing_scalar_error macro  # .include
+cases/spec/09-macros/include_prefix_key macro  # .include
+cases/spec/09-macros/include_priority macro  # .include
+cases/spec/09-macros/include_priority_macro_inside macro  # .include
+cases/spec/09-macros/include_priority_must_be_integer macro  # .include
+cases/spec/09-macros/include_quoted macro  # .include
+cases/spec/09-macros/include_self_error macro  # .include
+cases/spec/09-macros/include_space_before_args macro  # .include
+cases/spec/09-macros/include_then_keys macro  # .include
+cases/spec/09-macros/include_try_missing macro  # .include
+cases/spec/09-macros/include_unknown_param_ignored macro  # .include
+cases/spec/09-macros/includes_like_include macro  # .includes
+cases/spec/09-macros/inherit_at_top_level macro  # .inherit
+cases/spec/09-macros/inherit_basic macro  # .inherit
+cases/spec/09-macros/inherit_enclosing_object macro  # .inherit
+cases/spec/09-macros/inherit_existing_keys_kept macro  # .inherit
+cases/spec/09-macros/inherit_first_of_repeated macro  # .inherit
+cases/spec/09-macros/inherit_is_shallow macro  # .inherit
+cases/spec/09-macros/inherit_keeps_source_priority macro  # .priority
+cases/spec/09-macros/inherit_missing_error macro  # .inherit
+cases/spec/09-macros/inherit_non_object_error macro  # .inherit
+cases/spec/09-macros/inherit_own_key_earlier_value macro  # .inherit
+cases/spec/09-macros/inherit_own_object macro  # .inherit
+cases/spec/09-macros/inherit_replace_appends macro  # .inherit
+cases/spec/09-macros/inherit_replace_copies_not_inherited macro  # .inherit
+cases/spec/09-macros/inherit_replaced_whatever_priority macro  # .priority
+cases/spec/09-macros/inherit_top_level_only_error macro  # .inherit
+cases/spec/09-macros/load_escape macro  # .load
+cases/spec/09-macros/load_existing_key_error macro  # .load
+cases/spec/09-macros/load_int macro  # .load
+cases/spec/09-macros/load_int_leading_digits macro  # .load
+cases/spec/09-macros/load_missing_error macro  # .load
+cases/spec/09-macros/load_multiline macro  # .load
+cases/spec/09-macros/load_priority macro  # .load
+cases/spec/09-macros/load_string macro  # .load
+cases/spec/09-macros/load_trim macro  # .load
+cases/spec/09-macros/load_try_missing macro  # .load
+cases/spec/09-macros/load_unknown_target_inserts_nothing macro  # .load
+cases/spec/09-macros/load_without_key_error macro  # .load
+cases/spec/09-macros/macro_args_no_variables macro  # .include
+cases/spec/09-macros/macro_quoted_value_not_unescaped macro  # .load
+cases/spec/09-macros/macro_unbalanced_args_error macro  # .include
+cases/spec/09-macros/macro_value_variables macro  # .include
+cases/spec/09-macros/priority_args_only macro  # .priority
+cases/spec/09-macros/priority_forms macro  # .priority
+cases/spec/09-macros/priority_invalid_error macro  # .priority
+cases/spec/09-macros/priority_missing_value_error macro  # .priority
+cases/spec/09-macros/priority_value_on_next_line_error macro  # .priority
+cases/spec/09-macros/try_include_missing_stops_parsing macro  # .try_include
+cases/spec/09-macros/try_include_present macro  # .try_include
+cases/spec/10-output/load_multiline_output macro  # .load
+cases/spec/10-output/priorities_not_emitted macro  # .priority
+cases/spec/10-output/priority_not_emitted macro  # .priority
+libucl/basic/13 macro  # .include
+libucl/basic/14 macro  # .include
+libucl/basic/15 macro  # .include
+libucl/basic/16 macro  # .include
+libucl/basic/18 macro  # .inherit
+libucl/basic/19 macro  # .include
+libucl/basic/22 non-utf8  # the key is the single byte 0xFF
+libucl/basic/23 macro  # .include
+libucl/basic/9 macro  # .include
+libucl/basic/load macro  # .load

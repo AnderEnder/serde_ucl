@@ -266,6 +266,7 @@
 pub mod de;
 pub mod error;
 pub mod lexer;
+pub mod parse;
 pub mod parser;
 pub mod time;
 pub mod value;
@@ -282,8 +283,8 @@ pub use lexer::{
 };
 pub use parser::{DuplicateKeyBehavior, ParserConfig, UclParser};
 pub use value::{
-    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Slot, UclArray, UclObject, UclValue,
-    Values,
+    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclArray, UclObject,
+    UclValue, Values,
 };
 
 // Re-export position types

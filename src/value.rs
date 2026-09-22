@@ -183,7 +183,7 @@ impl ParserFlags {
     pub const NO_IMPLICIT_ARRAYS: Self = Self(1 << 3);
     /// Save comments in the parser context.
     pub const SAVE_COMMENTS: Self = Self(1 << 4);
-    /// Treat macros as comments.
+    /// Reject macros as syntax errors and switch off variable expansion (spec §12.6).
     pub const DISABLE_MACRO: Self = Self(1 << 5);
     /// Do not set the `FILENAME` and `CURDIR` variables.
     pub const NO_FILEVARS: Self = Self(1 << 6);
@@ -248,7 +248,9 @@ impl std::ops::BitAnd for ParserFlags {
     }
 }
 
-/// Returned by [`UclObject::insert_with_strategy`] under [`DuplicateStrategy::Error`].
+/// Returned by [`UclObject::insert_with_strategy`] when a repeated key cannot take another value:
+/// under [`DuplicateStrategy::Error`], for a container type mismatch under
+/// [`DuplicateStrategy::Merge`], and for the `NO_IMPLICIT_ARRAYS` repeat of spec §8.5.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DuplicateKeyError {
     pub key: String,
@@ -256,7 +258,7 @@ pub struct DuplicateKeyError {
 
 impl fmt::Display for DuplicateKeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "duplicate element for key '{}' found", self.key)
+        write!(f, "key '{}' cannot take another value", self.key)
     }
 }
 
@@ -264,6 +266,22 @@ impl std::error::Error for DuplicateKeyError {}
 
 /// Highest libucl priority: only the 4 least significant bits are used.
 pub const MAX_PRIORITY: u8 = 0x0f;
+
+/// Where [`UclObject::insert_slot_placed`] put a value. A parser that fills containers in place
+/// uses it to find the container it has just inserted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// The value is value `n` of the key's entry.
+    Slot(usize),
+    /// The value is element `n` of the explicit array that is the entry's first value: a repeat
+    /// collected under [`ParserFlags::NO_IMPLICIT_ARRAYS`] (spec §8.5).
+    Collected(usize),
+    /// The value, a container, was merged into the entry's first value, a container of the same
+    /// type (spec §8.4).
+    Merged,
+    /// The value was discarded: the existing value has a higher priority (spec §8.3).
+    Dropped,
+}
 
 /// One value of an [`Entry`], with its priority and `.inherit` flag.
 #[derive(Debug, Clone, PartialEq)]
@@ -377,6 +395,11 @@ impl Entry {
         &self.slots
     }
 
+    /// Value `index` of the entry, mutably.
+    pub fn value_at_mut(&mut self, index: usize) -> Option<&mut UclValue> {
+        self.slots.get_mut(index).map(|s| &mut s.value)
+    }
+
     /// Adds a value to the entry at priority 0, making it an implicit array.
     pub fn push(&mut self, value: UclValue) {
         self.slots.push(Slot::new(value, 0));
@@ -417,17 +440,20 @@ impl Entry {
         slot: Slot,
         replace_inherited: bool,
         flags: ParserFlags,
-    ) -> Result<(), DuplicateKeyError> {
+    ) -> Result<Placement, DuplicateKeyError> {
         let head = self.head();
         if (replace_inherited && head.inherited) || slot.priority > head.priority {
             *self = Entry::from_slot(slot);
+            Ok(Placement::Slot(0))
         } else if slot.priority == head.priority {
             if flags.contains(ParserFlags::NO_IMPLICIT_ARRAYS) {
                 return self.collect(key, slot);
             }
             self.slots.push(slot);
+            Ok(Placement::Slot(self.slots.len() - 1))
+        } else {
+            Ok(Placement::Dropped)
         }
-        Ok(())
     }
 
     /// Adds a repeated value under `NO_IMPLICIT_ARRAYS` (spec §8.5). The first repeat replaces the
@@ -437,12 +463,12 @@ impl Entry {
     /// - The collection array has priority 0, whatever its elements' priorities, so a later value
     ///   with a priority above 0 replaces it.
     /// - If `merge` has replaced the collection array with a scalar, a later repeat is an error.
-    fn collect(&mut self, key: &str, slot: Slot) -> Result<(), DuplicateKeyError> {
+    fn collect(&mut self, key: &str, slot: Slot) -> Result<Placement, DuplicateKeyError> {
         if self.head().collected {
             return match &mut self.slots[0].value {
                 UclValue::Array(items) => {
                     items.push(slot.value);
-                    Ok(())
+                    Ok(Placement::Collected(items.len() - 1))
                 }
                 _ => Err(DuplicateKeyError {
                     key: key.to_owned(),
@@ -454,11 +480,12 @@ impl Entry {
             .map(|s| s.value)
             .collect();
         items.push(slot.value);
+        let index = items.len() - 1;
         *self = Entry::from_slot(Slot {
             collected: true,
             ..Slot::new(UclValue::Array(items), 0)
         });
-        Ok(())
+        Ok(Placement::Collected(index))
     }
 
     /// Resolves a repeated key under [`DuplicateStrategy::Merge`] (spec §8.4), by the type of the
@@ -478,14 +505,14 @@ impl Entry {
         key: &str,
         slot: Slot,
         flags: ParserFlags,
-    ) -> Result<(), DuplicateKeyError> {
+    ) -> Result<Placement, DuplicateKeyError> {
         let head = &mut self.slots[0];
         if !is_container(&head.value) {
             return self.add_by_priority(key, slot, false, flags);
         }
         if !is_container(&slot.value) {
             head.value = slot.value;
-            return Ok(());
+            return Ok(Placement::Slot(0));
         }
         match (&mut head.value, slot.value) {
             (UclValue::Object(target), UclValue::Object(source)) => {
@@ -499,11 +526,11 @@ impl Entry {
                         )?;
                     }
                 }
-                Ok(())
+                Ok(Placement::Merged)
             }
             (UclValue::Array(target), UclValue::Array(source)) => {
                 target.extend(source);
-                Ok(())
+                Ok(Placement::Merged)
             }
             _ => Err(DuplicateKeyError {
                 key: key.to_owned(),
@@ -686,20 +713,35 @@ impl UclObject {
         strategy: DuplicateStrategy,
         flags: ParserFlags,
     ) -> Result<(), DuplicateKeyError> {
+        self.insert_slot_placed(key, slot, strategy, flags)
+            .map(|_| ())
+    }
+
+    /// [`UclObject::insert_slot_with_strategy`], reporting where the value went.
+    ///
+    /// The key the value is stored under is `key`, lowercased under
+    /// [`ParserFlags::KEY_LOWERCASE`].
+    pub fn insert_slot_placed(
+        &mut self,
+        key: impl Into<String>,
+        slot: Slot,
+        strategy: DuplicateStrategy,
+        flags: ParserFlags,
+    ) -> Result<Placement, DuplicateKeyError> {
         let mut key = key.into();
         if flags.contains(ParserFlags::KEY_LOWERCASE) {
             key.make_ascii_lowercase();
         }
         let Some(entry) = self.entries.get_mut(&key) else {
             self.entries.insert(key, Entry::from_slot(slot));
-            return Ok(());
+            return Ok(Placement::Slot(0));
         };
         match strategy {
             DuplicateStrategy::Append => entry.add_by_priority(&key, slot, true, flags),
             DuplicateStrategy::Merge => entry.merge(&key, slot, flags),
             DuplicateStrategy::Rewrite => {
                 *entry = Entry::from_slot(slot);
-                Ok(())
+                Ok(Placement::Slot(0))
             }
             DuplicateStrategy::Error => Err(DuplicateKeyError { key }),
         }
@@ -856,7 +898,12 @@ mod tests {
                 ParserFlags::DEFAULT,
             )
             .unwrap_err();
-        assert_eq!(err.to_string(), "duplicate element for key 'k' found");
+        assert_eq!(
+            err,
+            DuplicateKeyError {
+                key: "k".to_string()
+            }
+        );
         assert_eq!(values(&obj, "k"), vec![int(2)]);
     }
 
@@ -1276,6 +1323,61 @@ mod tests {
         assert_eq!(entry.clone().into_value(), int(1));
         entry.push(int(2));
         assert_eq!(entry.into_value(), UclValue::Array(vec![int(1), int(2)]));
+    }
+
+    #[test]
+    fn test_insert_slot_placed_reports_where_the_value_went() {
+        let append = DuplicateStrategy::Append;
+        let flags = ParserFlags::DEFAULT;
+        let mut obj = UclObject::new();
+        let place = |obj: &mut UclObject, v, pri, s, f| {
+            obj.insert_slot_placed("k", Slot::new(v, pri), s, f)
+                .unwrap()
+        };
+        assert_eq!(
+            place(&mut obj, int(1), 1, append, flags),
+            Placement::Slot(0)
+        );
+        assert_eq!(
+            place(&mut obj, int(2), 1, append, flags),
+            Placement::Slot(1)
+        );
+        assert_eq!(
+            place(&mut obj, int(3), 0, append, flags),
+            Placement::Dropped
+        );
+        assert_eq!(
+            place(&mut obj, int(4), 2, append, flags),
+            Placement::Slot(0)
+        );
+
+        let merge = DuplicateStrategy::Merge;
+        let empty = || UclValue::Object(UclObject::new());
+        let mut obj = UclObject::new();
+        assert_eq!(
+            place(&mut obj, empty(), 0, merge, flags),
+            Placement::Slot(0)
+        );
+        assert_eq!(place(&mut obj, empty(), 0, merge, flags), Placement::Merged);
+
+        let nia = ParserFlags::NO_IMPLICIT_ARRAYS;
+        let mut obj = UclObject::new();
+        assert_eq!(place(&mut obj, int(1), 0, append, nia), Placement::Slot(0));
+        assert_eq!(
+            place(&mut obj, empty(), 0, append, nia),
+            Placement::Collected(1)
+        );
+        assert_eq!(
+            place(&mut obj, empty(), 0, append, nia),
+            Placement::Collected(2)
+        );
+        assert!(
+            obj.entry_mut("k")
+                .unwrap()
+                .value_at_mut(0)
+                .unwrap()
+                .is_array()
+        );
     }
 
     #[test]

@@ -454,6 +454,10 @@ pub enum UclError {
     /// I/O error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Error from the new parser core, [`crate::parse`]
+    #[error("Syntax error: {0}")]
+    Syntax(#[from] crate::parse::Error),
 }
 
 /// Lexical analysis errors

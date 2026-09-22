@@ -155,3 +155,72 @@
   the root object's priority and array elements' priorities, as §8.7 states. Commits: `a7344ce`,
   `4d8e863`, `17b0b85`. The spec contains behaviour only: no libucl code, internal names, or
   procedures.
+
+- 2026-09-23 — **Implementation team, C2 (new parser core).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `WORKLIST.md`, `LOG.md`, `QUESTIONS.md`;
+    - spec `spec-v2`, read from the working tree after checking that `git diff spec-v2 -- docs/spec/`
+      is empty: `README.md`, §01–§09, §11, §12 (§10 not read);
+    - `tests/conformance.rs`, `tests/conformance/README.md`, the header of `xfail.txt`, case inputs
+      and golden files (`cases/spec/08-duplicates/priority_applies_to_containers`,
+      `cases/spec/07-variables/filename_for_string_input`, `cases/spec/11-errors/*`,
+      `cases/spec/02-comments/hash_at_end_of_input`, `libucl/basic/22`), and a grep of all golden
+      files for hex-encoded keys and strings (only `libucl/basic/22`);
+    - the crate's own code: `src/value.rs`, `src/lib.rs`, parts of `src/error.rs` (`Position`,
+      `UclError`, the outline of `with_source_context`), `examples/advanced_features.rs` lines
+      355–385 (a `match` on `UclError`), `Cargo.toml`;
+    - black-box runs of `target/libucl-oracle/ucl-dump`: its usage message; about 300 probes on
+      scratch inputs, with options `-l`, `-T`, `-I`, `-M`, `-s merge|rewrite|error`; and
+      differential runs of about 90,000 generated inputs through the oracle and the new core
+      (a scratch tool outside the repository), across the same options. The findings are in
+      `QUESTIONS.md` #5–#16 with their inputs and results. In the last runs every remaining
+      difference falls under one of those questions;
+    - the clean `CLAUDE.md` embedded in the agent definition; `cargo build`, `cargo test`,
+      `cargo fmt --check` output.
+  - Seen without opening the files:
+    - one directory listing of the session scratchpad's root, shared with other sessions, showed
+      other sessions' file names, among them `.c` files, `chartable.txt` and `parser_head.rs`.
+      None was opened, and all work used a private subdirectory;
+    - two greps over `src/` for `duplicate element` and `DuplicateKeyError` had `src/lexer.rs` and
+      `src/parser.rs` in scope. Neither matched in them, so nothing from those files was printed;
+    - the oracle's stderr messages, libucl's wording, in probe output. The core's messages are the
+      project's own;
+    - `tests/conformance/README.md` names `tools/ucl-dump/ucl_dump.c`, and `xfail.txt` notes name
+      `PLAN.md` items. Neither was followed.
+  - Not consulted: libucl source; anything under `target/libucl-oracle/` other than running
+    `ucl-dump` (no `libucl/`, `build/` or `build.log`); the oracle tool's sources;
+    `scripts/regen-golden.sh` (neither read nor run); `REVIEW.md`, `PLAN.md`, `PROGRESS.md`;
+    `quarantine/*`; history of `src/` before `ef8007e`; history of `CLAUDE.md`; `src/lexer.rs`,
+    `src/parser.rs`.
+  - Commits, with the `xfail-new.txt` count after each:
+    - `f8385a0` C2.1: `DuplicateKeyError` wording is the project's own; `test_rewrite_and_error`
+      checks the error value and key (no `xfail-new.txt` yet);
+    - `19e5b2d` C2.2: `src/parse/` skeleton and public API, the second conformance suite with
+      `.flags` applied, `xfail-new.txt` with all 788 cases: 788;
+    - `bb69379` C2.3: the parser core (§1–§8, §11, §12; macros recognised): 130;
+    - `7333c5f` C2.4: two gaps found by differential runs (QUESTIONS.md #9, #15); unit tests: 130;
+    - `19f0c68` C2.5: `UclError::Syntax`; QUESTIONS.md #5–#15: 130;
+    - `abb5da0` C2.6: this entry: 130;
+    - a follow-up C2.7 commit: QUESTIONS.md #16 and the corrections to this entry: 130.
+  - Result:
+    - `xfail-new.txt`: 130 entries, 129 `macro` (C3) and 1 `non-utf8` (`libucl/basic/22`).
+      `xfail.txt` is unchanged at 431. `cargo test`: 431 tests pass (395 before C2).
+      `cargo build --examples --benches` builds.
+    - Design: containers are filled in place on an explicit frame stack, so nesting never grows
+      the call stack and a nested object is already in its parent while it is parsed (which
+      `.inherit` needs in C3). Supporting changes to the model: `Placement`,
+      `UclObject::insert_slot_placed`, `Entry::value_at_mut`. Root and array-element priorities
+      are not represented (§8.7). A container dropped for a lower priority is parsed into a
+      detached value; that path needs C3's priority changes to be reached.
+    - Spec gaps: where the spec is silent the core follows the oracle (QUESTIONS.md #5–#9, #15);
+      where the spec states a rule that the oracle contradicts, the core follows the spec
+      (#10–#14, #16). Two of these rest on a reading of the spec: #5 takes §1.6's "a bare key
+      followed by a line break" to mean a line break directly after the key, and #15 takes §5.8
+      to be silent on out-of-range numbers followed by other text.
+    - Choices for the spec's *Uncertain* items: §4.8, fewer than four characters after
+      backslash-u in an unquoted value: the backslash is dropped and the characters kept
+      (`x\u12` gives `xu12`; the oracle gives `xu2`); §7.7, a handler's value is substituted in
+      place like a registered variable's and counts as a replacement for §7.5; §12.5, every skipped
+      comment is saved with its text and position, without attaching it to a value.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

@@ -4,9 +4,19 @@
 //! libucl's typed dump of the same input (`<case>.golden.json`, produced by
 //! `scripts/regen-golden.sh`). Expected values are never written by hand.
 //!
-//! `tests/conformance/xfail.txt` lists the cases known to fail, one per line:
-//! `<case-id> <reason>`. The run fails when an unlisted case fails, and also when a listed case
-//! passes, so the list can only shrink.
+//! Two parsers run every case:
+//!
+//! - the existing parser (`libucl_conformance`), with its known failures in
+//!   `tests/conformance/xfail.txt`. It cannot apply `.flags` files, so cases that have one fail;
+//! - the new parser core `ucl_lexer::parse` (`libucl_conformance_new_core`), with its known
+//!   failures in `tests/conformance/xfail-new.txt`. It applies each case's `.flags` file.
+//!
+//! Each xfail file lists cases one per line: `<case-id> <reason>`. The run fails when an unlisted
+//! case fails, and also when a listed case passes, so the lists can only shrink.
+//!
+//! A case whose golden file is an error passes only if the parser rejects the input. For the new
+//! core, a rejection because the input uses something not supported yet (`Error::is_unsupported`,
+//! such as a macro before C3) does not count: the case fails with the reason `macro`.
 //!
 //! Set `UCL_CONFORMANCE_REPORT=1` (with `-- --nocapture`) to print every failing case with the
 //! first point where the two dumps differ, and a suggested xfail reason.
@@ -16,7 +26,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use ucl_lexer::{MapVariableHandler, UclParser, UclValue};
+use std::sync::Mutex;
+use ucl_lexer::parse::Parser as CoreParser;
+use ucl_lexer::{DuplicateStrategy, MapVariableHandler, ParserFlags, UclParser, UclValue};
 
 const CONFORMANCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance");
 
@@ -157,7 +169,15 @@ fn strip_unobservable_priorities(node: &mut J, is_root: bool) {
     }
 }
 
-fn parse_with_crate(case: &Case) -> Result<Result<J, String>, &'static str> {
+/// What a parser made of a case: a dump, a rejection, or a reason why the case could not be run.
+enum Parsed {
+    Value(J),
+    Rejected(String),
+    /// The parser recognised the input but does not support it yet; never a pass.
+    Unsupported(String),
+}
+
+fn parse_with_crate(case: &Case) -> Result<Parsed, &'static str> {
     let bytes = fs::read(&case.input).unwrap();
     let Ok(text) = std::str::from_utf8(&bytes) else {
         return Err("non-utf8");
@@ -170,10 +190,102 @@ fn parse_with_crate(case: &Case) -> Result<Result<J, String>, &'static str> {
     vars.insert("ABI".to_string(), "unknown".to_string());
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let mut parser = UclParser::with_variable_handler(text, Box::new(vars));
-        parser
-            .parse_document()
-            .map(|v| dump(&v))
-            .map_err(|e| e.to_string())
+        match parser.parse_document() {
+            Ok(v) => Parsed::Value(dump(&v)),
+            Err(e) => Parsed::Rejected(e.to_string()),
+        }
+    }));
+    result.map_err(|_| "panic")
+}
+
+/// The settings a case's `.flags` file asks for (`tests/conformance/README.md`).
+#[derive(Default)]
+struct Setup {
+    flags: ParserFlags,
+    vars: Vec<(String, String)>,
+    handler: bool,
+    priority: Option<u8>,
+    strategy: Option<DuplicateStrategy>,
+    string_input: bool,
+}
+
+fn setup(case: &Case) -> Setup {
+    let mut setup = Setup::default();
+    for flag in &case.flags {
+        let flag = flag.as_str();
+        let parser_flag = match flag {
+            "key-lowercase" => Some(ParserFlags::KEY_LOWERCASE),
+            "zerocopy" => Some(ParserFlags::ZEROCOPY),
+            "no-time" => Some(ParserFlags::NO_TIME),
+            "no-implicit-arrays" => Some(ParserFlags::NO_IMPLICIT_ARRAYS),
+            "save-comments" => Some(ParserFlags::SAVE_COMMENTS),
+            "disable-macro" => Some(ParserFlags::DISABLE_MACRO),
+            "no-filevars" => Some(ParserFlags::NO_FILEVARS),
+            _ => None,
+        };
+        if let Some(f) = parser_flag {
+            setup.flags |= f;
+        } else if flag == "variable-handler" {
+            setup.handler = true;
+        } else if flag == "string-input" {
+            setup.string_input = true;
+        } else if let Some(var) = flag.strip_prefix("var:") {
+            let (name, value) = var
+                .split_once('=')
+                .unwrap_or_else(|| panic!("{}: bad flag '{flag}'", case.id));
+            setup.vars.push((name.to_string(), value.to_string()));
+        } else if let Some(n) = flag.strip_prefix("priority:") {
+            let n: u32 = n
+                .parse()
+                .unwrap_or_else(|_| panic!("{}: bad flag '{flag}'", case.id));
+            setup.priority = Some((n & 0x0f) as u8);
+        } else if let Some(name) = flag.strip_prefix("strategy:") {
+            setup.strategy = Some(match name {
+                "append" => DuplicateStrategy::Append,
+                "merge" => DuplicateStrategy::Merge,
+                "rewrite" => DuplicateStrategy::Rewrite,
+                "error" => DuplicateStrategy::Error,
+                _ => panic!("{}: unknown strategy in '{flag}'", case.id),
+            });
+        } else {
+            panic!("{}: unknown .flags entry '{flag}'", case.id);
+        }
+    }
+    setup
+}
+
+/// Parses a case with the new core, applying its `.flags` file as the oracle does
+/// (`docs/spec/README.md`, "How the conformance oracle runs every case").
+fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
+    let setup = setup(case);
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let mut parser = CoreParser::with_flags(setup.flags);
+        parser.register_variable("ABI", "unknown");
+        for (name, value) in &setup.vars {
+            parser.register_variable(name.as_str(), value.as_str());
+        }
+        if setup.handler {
+            parser.set_variable_handler(|name| {
+                name.starts_with("H_").then(|| "[handled]".to_string())
+            });
+        }
+        if let Some(priority) = setup.priority {
+            parser.set_priority(priority);
+        }
+        if let Some(strategy) = setup.strategy {
+            parser.set_strategy(strategy);
+        }
+        let result = if setup.string_input {
+            let bytes = fs::read(&case.input).unwrap();
+            parser.parse(&bytes)
+        } else {
+            parser.parse_file(&case.input)
+        };
+        match result {
+            Ok(v) => Parsed::Value(dump(&v)),
+            Err(e) if e.is_unsupported() => Parsed::Unsupported(e.to_string()),
+            Err(e) => Parsed::Rejected(e.to_string()),
+        }
     }));
     result.map_err(|_| "panic")
 }
@@ -263,7 +375,7 @@ fn uses_macros(case: &Case) -> bool {
     })
 }
 
-fn evaluate(case: &Case) -> Outcome {
+fn evaluate(case: &Case, parse: fn(&Case) -> Result<Parsed, &'static str>) -> Outcome {
     let golden_text = match fs::read_to_string(&case.golden) {
         Ok(t) => t,
         Err(_) => {
@@ -277,7 +389,7 @@ fn evaluate(case: &Case) -> Outcome {
     strip_unobservable_priorities(&mut golden, true);
     let golden_is_error = golden.get("error").is_some();
 
-    let actual = match parse_with_crate(case) {
+    let actual = match parse(case) {
         Err(hint) => {
             let hint = if hint == "non-utf8" {
                 "non-utf8, D2"
@@ -294,16 +406,20 @@ fn evaluate(case: &Case) -> Outcome {
     let macro_hint = if uses_macros(case) { "macro" } else { "parser" };
 
     match (golden_is_error, actual) {
-        (true, Err(_)) => Outcome::Pass,
-        (true, Ok(value)) => Outcome::Fail {
+        (_, Parsed::Unsupported(e)) => Outcome::Fail {
+            hint: "macro",
+            detail: format!("not supported yet: {e}"),
+        },
+        (true, Parsed::Rejected(_)) => Outcome::Pass,
+        (true, Parsed::Value(value)) => Outcome::Fail {
             hint: "parser",
             detail: format!("libucl rejects the input; crate accepted it as {value}"),
         },
-        (false, Err(e)) => Outcome::Fail {
+        (false, Parsed::Rejected(e)) => Outcome::Fail {
             hint: macro_hint,
             detail: format!("crate error: {e}"),
         },
-        (false, Ok(value)) => match find_diff(&golden, &value, "$") {
+        (false, Parsed::Value(value)) => match find_diff(&golden, &value, "$") {
             None => Outcome::Pass,
             Some(detail) => Outcome::Fail {
                 hint: macro_hint,
@@ -313,8 +429,9 @@ fn evaluate(case: &Case) -> Outcome {
     }
 }
 
-fn load_xfail() -> BTreeMap<String, String> {
-    let text = fs::read_to_string(Path::new(CONFORMANCE_DIR).join("xfail.txt")).unwrap_or_default();
+fn load_xfail(file: &str) -> BTreeMap<String, String> {
+    let text = fs::read_to_string(Path::new(CONFORMANCE_DIR).join(file))
+        .unwrap_or_else(|e| panic!("cannot read {file}: {e}"));
     let mut map = BTreeMap::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -325,38 +442,54 @@ fn load_xfail() -> BTreeMap<String, String> {
         let reason = reason.trim();
         assert!(
             !reason.is_empty(),
-            "xfail.txt line {}: entry '{id}' has no reason",
+            "{file} line {}: entry '{id}' has no reason",
             n + 1
         );
         assert!(
             map.insert(id.to_string(), reason.to_string()).is_none(),
-            "xfail.txt: duplicate '{id}'"
+            "{file}: duplicate '{id}'"
         );
     }
     map
 }
 
+/// Serialises the panic-hook swap of the two tests, which cargo runs in parallel.
+static PANIC_HOOK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn libucl_conformance() {
+    run_suite("existing parser", "xfail.txt", parse_with_crate);
+}
+
+#[test]
+fn libucl_conformance_new_core() {
+    run_suite("new core", "xfail-new.txt", parse_with_new_core);
+}
+
+fn run_suite(label: &str, xfail_file: &str, parse: fn(&Case) -> Result<Parsed, &'static str>) {
     let cases = discover();
     assert!(
         !cases.is_empty(),
         "no conformance cases found under {CONFORMANCE_DIR}"
     );
-    let xfail = load_xfail();
+    let xfail = load_xfail(xfail_file);
     let report = std::env::var_os("UCL_CONFORMANCE_REPORT").is_some();
 
     // Parser panics are caught per case; keep their messages out of the output.
-    let hook = panic::take_hook();
-    panic::set_hook(Box::new(|_| {}));
-    let outcomes: Vec<(&Case, Outcome)> = cases.iter().map(|c| (c, evaluate(c))).collect();
-    panic::set_hook(hook);
+    let outcomes: Vec<(&Case, Outcome)> = {
+        let _guard = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        let hook = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        let outcomes = cases.iter().map(|c| (c, evaluate(c, parse))).collect();
+        panic::set_hook(hook);
+        outcomes
+    };
 
     let known: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
     let mut problems = Vec::new();
     for id in xfail.keys() {
         if !known.contains(id.as_str()) {
-            problems.push(format!("xfail.txt lists unknown case '{id}'"));
+            problems.push(format!("{xfail_file} lists unknown case '{id}'"));
         }
     }
 
@@ -365,11 +498,12 @@ fn libucl_conformance() {
     for (case, outcome) in &outcomes {
         match (outcome, xfail.get(&case.id)) {
             (Outcome::Pass, None) => passed += 1,
-            (Outcome::Pass, Some(_)) => {
-                problems.push(format!("{} now passes: remove it from xfail.txt", case.id))
-            }
+            (Outcome::Pass, Some(_)) => problems.push(format!(
+                "{} now passes: remove it from {xfail_file}",
+                case.id
+            )),
             (Outcome::Fail { hint, detail }, None) => problems.push(format!(
-                "{} fails and is not in xfail.txt (suggested reason: {hint})\n    {detail}",
+                "{} fails and is not in {xfail_file} (suggested reason: {hint})\n    {detail}",
                 case.id
             )),
             (Outcome::Fail { .. }, Some(reason)) => {
@@ -378,18 +512,18 @@ fn libucl_conformance() {
             }
         }
         if report && let Outcome::Fail { hint, detail } = outcome {
-            println!("FAIL {} [{hint}]\n    {detail}", case.id);
+            println!("FAIL({label}) {} [{hint}]\n    {detail}", case.id);
         }
     }
 
     let total = outcomes.len();
     let xfail_total: usize = xfailed.values().sum();
     println!(
-        "conformance: {total} cases, {passed} pass, {xfail_total} expected failures {xfailed:?}"
+        "conformance ({label}): {total} cases, {passed} pass, {xfail_total} expected failures {xfailed:?}"
     );
     assert!(
         problems.is_empty(),
-        "conformance problems:\n{}",
+        "conformance problems ({label}):\n{}",
         problems.join("\n")
     );
 }
