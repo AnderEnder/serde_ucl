@@ -1,0 +1,2 @@
+a { .priority 3 }
+b = 1

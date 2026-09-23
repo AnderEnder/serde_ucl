@@ -1,0 +1,1 @@
+.load(key="k", escape=1) "files/esc.txt"

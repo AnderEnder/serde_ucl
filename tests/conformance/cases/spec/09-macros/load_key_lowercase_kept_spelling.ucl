@@ -1,0 +1,2 @@
+.load(key="K") "files/num.txt"
+k = 2

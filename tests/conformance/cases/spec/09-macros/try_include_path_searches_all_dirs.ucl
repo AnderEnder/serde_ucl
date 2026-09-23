@@ -1,0 +1,2 @@
+.try_include(path=["files/v4/p1", "files/v4/p2"]) "pc.inc"
+k = 1

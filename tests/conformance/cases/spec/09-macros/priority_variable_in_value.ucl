@@ -1,0 +1,4 @@
+.priority $P
+a = 1
+.priority "1$P"
+b = 1

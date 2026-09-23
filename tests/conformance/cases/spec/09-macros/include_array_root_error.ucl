@@ -1,0 +1,2 @@
+a = 1
+.include "files/v4/array_root.inc"

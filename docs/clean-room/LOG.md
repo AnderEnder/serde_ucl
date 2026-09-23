@@ -318,3 +318,26 @@
       tests pass. `cargo build --examples --benches` builds.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — Role: spec team. Item: C0, release `spec-v4` (tag on `591b818`). Answers implementer
+  questions #17–#22 from C2.8 and completes §9 for C3 (macros). Inputs consulted: libucl source at
+  the pinned commit (the include, priority, load and inherit handlers; macro name, argument and
+  value parsing; comment saving and attachment; number reading; character classes; the emitter's
+  key quoting; file fetching, path resolution and file variables), black-box oracle runs, the
+  conformance corpus, and `spec-v3`. All six questions confirm the implementer's reading and are
+  written down: §12.5 (#17; a replaced value's comments reappearing later is **Uncertain**), §9.2
+  and §2.2 (#18), §5.2 and §5.8 (#19; an out-of-range float truncated for `kb`/`mb`/`gb` is
+  platform-dependent, **Uncertain**, §5.4), §12.1 (#20), §4.8 and §7.6 (#21), §3.4 (#22). §9.5 now
+  states that a bare macro value keeps its trailing spaces. The §9 audit corrected three earlier
+  statements: macro arguments do see `FILENAME` = `undef` and `CURDIR` (not "no variables");
+  whitespace after a comment group before a macro value is part of the value; a braced included
+  file takes over the enclosing object's brace. It adds parameter matching and types, value
+  forms, include units (priority and strategy not inherited, file variables, `no-filevars`),
+  braces in included files, missing and unusable files, globs, nesting under a key, `sign`/`url`/
+  `path`, and details of `.priority`, `.load` and `.inherit`; §10.1 gains the output facts of
+  values created by macros. README: Uncertain list, and *Known gaps* now lists three project
+  decisions still open (`sign`/`url`/`path`; how the API reports a silent stop; file parsing under
+  `no-filevars`). 261 new cases with golden files from the oracle (1143 in all); no existing
+  golden file changed. The new core fails 193 of them, all reason `macro` (`xfail-new.txt`); the
+  old parser fails 206 (`xfail.txt`). The conformance README notes the new helper files. Both
+  runners green at every commit. Commits: `797072a`, `a81b420`, `591b818`. The spec contains
+  behaviour only: no libucl code, internal names, or procedures.

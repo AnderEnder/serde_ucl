@@ -1,0 +1,3 @@
+.load(key="a b") "../09-macros/files/num.txt"
+.include(key="x y") "../09-macros/files/a.inc"
+.include(key="c{d", target="array") "../09-macros/files/a.inc"

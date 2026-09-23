@@ -28,7 +28,7 @@ Names are case-sensitive: `$abi` and `${abi}` do not match `ABI` (`names_case_se
 | macro values (all three forms) | yes | `cases/spec/09-macros/include_curdir` (quoted), `cases/spec/09-macros/include_braces_variables` (braces), `cases/spec/09-macros/macro_value_variables` (bare) |
 | single-quoted strings | no | `not_in_single_quotes`, `cases/spec/06-strings/sq_no_variables` |
 | keys, bare or quoted | no | `not_in_keys`, `cases/spec/03-keys/quoted_no_variable_expansion` |
-| macro argument lists `(…)` | no | `cases/spec/09-macros/macro_args_no_variables` |
+| macro argument lists `(…)` | only `FILENAME` = `undef` and `CURDIR` = the working directory, as for a string document, and neither with `no-filevars` (§9.2) | `cases/spec/09-macros/macro_args_no_variables`, `cases/spec/09-macros/macro_args_filename_is_undef` |
 | numbers and keywords | no: expansion never changes a value's type, so it never produces a number, boolean or null (`$T` with `T` = `true` → `"true"`; `1$ABI` → `"1unknown"`) | `expanded_values_stay_strings`, `numbers_are_not_expanded` |
 
 With `disable-macro` set, nothing is expanded anywhere (§12.6).
@@ -97,7 +97,10 @@ The same holds for unquoted values: `$ABI$$x` → `"unknown$x"`, `$$x` → `"$$x
     `\$ABI$ABI` → `"unknownunknown"`, `\$ABIc$` → `"unknownc$"`, `\$ABI $` → `"unknown $"`,
     `${\$ABI` → `"${unknown"`;
   - the `$$` rule of §7.5 applies to the decoded text: `x$\$ABI` → `"x$$ABI"`;
-  - a `$` after an escaped backslash is not escaped: `\\$ABI` → `"\\unknown"`.
+  - a `$` after an escaped backslash is not escaped: `\\$ABI` → `"\\unknown"`;
+  - every `$` as written counts, also one that a `\u` escape consumes or drops (§4.8):
+    `\$ABI\u$000` → `"unknown\u0000"`, `\$ABI\u$` → `"unknownu"`
+    (`backslash_dollar_counts_dollar_in_unicode_escape`).
 
 ## 7.7 Variable handler
 

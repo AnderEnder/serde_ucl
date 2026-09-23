@@ -1,0 +1,1 @@
+a { .load(key="k") "files/num.txt" }

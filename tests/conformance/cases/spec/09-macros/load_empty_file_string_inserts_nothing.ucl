@@ -1,0 +1,2 @@
+.load(key="k") "files/v4/empty.txt"
+j = 1

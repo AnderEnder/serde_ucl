@@ -1,0 +1,2 @@
+.include(key="$FILENAME") "files/a.inc"
+.include(key="x${FILENAME}") "files/b.inc"

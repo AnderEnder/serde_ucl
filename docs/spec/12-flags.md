@@ -24,6 +24,21 @@ key `"A"`; `"\N" = 1` → key LF, because `\N` becomes `\n`; `"\U0042" = 1` → 
 (`key_lowercase`, `key_lowercase_non_ascii`). Keys that differ only in ASCII case are the same
 key, so they form multi-value entries (`key_lowercase_merges_case`, §8.6).
 
+- **Quirk.** Because lowercasing comes first, `\U` in a quoted key becomes `\u`. The escapes are
+  checked as written, where `\U` is an unknown escape and allowed (§6.1), and the lowercased text
+  is then decoded with the rules of §4.8 for `\u` in unquoted values, so an invalid or short `\u`
+  made this way is not an error: `"\U12"` → `u2`, `"\U123"` → U+1230, `"\U"` → `u`,
+  `"\U\""` → `u"`, `"\UZZZZ"` → a NUL byte (`key_lowercase_upper_u_escape_decoded_as_unquoted`).
+  A `\u` written as such is checked as without the flag: `"\uZZZZ" = 1` is an error
+  (`key_lowercase_escapes_checked_as_written_error`). Without the flag, `"\UZZZZ"` is the key
+  `UZZZZ` (`key_lowercase_upper_u_escape_without_flag`).
+- Escapes can produce uppercase letters, so the keys of one entry may differ in case. Keys are
+  compared ignoring ASCII case, and the entry keeps the spelling of its first key:
+  `"\u0041" = 1⏎a = 2` → `A: ⟨int 1 | int 2⟩`; `"\u0041\u0042" = 3⏎ab = 4⏎"aB" = 5` → `AB`
+  with three values; `A = 1⏎"\u0041" = 2` → `a: ⟨int 1 | int 2⟩`
+  (`key_lowercase_decoded_key_first_spelling_kept`, `key_lowercase_later_decoded_key_joins`).
+- Keys created by macros keep their spelling and compare the same way (§9.4, §9.6, §9.7).
+
 ## 12.2 `zerocopy`
 
 No observable effect on the value tree (`zerocopy_no_effect`).
@@ -55,28 +70,78 @@ What is saved:
   is: `/* c */a = 1` → `"/* c */a"`, `/* d */⏎` → `"/* d */\n"`
   (`comments_block_comment_saved_with_next_byte`). A nested block comment is saved as one comment.
   **Uncertain (undefined in libucl):** at the end of input that byte lies outside the document.
+- **Quirk.** A `#` that is the last byte of the input is saved, as the comment `"#"`, only where it
+  is read as a comment: as the whole input, directly after another comment (after the LF of a line
+  comment, or directly after `*/`), and where a value on a following line may start (§1.6):
+  `#`, `a = 1⏎# c⏎#`, `a = 1⏎/* c */#` and `a =⏎ #` save it (`comments_last_byte_hash_alone_saved`,
+  `comments_last_byte_hash_after_comment_saved`, `comments_last_byte_hash_after_block_comment_saved`,
+  `comments_last_byte_hash_for_value_on_next_line_saved`). After a value it only ends the value:
+  `a = 1 #`, `a = 1#`, `a = 1⏎#`, `a = [1]#` and `a = 1;#` save nothing
+  (`comments_last_byte_hash_after_value_not_saved`). Elsewhere it is an error (§2.2).
 - Comments are kept in input order.
 
 Where they attach:
 
+- Each value has **one** list of comments. The first comments attached to a value decide whether
+  the list comes before it (`"c"`) or after it (`"ca"`). Comments attached to the same value later
+  are appended to that list, whatever their own placement: `# c⏎a = 1 # d` → `a` has
+  `"c": ["# c", "# d"]`; `a = [ # c⏎1 ] # d` → the element `1` has `"c": ["# c", "# d"]`
+  (`comments_later_comments_join_first_list`, `comments_after_joins_before_list_in_array`).
 - Comments not yet attached go, as *before* comments, to the next value that is created: the value
-  of the next key, the next value of a repeated key, or the next array element. It does not matter
-  where they stand: before the key, between the key and its value, or after the previous value on
-  its line. `# c1⏎# c2⏎a = 1 # c3⏎b = /* c4 */ 2⏎c = [ 1, # c5⏎ 2 ]` → `a` gets `c1` and `c2`,
-  `b` gets `c3` and `c4`, and the element `2` gets `c5` (`comments_attach_to_next_value`);
-  `a = 1⏎a = 2 # c⏎a = 3` → the third value of `a` gets `c` (`comments_repeated_key`).
+  of the next key, the next value of a repeated key, or the next array element. An entry's value is
+  created when its key has been read together with what follows the key on its line up to the
+  value: the separator, spaces and comments. An array element is created where it starts. So it
+  does not matter where the comments stand: before the key, between the key and its value, or after
+  the previous value on its line. `# c1⏎# c2⏎a = 1 # c3⏎b = /* c4 */ 2⏎c = [ 1, # c5⏎ 2 ]` → `a`
+  gets `c1` and `c2`, `b` gets `c3` and `c4`, and the element `2` gets `c5`
+  (`comments_attach_to_next_value`); `a = 1⏎a = 2 # c⏎a = 3` → the third value of `a` gets `c`
+  (`comments_repeated_key`). Macros create no value, so comments before them stay pending
+  (`comments_before_macro_go_to_next_value`).
+- A value on a following line (§1.6) was created with its key, before the comments in front of it
+  were read. Those comments therefore go to the next value created, or to the value created most
+  recently when a container closes or the input ends (below): `c =⏎#z⏎b⏎d = 1` → `d` gets `#z`;
+  `a =⏎# c⏎{ b = 1 }` → `b` gets `# c`; `a =⏎# c⏎` → `a: null` with `"ca": ["# c"]`;
+  `# p⏎a =⏎# c⏎v` → `a: "v"` with `"c": ["# p", "# c"]`
+  (`comments_value_on_next_line_goes_to_next_value`, `comments_value_on_next_line_object`,
+  `comments_value_on_next_line_at_end`, `comments_value_on_next_line_joins_key_list`).
 - When `}` or `]` closes a container, comments not yet attached go, as *after* comments, to the
   value created most recently: in `a { b = 1 # c1⏎}` to the value of `b`, in `d {⏎# c2⏎}` to the
   object `d`, in `e { f { g = 1 } # c3⏎}` to the value of `g`
   (`comments_trailing_at_container_close`).
 - At the end of input, likewise as *after* comments to the value created most recently, or to the
   root when there is none: `a = 1⏎# c` (`comments_trailing_at_end`), `# c`
-  (`comments_only_attach_to_root`).
+  (`comments_only_attach_to_root`). The end of an included file counts as an end of input here, and
+  comments pending before an include may go to a value of the included file (§9.4;
+  `cases/spec/09-macros/comments_carry_into_included_file`,
+  `cases/spec/09-macros/comments_end_of_included_file`).
 - When the objects of a section path close together with its bracket, the outermost of them counts
   as the value created most recently: `a b { c = 1 } # z` → `z` after the object `a`
-  (`comments_section_path_close`).
+  (`comments_section_path_close`). The same holds when a bracket closes objects that a section
+  path left open (§3.4): `x "y{" z⏎a { b = 1 }⏎# c` → `x` gets `"ca": ["# c"]`. At the end of input
+  they close without making a difference: `x "y{" z⏎# c` → the value `z` gets it
+  (`comments_left_open_sections_closed_by_bracket`, `comments_left_open_sections_at_end`).
 - Comments after the closing bracket of a braced root are ignored like the rest of the input
   (§1.1; `comments_after_braced_root_ignored`).
+
+Comments and the rules of §8:
+
+- Comments stay with their value when §8 moves it into a collected array: under
+  `no-implicit-arrays`, `# c⏎a = 1⏎a = 2⏎# e` → `a: [1 with "c": ["# c"], 2 with "ca": ["# e"]]`
+  (`comments_collected_array_keeps_comments`).
+- Under `merge`, a repeated key whose value merges into the existing container attaches its
+  comments to that container, where they join its list: `# c⏎a { x = 1 }⏎# d⏎a { y = 2 }` →
+  `a` has `"c": ["# c", "# d"]`; `a { x = 1 }⏎a { }⏎# e` → `a` has `"ca": ["# e"]`;
+  `r { a { } # e⏎}⏎r { # d⏎a { y = 2 } }` → `r.a` has `"ca": ["# e", "# d"]`. The scalar that
+  takes a container's place (§8.4) keeps the container's comments: `# c⏎k { m = 1 }⏎# d⏎k = 1` →
+  `k: int 1` with `"c": ["# c", "# d"]` (`comments_merge_joins_existing_object_list`,
+  `comments_merge_after_comment_on_existing_object`, `comments_before_joins_after_list_under_merge`,
+  `comments_merge_scalar_keeps_container_comments`).
+- The comments of a value that §8 discards are lost with it: under `rewrite`,
+  `# c⏎a = 1⏎# d⏎a = 2` → `a: int 2` with `"c": ["# d"]` only
+  (`comments_rewrite_drops_replaced_value_comments`). **Uncertain (undefined in libucl):** the
+  comments of a value that was replaced, under `rewrite` or by a higher priority, can reappear on a
+  value created later, depending on memory reuse (under `rewrite`, `# c⏎k = 2⏎k = 3⏎q = 4` gave
+  `q` the comment `# c`). No case pins this.
 
 libucl's config output can include saved comments when the application passes them in. The output
 formats of §10 are specified without them.
@@ -95,6 +160,17 @@ formats of §10 are specified without them.
 
 `FILENAME` and `CURDIR` are not defined (§7.8), so references to them stay as written
 (`no_filevars`, `cases/spec/07-variables/filevars_disabled`). Other variables work as usual.
+
+- **Quirk.** Including a file (§9.4) defines them for that file anyway, and they then stay defined
+  in the including unit after the include, with the included file's values
+  (`cases/spec/09-macros/no_filevars_include_defines_them`,
+  `cases/spec/09-macros/no_filevars_included_file_has_curdir`). In macro arguments they are not
+  defined (§9.2).
+- The flag only stops the definitions that a parser makes for a document given as a string. libucl's
+  function for parsing a file defines them from the file's path whatever the flag says. The
+  conformance oracle parses each case as a string and defines them from the case's path itself,
+  unless the case has `no-filevars` (README, *How the conformance oracle runs every case*); this
+  section and the cases describe that behaviour.
 
 ## 12.8 Other parser settings used by the oracle
 

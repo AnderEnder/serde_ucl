@@ -1,0 +1,3 @@
+.include(try=yes) "files/missing.inc"
+.include(glob=on) "files/glob/*.inc"
+k = 1

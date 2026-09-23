@@ -1,0 +1,3 @@
+k = 1
+.include(key="k", target="array") "files/a.inc"
+k = 3

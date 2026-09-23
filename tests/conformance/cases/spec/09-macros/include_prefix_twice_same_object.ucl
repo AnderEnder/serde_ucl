@@ -1,0 +1,2 @@
+.include(key="k") "files/a.inc"
+.include(key="k") "files/a.inc"

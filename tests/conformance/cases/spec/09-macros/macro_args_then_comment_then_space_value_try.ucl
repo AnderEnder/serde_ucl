@@ -1,0 +1,2 @@
+.include(try=true) /* c */ "files/a.inc"
+k = 1

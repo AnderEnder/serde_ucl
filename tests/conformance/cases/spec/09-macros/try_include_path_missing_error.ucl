@@ -1,0 +1,2 @@
+.try_include(path=["files/v4/p1"]) "zz.inc"
+k = 1

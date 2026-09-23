@@ -1,0 +1,8 @@
+.priority 17
+a = 1
+.priority -1
+b = 1
+.priority 99999999999999999999
+c = 1
+.priority -9223372036854775809
+d = 1

@@ -1,0 +1,2 @@
+[ { .include "files/a.inc" }, { .priority 3
+b = 1 }, { c = 1 } ]

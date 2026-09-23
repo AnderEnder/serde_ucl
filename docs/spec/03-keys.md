@@ -113,7 +113,7 @@ it, so a bracket in them counts:
     `c "x{y" z⏎d { e { f = 1 } g = 2 }⏎h = 1` →
     `{ c: { "x{y": "z", d: { e: { f: int 1 }, g: int 2 } }, h: int 1 }`
     (`section_path_left_open_inner_container`).
-  - The input ends.
+  - The input ends. The end of an included file does not close them (§9.4).
   A `}` that arrives while they are open is an error (`section_path_left_open_inside_braces_error`,
   `section_path_left_open_extra_close_error`).
 - **Quirk.** A `=` or `:` after a word that follows a name is ignored, and that word is a name too:
@@ -123,6 +123,34 @@ it, so a bracket in them counts:
   (`section_quoted_name_then_separator`, `section_quoted_name_then_separator_error`).
   Since such a word never holds the value itself, `a b = [1]` and `a b = {d = 1}` are errors
   (`section_path_separator_after_name_error`, `section_path_separator_after_name_object_error`).
+  When such a separator is followed on its line only by spaces and then a line break (LF, CR, VT
+  or FF), the next name may come after any whitespace and comments, on a later line, and if the
+  input ends first the objects are kept, empty: `c "x{" =⏎d {}`, `c "x{" =⏎# c⏎ d {}` and
+  `c "x{" = ⏎ d {}` → `{ c: { "x{": { d: {} } } }`; `c "x{" =⏎ d x` →
+  `{ c: { "x{": { d: "x" } } }`; `c "x{" =⏎`, `c "x{" =<VT>` and `c "x{" =⏎# c⏎` →
+  `{ c: { "x{": {} } }` (`section_separator_newline_then_name`,
+  `section_separator_newline_comment_then_name`, `section_separator_space_newline_then_name`,
+  `section_separator_newline_then_key_value`, `section_separator_newline_at_end`,
+  `section_separator_vt_at_end`, `section_separator_newline_comment_at_end`). It is an error when
+  the input ends directly after the separator or its spaces, or after a comment on its line,
+  because that comment takes the line break: `c "x{" =`, `c "x{" =␠`, `c "x{" = # c⏎`
+  (`section_separator_at_end_error`, `section_separator_space_at_end_error`,
+  `section_separator_comment_takes_newline_error`). It is also an error when a bracket, or a `#`
+  that is the last byte (§2.2), stands where the next name should start: `c "x{" =⏎{ }`,
+  `c "x{" =⏎ #` (`section_separator_newline_bracket_error`,
+  `section_separator_newline_last_hash_error`).
+- VT and FF around names. The rest of a word's line starts after spaces, tabs and comments (above),
+  so a VT or FF there is part of it and does not end it. When the rest of the line makes the word
+  a name, VT and FF before the next name are skipped like spaces: `a <FF>b { c = 1 }`,
+  `d e <FF><FF>f { g = 1 }`, `h i <FF> /* x */ j { k = 1 }`, `l m /* x */<FF>n { o = 1 }`,
+  `p q = <FF>r { s = 1 }` and `t u <VT>v { w = 1 }` all give nested objects
+  (`section_names_vt_ff_between_names`). They do not stand for the space before the bracket:
+  `a <FF>{ b = 1 }` and `a b <FF>{ d = 1 }` are errors, because the bracket then stands where a
+  name should start (`section_ff_before_bracket_error`, `section_name_then_ff_before_bracket_error`).
+  If the rest of the line has no bracket, the word takes its value by §1.6:
+  `a <FF># c⏎b { c = 1 }` → `{ a: "b { c = 1 }" }` (`section_lookahead_ff_then_line_comment`).
+  Inside a bare name a VT or FF is invalid (§3.1): `a b<FF>c { d = 1 }` is an error
+  (`section_ff_inside_name_error`).
 - The bracket must be on the same line: `a b⏎{ c = 1 }` is an error, because `b` is the value of
   `a` and a `{` cannot start an entry (`section_newline_before_brace_error`).
 - A bare key followed by a quoted string and a separator is an error: `a "b" = 1`

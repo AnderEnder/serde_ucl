@@ -1,0 +1,2 @@
+d { a = 1 }
+.include "files/v4/inherit_e.inc"

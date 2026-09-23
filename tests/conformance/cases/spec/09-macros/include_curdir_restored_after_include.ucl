@@ -1,0 +1,3 @@
+.include "files/v4/fv/leak.inc"
+.include(try=true) "${CURDIR}/after.inc"
+k = 1

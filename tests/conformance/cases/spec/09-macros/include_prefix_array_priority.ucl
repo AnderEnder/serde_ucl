@@ -1,0 +1,1 @@
+.include(key="k", target="array", priority=3) "files/a.inc"

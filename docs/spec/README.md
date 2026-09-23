@@ -110,20 +110,33 @@ behaviour, and each place says so:
 
 ## Uncertain behaviour (summary)
 
-Only behaviour that is undefined in libucl, because it depends on memory contents, is left
-uncertain:
+Only behaviour that is undefined in libucl, because it depends on memory contents or on the
+platform, is left uncertain:
 
 - Variable-handler results combined with other text in one string (§7.7); the project's choice is
   listed under *Divergences decided by the project*.
 - The byte saved after a block comment that ends the input, under `save-comments` (§12.5).
+- Saved comments of a value that was replaced under §8, which can reappear on a later value
+  (§12.5).
+- A float outside the 64-bit range truncated for `kb`, `mb` or `gb` (§5.4).
 
 ## Known gaps
 
 All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed. `spec-v2`
-answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, and `spec-v3` answers
-#5–#16. Two rules
-are stated but have no committed case, because their golden files cannot be
-committed:
+answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, `spec-v3` answers
+#5–#16, and `spec-v4` answers #17–#22 and completes §9 for the macro work.
+
+The project has not yet decided what it does in these places, where §9 describes libucl:
+
+- the include parameters `sign`, `url` and `path` (§9.4, *Signatures, URLs and search paths*);
+  `.includes` itself is decided (above);
+- how its API reports a silent stop (§9.4, *Missing and unusable files*): libucl's parse function
+  returns failure without an error message and keeps the partial tree, and the golden files record
+  that tree;
+- what parsing a file with `no-filevars` does (§12.7): libucl's file function defines `FILENAME`
+  and `CURDIR` anyway, while the cases follow the oracle, which does not.
+
+Two rules are stated but have no committed case, because their golden files cannot be committed:
 
 - B-10: a `var:` entry for `FILENAME` or `CURDIR` has no effect when the document comes from a
   file (§7.1). The golden file would contain the checkout path.
@@ -132,7 +145,7 @@ committed:
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 882 cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1143 cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - The mappings for `cases/review/`, `cases/additions/`, `cases/errors/` and `libucl/basic/` were
@@ -548,6 +561,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/02-comments/hash_last_byte_after_entry` | §2 |
 | `cases/spec/02-comments/hash_last_byte_after_leading_newline_error` | §2 |
 | `cases/spec/02-comments/hash_last_byte_after_leading_space_error` | §2 |
+| `cases/spec/02-comments/hash_last_byte_after_macro_error` | §2, §9 |
 | `cases/spec/02-comments/hash_last_byte_at_start` | §2 |
 | `cases/spec/02-comments/hash_last_byte_directly_after_comment` | §2 |
 | `cases/spec/02-comments/hash_line` | §2 |
@@ -591,16 +605,21 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/03-keys/quoted_value_after_bare_key_error` | §3 |
 | `cases/spec/03-keys/section_any_keyword` | §3 |
 | `cases/spec/03-keys/section_array_value` | §3 |
+| `cases/spec/03-keys/section_ff_before_bracket_error` | §3 |
+| `cases/spec/03-keys/section_ff_inside_name_error` | §3 |
 | `cases/spec/03-keys/section_lookahead_after_block_comment` | §3 |
 | `cases/spec/03-keys/section_lookahead_after_line_comment` | §3 |
 | `cases/spec/03-keys/section_lookahead_brace_in_value_error` | §3 |
 | `cases/spec/03-keys/section_lookahead_brace_later_on_line_error` | §3 |
 | `cases/spec/03-keys/section_lookahead_counts_comment_text_error` | §3 |
+| `cases/spec/03-keys/section_lookahead_ff_then_line_comment` | §3 |
 | `cases/spec/03-keys/section_lookahead_stops_at_newline` | §3 |
 | `cases/spec/03-keys/section_lookahead_stops_at_semicolon` | §3 |
 | `cases/spec/03-keys/section_mixed_names` | §3 |
+| `cases/spec/03-keys/section_name_then_ff_before_bracket_error` | §3 |
 | `cases/spec/03-keys/section_names_then_atom_is_value` | §3 |
 | `cases/spec/03-keys/section_names_then_separator_is_value` | §3 |
+| `cases/spec/03-keys/section_names_vt_ff_between_names` | §3 |
 | `cases/spec/03-keys/section_newline_before_brace_error` | §3 |
 | `cases/spec/03-keys/section_numeric_names` | §3 |
 | `cases/spec/03-keys/section_one_name` | §3 |
@@ -622,6 +641,18 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/03-keys/section_quoted_name_then_separator` | §3 |
 | `cases/spec/03-keys/section_quoted_name_then_separator_error` | §3 |
 | `cases/spec/03-keys/section_quoted_names` | §3 |
+| `cases/spec/03-keys/section_separator_at_end_error` | §3 |
+| `cases/spec/03-keys/section_separator_comment_takes_newline_error` | §3 |
+| `cases/spec/03-keys/section_separator_newline_at_end` | §3 |
+| `cases/spec/03-keys/section_separator_newline_bracket_error` | §3 |
+| `cases/spec/03-keys/section_separator_newline_comment_at_end` | §3 |
+| `cases/spec/03-keys/section_separator_newline_comment_then_name` | §3 |
+| `cases/spec/03-keys/section_separator_newline_last_hash_error` | §3 |
+| `cases/spec/03-keys/section_separator_newline_then_key_value` | §3 |
+| `cases/spec/03-keys/section_separator_newline_then_name` | §3 |
+| `cases/spec/03-keys/section_separator_space_at_end_error` | §3 |
+| `cases/spec/03-keys/section_separator_space_newline_then_name` | §3 |
+| `cases/spec/03-keys/section_separator_vt_at_end` | §3 |
 | `cases/spec/03-keys/section_single_quoted_name_error` | §3 |
 | `cases/spec/03-keys/section_two_names` | §3 |
 | `cases/spec/03-keys/single_quoted_error` | §3 |
@@ -635,6 +666,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/04-atoms/backslash_invalid_unicode` | §4 |
 | `cases/spec/04-atoms/backslash_invalid_unicode_prefixes` | §4 |
 | `cases/spec/04-atoms/backslash_short_unicode_at_end` | §4 |
+| `cases/spec/04-atoms/backslash_short_unicode_counts_bytes` | §4 |
 | `cases/spec/04-atoms/bool_false_forms` | §4 |
 | `cases/spec/04-atoms/bool_lookalikes_are_strings` | §4 |
 | `cases/spec/04-atoms/bool_true_forms` | §4 |
@@ -656,7 +688,10 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/05-numbers/big_integer_with_fraction_is_float` | §5 |
 | `cases/spec/05-numbers/binary_multipliers` | §5 |
 | `cases/spec/05-numbers/decimal_multipliers` | §5 |
+| `cases/spec/05-numbers/dot_after_exponent_forms` | §5 |
+| `cases/spec/05-numbers/dot_after_hex_digits_is_string` | §5 |
 | `cases/spec/05-numbers/exponent_forms` | §5 |
+| `cases/spec/05-numbers/exponent_sign_without_digits_big_integer` | §5 |
 | `cases/spec/05-numbers/exponents` | §5 |
 | `cases/spec/05-numbers/float_binary_multiplier_truncates` | §5 |
 | `cases/spec/05-numbers/float_decimal_multiplier` | §5 |
@@ -665,11 +700,18 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/05-numbers/float_underflow_error` | §5 |
 | `cases/spec/05-numbers/floats` | §5 |
 | `cases/spec/05-numbers/hex` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_bad_suffix_strings` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_first_number_unchecked` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_no_time` | §5 |
 | `cases/spec/05-numbers/hex_after_fraction_or_exponent` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_range_error` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_range_error_before_text` | §5 |
+| `cases/spec/05-numbers/hex_after_fraction_suffixes_give_zero` | §5 |
 | `cases/spec/05-numbers/hex_digits_before_x_ignored` | §5 |
 | `cases/spec/05-numbers/hex_malformed_become_strings` | §5 |
 | `cases/spec/05-numbers/hex_more_malformed` | §5 |
 | `cases/spec/05-numbers/hex_overflow_error` | §5 |
+| `cases/spec/05-numbers/hex_range_error_before_minus` | §5 |
 | `cases/spec/05-numbers/hex_with_suffixes` | §5 |
 | `cases/spec/05-numbers/int64_limits` | §5 |
 | `cases/spec/05-numbers/int_overflow_error` | §5 |
@@ -692,6 +734,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/05-numbers/range_error_before_letters` | §5 |
 | `cases/spec/05-numbers/range_error_before_suffix_text` | §5 |
 | `cases/spec/05-numbers/range_error_before_trailing_space_text` | §5 |
+| `cases/spec/05-numbers/range_error_dot_after_exponent` | §5 |
 | `cases/spec/05-numbers/range_error_hex_before_trailing_x` | §5 |
 | `cases/spec/05-numbers/range_error_underflow_before_suffix` | §5 |
 | `cases/spec/05-numbers/subnormal_error` | §5 |
@@ -763,6 +806,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/06-strings/sq_unterminated_error` | §6 |
 | `cases/spec/06-strings/triple_quote_error` | §6 |
 | `cases/spec/07-variables/backslash_dollar` | §7 |
+| `cases/spec/07-variables/backslash_dollar_counts_dollar_in_unicode_escape` | §7 |
 | `cases/spec/07-variables/backslash_dollar_unquoted_mixed` | §7 |
 | `cases/spec/07-variables/braced` | §7 |
 | `cases/spec/07-variables/dollar_escape_in_unquoted` | §7 |
@@ -854,21 +898,56 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/08-duplicates/strategy_merge_scalar_then_object` | §8 |
 | `cases/spec/08-duplicates/strategy_merge_scalars_append` | §8 |
 | `cases/spec/08-duplicates/strategy_rewrite` | §8 |
+| `cases/spec/09-macros/comments_carry_into_included_file` | §9, §12 |
+| `cases/spec/09-macros/comments_end_of_included_file` | §9, §12 |
+| `cases/spec/09-macros/include_array_root_error` | §9 |
 | `cases/spec/09-macros/include_bare` | §9 |
+| `cases/spec/09-macros/include_braced_file_at_braced_root_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_inside_braces_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_then_entries` | §9 |
+| `cases/spec/09-macros/include_braced_file_twice` | §9 |
+| `cases/spec/09-macros/include_braced_file_with_key_inside_braces` | §9 |
 | `cases/spec/09-macros/include_braces` | §9 |
 | `cases/spec/09-macros/include_braces_variables` | §9 |
+| `cases/spec/09-macros/include_comment_blank_line_brace_error` | §9 |
 | `cases/spec/09-macros/include_curdir` | §9 |
+| `cases/spec/09-macros/include_curdir_restored_after_include` | §9 |
+| `cases/spec/09-macros/include_cycle_nesting_limit_error` | §9 |
+| `cases/spec/09-macros/include_directory_error` | §9 |
+| `cases/spec/09-macros/include_directory_try` | §9 |
+| `cases/spec/09-macros/include_does_not_inherit_priority` | §9 |
+| `cases/spec/09-macros/include_does_not_inherit_strategy` | §9 |
 | `cases/spec/09-macros/include_duplicate_error` | §9 |
 | `cases/spec/09-macros/include_duplicate_merge` | §9 |
 | `cases/spec/09-macros/include_duplicate_rewrite` | §9 |
+| `cases/spec/09-macros/include_duplicate_unknown_is_append` | §9 |
 | `cases/spec/09-macros/include_duplicates_append` | §9 |
 | `cases/spec/09-macros/include_empty_args` | §9 |
+| `cases/spec/09-macros/include_empty_file` | §9 |
+| `cases/spec/09-macros/include_empty_path_try` | §9 |
 | `cases/spec/09-macros/include_empty_value_is_null` | §9 |
+| `cases/spec/09-macros/include_file_closes_including_object` | §9 |
+| `cases/spec/09-macros/include_file_closing_brace_at_top_level_error` | §9 |
 | `cases/spec/09-macros/include_glob` | §9 |
+| `cases/spec/09-macros/include_glob_bracket_expression` | §9 |
+| `cases/spec/09-macros/include_glob_bracket_needs_wildcard_error` | §9 |
+| `cases/spec/09-macros/include_glob_byte_order` | §9 |
+| `cases/spec/09-macros/include_glob_directory_match_error` | §9 |
+| `cases/spec/09-macros/include_glob_matches_including_file_error` | §9 |
+| `cases/spec/09-macros/include_glob_no_brace_expansion` | §9 |
 | `cases/spec/09-macros/include_glob_no_match_stops_parsing` | §9 |
+| `cases/spec/09-macros/include_glob_prefix_key_from_first_file` | §9 |
+| `cases/spec/09-macros/include_glob_question_mark` | §9 |
+| `cases/spec/09-macros/include_glob_skips_hidden_files` | §9 |
 | `cases/spec/09-macros/include_glob_try_no_match` | §9 |
+| `cases/spec/09-macros/include_glob_try_skips_directories` | §9 |
 | `cases/spec/09-macros/include_inside_object` | §9 |
+| `cases/spec/09-macros/include_key_empty_string` | §9 |
+| `cases/spec/09-macros/include_key_not_lowercased_but_matched` | §9 |
 | `cases/spec/09-macros/include_key_without_prefix` | §9 |
+| `cases/spec/09-macros/include_left_open_section_persists` | §9 |
+| `cases/spec/09-macros/include_lower_than_main_priority_dropped` | §9 |
+| `cases/spec/09-macros/include_main_document_itself_error` | §9 |
 | `cases/spec/09-macros/include_merge_ignores_priority` | §9 |
 | `cases/spec/09-macros/include_merge_lower_priority_still_merges` | §9 |
 | `cases/spec/09-macros/include_merge_scalar_higher_priority_replaces` | §9 |
@@ -878,75 +957,243 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/09-macros/include_nesting_limit_error` | §9 |
 | `cases/spec/09-macros/include_nesting_limit_ok` | §9 |
 | `cases/spec/09-macros/include_param_prefix_names` | §9 |
+| `cases/spec/09-macros/include_path_empty_array_error` | §9 |
+| `cases/spec/09-macros/include_path_first_dir` | §9 |
+| `cases/spec/09-macros/include_path_glob_all_dirs` | §9 |
+| `cases/spec/09-macros/include_path_glob_last_dir_must_match_error` | §9 |
+| `cases/spec/09-macros/include_path_missing_in_first_dir_error` | §9 |
+| `cases/spec/09-macros/include_path_persists` | §9 |
+| `cases/spec/09-macros/include_path_string_ignored` | §9 |
+| `cases/spec/09-macros/include_path_try_first_dir_only` | §9 |
 | `cases/spec/09-macros/include_pattern_without_glob_error` | §9 |
+| `cases/spec/09-macros/include_prefix_array_converted_collects_repeats` | §9 |
+| `cases/spec/09-macros/include_prefix_array_existing_multivalue_first_array` | §9 |
+| `cases/spec/09-macros/include_prefix_array_existing_multivalue_scalars` | §9 |
+| `cases/spec/09-macros/include_prefix_array_existing_object` | §9 |
 | `cases/spec/09-macros/include_prefix_array_existing_scalar` | §9 |
+| `cases/spec/09-macros/include_prefix_array_new_does_not_collect` | §9 |
+| `cases/spec/09-macros/include_prefix_array_priority` | §9 |
 | `cases/spec/09-macros/include_prefix_array_target` | §9 |
 | `cases/spec/09-macros/include_prefix_auto_key` | §9 |
+| `cases/spec/09-macros/include_prefix_empty_file_creates_object` | §9 |
 | `cases/spec/09-macros/include_prefix_existing_array_error` | §9 |
+| `cases/spec/09-macros/include_prefix_existing_multivalue_first_scalar_error` | §9 |
+| `cases/spec/09-macros/include_prefix_existing_multivalue_object` | §9 |
 | `cases/spec/09-macros/include_prefix_existing_object` | §9 |
 | `cases/spec/09-macros/include_prefix_existing_scalar_error` | §9 |
+| `cases/spec/09-macros/include_prefix_keeps_other_extensions` | §9 |
 | `cases/spec/09-macros/include_prefix_key` | §9 |
+| `cases/spec/09-macros/include_prefix_priority_applies_to_nesting_object` | §9 |
+| `cases/spec/09-macros/include_prefix_strips_ucl` | §9 |
+| `cases/spec/09-macros/include_prefix_symlink_uses_target_name` | §9 |
+| `cases/spec/09-macros/include_prefix_then_explicit_object_appends` | §9 |
+| `cases/spec/09-macros/include_prefix_twice_same_object` | §9 |
+| `cases/spec/09-macros/include_prefix_ucl_target` | §9 |
 | `cases/spec/09-macros/include_priority` | §9 |
 | `cases/spec/09-macros/include_priority_macro_inside` | §9 |
+| `cases/spec/09-macros/include_priority_modulo_16` | §9 |
 | `cases/spec/09-macros/include_priority_must_be_integer` | §9 |
+| `cases/spec/09-macros/include_priority_negative` | §9 |
+| `cases/spec/09-macros/include_priority_wins_over_later_entries` | §9 |
+| `cases/spec/09-macros/include_priority_with_multiplier` | §9 |
 | `cases/spec/09-macros/include_quoted` | §9 |
+| `cases/spec/09-macros/include_relative_path_from_included_file` | §9 |
 | `cases/spec/09-macros/include_self_error` | §9 |
+| `cases/spec/09-macros/include_self_with_try_error` | §9 |
+| `cases/spec/09-macros/include_sign_param_no_effect` | §9 |
 | `cases/spec/09-macros/include_space_before_args` | §9 |
+| `cases/spec/09-macros/include_strategy_only_for_included_entries` | §9 |
+| `cases/spec/09-macros/include_syntax_error_in_file_error` | §9 |
+| `cases/spec/09-macros/include_target_case_insensitive` | §9 |
+| `cases/spec/09-macros/include_target_unknown_means_object` | §9 |
 | `cases/spec/09-macros/include_then_keys` | §9 |
 | `cases/spec/09-macros/include_try_missing` | §9 |
+| `cases/spec/09-macros/include_try_must_be_boolean_error` | §9 |
+| `cases/spec/09-macros/include_try_string_ignored_error` | §9 |
+| `cases/spec/09-macros/include_unclosed_brace_closed_by_includer` | §9 |
+| `cases/spec/09-macros/include_unclosed_brace_error` | §9 |
+| `cases/spec/09-macros/include_unclosed_brace_inside_braces` | §9 |
+| `cases/spec/09-macros/include_unclosed_object_in_file_error` | §9 |
 | `cases/spec/09-macros/include_unknown_param_ignored` | §9 |
+| `cases/spec/09-macros/include_url_like_path_is_a_path` | §9 |
+| `cases/spec/09-macros/include_url_param_error` | §9 |
 | `cases/spec/09-macros/includes_like_include` | §9 |
 | `cases/spec/09-macros/inherit_at_top_level` | §9 |
+| `cases/spec/09-macros/inherit_bare_value_trailing_space_error` | §9 |
 | `cases/spec/09-macros/inherit_basic` | §9 |
+| `cases/spec/09-macros/inherit_braces_value` | §9 |
+| `cases/spec/09-macros/inherit_dotted_name_is_one_key` | §9 |
+| `cases/spec/09-macros/inherit_dotted_name_not_a_path_error` | §9 |
+| `cases/spec/09-macros/inherit_empty_name_error` | §9 |
 | `cases/spec/09-macros/inherit_enclosing_object` | §9 |
 | `cases/spec/09-macros/inherit_existing_keys_kept` | §9 |
 | `cases/spec/09-macros/inherit_first_of_repeated` | §9 |
+| `cases/spec/09-macros/inherit_from_included_file_uses_main_root` | §9 |
+| `cases/spec/09-macros/inherit_inside_included_file_with_key` | §9 |
 | `cases/spec/09-macros/inherit_is_shallow` | §9 |
 | `cases/spec/09-macros/inherit_keeps_source_priority` | §9 |
+| `cases/spec/09-macros/inherit_key_lowercase_name` | §9 |
 | `cases/spec/09-macros/inherit_missing_error` | §9 |
+| `cases/spec/09-macros/inherit_multivalue_replaced_by_explicit` | §9 |
+| `cases/spec/09-macros/inherit_name_case_sensitive_error` | §9 |
+| `cases/spec/09-macros/inherit_no_implicit_arrays_collects` | §9 |
 | `cases/spec/09-macros/inherit_non_object_error` | §9 |
 | `cases/spec/09-macros/inherit_own_key_earlier_value` | §9 |
 | `cases/spec/09-macros/inherit_own_object` | §9 |
 | `cases/spec/09-macros/inherit_replace_appends` | §9 |
 | `cases/spec/09-macros/inherit_replace_copies_not_inherited` | §9 |
+| `cases/spec/09-macros/inherit_replace_first_value` | §9 |
+| `cases/spec/09-macros/inherit_replace_keyword_yes` | §9 |
+| `cases/spec/09-macros/inherit_replace_must_be_boolean` | §9 |
+| `cases/spec/09-macros/inherit_replace_no_prefix_match` | §9 |
+| `cases/spec/09-macros/inherit_replace_own_object_duplicates` | §9 |
+| `cases/spec/09-macros/inherit_replace_twice_duplicates` | §9 |
 | `cases/spec/09-macros/inherit_replaced_whatever_priority` | §9 |
+| `cases/spec/09-macros/inherit_root_array_error` | §9 |
+| `cases/spec/09-macros/inherit_source_must_exist_already_error` | §9 |
 | `cases/spec/09-macros/inherit_top_level_only_error` | §9 |
+| `cases/spec/09-macros/inherit_twice_no_change` | §9 |
+| `cases/spec/09-macros/inherit_variable_in_name` | §9 |
+| `cases/spec/09-macros/load_directory_error` | §9 |
+| `cases/spec/09-macros/load_directory_try` | §9 |
+| `cases/spec/09-macros/load_empty_file_int_zero` | §9 |
+| `cases/spec/09-macros/load_empty_file_string_inserts_nothing` | §9 |
+| `cases/spec/09-macros/load_empty_key_error` | §9 |
+| `cases/spec/09-macros/load_empty_path_error` | §9 |
 | `cases/spec/09-macros/load_escape` | §9 |
+| `cases/spec/09-macros/load_escape_all_bytes` | §9 |
+| `cases/spec/09-macros/load_escape_must_be_boolean` | §9 |
 | `cases/spec/09-macros/load_existing_key_error` | §9 |
+| `cases/spec/09-macros/load_ignores_priority_macro` | §9 |
+| `cases/spec/09-macros/load_inside_object` | §9 |
 | `cases/spec/09-macros/load_int` | §9 |
+| `cases/spec/09-macros/load_int_clamps` | §9 |
 | `cases/spec/09-macros/load_int_leading_digits` | §9 |
+| `cases/spec/09-macros/load_int_leading_whitespace_and_sign` | §9 |
+| `cases/spec/09-macros/load_int_no_digits_is_zero` | §9 |
+| `cases/spec/09-macros/load_int_stops_at_nul` | §9 |
+| `cases/spec/09-macros/load_key_case_sensitive` | §9 |
+| `cases/spec/09-macros/load_key_lowercase_existing_error` | §9 |
+| `cases/spec/09-macros/load_key_lowercase_kept_spelling` | §9 |
 | `cases/spec/09-macros/load_missing_error` | §9 |
 | `cases/spec/09-macros/load_multiline` | §9 |
+| `cases/spec/09-macros/load_param_prefix_t_is_try` | §9 |
+| `cases/spec/09-macros/load_param_prefix_tri_is_trim` | §9 |
 | `cases/spec/09-macros/load_priority` | §9 |
+| `cases/spec/09-macros/load_priority_modulo_16` | §9 |
 | `cases/spec/09-macros/load_string` | §9 |
+| `cases/spec/09-macros/load_string_keeps_nul` | §9 |
+| `cases/spec/09-macros/load_target_case_insensitive` | §9 |
+| `cases/spec/09-macros/load_then_same_key_appends` | §9 |
 | `cases/spec/09-macros/load_trim` | §9 |
+| `cases/spec/09-macros/load_trim_all_whitespace` | §9 |
+| `cases/spec/09-macros/load_trim_then_escape` | §9 |
 | `cases/spec/09-macros/load_try_missing` | §9 |
+| `cases/spec/09-macros/load_twice_same_key_error` | §9 |
 | `cases/spec/09-macros/load_unknown_target_inserts_nothing` | §9 |
 | `cases/spec/09-macros/load_without_key_error` | §9 |
+| `cases/spec/09-macros/macro_after_entry_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_args_after_comment_then_space_error` | §9 |
+| `cases/spec/09-macros/macro_args_array_root_ignored` | §9 |
+| `cases/spec/09-macros/macro_args_backslash_pair_quote_error` | §9 |
+| `cases/spec/09-macros/macro_args_boolean_keywords` | §9 |
+| `cases/spec/09-macros/macro_args_braced_root` | §9 |
+| `cases/spec/09-macros/macro_args_directly_after_comment` | §9 |
+| `cases/spec/09-macros/macro_args_escaped_quote_error` | §9 |
+| `cases/spec/09-macros/macro_args_filename_is_undef` | §9, §7 |
+| `cases/spec/09-macros/macro_args_filename_no_filevars` | §9, §7 |
+| `cases/spec/09-macros/macro_args_key_lowercase` | §9 |
+| `cases/spec/09-macros/macro_args_names_case_sensitive` | §9 |
+| `cases/spec/09-macros/macro_args_nested_not_parameters` | §9 |
 | `cases/spec/09-macros/macro_args_no_variables` | §9 |
+| `cases/spec/09-macros/macro_args_paren_in_quotes` | §9 |
+| `cases/spec/09-macros/macro_args_parse_error` | §9 |
+| `cases/spec/09-macros/macro_args_repeated_first_wins` | §9 |
+| `cases/spec/09-macros/macro_args_single_quotes_do_not_protect_error` | §9 |
+| `cases/spec/09-macros/macro_args_then_comment_then_space_value_try` | §9 |
 | `cases/spec/09-macros/macro_args_then_end_error` | §9 |
+| `cases/spec/09-macros/macro_args_two_prefixes_last_wins` | §9 |
+| `cases/spec/09-macros/macro_bare_value` | §9 |
+| `cases/spec/09-macros/macro_bare_value_trailing_space_kept_error` | §9 |
+| `cases/spec/09-macros/macro_braces_value_leading_newline_skipped` | §9 |
+| `cases/spec/09-macros/macro_braces_value_trailing_space_kept_error` | §9 |
+| `cases/spec/09-macros/macro_braces_value_unterminated_error` | §9 |
+| `cases/spec/09-macros/macro_comment_directly_before_value` | §9 |
+| `cases/spec/09-macros/macro_comment_then_space_before_value_error` | §9 |
 | `cases/spec/09-macros/macro_dot_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_in_object_inside_array` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_block_comment_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_block_comment_on_next_line_error` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_comment_and_last_hash_ignored` | §9 |
 | `cases/spec/09-macros/macro_known_name_then_comment_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_comment_group_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_comment_then_blank_line_error` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_comment_then_space_error` | §9 |
+| `cases/spec/09-macros/macro_known_name_then_last_byte_hash_error` | §9 |
 | `cases/spec/09-macros/macro_known_name_then_whitespace_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_line_comment_then_indented_value_error` | §9 |
+| `cases/spec/09-macros/macro_line_comment_then_value` | §9 |
+| `cases/spec/09-macros/macro_name_at_end_after_quoted_key_name` | §9 |
+| `cases/spec/09-macros/macro_name_at_end_after_section_path` | §9 |
 | `cases/spec/09-macros/macro_name_at_end_ignored` | §9 |
+| `cases/spec/09-macros/macro_name_at_end_inside_braces_error` | §9 |
 | `cases/spec/09-macros/macro_name_case_sensitive_error` | §9 |
+| `cases/spec/09-macros/macro_name_includes_semicolon_error` | §9 |
+| `cases/spec/09-macros/macro_name_runs_to_whitespace_or_paren` | §9 |
 | `cases/spec/09-macros/macro_name_with_punctuation_at_end_ignored` | §9 |
 | `cases/spec/09-macros/macro_not_recognised_as_value` | §9 |
 | `cases/spec/09-macros/macro_not_recognised_in_arrays` | §9 |
+| `cases/spec/09-macros/macro_quoted_value_bad_unicode_error` | §9 |
+| `cases/spec/09-macros/macro_quoted_value_control_byte_error` | §9 |
 | `cases/spec/09-macros/macro_quoted_value_not_unescaped` | §9 |
+| `cases/spec/09-macros/macro_quoted_value_unterminated_error` | §9 |
 | `cases/spec/09-macros/macro_space_after_dot_error` | §9 |
 | `cases/spec/09-macros/macro_unbalanced_args_error` | §9 |
 | `cases/spec/09-macros/macro_unknown_name_then_newline_error` | §9 |
+| `cases/spec/09-macros/macro_value_then_comma_error` | §9 |
+| `cases/spec/09-macros/macro_value_then_entry_without_space` | §9 |
+| `cases/spec/09-macros/macro_value_then_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_value_then_newline_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_value_then_semicolons_and_comment` | §9 |
 | `cases/spec/09-macros/macro_value_variables` | §9 |
 | `cases/spec/09-macros/macro_word_after_section_name_error` | §9, §3 |
 | `cases/spec/09-macros/macro_word_after_section_name_ignored` | §9, §3 |
+| `cases/spec/09-macros/no_filevars_include_defines_them` | §9, §12 |
+| `cases/spec/09-macros/no_filevars_included_file_has_curdir` | §9, §12 |
+| `cases/spec/09-macros/priority_args_must_be_integer_error` | §9 |
 | `cases/spec/09-macros/priority_args_only` | §9 |
+| `cases/spec/09-macros/priority_args_used_for_empty_value` | §9 |
+| `cases/spec/09-macros/priority_braces_value` | §9 |
+| `cases/spec/09-macros/priority_braces_value_trailing_space_error` | §9 |
+| `cases/spec/09-macros/priority_comma_after_value_error` | §9 |
+| `cases/spec/09-macros/priority_comment_then_space_value` | §9 |
+| `cases/spec/09-macros/priority_continues_after_object` | §9 |
+| `cases/spec/09-macros/priority_empty_args_error` | §9 |
+| `cases/spec/09-macros/priority_empty_quoted_value_error` | §9 |
 | `cases/spec/09-macros/priority_forms` | §9 |
+| `cases/spec/09-macros/priority_hex_error` | §9 |
+| `cases/spec/09-macros/priority_in_braces_trailing_space_error` | §9 |
 | `cases/spec/09-macros/priority_invalid_error` | §9 |
+| `cases/spec/09-macros/priority_leading_zeros_decimal` | §9 |
 | `cases/spec/09-macros/priority_missing_value_error` | §9 |
+| `cases/spec/09-macros/priority_quoted_leading_space_and_sign` | §9 |
+| `cases/spec/09-macros/priority_trailing_space_before_semicolon_error` | §9 |
+| `cases/spec/09-macros/priority_trailing_space_error` | §9 |
 | `cases/spec/09-macros/priority_value_on_next_line_error` | §9 |
+| `cases/spec/09-macros/priority_value_range` | §9 |
+| `cases/spec/09-macros/priority_variable_in_value` | §9 |
+| `cases/spec/09-macros/try_include_directory_stops_parsing` | §9 |
+| `cases/spec/09-macros/try_include_empty_path_stops_parsing` | §9 |
+| `cases/spec/09-macros/try_include_glob_no_match_continues` | §9 |
+| `cases/spec/09-macros/try_include_glob_skips_directories` | §9 |
+| `cases/spec/09-macros/try_include_glob_skips_including_file` | §9 |
+| `cases/spec/09-macros/try_include_glob_try_false_no_match_stops` | §9 |
+| `cases/spec/09-macros/try_include_main_document_itself_stops` | §9 |
 | `cases/spec/09-macros/try_include_missing_stops_parsing` | §9 |
+| `cases/spec/09-macros/try_include_path_missing_error` | §9 |
+| `cases/spec/09-macros/try_include_path_searches_all_dirs` | §9 |
 | `cases/spec/09-macros/try_include_present` | §9 |
+| `cases/spec/09-macros/try_include_self_stops_parsing` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/empty_document` | §10 |
@@ -959,11 +1206,13 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/10-output/implicit_array_layouts` | §10 |
 | `cases/spec/10-output/implicit_array_of_arrays` | §10 |
 | `cases/spec/10-output/implicit_arrays` | §10 |
+| `cases/spec/10-output/inherit_copies_keep_output_facts` | §10, §9 |
 | `cases/spec/10-output/integers_large` | §10 |
 | `cases/spec/10-output/keys_quoting` | §10 |
 | `cases/spec/10-output/load_multiline_output` | §10 |
 | `cases/spec/10-output/long_string_boundary` | §10 |
 | `cases/spec/10-output/long_string_with_newline` | §10 |
+| `cases/spec/10-output/macro_created_keys_quoting` | §10, §9 |
 | `cases/spec/10-output/nested_implicit_arrays` | §10 |
 | `cases/spec/10-output/objects` | §10 |
 | `cases/spec/10-output/priorities_not_emitted` | §10 |
@@ -981,22 +1230,47 @@ Every case in `tests/conformance/` and the section(s) that explain it: 882 cases
 | `cases/spec/11-errors/object_depth_limit_error` | §11 |
 | `cases/spec/11-errors/unexpected_close_top_error` | §11 |
 | `cases/spec/12-flags/comments_after_braced_root_ignored` | §12 |
+| `cases/spec/12-flags/comments_after_joins_before_list_in_array` | §12 |
 | `cases/spec/12-flags/comments_attach_to_next_value` | §12 |
+| `cases/spec/12-flags/comments_before_joins_after_list_under_merge` | §12 |
+| `cases/spec/12-flags/comments_before_macro_go_to_next_value` | §12, §9 |
 | `cases/spec/12-flags/comments_block_comment_saved_with_next_byte` | §12 |
+| `cases/spec/12-flags/comments_collected_array_keeps_comments` | §12 |
+| `cases/spec/12-flags/comments_last_byte_hash_after_block_comment_saved` | §12 |
+| `cases/spec/12-flags/comments_last_byte_hash_after_comment_saved` | §12 |
+| `cases/spec/12-flags/comments_last_byte_hash_after_value_not_saved` | §12 |
+| `cases/spec/12-flags/comments_last_byte_hash_alone_saved` | §12 |
+| `cases/spec/12-flags/comments_last_byte_hash_for_value_on_next_line_saved` | §12 |
+| `cases/spec/12-flags/comments_later_comments_join_first_list` | §12 |
+| `cases/spec/12-flags/comments_left_open_sections_at_end` | §12 |
+| `cases/spec/12-flags/comments_left_open_sections_closed_by_bracket` | §12 |
 | `cases/spec/12-flags/comments_line_comment_keeps_cr` | §12 |
+| `cases/spec/12-flags/comments_merge_after_comment_on_existing_object` | §12 |
+| `cases/spec/12-flags/comments_merge_joins_existing_object_list` | §12 |
+| `cases/spec/12-flags/comments_merge_scalar_keeps_container_comments` | §12 |
 | `cases/spec/12-flags/comments_only_attach_to_root` | §12 |
 | `cases/spec/12-flags/comments_repeated_key` | §12 |
+| `cases/spec/12-flags/comments_rewrite_drops_replaced_value_comments` | §12 |
 | `cases/spec/12-flags/comments_section_path_close` | §12 |
 | `cases/spec/12-flags/comments_trailing_at_container_close` | §12 |
 | `cases/spec/12-flags/comments_trailing_at_end` | §12 |
+| `cases/spec/12-flags/comments_value_on_next_line_at_end` | §12 |
+| `cases/spec/12-flags/comments_value_on_next_line_goes_to_next_value` | §12 |
+| `cases/spec/12-flags/comments_value_on_next_line_joins_key_list` | §12 |
+| `cases/spec/12-flags/comments_value_on_next_line_object` | §12 |
 | `cases/spec/12-flags/disable_macro_name_at_end_error` | §12, §9 |
 | `cases/spec/12-flags/disable_macro_no_variables` | §12 |
 | `cases/spec/12-flags/disable_macro_priority_error` | §12 |
 | `cases/spec/12-flags/disable_macro_rejects_macros` | §12 |
 | `cases/spec/12-flags/key_lowercase` | §12 |
 | `cases/spec/12-flags/key_lowercase_before_escapes` | §12, §3 |
+| `cases/spec/12-flags/key_lowercase_decoded_key_first_spelling_kept` | §12 |
+| `cases/spec/12-flags/key_lowercase_escapes_checked_as_written_error` | §12 |
+| `cases/spec/12-flags/key_lowercase_later_decoded_key_joins` | §12 |
 | `cases/spec/12-flags/key_lowercase_merges_case` | §12 |
 | `cases/spec/12-flags/key_lowercase_non_ascii` | §12 |
+| `cases/spec/12-flags/key_lowercase_upper_u_escape_decoded_as_unquoted` | §12 |
+| `cases/spec/12-flags/key_lowercase_upper_u_escape_without_flag` | §12 |
 | `cases/spec/12-flags/no_filevars` | §12 |
 | `cases/spec/12-flags/no_time` | §12 |
 | `cases/spec/12-flags/save_comments_no_effect_on_values` | §12 |

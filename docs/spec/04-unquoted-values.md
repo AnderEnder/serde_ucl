@@ -91,8 +91,10 @@ The resulting text is decoded like a double-quoted string (§6.1): `x\ny` → `"
 ## 4.8 `\u` escapes in unquoted values
 
 **Quirk.** Unlike double-quoted strings, an invalid `\u` escape in an unquoted value is not an
-error. When at least four characters follow `\u`, the escape covers `\u` and those four
-characters. If all four are hex digits, the code point is their value. Otherwise it is 16 × the
+error. "Characters" in this section are bytes, counted in the value after its trailing whitespace
+is removed (§4.3): `x\u12␠` has two after `\u`, and in `x\u1é` the `é` counts as two
+(`backslash_short_unicode_counts_bytes`). When at least four characters follow `\u`, the escape
+covers `\u` and those four characters. If all four are hex digits, the code point is their value. Otherwise it is 16 × the
 value of the hex digits before the first non-hex character among the four, or 0 if there are none:
 
 - `x\uZZZZ` → `"x\u0000"`; `x\u00ZZ` → `"x\u0000"`; `x\u4Z00y` → `"x@y"` (U+0040)
@@ -104,11 +106,12 @@ When fewer than four characters of the value follow `\u`:
 
 - With three, the code point is found the same way, with the end of the value counting as a
   fourth, non-hex character, and the three characters are part of the escape:
-  `x\u123` → `"x\u1230"`, `x\u1Z2` → `"x\u0010"` (`backslash_short_unicode_at_end`).
+  `x\u123` → `"x\u1230"`, `x\u1Z2` → `"x\u0010"`, `x\u1é` → `"x\u0010"`
+  (`backslash_short_unicode_at_end`, `backslash_short_unicode_counts_bytes`).
 - **Quirk.** With two or fewer, the `\` is dropped, the `u` is kept, the first character after
   it is dropped, and the rest of the value follows unchanged, its own escapes decoded: `x\u12` → `"xu2"`, `x\u41` → `"xu1"`,
-  `x\u1` → `"xu"`, `x\uZ` → `"xu"`, `x\u` → `"xu"`, `a\u\n` → `"aun"`
-  (`backslash_short_unicode_at_end`).
+  `x\u1` → `"xu"`, `x\uZ` → `"xu"`, `x\u` → `"xu"`, `a\u\n` → `"aun"`, `x\u12␠` → `"xu2"`
+  (`backslash_short_unicode_at_end`, `backslash_short_unicode_counts_bytes`).
 
 ## 4.9 `$` in unquoted values
 

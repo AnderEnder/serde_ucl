@@ -1,0 +1,2 @@
+.include(key="NEW") "files/a.inc"
+new { z = 1 }

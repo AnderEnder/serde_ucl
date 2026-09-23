@@ -36,12 +36,29 @@ Not numbers, so strings: `.5`, `-.5`, `+1`, `--1`, `-`, `-a`, `1_000`, `1e`, `1e
 - **Quirk.** The `x` may follow any run of decimal digits, and those digits are ignored:
   `12x34` → `int 52` (0x34); `9x1f` → `int 31`. A leading `-` negates the result: `-12x34` →
   `int -52`. `x10` and `1x` are strings (`hex_digits_before_x_ignored`, `hex_more_malformed`).
-- **Quirk.** After a number with a `.` or an exponent, the hex digits after an `x` are taken as a
-  decimal number: `1.5x10` → `int 0`, `1e5x10` → `int 0`, `1.x5` → `int 0`,
-  `1.5x1e5` → `int 0`. The value is `int 0`, except with a binary multiplier (§5.4), which gives
-  that decimal number, truncated, times the multiplier: `1.5x10kb` → `int 10240`. When the hex
-  digits do not form a decimal number followed by what §5.5 allows, the value is a string:
-  `1.5x1f`, `1e5x`, `1.5x10.5` (`hex_after_fraction_or_exponent`).
+- **Quirk.** After a number with a `.` or an exponent, an `x` still starts hex digits, but they
+  are then read as a decimal number: `1.5x10` → `int 0`, `1e5x10` → `int 0`, `1.x5` → `int 0`,
+  `1.5x1e5` → `int 0` (`hex_after_fraction_or_exponent`). In detail:
+  - The number before the `x` is dropped and never checked for range: `1e999x5kb` → `int 5120`.
+    A leading `-` applies to the result: `-1.5x10kb` → `int -10240`
+    (`hex_after_fraction_first_number_unchecked`).
+  - The run of hex digits after the `x` (`e` and `E` are hex digits) is read as a decimal float,
+    as far as it forms one, possibly not at all. The rest of the run, with any letters after it,
+    is a suffix under §5.4 and §5.5: `1.5x1d` reads `1` with the suffix `d`, `1.5xd` reads nothing
+    with the suffix `d`. When that is not a valid suffix followed by what §5.5 allows, the value
+    is a string: `1.5x1f`, `1e5x`, `1.5x1dkb`, `1.5x10b`, `1.5x10e`, `1.5x1e1e1`
+    (`hex_after_fraction_bad_suffix_strings`).
+  - The value is `int 0`, with a time suffix and a decimal multiplier as well: `1.5x10s`,
+    `1.5x10ms`, `1.5x10min`, `1.5x10k`, `1.5x1d`, `1.5xd` → `int 0`
+    (`hex_after_fraction_suffixes_give_zero`). Only a binary multiplier (§5.4) gives something
+    else: the number read, truncated toward zero, times the multiplier: `1.5x10kb` → `int 10240`.
+    `no-time` applies as usual: `1.5x10s` and `1.5x1d` are strings, `1.5x10ms` is still `int 0`
+    (`hex_after_fraction_no_time`).
+  - The number read is checked for range (§5.8): `1.5x1e999` and `1.5x1e999 x` are errors
+    (`hex_after_fraction_range_error`, `hex_after_fraction_range_error_before_text`).
+  - A `.` directly after the hex digits makes the value a string, before any range check, here as
+    after plain hex digits: `1.5x10.5`, `1.5x1e999.`, `0x8000000000000000.`,
+    `12x8000000000000000.5` are strings (`dot_after_hex_digits_is_string`).
 - There is no binary or octal syntax: `0b1010` and `0o755` are strings (`no_binary_or_octal`,
   `cases/review/12_0b`, `cases/review/13_0o`).
 
@@ -92,6 +109,11 @@ Notes:
 - **Quirk.** With `kb`, `mb` and `gb`, a float is first truncated toward zero:
   `1.5kb` → `int 1024`, `2.9mb` → `int 2097152`, `1e3kb` → `int 1024000`
   (`float_binary_multiplier_truncates`, `cases/additions/a14_float_kb`, `cases/additions/a24_int_float_exp_suffix`).
+  **Uncertain (undefined in libucl):** when the truncated float lies outside the 64-bit signed
+  range, the result depends on the platform: `1e20kb` or `1.5x99999999999999999999kb`. The oracle's
+  platform saturates to the nearest end of the range and then multiplies with wrap-around
+  (`1e20kb` → `int -1024`, `-1e20kb` → `int 0`); other platforms may give other results. No case
+  pins this.
 - **Quirk.** Multiplying an int can overflow, and the result wraps around in 64-bit two's
   complement without error: `9223372036854775807k` → `int -1000`,
   `9223372036854775807kb` → `int -1024`. A float that overflows through a multiplier becomes
@@ -168,3 +190,14 @@ digits not followed by a hex digit: `1e999x`, `1e999e`, `99999999999999999999X`,
 integer with a fraction or an exponent is a float, not an error: `99999999999999999999.5` →
 `float 1e+20`, `99999999999999999999E5` → `float 1.0000000000000001e+25`
 (`big_integer_with_fraction_is_float`).
+
+A number text with a `.` or an exponent is converted as a float, and its value is that of its
+longest leading part that reads as a decimal float. So the `.` and the exponent may come in either
+order, and only the part before a `.` that follows an exponent counts: `1e999.` and `1e999.5` are
+range errors, while `1e999.5.`, `1e999.e5` and `1.5e999.5` are strings, having a second `.` or
+exponent (`range_error_dot_after_exponent`, `range_error_before_fraction`,
+`dot_after_exponent_forms`). An exponent sign with no digits after it is not part of the value:
+`99999999999999999999e+` reads as 1e20, in range, and is then a string by §5.5
+(`exponent_sign_without_digits_big_integer`). For a hex number, anything after the hex digits other
+than `.` is checked only after the range: `0x8000000000000000-` is an error
+(`hex_range_error_before_minus`); for a `.`, see §5.2.

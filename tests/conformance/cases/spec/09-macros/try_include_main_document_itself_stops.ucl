@@ -1,0 +1,3 @@
+a = 1
+.try_include "try_include_main_document_itself_stops.ucl"
+k = 1

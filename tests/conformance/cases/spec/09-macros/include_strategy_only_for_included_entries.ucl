@@ -1,0 +1,2 @@
+.include(duplicate="rewrite") "files/a.inc"
+x = 2

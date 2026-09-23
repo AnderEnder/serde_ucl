@@ -1,0 +1,2 @@
+.load(key="a", target="INT") "files/num.txt"
+.load(key="b", target="String") "files/num.txt"

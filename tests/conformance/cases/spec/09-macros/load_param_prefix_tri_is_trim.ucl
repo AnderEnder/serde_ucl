@@ -1,0 +1,1 @@
+.load(key="k", tri=true) "files/text.txt"

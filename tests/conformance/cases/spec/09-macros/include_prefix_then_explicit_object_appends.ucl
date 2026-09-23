@@ -1,0 +1,2 @@
+.include(key="k") "files/a.inc"
+k { z = 1 }

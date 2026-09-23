@@ -1,0 +1,6 @@
+a b { c = 1 }
+d e f { g = 1 }
+h i  /* x */ j { k = 1 }
+l m /* x */n { o = 1 }
+p q = r { s = 1 }
+t u v { w = 1 }

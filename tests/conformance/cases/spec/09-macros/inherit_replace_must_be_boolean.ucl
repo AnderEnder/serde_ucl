@@ -1,0 +1,2 @@
+d { a = 1 }
+e { a = 0; .inherit(replace=1) "d" }

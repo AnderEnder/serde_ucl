@@ -20,6 +20,14 @@ parsing affect the config format:
    `"s/t"` → `s/t`). **Quirk:** so are keys containing `;`, `}`, `#` or `,`, which then cannot be
    read back (`keys_quoting`).
 
+Values created by macros (§9):
+
+- Copies made by `.inherit` keep all three facts of the values they copy
+  (`inherit_copies_keep_output_facts`).
+- A key created by `.load` needs quoting when it contains any of the bytes listed in fact 3,
+  however it was written. **Quirk:** a key created by `.include` with `key` or `prefix` never does,
+  so `.include(key="x y") …` is written `x y {…}` (`macro_created_keys_quoting`).
+
 Priorities are never written (`priorities_not_emitted`). Output of a parse error is not defined.
 
 ## 10.2 Scalars (all formats)

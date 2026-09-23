@@ -1,0 +1,3 @@
+.include "files/v4/unclosed_object.inc"
+}
+k = 1

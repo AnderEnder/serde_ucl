@@ -29,6 +29,10 @@ entry: `#` and `# c⏎#` → `{}`, `a = 1⏎ #` → `{ a: int 1 }` (`hash_last_b
 space, makes it an ordinary comment: `⏎#⏎` and `⏎# ` → `{}`
 (`hash_then_newline_after_leading_newline`, `hash_then_space_after_leading_newline`).
 
+The same holds where the next entry should start after a macro, whatever came before the macro:
+`.priority 1⏎ #` and `a = 1⏎.priority 1⏎ #` are errors, and so is `.priority 1#`, with no space
+(`hash_last_byte_after_macro_error`, §9.2).
+
 A `#` ends an unquoted value immediately, even with no space before it: `a = x#y` →
 `{ a: "x" }`; `b = 1#2` → `{ b: int 1 }` (`hash_ends_unquoted_value`,
 `cases/additions/a44_hash_in_value`). Inside quoted strings `#` is an ordinary character

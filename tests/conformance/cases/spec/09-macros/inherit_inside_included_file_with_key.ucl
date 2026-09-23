@@ -1,0 +1,2 @@
+d { a = 1 }
+x { .include(key="k") "files/v4/inherit_here.inc" }

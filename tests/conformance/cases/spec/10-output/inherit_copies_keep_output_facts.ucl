@@ -1,0 +1,9 @@
+d {
+    s = 'x';
+    "a b" = 1;
+    h = <<EOD
+l1
+l2
+EOD
+}
+e { .inherit "d" }

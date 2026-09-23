@@ -1,0 +1,3 @@
+k { a = 1 }
+k { b = 2 }
+.include(key="k") "files/a.inc"

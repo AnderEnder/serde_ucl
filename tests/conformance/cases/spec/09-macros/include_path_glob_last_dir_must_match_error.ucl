@@ -1,0 +1,2 @@
+.include(path=["files/v4/p2", "files/v4/p1"], glob=true) "pc*.inc"
+k = 1

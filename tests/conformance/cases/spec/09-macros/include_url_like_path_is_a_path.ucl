@@ -1,0 +1,2 @@
+.include(try=true) "http://example.invalid/x.inc"
+k = 1
