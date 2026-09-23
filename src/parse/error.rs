@@ -2,22 +2,34 @@
 //!
 //! The spec fixes only whether a document is rejected (`docs/spec/11-errors.md` §11.1). The kinds
 //! and messages here are the project's own; every error carries the position where it was
-//! detected.
+//! detected, and the file when that is an included file.
 
 use crate::error::Position;
+use crate::value::UclValue;
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 /// A parse error: what went wrong and where.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A silent stop (spec §9.4, *Missing and unusable files*) is reported as an error of kind
+/// [`ErrorKind::Stopped`]; it carries the entries parsed before the stop ([`Error::partial`]).
+#[derive(Debug, Clone, PartialEq)]
 pub struct Error {
     kind: ErrorKind,
     position: Position,
+    file: Option<PathBuf>,
+    partial: Option<Box<UclValue>>,
 }
 
 impl Error {
     /// An error of `kind` at `position`.
     pub fn new(kind: ErrorKind, position: Position) -> Self {
-        Self { kind, position }
+        Self {
+            kind,
+            position,
+            file: None,
+            partial: None,
+        }
     }
 
     /// What went wrong.
@@ -25,15 +37,54 @@ impl Error {
         &self.kind
     }
 
-    /// Where the error was detected: 1-based line and column (in characters), 0-based byte offset.
+    /// Where the error was detected: 1-based line and column (in characters), 0-based byte offset,
+    /// in the input named by [`Error::file`].
     pub fn position(&self) -> Position {
         self.position
     }
 
-    /// True for input the parser recognises but does not support yet, such as macros before
-    /// work item C3. Such an error is not a rejection of the document by the format rules.
+    /// The canonical path of the included file (spec §9.4) the error was detected in, or `None`
+    /// when it was detected in the document the parser was given.
+    pub fn file(&self) -> Option<&Path> {
+        self.file.as_deref()
+    }
+
+    /// True for input the parser recognises but does not support: the macro `.includes`, the
+    /// parameter `sign=true` of the include macros (project decision: signatures are never
+    /// verified), and `.load` when the crate is built without its `load` feature. Such an error
+    /// is not a rejection of the document by the format rules.
     pub fn is_unsupported(&self) -> bool {
         matches!(self.kind, ErrorKind::Unsupported { .. })
+    }
+
+    /// True for a silent stop ([`ErrorKind::Stopped`]).
+    pub fn is_stopped(&self) -> bool {
+        matches!(self.kind, ErrorKind::Stopped { .. })
+    }
+
+    /// For a silent stop, the root value as parsed up to the macro that stopped: what libucl
+    /// returns as the result in that situation (spec §9.4).
+    pub fn partial(&self) -> Option<&UclValue> {
+        self.partial.as_deref()
+    }
+
+    /// [`Error::partial`], by value.
+    pub fn into_partial(self) -> Option<UclValue> {
+        self.partial.map(|v| *v)
+    }
+
+    /// The error with `file` recorded, unless it already names one.
+    pub(crate) fn in_file(mut self, file: &Path) -> Self {
+        if self.file.is_none() {
+            self.file = Some(file.to_path_buf());
+        }
+        self
+    }
+
+    /// The error with the partial result of a silent stop.
+    pub(crate) fn with_partial(mut self, root: UclValue) -> Self {
+        self.partial = Some(Box::new(root));
+        self
     }
 }
 
@@ -41,9 +92,13 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} (line {}, column {})",
+            "{} (line {}, column {}",
             self.kind, self.position.line, self.position.column
-        )
+        )?;
+        match &self.file {
+            Some(file) => write!(f, " of {})", file.display()),
+            None => f.write_str(")"),
+        }
     }
 }
 
@@ -63,8 +118,8 @@ pub enum ErrorKind {
     UnterminatedHeredoc,
     /// A block comment has no matching `*/`.
     UnterminatedComment,
-    /// A `#` that is the last byte of the input, directly after whitespace, where the first key of
-    /// an unbraced root or a macro's value could start (spec §2.2, *Quirk*).
+    /// A `#` that is the last byte of the input, directly after whitespace where the first key
+    /// of an unbraced root could start (spec §2.2, *Quirk*), or after a macro (spec §9.2).
     HashAtEnd,
     /// A `}` or `]` that closes nothing, or the wrong kind of container.
     UnmatchedClose { found: char },
@@ -101,6 +156,45 @@ pub enum ErrorKind {
     MacrosDisabled,
     /// A macro's `(` has no matching `)` (spec §9.2).
     UnterminatedArguments,
+    /// A macro value written in braces has no `}` (spec §9.2).
+    UnterminatedMacroValue,
+    /// More macro argument documents open inside one another than the limit allows
+    /// ([`crate::parse::MAX_ARGUMENT_DEPTH`]).
+    ArgumentsTooDeep { limit: usize },
+    /// The value of `.priority` is not a decimal integer, or it is empty and there is no
+    /// integer `priority` parameter (spec §9.5).
+    InvalidPriority,
+    /// `.inherit` names no key of the root object, or the root is an array (spec §9.7).
+    InheritSourceMissing { name: String },
+    /// `.inherit` names a root key whose first value is not an object (spec §9.7).
+    InheritSourceNotObject { name: String },
+    /// A file named by `.include`, `.try_include` or `.load` does not exist, or, with a search
+    /// path, exists in none of its directories (spec §9.4, §9.6).
+    FileNotFound { path: String },
+    /// A file named by `.include`, `.try_include` or `.load` is a directory or another kind of
+    /// file that is not a regular file, or cannot be read.
+    NotAFile { path: String },
+    /// An include macro names the file that holds it (spec §9.4).
+    IncludeSelf { path: String },
+    /// More input units open at once than [`crate::parse::MAX_INCLUDE_DEPTH`] allows.
+    IncludeTooDeep { limit: usize },
+    /// An included file starts with `[` where a bracketed root would start (spec §9.4).
+    IncludeArrayRoot,
+    /// Nesting an included file under key `key` (`key`, `prefix`), whose first value is not an
+    /// object, without `target="array"` (spec §9.4).
+    IncludeTargetNotObject { key: String },
+    /// `url=true` with `://` in the path: the crate never fetches URLs (project decision).
+    UrlNotSupported { path: String },
+    /// `.load` without a `key` parameter, or with an empty one (spec §9.6).
+    LoadKeyMissing,
+    /// `.load` of a key the current object already has (spec §9.6).
+    LoadKeyExists { key: String },
+    /// A silent stop (spec §9.4, *Missing and unusable files*): `.try_include` found no usable
+    /// file, or `.include` a glob pattern that matches nothing. libucl ends the parse there
+    /// without an error message and keeps what it parsed; [`Error::partial`] holds that.
+    Stopped { path: String },
+    /// A silent stop inside a macro argument list (spec §9.2), which makes the macro fail.
+    StoppedInArguments { path: String },
     /// Input the parser recognises but does not support.
     Unsupported { feature: String },
     /// The input file could not be read.
@@ -157,7 +251,54 @@ impl fmt::Display for ErrorKind {
             ErrorKind::UnterminatedArguments => {
                 f.write_str("macro arguments are not closed with ')'")
             }
-            ErrorKind::Unsupported { feature } => write!(f, "{feature} is not supported yet"),
+            ErrorKind::UnterminatedMacroValue => {
+                f.write_str("macro value in braces is not closed with '}'")
+            }
+            ErrorKind::ArgumentsTooDeep { limit } => {
+                write!(
+                    f,
+                    "more than {limit} macro argument lists inside one another"
+                )
+            }
+            ErrorKind::InvalidPriority => f.write_str(
+                ".priority needs a decimal integer, as its value or its priority parameter",
+            ),
+            ErrorKind::InheritSourceMissing { name } => {
+                write!(f, ".inherit: the root object has no key '{name}'")
+            }
+            ErrorKind::InheritSourceNotObject { name } => {
+                write!(f, ".inherit: the root key '{name}' is not an object")
+            }
+            ErrorKind::FileNotFound { path } => write!(f, "file '{path}' does not exist"),
+            ErrorKind::NotAFile { path } => {
+                write!(f, "'{path}' is not a regular file that can be read")
+            }
+            ErrorKind::IncludeSelf { path } => write!(f, "file '{path}' includes itself"),
+            ErrorKind::IncludeTooDeep { limit } => {
+                write!(f, "more than {limit} files are included inside one another")
+            }
+            ErrorKind::IncludeArrayRoot => f.write_str("an included file cannot start with '['"),
+            ErrorKind::IncludeTargetNotObject { key } => write!(
+                f,
+                "cannot include into key '{key}': its value is not an object"
+            ),
+            ErrorKind::UrlNotSupported { path } => {
+                write!(f, "'{path}' is a URL, and URLs are never fetched")
+            }
+            ErrorKind::LoadKeyMissing => f.write_str(".load needs a non-empty key parameter"),
+            ErrorKind::LoadKeyExists { key } => {
+                write!(f, ".load: the object already has the key '{key}'")
+            }
+            ErrorKind::Stopped { path } => write!(
+                f,
+                "parsing stopped at the include of '{path}', which found no usable file; \
+                 the entries before it are kept"
+            ),
+            ErrorKind::StoppedInArguments { path } => write!(
+                f,
+                "macro arguments stopped at the include of '{path}', which found no usable file"
+            ),
+            ErrorKind::Unsupported { feature } => write!(f, "{feature} is not supported"),
             ErrorKind::Io { message } => write!(f, "cannot read input: {message}"),
         }
     }

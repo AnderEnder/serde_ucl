@@ -457,7 +457,25 @@ pub enum UclError {
 
     /// Error from the new parser core, [`crate::parse`]
     #[error("Syntax error: {0}")]
-    Syntax(#[from] crate::parse::Error),
+    Syntax(#[source] crate::parse::Error),
+
+    /// A silent stop of the new parser core (spec §9.4): libucl ends the parse at a
+    /// `.try_include` that finds no usable file, or at an `.include` of a glob pattern that
+    /// matches nothing, and keeps what it has parsed. The error's
+    /// [`partial`](crate::parse::Error::partial) result holds that.
+    #[error("Parsing stopped: {0}")]
+    Stopped(#[source] crate::parse::Error),
+}
+
+impl From<crate::parse::Error> for UclError {
+    /// A silent stop becomes [`UclError::Stopped`], any other error [`UclError::Syntax`].
+    fn from(error: crate::parse::Error) -> Self {
+        if error.is_stopped() {
+            UclError::Stopped(error)
+        } else {
+            UclError::Syntax(error)
+        }
+    }
 }
 
 /// Lexical analysis errors

@@ -9,15 +9,21 @@
 //! - the existing parser (`libucl_conformance`), with its known failures in
 //!   `tests/conformance/xfail.txt`. It cannot apply `.flags` files, so cases that have one fail;
 //! - the new parser core `ucl_lexer::parse` (`libucl_conformance_new_core`), with its known
-//!   failures in `tests/conformance/xfail-new.txt`. It applies each case's `.flags` file.
+//!   failures in `tests/conformance/xfail-new.txt`. It applies each case's `.flags` file, and
+//!   gives the parser the case's directory as its base directory, so relative include paths
+//!   resolve as the oracle's do (spec §9.3) without changing the process's working directory.
+//!   A case is parsed as a file, which defines `FILENAME` and `CURDIR` from its path, unless its
+//!   `.flags` say `string-input` or `no-filevars`: then it is parsed as bytes, as the oracle
+//!   parses it.
 //!
 //! Each xfail file lists cases one per line: `<case-id> <reason>`. The run fails when an unlisted
 //! case fails, and also when a listed case passes, so the lists can only shrink.
 //!
 //! A case whose golden file is an error passes only if the parser rejects the input. For the new
-//! core, a rejection because the input uses something not supported yet (`Error::is_unsupported`,
-//! such as a known macro before C3) does not count: the case fails with the reason `macro`. Syntax
-//! errors in macros are real rejections.
+//! core, a rejection because the input uses something the project does not support
+//! (`Error::is_unsupported`: `.includes`, `sign=true`) never counts as a pass. A case listed with
+//! the reason `divergence:signature` must fail with exactly that error. A silent stop (spec §9.4,
+//! `Error::is_stopped`) is not a rejection: its partial result is compared with the golden file.
 //!
 //! For cases with `dump-comments` in their `.flags`, the new core's dump also records the saved
 //! comments attached to each value, as the oracle's does (`tests/conformance/README.md`): `"c"` for
@@ -218,7 +224,7 @@ fn strip_unobservable_priorities(node: &mut J, is_root: bool) {
 enum Parsed {
     Value(J),
     Rejected(String),
-    /// The parser recognised the input but does not support it yet; never a pass.
+    /// The parser recognised the input but does not support it; never a pass.
     Unsupported(String),
 }
 
@@ -312,6 +318,7 @@ fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
     let setup = setup(case);
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         let mut parser = CoreParser::with_flags(setup.flags);
+        parser.set_base_dir(case.input.parent().expect("a case is in a directory"));
         parser.register_variable("ABI", "unknown");
         for (name, value) in &setup.vars {
             parser.register_variable(name.as_str(), value.as_str());
@@ -327,11 +334,19 @@ fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
         if let Some(strategy) = setup.strategy {
             parser.set_strategy(strategy);
         }
-        let result = if setup.string_input {
+        // The oracle parses every case as a string, then defines FILENAME and CURDIR from the
+        // case's path unless the case has `no-filevars` (spec §12.7). The core defines them
+        // whenever it parses a file (project decision 5).
+        let no_filevars = setup.flags.contains(ParserFlags::NO_FILEVARS);
+        let result = if setup.string_input || no_filevars {
             let bytes = fs::read(&case.input).unwrap();
             parser.parse(&bytes)
         } else {
             parser.parse_file(&case.input)
+        };
+        let result = match result {
+            Err(e) if e.is_stopped() => Ok(e.into_partial().expect("a stop keeps its result")),
+            other => other,
         };
         match result {
             Ok(v) => {
@@ -462,8 +477,8 @@ fn evaluate(case: &Case, parse: fn(&Case) -> Result<Parsed, &'static str>) -> Ou
 
     match (golden_is_error, actual) {
         (_, Parsed::Unsupported(e)) => Outcome::Fail {
-            hint: "macro",
-            detail: format!("not supported yet: {e}"),
+            hint: "unsupported",
+            detail: format!("not supported: {e}"),
         },
         (true, Parsed::Rejected(_)) => Outcome::Pass,
         (true, Parsed::Value(value)) => Outcome::Fail {
@@ -551,6 +566,25 @@ fn run_suite(label: &str, xfail_file: &str, parse: fn(&Case) -> Result<Parsed, &
     let mut passed = 0;
     let mut xfailed: BTreeMap<&str, usize> = BTreeMap::new();
     for (case, outcome) in &outcomes {
+        let reason = xfail
+            .get(&case.id)
+            .map(|r| r.split([',', '#']).next().unwrap().trim());
+        if reason == Some("divergence:signature")
+            && !matches!(
+                outcome,
+                Outcome::Fail {
+                    hint: "unsupported",
+                    ..
+                }
+            )
+        {
+            // Signatures are never verified (project decision): these cases must fail with
+            // the "unsupported" error, not with any other outcome.
+            problems.push(format!(
+                "{} is listed as divergence:signature but does not fail with the unsupported error",
+                case.id
+            ));
+        }
         match (outcome, xfail.get(&case.id)) {
             (Outcome::Pass, None) => passed += 1,
             (Outcome::Pass, Some(_)) => problems.push(format!(

@@ -305,11 +305,26 @@ impl Slot {
     }
 
     /// A value copied from another object by `.inherit`.
-    #[cfg_attr(not(test), allow(dead_code))] // used by `.inherit` (PLAN.md P4.5)
+    #[cfg(test)]
     pub(crate) fn inherited(value: UclValue, priority: u8) -> Self {
+        Self::new(value, priority).into_inherited()
+    }
+
+    /// An explicit array that collects a key's repeats under `NO_IMPLICIT_ARRAYS` (spec §8.5),
+    /// at priority 0.
+    pub(crate) fn collection(value: UclValue) -> Self {
+        Self {
+            collected: true,
+            ..Self::new(value, 0)
+        }
+    }
+
+    /// The slot marked as copied by `.inherit` (spec §9.7). Its value, priority and
+    /// `NO_IMPLICIT_ARRAYS` collection mark are kept.
+    pub(crate) fn into_inherited(self) -> Self {
         Self {
             inherited: true,
-            ..Self::new(value, priority)
+            ..self
         }
     }
 
@@ -463,6 +478,8 @@ impl Entry {
 
     /// Adds a repeated value under `NO_IMPLICIT_ARRAYS` (spec §8.5). The first repeat replaces the
     /// entry with an explicit array of the old and new values; later repeats are appended to it.
+    /// Only the entry's first value goes into the array: other values, which only `.inherit`
+    /// with `replace=true` can add under this flag, are dropped (QUESTIONS.md #25).
     ///
     /// Two details follow the oracle rather than the spec text (QUESTIONS.md #3, #4):
     /// - The collection array has priority 0, whatever its elements' priorities, so a later value
@@ -480,17 +497,13 @@ impl Entry {
                 }),
             };
         }
-        let mut items: UclArray = std::mem::take(&mut self.slots)
+        let head = std::mem::take(&mut self.slots)
             .into_iter()
-            .map(|s| s.value)
-            .collect();
-        items.push(slot.value);
-        let index = items.len() - 1;
-        *self = Entry::from_slot(Slot {
-            collected: true,
-            ..Slot::new(UclValue::Array(items), 0)
-        });
-        Ok(Placement::Collected(index))
+            .next()
+            .expect("an entry holds at least one value");
+        let items: UclArray = vec![head.value, slot.value];
+        *self = Entry::from_slot(Slot::collection(UclValue::Array(items)));
+        Ok(Placement::Collected(1))
     }
 
     /// Resolves a repeated key under [`DuplicateStrategy::Merge`] (spec §8.4), by the type of the
@@ -628,6 +641,30 @@ impl UclObject {
 
     pub fn entry_mut(&mut self, key: &str) -> Option<&mut Entry> {
         self.entries.get_mut(key)
+    }
+
+    /// The key and entry at position `index` in insertion order.
+    pub fn get_index(&self, index: usize) -> Option<(&String, &Entry)> {
+        self.entries.get_index(index)
+    }
+
+    /// The key and entry at position `index` in insertion order, the entry mutable.
+    pub fn get_index_mut(&mut self, index: usize) -> Option<(&String, &mut Entry)> {
+        self.entries.get_index_mut(index)
+    }
+
+    /// The position of `key` in insertion order.
+    pub fn index_of(&self, key: &str) -> Option<usize> {
+        self.entries.get_index_of(key)
+    }
+
+    /// Changes the spelling of key `old` to `new`, keeping its position and entry. Returns false
+    /// if `old` is absent or `new` is another key already present.
+    pub fn rename_key(&mut self, old: &str, new: impl Into<String>) -> bool {
+        match self.entries.get_index_of(old) {
+            Some(index) => self.entries.replace_index(index, new.into()).is_ok(),
+            None => false,
+        }
     }
 
     /// Sets `key` to a single value, replacing every existing value. An existing key keeps its

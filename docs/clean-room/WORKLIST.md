@@ -44,6 +44,29 @@ Spec §09: `.include` (and its parameters), `.try_include`, `.priority`, `.inher
 errors. There is a loader abstraction with a filesystem loader (feature `fs`, default on) and an
 in-memory loader. Done when no `xfail-new.txt` entry is left that needs macros.
 
+Split into two work items: C3a `.priority` and `.inherit`; C3b the loader, `.include`,
+`.try_include`, their parameters, globs and `.load`.
+
+### Project decisions for C3 (settle spec-v4 README, *Known gaps*)
+
+1. **Signatures (§9.4).** The crate never verifies signatures. `.includes`, and `sign=true` on
+   any include macro, are rejected with the "unsupported" error; `sign=false` is accepted. The
+   cases `includes_like_include` and `include_sign_param_no_effect` are justified divergences.
+2. **URLs (§9.4).** The crate never fetches URLs. What `url=true` with `://` in the path does
+   instead follows §9.4 in every mode, including `try=true` and `.try_include`; without
+   `url=true` such a path is an ordinary path.
+3. **Search paths (§9.4).** `path` is implemented as §9.4 describes, quirks included.
+4. **Silent stop (§9.4, *Missing and unusable files*).** The API reports it as an error of its own
+   kind, distinct from a syntax error, from which the partial tree built so far can be retrieved.
+   The serde entry points report it as an error. Message wording is the implementer's choice.
+5. **`no-filevars` when parsing a file (§12.7).** Parsing a file by path defines `FILENAME` and
+   `CURDIR` from that path whatever the flag says. Parsing bytes honours the flag.
+6. **Base directory.** Where relative include paths resolve and what `CURDIR` is for a document
+   given as bytes are parser options, not the process working directory.
+
+Known-failure reasons: a justified divergence is listed with reason `divergence:<topic>` and
+stays listed; C3 is done when no entry's reason is `macro`.
+
 ## C4 — Output formats and serde serialization
 
 1. Emitters for JSON, compact JSON, the UCL config format and YAML, per spec §10. In its

@@ -5,14 +5,21 @@ use super::VariableHandler;
 /// Expands `$NAME`, `${NAME}` and `$$` in string values.
 pub(crate) struct Expander<'a> {
     /// Registered variables in lookup order (spec §7.1).
-    variables: &'a [(String, String)],
+    variables: Vec<(String, String)>,
     handler: Option<&'a mut VariableHandler>,
     enabled: bool,
 }
 
+/// The file variables' values from before an included file set them (see
+/// [`Expander::enter_file`]); `None` for one that was not defined.
+#[derive(Debug)]
+pub(crate) struct SavedFileVars([Option<String>; 2]);
+
+const FILE_VARS: [&str; 2] = ["FILENAME", "CURDIR"];
+
 impl<'a> Expander<'a> {
     pub(crate) fn new(
-        variables: &'a [(String, String)],
+        variables: Vec<(String, String)>,
         handler: Option<&'a mut VariableHandler>,
         enabled: bool,
     ) -> Self {
@@ -20,6 +27,36 @@ impl<'a> Expander<'a> {
             variables,
             handler,
             enabled,
+        }
+    }
+
+    /// Sets `FILENAME` and `CURDIR` for an included file (spec §9.4), whatever the registered
+    /// variables and `NO_FILEVARS` say. As the oracle does, they move to the end of the lookup
+    /// order, after every registered variable, and stay there (QUESTIONS.md #28).
+    pub(crate) fn enter_file(&mut self, filename: String, curdir: String) -> SavedFileVars {
+        let mut saved = [None, None];
+        for (slot, (name, value)) in saved
+            .iter_mut()
+            .zip(FILE_VARS.into_iter().zip([filename, curdir]))
+        {
+            if let Some(i) = self.variables.iter().position(|(n, _)| n == name) {
+                *slot = Some(self.variables.remove(i).1);
+            }
+            self.variables.push((name.to_string(), value));
+        }
+        SavedFileVars(saved)
+    }
+
+    /// Gives `FILENAME` and `CURDIR` back the values they had before [`Expander::enter_file`].
+    /// One that was not defined then keeps the included file's value (spec §9.4, §12.7,
+    /// *Quirk*).
+    pub(crate) fn leave_file(&mut self, saved: SavedFileVars) {
+        for (name, value) in FILE_VARS.into_iter().zip(saved.0) {
+            if let (Some(value), Some(slot)) =
+                (value, self.variables.iter_mut().find(|(n, _)| n == name))
+            {
+                slot.1 = value;
+            }
         }
     }
 
@@ -121,7 +158,7 @@ mod tests {
     }
 
     fn expand(variables: &[(String, String)], text: &str) -> String {
-        let mut e = Expander::new(variables, None, true);
+        let mut e = Expander::new(variables.to_vec(), None, true);
         String::from_utf8(e.expand(text.as_bytes().to_vec())).unwrap()
     }
 
@@ -165,7 +202,7 @@ mod tests {
         let v = vars(&[("H_REG", "registered")]);
         let mut handler =
             |name: &str| -> Option<String> { name.starts_with("H_").then(|| "[h]".to_string()) };
-        let mut e = Expander::new(&v, Some(&mut handler), true);
+        let mut e = Expander::new(v, Some(&mut handler), true);
         let mut run = |t: &str| String::from_utf8(e.expand(t.as_bytes().to_vec())).unwrap();
         assert_eq!(run("${H_X}"), "[h]");
         assert_eq!(run("$H_X"), "$H_X");
@@ -176,7 +213,34 @@ mod tests {
     #[test]
     fn disabled_expansion() {
         let v = vars(&[("ABI", "unknown")]);
-        let mut off = Expander::new(&v, None, false);
+        let mut off = Expander::new(v, None, false);
         assert_eq!(off.expand(b"$ABI".to_vec()), b"$ABI");
+    }
+
+    #[test]
+    fn file_variables_of_an_included_file() {
+        // Oracle runs (QUESTIONS.md #28): the included file's FILENAME and CURDIR come after
+        // the registered variables, so `FILE` wins an unbraced `$FILENAME`.
+        let v = vars(&[("FILENAME", "main"), ("CURDIR", "/m"), ("FILE", "f")]);
+        let mut e = Expander::new(v, None, true);
+        let run = |e: &mut Expander<'_>, t: &str| {
+            String::from_utf8(e.expand(t.as_bytes().to_vec())).unwrap()
+        };
+        assert_eq!(run(&mut e, "$FILENAME ${FILENAME}"), "main main");
+        let saved = e.enter_file("/i/x.inc".into(), "/i".into());
+        assert_eq!(
+            run(&mut e, "$FILENAME ${FILENAME} $CURDIR"),
+            "fNAME /i/x.inc /i"
+        );
+        e.leave_file(saved);
+        assert_eq!(
+            run(&mut e, "$FILENAME ${FILENAME} $CURDIR"),
+            "fNAME main /m"
+        );
+        // Not defined before (NO_FILEVARS): the included file's values stay.
+        let mut e = Expander::new(vars(&[("ABI", "unknown")]), None, true);
+        let saved = e.enter_file("/i/x.inc".into(), "/i".into());
+        e.leave_file(saved);
+        assert_eq!(run(&mut e, "${FILENAME} ${CURDIR}"), "/i/x.inc /i");
     }
 }

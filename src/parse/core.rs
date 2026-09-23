@@ -4,9 +4,16 @@
 //! grows the call stack. Containers are filled in place: an object or array is inserted into its
 //! parent (by the duplicate rules of §8) when its opening bracket is read, and later entries go
 //! straight into it. Each stack frame records how to reach its container from the one below.
+//!
+//! Input units (§9.4): an included file is parsed by a [`Core`] of its own that takes over the
+//! container stack, the tree and the saved comments of the unit that includes it, and hands them
+//! back when the file ends. So an included file adds entries where the macro stands, may close
+//! containers the including unit opened, and leaves section objects open for it (§9.4, *Where
+//! the entries go*).
 
 use super::comments::{Notes, ValuePath};
 use super::error::position_at;
+use super::include::Includes;
 use super::number::{self, Number};
 use super::string;
 use super::vars::Expander;
@@ -14,6 +21,7 @@ use super::{AttachedComments, Comment, Error, ErrorKind, MAX_NESTING, PathSegmen
 use crate::value::{
     DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclObject, UclValue,
 };
+use std::path::Path;
 
 /// The settings of one input unit.
 #[derive(Debug, Clone, Copy)]
@@ -30,61 +38,66 @@ pub(crate) struct CommentSink<'c> {
 }
 
 /// Parses a whole document into its root value.
+///
+/// A silent stop (§9.4) is an [`ErrorKind::Stopped`] error that carries the root as parsed so
+/// far; the saved comments and their attachments are kept then too.
 pub(crate) fn parse_document(
     input: &[u8],
     settings: Settings,
     expander: &mut Expander<'_>,
+    includes: &mut Includes<'_>,
     sink: Option<CommentSink<'_>>,
+) -> Result<UclValue, Error> {
+    parse_unit(input, settings, expander, includes, sink, 0)
+}
+
+/// Parses a macro's argument document (§9.2) that is `depth` argument documents deep. Its
+/// comments are not saved.
+pub(super) fn parse_nested(
+    input: &[u8],
+    settings: Settings,
+    expander: &mut Expander<'_>,
+    includes: &mut Includes<'_>,
+    depth: usize,
+) -> Result<UclValue, Error> {
+    parse_unit(input, settings, expander, includes, None, depth)
+}
+
+fn parse_unit(
+    input: &[u8],
+    settings: Settings,
+    expander: &mut Expander<'_>,
+    includes: &mut Includes<'_>,
+    sink: Option<CommentSink<'_>>,
+    depth: usize,
 ) -> Result<UclValue, Error> {
     let mut core = Core {
         src: input,
         pos: 0,
         settings,
         expander,
+        includes,
         notes: sink.as_ref().map(|_| Notes::new()),
         uppercase_keys: false,
         root: UclValue::Null,
         frames: Vec::new(),
+        depth,
+        unit: 0,
+        unit_done: false,
     };
     let result = core.run();
     if let (Some(sink), Some(notes)) = (sink, core.notes.take()) {
-        *sink.comments = comments_at(input, &notes.spans);
-        if result.is_ok() {
-            *sink.attached = notes.into_groups();
+        let (comments, groups) = notes.finish(input);
+        *sink.comments = comments;
+        if result.as_ref().is_ok() || result.as_ref().is_err_and(Error::is_stopped) {
+            *sink.attached = groups;
         }
     }
-    result.map(|()| core.root)
-}
-
-/// Converts comment byte ranges, in input order, to [`Comment`]s in one pass.
-fn comments_at(src: &[u8], spans: &[(usize, usize)]) -> Vec<Comment> {
-    let mut line = 1;
-    let mut line_start = 0;
-    let mut scanned = 0;
-    spans
-        .iter()
-        .map(|&(start, end)| {
-            for (i, &b) in src[scanned..start].iter().enumerate() {
-                if b == b'\n' {
-                    line += 1;
-                    line_start = scanned + i + 1;
-                }
-            }
-            scanned = start;
-            let column = 1 + src[line_start..start]
-                .iter()
-                .filter(|&&b| (b & 0xC0) != 0x80)
-                .count();
-            Comment {
-                text: String::from_utf8_lossy(&src[start..end]).into_owned(),
-                position: crate::error::Position {
-                    line,
-                    column,
-                    offset: start,
-                },
-            }
-        })
-        .collect()
+    match result {
+        Ok(()) => Ok(core.root),
+        Err(e) if e.is_stopped() => Err(e.with_partial(core.root)),
+        Err(e) => Err(e),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +122,36 @@ enum Close {
     /// closing bracket. It closes when a container written with a bracket that was opened in it
     /// closes, together with every such object below it, or at the end of input.
     LeftOpen,
+    /// An object whose opening brace an included file's leading `{` has taken over (§9.4,
+    /// *Quirk: braces around an included file*). A `}` removes the brace; what the object does
+    /// then is the [`Revert`].
+    IncludedBrace(Revert),
+}
+
+/// What an object whose brace an included file has taken over does when a `}` removes that
+/// brace (oracle runs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Revert {
+    /// It stays open as [`Close::Eof`]: the root, an object nested under a key, or an object
+    /// written with a brace, which has lost its own brace, so only the end of input closes it.
+    Open,
+    /// A section object ([`Close::Section`], [`Close::LeftOpen`]): it closes, with the section
+    /// objects around it, as when a bracketed container opened in it closes.
+    Section,
+}
+
+impl Close {
+    /// Whether a bracket is still open for the container.
+    fn has_bracket(self) -> bool {
+        matches!(
+            self,
+            Close::Brace | Close::Bracket | Close::IncludedBrace(_)
+        )
+    }
+
+    fn is_section(self) -> bool {
+        matches!(self, Close::Section | Close::LeftOpen)
+    }
 }
 
 /// How to reach a frame's container from the container of the frame below.
@@ -180,6 +223,9 @@ struct Frame {
     /// The container's path from the root, kept only when comments are saved; `None` also for a
     /// detached container.
     path: Option<ValuePath>,
+    /// The input unit that opened the container: 0 for the main document, `n` for a file
+    /// included `n` levels deep (§9.4).
+    unit: usize,
 }
 
 /// The container of the top frame.
@@ -230,7 +276,7 @@ fn is_key_byte(b: u8) -> bool {
 }
 
 /// Whitespace between entries and before values (§2.1).
-fn is_space(b: u8) -> bool {
+pub(super) fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
@@ -251,33 +297,43 @@ fn keyword(raw: &[u8]) -> Option<UclValue> {
     }
 }
 
-/// The macro names of §9.2.
-const MACROS: [&[u8]; 6] = [
-    b"include",
-    b"try_include",
-    b"includes",
-    b"priority",
-    b"load",
-    b"inherit",
-];
-
-struct Core<'s, 'e, 'v> {
-    src: &'s [u8],
-    pos: usize,
-    settings: Settings,
-    expander: &'e mut Expander<'v>,
+/// The parser state of one input unit. Macros are read and run in `super::macros`, and the
+/// include macros and `.load` in `super::include`.
+pub(super) struct Core<'s, 'e, 'v, 'l> {
+    pub(super) src: &'s [u8],
+    pub(super) pos: usize,
+    /// The settings of the input unit; `.priority` changes its priority (§9.5).
+    pub(super) settings: Settings,
+    pub(super) expander: &'e mut Expander<'v>,
+    /// The loader and the include state of the whole parse (§9.3, §9.4).
+    pub(super) includes: &'e mut Includes<'l>,
     /// Saved comments and their attachment, when comments are saved (§12.5).
     notes: Option<Notes>,
     /// A key with an uppercase ASCII letter has been read under `KEY_LOWERCASE` (§12.1).
-    uppercase_keys: bool,
-    root: UclValue,
+    pub(super) uppercase_keys: bool,
+    pub(super) root: UclValue,
     frames: Vec<Frame>,
+    /// How many macro argument documents this document is inside (§9.2): 0 for the main one.
+    pub(super) depth: usize,
+    /// This input unit: 0 for the main document, `n` for a file included `n` levels deep.
+    unit: usize,
+    /// The input of this included unit has ended.
+    unit_done: bool,
 }
 
-impl Core<'_, '_, '_> {
+/// The container an included file's contents go into when it is nested under a key (§9.4,
+/// *Nesting under a key*).
+#[derive(Debug, Clone)]
+pub(super) struct NestTarget {
+    pub(super) key: String,
+    pub(super) array: bool,
+    pub(super) priority: u8,
+}
+
+impl Core<'_, '_, '_, '_> {
     // ----- bytes ---------------------------------------------------------------------------
 
-    fn peek(&self) -> Option<u8> {
+    pub(super) fn peek(&self) -> Option<u8> {
         self.src.get(self.pos).copied()
     }
 
@@ -289,7 +345,7 @@ impl Core<'_, '_, '_> {
         self.peek() == Some(b'/') && self.peek_at(1) == Some(b'*')
     }
 
-    fn error(&self, kind: ErrorKind, at: usize) -> Error {
+    pub(super) fn error(&self, kind: ErrorKind, at: usize) -> Error {
         Error::new(kind, position_at(self.src, at))
     }
 
@@ -434,7 +490,8 @@ impl Core<'_, '_, '_> {
         self.frames.last().expect("a container is open")
     }
 
-    fn current(&mut self) -> &mut UclValue {
+    /// The container of the top frame.
+    pub(super) fn current(&mut self) -> &mut UclValue {
         resolve(&mut self.root, &mut self.frames)
     }
 
@@ -455,6 +512,7 @@ impl Core<'_, '_, '_> {
             home,
             fresh: true,
             path,
+            unit: self.unit,
         });
         Ok(())
     }
@@ -500,9 +558,11 @@ impl Core<'_, '_, '_> {
     /// Inserts `value` under `key` in the current object, by the duplicate rules of §8.
     ///
     /// Under `KEY_LOWERCASE`, `key` is first given the spelling of an existing key that differs
-    /// from it only in ASCII case (§12.1; QUESTIONS.md #20).
+    /// from it only in ASCII case (§12.1; QUESTIONS.md #20). If the new value then replaces all
+    /// of the entry's values, the entry takes the spelling of `key` as written, in its place
+    /// (QUESTIONS.md #27).
     fn insert(&mut self, key: &mut Key, value: UclValue) -> Result<Placement, Error> {
-        self.match_key_case(key);
+        let written = self.match_key_case(key);
         let Settings {
             mut flags,
             priority,
@@ -521,12 +581,15 @@ impl Core<'_, '_, '_> {
         let replaces_in_place = |e: &Entry| {
             strategy == DuplicateStrategy::Merge && is_container(e.first()) && !is_container(&value)
         };
+        let (existed, in_place) = object
+            .entry(&key.name)
+            .map_or((false, false), |e| (true, replaces_in_place(e)));
         let before = track
             .then(|| {
                 object.entry(&key.name).map(|e| Before {
                     len: e.len(),
                     collected: e.slots()[0].is_collected(),
-                    in_place: replaces_in_place(e),
+                    in_place,
                 })
             })
             .flatten();
@@ -547,6 +610,19 @@ impl Core<'_, '_, '_> {
         if track {
             self.values_moved(&key.name, before, placement, after);
         }
+        if let Some(written) = written
+            && existed
+            && placement == Placement::Slot(0)
+            && !in_place
+        {
+            let object = self
+                .current()
+                .as_object_mut()
+                .expect("entries are parsed inside objects");
+            if object.rename_key(&key.name, written.as_str()) {
+                key.name = written;
+            }
+        }
         Ok(placement)
     }
 
@@ -554,26 +630,30 @@ impl Core<'_, '_, '_> {
     /// the spelling of its first key. Keys are lowercased as they are read, so only escapes in
     /// quoted keys can leave uppercase letters (§12.1); until one does, exact comparison is
     /// enough.
-    fn match_key_case(&mut self, key: &mut Key) {
+    ///
+    /// Returns the spelling of `key` as written when it was changed.
+    fn match_key_case(&mut self, key: &mut Key) -> Option<String> {
         if !self.settings.flags.contains(ParserFlags::KEY_LOWERCASE) {
-            return;
+            return None;
         }
         if key.name.bytes().any(|b| b.is_ascii_uppercase()) {
             self.uppercase_keys = true;
         }
         if !self.uppercase_keys {
-            return;
+            return None;
         }
         let object = self
             .current()
             .as_object()
             .expect("entries are parsed inside objects");
         if object.contains_key(&key.name) {
-            return;
+            return None;
         }
-        if let Some(existing) = object.keys().find(|k| k.eq_ignore_ascii_case(&key.name)) {
-            key.name = existing.clone();
-        }
+        let existing = object
+            .keys()
+            .find(|k| k.eq_ignore_ascii_case(&key.name))?
+            .clone();
+        Some(std::mem::replace(&mut key.name, existing))
     }
 
     /// Keeps saved comments with their values when an insertion under `key` replaced or moved
@@ -602,7 +682,13 @@ impl Core<'_, '_, '_> {
             Placement::Slot(_) if in_place => {}
             Placement::Slot(_) if after == 1 => notes.replaced(&object, key, None),
             Placement::Slot(slot) => notes.replaced(&object, key, Some(slot)),
-            Placement::Collected(_) if !collected => notes.collected(&object, key, len),
+            Placement::Collected(_) if !collected => {
+                // Only the first value goes into the collection (QUESTIONS.md #25).
+                for slot in 1..len {
+                    notes.replaced(&object, key, Some(slot));
+                }
+                notes.collected(&object, key, 1);
+            }
             Placement::Collected(_) | Placement::Merged | Placement::Dropped => {}
         }
     }
@@ -669,21 +755,17 @@ impl Core<'_, '_, '_> {
             notes.trailing();
         }
         self.frames.pop();
+        self.close_sections()
+    }
+
+    /// After a bracketed container has closed: the section objects around it close too (§3.4).
+    /// Objects left open by a section path close with the first bracketed container that closes
+    /// in them, back to the nearest object written with a bracket, or the root. Section objects
+    /// of both kinds close together in any order, as the oracle does when an included file
+    /// leaves one inside another.
+    fn close_sections(&mut self) -> Result<(), Error> {
         let mut outermost = None;
-        while self
-            .frames
-            .last()
-            .is_some_and(|f| f.close == Close::Section)
-        {
-            outermost = self.frames.pop();
-        }
-        // Objects left open by a section path close with the first bracketed container that
-        // closes in them, back to the nearest object written with a bracket, or the root.
-        while self
-            .frames
-            .last()
-            .is_some_and(|f| f.close == Close::LeftOpen)
-        {
+        while self.frames.last().is_some_and(|f| f.close.is_section()) {
             outermost = self.frames.pop();
         }
         if let (Some(notes), Some(frame)) = (&mut self.notes, outermost) {
@@ -735,6 +817,234 @@ impl Core<'_, '_, '_> {
         Ok(())
     }
 
+    // ----- included units (§9.4) ------------------------------------------------------------
+
+    /// Parses `input`, an included file whose canonical path is `file`, as a new input unit with
+    /// `settings`. Its entries go into the current container, and it continues with the
+    /// container stack the file leaves behind.
+    pub(super) fn parse_included(
+        &mut self,
+        input: &[u8],
+        settings: Settings,
+        file: &Path,
+    ) -> Result<(), Error> {
+        let cursor = self.notes.as_mut().map(|n| n.suspend(self.src));
+        let mut inner = Core {
+            src: input,
+            pos: 0,
+            settings,
+            expander: &mut *self.expander,
+            includes: &mut *self.includes,
+            notes: self.notes.take(),
+            uppercase_keys: self.uppercase_keys,
+            root: std::mem::replace(&mut self.root, UclValue::Null),
+            frames: std::mem::take(&mut self.frames),
+            depth: self.depth,
+            unit: self.unit + 1,
+            unit_done: false,
+        };
+        let result = inner.run_included();
+        self.root = inner.root;
+        self.frames = inner.frames;
+        self.uppercase_keys = inner.uppercase_keys;
+        self.notes = inner.notes;
+        if let (Some(notes), Some(cursor)) = (&mut self.notes, cursor) {
+            notes.resume(input, cursor);
+        }
+        result.map_err(|e| e.in_file(file))
+    }
+
+    /// The start of an included unit follows §1.1, except that a `[` there is an error and a
+    /// `{` takes over the brace of the object the entries go into (§9.4).
+    fn run_included(&mut self) -> Result<(), Error> {
+        let mut after_space = false;
+        while self.peek().is_some_and(is_space) {
+            self.pos += 1;
+            after_space = true;
+        }
+        if !after_space {
+            self.comment_group()?;
+        }
+        match self.peek() {
+            Some(b'[') => return Err(self.error(ErrorKind::IncludeArrayRoot, self.pos)),
+            Some(b'{') => {
+                self.pos += 1;
+                let frame = self.frames.last_mut().expect("a container is open");
+                frame.close = Close::IncludedBrace(match frame.close {
+                    Close::IncludedBrace(revert) => revert,
+                    close if close.is_section() => Revert::Section,
+                    _ => Revert::Open,
+                });
+            }
+            _ => self.skip_space_checking_hash(after_space)?,
+        }
+        while !self.unit_done
+            && let Some(frame) = self.frames.last()
+        {
+            match frame.kind {
+                Kind::Object => self.object_step()?,
+                Kind::Array => self.array_step()?,
+            }
+        }
+        Ok(())
+    }
+
+    /// The input of an included unit has ended. Every container it opened with a bracket must
+    /// be closed; containers opened elsewhere, and section objects, stay open (§9.4). Pending
+    /// comments attach as at the end of input.
+    fn end_included_unit(&mut self) -> Result<(), Error> {
+        if let Some(frame) = self
+            .frames
+            .iter()
+            .find(|f| f.unit == self.unit && f.close.has_bracket())
+            .filter(|_| !self.left_by_included_file())
+        {
+            let kind = match frame.kind {
+                Kind::Object => ErrorKind::UnterminatedObject,
+                Kind::Array => ErrorKind::UnterminatedArray,
+            };
+            return Err(self.error(kind, self.pos));
+        }
+        if let Some(notes) = &mut self.notes {
+            notes.trailing();
+        }
+        self.unit_done = true;
+        Ok(())
+    }
+
+    /// Whether the innermost open objects, down to the first container that is not a section
+    /// object, include a section object that a file included by this unit left open (§9.4).
+    /// When this unit's input ends then, the containers below them are not checked: they stay
+    /// open, unclosed brackets included, and at the end of the main document the parse succeeds
+    /// (oracle runs, QUESTIONS.md #32).
+    fn left_by_included_file(&self) -> bool {
+        self.frames
+            .iter()
+            .rev()
+            .take_while(|f| f.close.is_section())
+            .any(|f| f.unit > self.unit)
+    }
+
+    /// The number of open containers.
+    pub(super) fn open_containers(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Closes the containers above the first `len`, without any check: the end of a file
+    /// nested under a key (§9.4).
+    pub(super) fn close_containers_above(&mut self, len: usize) {
+        self.frames.truncate(len);
+    }
+
+    /// Opens the container that an included file nested under a key goes into, in the current
+    /// object (§9.4, *Nesting under a key*):
+    ///
+    /// | `target` | key absent | first value an object | first value an array | anything else |
+    /// | --- | --- | --- | --- | --- |
+    /// | object | new object | that object | error | error |
+    /// | array | new array of one new object | array of that value and a new object | a new object appended | array of that value and a new object |
+    ///
+    /// The key is not lowercased under `KEY_LOWERCASE`, but found ignoring ASCII case. New
+    /// containers have the include's priority, except that an array that takes the place of the
+    /// key's values has priority 0 and collects later repeats under `NO_IMPLICIT_ARRAYS`, as a
+    /// collection does; the key's other values are dropped then. Such containers are not values
+    /// created for §12.5, but the one the contents go into counts as the most recent value.
+    pub(super) fn open_nest_target(&mut self, target: &NestTarget, at: usize) -> Result<(), Error> {
+        if self.frames.len() + 2 > MAX_NESTING {
+            return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
+        }
+        let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
+        if key_lowercase && target.key.bytes().any(|b| b.is_ascii_uppercase()) {
+            self.uppercase_keys = true;
+        }
+        let object = self
+            .current()
+            .as_object_mut()
+            .expect("macros are read inside objects");
+        let found = object.index_of(&target.key).or_else(|| {
+            key_lowercase
+                .then(|| {
+                    object
+                        .keys()
+                        .position(|k| k.eq_ignore_ascii_case(&target.key))
+                })
+                .flatten()
+        });
+        let empty_object = || UclValue::Object(UclObject::new());
+        // Where the array frame (if any) and the object frame go.
+        let (key, element) = match found {
+            None => {
+                let (value, element) = if target.array {
+                    (UclValue::Array(vec![empty_object()]), Some(0))
+                } else {
+                    (empty_object(), None)
+                };
+                object.insert_entry(
+                    target.key.clone(),
+                    Entry::from_slot(Slot::new(value, target.priority)),
+                );
+                (target.key.clone(), element)
+            }
+            Some(index) => {
+                let (name, entry) = object.get_index_mut(index).expect("the key was just found");
+                let name = name.clone();
+                let element = match (entry.first_mut(), target.array) {
+                    (UclValue::Object(_), false) => None,
+                    (_, false) => {
+                        return Err(self.error(ErrorKind::IncludeTargetNotObject { key: name }, at));
+                    }
+                    (UclValue::Array(items), true) => {
+                        items.push(empty_object());
+                        Some(items.len() - 1)
+                    }
+                    (first, true) => {
+                        let first = std::mem::replace(first, UclValue::Null);
+                        let array = UclValue::Array(vec![first, empty_object()]);
+                        *entry = Entry::from_slot(Slot::collection(array));
+                        Some(1)
+                    }
+                };
+                (name, element)
+            }
+        };
+        let entry_path = self.placed_path(&key, Placement::Slot(0));
+        let entry_step = Step::Entry { key, slot: 0 };
+        let path = match element {
+            None => {
+                self.push_frame(
+                    Kind::Object,
+                    Close::Eof,
+                    Home::Attached(entry_step),
+                    entry_path.clone(),
+                    at,
+                )?;
+                entry_path
+            }
+            Some(index) => {
+                self.push_frame(
+                    Kind::Array,
+                    Close::Eof,
+                    Home::Attached(entry_step),
+                    entry_path,
+                    at,
+                )?;
+                let path = self.element_path(index);
+                self.push_frame(
+                    Kind::Object,
+                    Close::Eof,
+                    Home::Attached(Step::Element(index)),
+                    path.clone(),
+                    at,
+                )?;
+                path
+            }
+        };
+        if let Some(notes) = &mut self.notes {
+            notes.set_last(path);
+        }
+        Ok(())
+    }
+
     /// Skips whitespace and comments. A `#` that is the last byte of the input is an error when
     /// whitespace comes directly before it (§2.2, *Quirk*); `after_space` tells whether the byte
     /// before the current position is such whitespace. This applies where the first key of an
@@ -773,6 +1083,15 @@ impl Core<'_, '_, '_> {
         self.skip_space()?;
         let at = self.pos;
         match self.peek() {
+            None if self.unit > 0 => self.end_included_unit(),
+            None if self.left_by_included_file() => {
+                // The containers below are not checked (oracle runs, QUESTIONS.md #32).
+                if let Some(notes) = &mut self.notes {
+                    notes.trailing();
+                }
+                self.frames.clear();
+                Ok(())
+            }
             None => match self.top().close {
                 Close::Eof | Close::LeftOpen | Close::Section => {
                     if let Some(notes) = &mut self.notes {
@@ -786,6 +1105,21 @@ impl Core<'_, '_, '_> {
             Some(b'}') if self.top().close == Close::Brace => {
                 self.pos += 1;
                 self.close_container()
+            }
+            Some(b'}') if matches!(self.top().close, Close::IncludedBrace(_)) => {
+                // The brace came from an included file: it goes, and the object stays open
+                // unless it is a section object (§9.4).
+                self.pos += 1;
+                if let Some(notes) = &mut self.notes {
+                    notes.trailing();
+                }
+                let frame = self.frames.last_mut().expect("a container is open");
+                if frame.close == Close::IncludedBrace(Revert::Section) {
+                    frame.close = Close::Section;
+                    return self.close_sections();
+                }
+                frame.close = Close::Eof;
+                self.after_value(false)
             }
             Some(c @ (b'}' | b']')) => Err(self.error(
                 ErrorKind::UnmatchedClose {
@@ -809,6 +1143,7 @@ impl Core<'_, '_, '_> {
             // The first element starts right after a group of comments that follow each
             // other directly, whitespace included (§1.5, *Quirk*).
             return match self.peek() {
+                None if self.unit > 0 => self.end_included_unit(),
                 None => Err(self.error(ErrorKind::UnterminatedArray, self.pos)),
                 Some(b']') => {
                     self.pos += 1;
@@ -820,6 +1155,7 @@ impl Core<'_, '_, '_> {
         self.skip_space()?;
         let at = self.pos;
         match self.peek() {
+            None if self.unit > 0 => self.end_included_unit(),
             None => Err(self.error(ErrorKind::UnterminatedArray, at)),
             Some(b']') => {
                 self.pos += 1;
@@ -842,7 +1178,7 @@ impl Core<'_, '_, '_> {
 
     /// Skips comments that follow each other directly, with nothing between them; a line
     /// comment includes its line break. Returns whether there was a comment.
-    fn comment_group(&mut self) -> Result<bool, Error> {
+    pub(super) fn comment_group(&mut self) -> Result<bool, Error> {
         let mut comment = false;
         loop {
             match self.peek() {
@@ -1195,90 +1531,5 @@ impl Core<'_, '_, '_> {
             i += 1;
         }
         i
-    }
-
-    // ----- macros (§9) ---------------------------------------------------------------------
-
-    /// A `.` where a key could start is a macro (§9.1): `.NAME (ARGUMENTS)? VALUE` (§9.2).
-    ///
-    /// Until work item C3, the core checks the syntax that decides whether the document is
-    /// rejected and stops there: a known macro with a value is [`ErrorKind::Unsupported`].
-    ///
-    /// - A NAME that runs to the end of input is ignored, whatever it is.
-    /// - An unknown NAME is an error.
-    /// - A known NAME followed by whitespace, then a group of comments that follow each other
-    ///   directly, then the end of input, is ignored. A `#` that is the last byte of the input
-    ///   directly after that whitespace is an error, as in §2.2 (QUESTIONS.md #18).
-    /// - Unbalanced ARGUMENTS are an error, and so are ARGUMENTS followed by nothing but
-    ///   whitespace and comments.
-    fn macro_entry(&mut self) -> Result<(), Error> {
-        let at = self.pos;
-        if self.settings.flags.contains(ParserFlags::DISABLE_MACRO) {
-            return Err(self.error(ErrorKind::MacrosDisabled, at));
-        }
-        let name_start = at + 1;
-        let name_end = name_start
-            + self.src[name_start..]
-                .iter()
-                .take_while(|&&b| !is_space(b) && b != b'(')
-                .count();
-        if name_end == self.src.len() {
-            self.pos = name_end;
-            return Ok(());
-        }
-        let name = &self.src[name_start..name_end];
-        let name_text = String::from_utf8_lossy(name).into_owned();
-        if !MACROS.contains(&name) {
-            return Err(self.error(ErrorKind::UnknownMacro { name: name_text }, at));
-        }
-        self.pos = name_end;
-        let mut after_space = false;
-        while self.peek().is_some_and(is_space) {
-            self.pos += 1;
-            after_space = true;
-        }
-        if self.peek() == Some(b'(') {
-            self.pos = self.macro_arguments_end(self.pos)?;
-            self.skip_space()?;
-            if self.peek().is_none() {
-                return Err(self.error(ErrorKind::MissingValue, self.pos));
-            }
-        } else {
-            self.check_hash_at_end(after_space)?;
-            self.comment_group()?;
-            if self.peek().is_none() {
-                return Ok(());
-            }
-        }
-        Err(self.error(
-            ErrorKind::Unsupported {
-                feature: format!("the macro .{name_text}"),
-            },
-            at,
-        ))
-    }
-
-    /// The offset after the `)` that matches the `(` at `open`. Parentheses between double
-    /// quotes do not count (§9.2); as in block comments (§2.3), a `"` directly after a `\` does
-    /// not begin or end a quoted part (QUESTIONS.md #18).
-    fn macro_arguments_end(&self, open: usize) -> Result<usize, Error> {
-        let mut depth = 0usize;
-        let mut in_quotes = false;
-        let mut i = open;
-        while let Some(&b) = self.src.get(i) {
-            match b {
-                b'"' if self.src[i - 1] != b'\\' => in_quotes = !in_quotes,
-                b'(' if !in_quotes => depth += 1,
-                b')' if !in_quotes => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Ok(i + 1);
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        Err(self.error(ErrorKind::UnterminatedArguments, open))
     }
 }

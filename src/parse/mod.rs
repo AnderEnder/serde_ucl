@@ -1,14 +1,27 @@
 //! The byte-oriented parser core (clean-room work item C2).
 //!
 //! It reads a UCL document from bytes and produces the [`crate::value`] model, following the
-//! behaviour spec in `docs/spec/` (§01–§08, §11, §12). Keys and strings must be valid UTF-8; the
+//! behaviour spec in `docs/spec/` (§01–§09, §11, §12). Keys and strings must be valid UTF-8; the
 //! check happens where each key or string is materialised, and a violation is an
 //! [`ErrorKind::InvalidUtf8`] error (a project divergence from libucl, spec §11.3). Comments may
 //! hold any bytes.
 //!
-//! Macros (§09) are recognised where a key could start, and their syntax is checked. Until work
-//! item C3, a known macro is rejected with [`ErrorKind::Unsupported`] and an unknown one with
+//! Macros (§09) are recognised where a key could start: `.priority` (§9.5), `.inherit` (§9.7),
+//! `.include` and `.try_include` (§9.4) with their parameters, glob patterns and search paths,
+//! and `.load` (§9.6) when the crate is built with its `load` feature (off by default). The
+//! project never verifies signatures, so `.includes` and `sign=true` are rejected with
+//! [`ErrorKind::Unsupported`], and it never fetches URLs. An unknown macro is
 //! [`ErrorKind::UnknownMacro`]; a macro that §9.2 ignores at the end of input is ignored.
+//!
+//! Files come from a [`Loader`]: [`FsLoader`] by default (Cargo feature `fs`, on by default), or
+//! a [`MemoryLoader`]. Relative paths resolve against the parser's base directory
+//! ([`Parser::set_base_dir`]), or the loader's current directory without one, never against the
+//! including file (§9.3).
+//!
+//! Where libucl stops parsing silently at a `.try_include` that finds no usable file, or at an
+//! `.include` of a glob pattern that matches nothing (§9.4), the parser returns an error of kind
+//! [`ErrorKind::Stopped`], from which [`Error::partial`] gives the entries parsed before the
+//! stop.
 //!
 //! This core sits next to the existing parser, which stays the default for the crate's public
 //! API until the cut-over (C5).
@@ -27,21 +40,37 @@
 mod comments;
 mod core;
 mod error;
+mod glob;
+mod include;
+mod loader;
+mod macros;
 mod number;
 mod string;
 mod vars;
 
 pub use error::{Error, ErrorKind};
+#[cfg(feature = "fs")]
+pub use loader::FsLoader;
+pub use loader::{FileKind, Loader, MemoryLoader};
 
 use crate::error::Position;
 use crate::value::{DuplicateStrategy, ParserFlags, UclValue};
 use indexmap::IndexMap;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The most containers (objects and arrays, the root included) that may be open at once
 /// (spec §11.2).
 pub const MAX_NESTING: usize = 1024;
+
+/// The most input units (spec §9.4) that may be open at once, the main document included: 15
+/// files may be included inside one another.
+pub const MAX_INCLUDE_DEPTH: usize = 16;
+
+/// The most macro argument documents (spec §9.2) that may be open inside one another, the
+/// document holding the outermost macro included. libucl has no such limit; the core has one so
+/// that nested arguments cannot exhaust the stack (QUESTIONS.md #26).
+pub const MAX_ARGUMENT_DEPTH: usize = 64;
 
 /// A comment saved under [`ParserFlags::SAVE_COMMENTS`] (spec §12.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,13 +124,16 @@ pub struct AttachedComments {
 pub type VariableHandler = dyn FnMut(&str) -> Option<String>;
 
 /// Parser settings and state: flags, the input unit's priority and duplicate strategy,
-/// registered variables, an optional variable handler, and saved comments.
+/// registered variables, an optional variable handler, the loader and base directory for the
+/// include macros, and saved comments.
 pub struct Parser {
     flags: ParserFlags,
     priority: u8,
     strategy: DuplicateStrategy,
     variables: IndexMap<String, String>,
     handler: Option<Box<VariableHandler>>,
+    loader: Box<dyn Loader>,
+    base_dir: Option<PathBuf>,
     comments: Vec<Comment>,
     attached: Vec<AttachedComments>,
 }
@@ -120,6 +152,7 @@ impl fmt::Debug for Parser {
             .field("strategy", &self.strategy)
             .field("variables", &self.variables)
             .field("handler", &self.handler.is_some())
+            .field("base_dir", &self.base_dir)
             .field("comments", &self.comments.len())
             .field("attached", &self.attached.len())
             .finish()
@@ -127,14 +160,21 @@ impl fmt::Debug for Parser {
 }
 
 impl Parser {
-    /// A parser with no flags, priority 0 and the `append` strategy.
+    /// A parser with no flags, priority 0, the `append` strategy, and the default loader:
+    /// [`FsLoader`] when the crate's `fs` feature is on, an empty [`MemoryLoader`] otherwise.
     pub fn new() -> Self {
+        #[cfg(feature = "fs")]
+        let loader: Box<dyn Loader> = Box::new(FsLoader::new());
+        #[cfg(not(feature = "fs"))]
+        let loader: Box<dyn Loader> = Box::new(MemoryLoader::new());
         Self {
             flags: ParserFlags::DEFAULT,
             priority: 0,
             strategy: DuplicateStrategy::Append,
             variables: IndexMap::new(),
             handler: None,
+            loader,
+            base_dir: None,
             comments: Vec::new(),
             attached: Vec::new(),
         }
@@ -158,7 +198,8 @@ impl Parser {
         self
     }
 
-    /// Sets the priority of the document's values, kept modulo 16 (spec §8.3).
+    /// Sets the priority of the document's values, kept modulo 16 (spec §8.3). A `.priority`
+    /// macro changes it for the values after it (spec §9.5).
     pub fn set_priority(&mut self, priority: u8) -> &mut Self {
         self.priority = priority & crate::value::MAX_PRIORITY;
         self
@@ -190,39 +231,74 @@ impl Parser {
         self
     }
 
-    /// Comments saved by the last parse under [`ParserFlags::SAVE_COMMENTS`], in input order.
+    /// Sets where `.include`, `.try_include` and `.load` read files from.
+    pub fn set_loader(&mut self, loader: impl Loader + 'static) -> &mut Self {
+        self.loader = Box::new(loader);
+        self
+    }
+
+    /// Sets the directory that relative paths resolve against: paths in the include macros and
+    /// `.load` (spec §9.3), and a relative path given to [`Parser::parse_file`]. It is also
+    /// `CURDIR` for a document given as bytes and for macro argument lists (spec §7.8, §9.2).
+    /// Without one, the loader's [`Loader::current_dir`] is used, which for [`FsLoader`] is the
+    /// process's working directory, as in libucl.
+    pub fn set_base_dir(&mut self, dir: impl Into<PathBuf>) -> &mut Self {
+        self.base_dir = Some(dir.into());
+        self
+    }
+
+    /// The base directory set with [`Parser::set_base_dir`].
+    pub fn base_dir(&self) -> Option<&Path> {
+        self.base_dir.as_deref()
+    }
+
+    /// Comments saved by the last parse under [`ParserFlags::SAVE_COMMENTS`], in the order they
+    /// were read, included files among them. A comment's position is in the input it was read
+    /// from.
     pub fn comments(&self) -> &[Comment] {
         &self.comments
     }
 
-    /// The values the saved comments of the last successful parse are attached to. A comment
-    /// attached to a value that a later repeat of its key replaced (spec §8) is in
-    /// [`Parser::comments`] but in none of these.
+    /// The values the saved comments of the last successful parse, or of a parse that stopped
+    /// silently, are attached to. A comment attached to a value that a later repeat of its key
+    /// replaced (spec §8) is in [`Parser::comments`] but in none of these.
     pub fn attached_comments(&self) -> &[AttachedComments] {
         &self.attached
+    }
+
+    /// The directory relative paths resolve against: the base directory, or the loader's
+    /// current directory.
+    fn base(&self) -> PathBuf {
+        match &self.base_dir {
+            Some(dir) => dir.clone(),
+            None => self
+                .loader
+                .current_dir()
+                .unwrap_or_else(|_| PathBuf::from(".")),
+        }
     }
 
     /// Parses a document given as bytes rather than read from a file.
     ///
     /// Unless [`ParserFlags::NO_FILEVARS`] is set, the file variables are defined as for such a
-    /// document (spec §7.8): `FILENAME` is `undef` and `CURDIR` is the process's working
-    /// directory. Registered variables of the same names override them.
+    /// document (spec §7.8): `FILENAME` is `undef` and `CURDIR` is the base directory
+    /// ([`Parser::set_base_dir`]). Registered variables of the same names override them.
     pub fn parse(&mut self, input: &[u8]) -> Result<UclValue, Error> {
-        let filevars = (
-            "undef".to_string(),
-            std::env::current_dir()
-                .map(|d| d.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        );
-        self.run(input, filevars, false)
+        let base = self.base();
+        let filevars = (!self.flags.contains(ParserFlags::NO_FILEVARS))
+            .then(|| ("undef".to_string(), base.to_string_lossy().into_owned()));
+        self.run(input, base, filevars, None)
     }
 
-    /// Reads and parses the file at `path`.
+    /// Reads the file at `path` through the loader and parses it. A relative `path` resolves
+    /// against the base directory.
     ///
-    /// Unless [`ParserFlags::NO_FILEVARS`] is set, `FILENAME` is the file's absolute path and
-    /// `CURDIR` its directory, whatever registered variables of those names say (spec §7.1).
+    /// `FILENAME` is the file's canonical path and `CURDIR` its directory, whatever registered
+    /// variables of those names say (spec §7.1), and also under [`ParserFlags::NO_FILEVARS`]
+    /// (project decision; libucl's function for parsing a file does the same, spec §12.7).
     pub fn parse_file(&mut self, path: impl AsRef<Path>) -> Result<UclValue, Error> {
-        let path = path.as_ref();
+        let base = self.base();
+        let path = base.join(path.as_ref());
         let io_error = |e: std::io::Error| {
             Error::new(
                 ErrorKind::Io {
@@ -231,27 +307,29 @@ impl Parser {
                 Position::new(),
             )
         };
-        let input = std::fs::read(path).map_err(io_error)?;
-        let absolute = std::fs::canonicalize(path)
-            .or_else(|_| std::path::absolute(path))
-            .map_err(io_error)?;
-        let dir = absolute
+        let canonical = self.loader.canonicalize(&path).map_err(io_error)?;
+        let input = self.loader.read(&canonical).map_err(io_error)?;
+        let dir = canonical
             .parent()
             .map(|d| d.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let filevars = (absolute.to_string_lossy().into_owned(), dir);
-        self.run(&input, filevars, true)
+        let filevars = Some((canonical.to_string_lossy().into_owned(), dir));
+        self.run(&input, base, filevars, Some(canonical))
     }
 
+    /// `filevars` are `FILENAME` and `CURDIR`, if defined; `main` is the canonical path of a
+    /// document read from a file.
     fn run(
         &mut self,
         input: &[u8],
-        (filename, curdir): (String, String),
-        from_file: bool,
+        base: PathBuf,
+        filevars: Option<(String, String)>,
+        main: Option<PathBuf>,
     ) -> Result<UclValue, Error> {
+        let from_file = main.is_some();
         // Lookup order (spec §7.1): the file variables first, then the registered ones.
         let mut variables: IndexMap<String, String> = IndexMap::new();
-        if !self.flags.contains(ParserFlags::NO_FILEVARS) {
+        if let Some((filename, curdir)) = filevars {
             variables.insert("FILENAME".to_string(), filename);
             variables.insert("CURDIR".to_string(), curdir);
         }
@@ -271,10 +349,11 @@ impl Parser {
         };
         let variables: Vec<(String, String)> = variables.into_iter().collect();
         let mut expander = vars::Expander::new(
-            &variables,
+            variables,
             self.handler.as_deref_mut(),
             !self.flags.contains(ParserFlags::DISABLE_MACRO),
         );
+        let mut includes = include::Includes::new(&*self.loader, base, main);
         let sink = self
             .flags
             .contains(ParserFlags::SAVE_COMMENTS)
@@ -282,7 +361,7 @@ impl Parser {
                 comments: &mut self.comments,
                 attached: &mut self.attached,
             });
-        core::parse_document(input, settings, &mut expander, sink)
+        core::parse_document(input, settings, &mut expander, &mut includes, sink)
     }
 }
 
@@ -528,7 +607,11 @@ mod tests {
             kind(b"a .b {c = 1}"),
             ErrorKind::UnknownMacro { name: "b".into() }
         );
-        assert_eq!(kind(b".include\n#"), ErrorKind::HashAtEnd);
+        // A last-byte `#` there ends an empty VALUE, the empty path (QUESTIONS.md #23).
+        assert!(
+            matches!(kind(b".include\n#"), ErrorKind::FileNotFound { path } if path.is_empty())
+        );
+        assert_eq!(kind(b".priority\n#"), ErrorKind::InvalidPriority);
         assert_eq!(kind(b".priority(priority=2)"), ErrorKind::MissingValue);
         assert_eq!(
             kind(b".priority(priority=2) # c\n"),
@@ -542,13 +625,15 @@ mod tests {
         for input in [&br#".priority(p="a\") 1"#[..], br#".priority(p="a\\") 1"#] {
             assert_eq!(kind(input), ErrorKind::UnterminatedArguments, "{input:?}");
         }
-        assert!(parse(b".priority(p=\"(\") 1").unwrap_err().is_unsupported());
-        assert!(
-            parse(b".include(p=\")\") \"x\"")
-                .unwrap_err()
-                .is_unsupported()
-        );
-        assert!(parse(b".include # c\n\n").unwrap_err().is_unsupported());
+        assert!(parse(b".priority(p=\"(\") 1").is_ok());
+        assert!(matches!(
+            kind(b".include(t=\")\") \"no such file\""),
+            ErrorKind::FileNotFound { .. }
+        ));
+        assert!(matches!(
+            kind(b".include # c\n\n"),
+            ErrorKind::FileNotFound { path } if path.is_empty()
+        ));
         assert_eq!(
             Parser::with_flags(ParserFlags::DISABLE_MACRO)
                 .parse(b"a = 1\n.foo")
@@ -588,8 +673,112 @@ mod tests {
     }
 
     #[test]
-    fn macros_are_recognised_but_not_supported() {
-        let e = parse(b".include \"x.conf\"").unwrap_err();
+    fn key_lowercase_replacement_takes_the_new_spelling() {
+        // Oracle runs (QUESTIONS.md #27): a value that replaces all of an entry's values gives
+        // the entry its key's spelling, in place; other repeats keep the first spelling.
+        let keys = |input: &[u8], strategy: DuplicateStrategy, flags: ParserFlags| {
+            let mut p = Parser::with_flags(ParserFlags::KEY_LOWERCASE | flags);
+            p.set_strategy(strategy);
+            let v = p.parse(input).unwrap();
+            obj(&v).keys().cloned().collect::<Vec<_>>()
+        };
+        let (append, none) = (DuplicateStrategy::Append, ParserFlags::DEFAULT);
+        let nia = ParserFlags::NO_IMPLICIT_ARRAYS;
+        for (input, strategy, flags, expected) in [
+            (
+                &b"x = 1\na = 6\n.priority 3\n\"\\u0041\" = 3\ny = 1"[..],
+                append,
+                none,
+                ["x", "A", "y"],
+            ),
+            (
+                b"x = 1\na = 1\n\"\\u0041\" = 2\ny = 1",
+                DuplicateStrategy::Rewrite,
+                none,
+                ["x", "A", "y"],
+            ),
+            (
+                b"x = 1\na = 1\na = 2\n.priority 3\n\"\\u0041\" = 3\ny = 1",
+                append,
+                nia,
+                ["x", "A", "y"],
+            ),
+            (
+                b"x = 1\na = 1\n.priority 3\n\"\\u0041\" = 2\ny = 1",
+                DuplicateStrategy::Merge,
+                none,
+                ["x", "A", "y"],
+            ),
+            (
+                b"x = 1\n\"\\u0041\" = 1\n.priority 3\na = 2\ny = 1",
+                append,
+                none,
+                ["x", "a", "y"],
+            ),
+            (
+                b"x = 1\na = 1\n\"\\u0041\" = 2\ny = 1",
+                append,
+                none,
+                ["x", "a", "y"],
+            ),
+            (
+                b"x = 1\na = 1\n\"\\u0041\" = 2\ny = 1",
+                append,
+                nia,
+                ["x", "a", "y"],
+            ),
+            (
+                b"x = 1\n.priority 3\na = 1\n.priority 1\n\"\\u0041\" = 2\ny = 1",
+                append,
+                none,
+                ["x", "a", "y"],
+            ),
+            (
+                b"x = 1\na { b = 1 }\n\"\\u0041\" { c = 1 }\ny = 1",
+                DuplicateStrategy::Merge,
+                none,
+                ["x", "a", "y"],
+            ),
+            (
+                b"x = 1\na { b = 1 }\n\"\\u0041\" = 2\ny = 1",
+                DuplicateStrategy::Merge,
+                none,
+                ["x", "a", "y"],
+            ),
+        ] {
+            assert_eq!(
+                keys(input, strategy, flags),
+                expected,
+                "{}",
+                String::from_utf8_lossy(input)
+            );
+        }
+        // An inherited value replaced by an explicit one.
+        let v = Parser::with_flags(ParserFlags::KEY_LOWERCASE)
+            .parse(b"d { a = 1 }\ne { .inherit \"d\"; \"\\u0041\" = 2 }")
+            .unwrap();
+        assert_eq!(obj(&obj(&v)["e"]).keys().collect::<Vec<_>>(), ["A"]);
+        // The renamed entry keeps working as a container and for comments.
+        let mut p = Parser::with_flags(ParserFlags::KEY_LOWERCASE | ParserFlags::SAVE_COMMENTS);
+        let v = p
+            .parse(b"a { x = 1 }\n.priority 3\n# c\n\"\\u0041\" { y = 2 # d\n}")
+            .unwrap();
+        assert_eq!(obj(&obj(&v)["A"]).keys().collect::<Vec<_>>(), ["y"]);
+        let paths: Vec<_> = p
+            .attached_comments()
+            .iter()
+            .map(|g| g.path.clone())
+            .collect();
+        let key = |k: &str| PathSegment::Key {
+            key: k.into(),
+            index: 0,
+        };
+        assert_eq!(paths, [vec![key("A")], vec![key("A"), key("y")]]);
+    }
+
+    #[test]
+    fn macros_are_recognised() {
+        let e = parse(b".includes \"x.conf\"").unwrap_err();
         assert!(e.is_unsupported());
         assert_eq!(
             kind(b".unknown x"),
@@ -679,11 +868,17 @@ mod tests {
 
     #[test]
     fn errors_convert_into_ucl_error() {
-        fn run() -> Result<UclValue, crate::UclError> {
-            Ok(parse(b"a = ")?)
+        fn run(input: &[u8]) -> Result<UclValue, crate::UclError> {
+            Ok(parse(input)?)
         }
-        let err = run().unwrap_err();
+        let err = run(b"a = ").unwrap_err();
         assert!(matches!(&err, crate::UclError::Syntax(e) if e.kind() == &ErrorKind::MissingValue));
+        // A silent stop is an error of its own kind (project decision 4).
+        let err = run(b"a = 1\n.try_include \"no such file\"\nb = 2").unwrap_err();
+        let crate::UclError::Stopped(e) = &err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(obj(e.partial().unwrap()).keys().collect::<Vec<_>>(), ["a"]);
     }
 
     #[test]

@@ -341,3 +341,182 @@
   old parser fails 206 (`xfail.txt`). The conformance README notes the new helper files. Both
   runners green at every commit. Commits: `797072a`, `a81b420`, `591b818`. The spec contains
   behaviour only: no libucl code, internal names, or procedures.
+- 2026-09-23 — **Implementation team, C3a (`.priority` and `.inherit` in the new parser core, `spec-v4`).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `WORKLIST.md` (with *Project decisions for C3*), `LOG.md`
+      (the C2.8 and `spec-v4` entries), `QUESTIONS.md`;
+    - spec `spec-v4`, read from the working tree after checking that
+      `git diff --stat spec-v4 HEAD -- docs/spec/` is empty: §8, §9 and §12 in full; README lines
+      1–150 (conventions, how the oracle runs every case, divergences, uncertain behaviour, known
+      gaps);
+    - `tests/conformance/README.md`, `xfail-new.txt`, `tests/conformance.rs`; the inputs, `.flags`
+      and golden files of the 86 entries whose input uses only `.priority` and `.inherit`, and the
+      inputs of `macro_value_then_comma_error` and `try_include_self_stops_parsing`;
+    - the crate's own code: `src/parse/*`, `src/value.rs`, `Cargo.lock`; the C2.8 scratch
+      differential tool `target/c28/difftool/` (implementation-team code, not committed), copied to
+      `target/c3a/difftool/` and given generators for macro inputs;
+    - the `indexmap` 2.12 source in the cargo registry, for the signature of `replace_index`;
+    - black-box runs of `target/libucl-oracle/ucl-dump`: its usage message; about 130 probes on
+      scratch inputs under `target/c3a/p/` (options `-c`, `-l`, `-I`, `-F`, `-v`, `-s`);
+      differential runs of about 150,000 generated inputs through the oracle and the new core. The
+      final runs (about 120,000 inputs, flags `-l`, `-I`, `-c`, `-F`, `-s merge|rewrite|error` and
+      combinations) left no difference; the tool skips inputs the core reports as unsupported. The
+      findings that the spec does not cover are in `QUESTIONS.md` #23–#27 with their inputs and
+      results;
+    - the clean `CLAUDE.md` embedded in the agent definition; `cargo build`, `cargo test`,
+      `cargo clippy`, `rustfmt --check` output.
+  - Seen without opening the files:
+    - the session's git status listed `PLAN.md`, `REVIEW.md` and `.claude/` as untracked and
+      `CLAUDE.md` as modified in the main checkout, by name;
+    - `tests/conformance/README.md` names `tools/ucl-dump/ucl_dump.c`, `PLAN.md` and `REVIEW.md`;
+      doc comments in `tests/conformance.rs` and `src/value.rs` name `PLAN.md` items (the one on
+      `Slot::inherited` was removed with the attribute it explained); none was followed;
+    - the oracle's stderr, libucl's wording, in the first probes, before stderr was discarded;
+    - one `clippy` run printed six lines of `src/lexer.rs` (a collapsible `if`), and later runs
+      printed the file and line of two `src/parser.rs` warnings. Neither file was opened and
+      nothing from them was used;
+    - `ls target/` and `ls target/c28/` printed directory names, `libucl-oracle` among them.
+  - Not consulted: libucl source; anything under `target/libucl-oracle/` other than running
+    `ucl-dump`; the oracle tool's sources; `scripts/regen-golden.sh` (neither read nor run);
+    `REVIEW.md`, `PLAN.md`, `PROGRESS.md`; `quarantine/*`; history of `src/` before `ef8007e`;
+    history of `CLAUDE.md`; `src/lexer.rs`, `src/parser.rs`; `/tmp` and the session scratchpad.
+    `docs/spec/` and golden files were not edited.
+  - Changes:
+    - `src/parse/macros.rs` (new): the syntax every macro shares (§9.2): NAME, the skipping between
+      the parts, ARGUMENTS parsed as a document of their own (same flags, priority 0, `append`,
+      only `FILENAME` = `undef` and `CURDIR`, no handler, comments not saved; error positions in
+      the enclosing input; at most `MAX_ARGUMENT_DEPTH` = 64 documents inside one another), the
+      three VALUE forms with variables expanded, and the skipping after a macro. Parameter tables
+      for `.include`/`.try_include`/`.includes`, `.load` and `.priority`, matched by prefix and
+      type (`Arguments::resolve`), and the exact-name `replace` of `.inherit`
+      (`Arguments::exact_bool`). `.priority` (§9.5) and `.inherit` (§9.7) run; `.include`,
+      `.try_include`, `.includes` and `.load` are read in full, then reported as unsupported.
+    - `src/parse/core.rs`: the macro code moved to `macros.rs`. Under `key-lowercase`, an entry
+      whose values a new value replaces takes the new key's spelling (QUESTIONS.md #27).
+    - `src/value.rs`: `UclObject::get_index`, `get_index_mut`, `index_of`, `rename_key`;
+      `Slot::into_inherited`; under `no-implicit-arrays` a collection takes only the entry's first
+      value (#25).
+    - `src/parse/error.rs`: `UnterminatedMacroValue`, `ArgumentsTooDeep`, `InvalidPriority`,
+      `InheritSourceMissing`, `InheritSourceNotObject`.
+    - `xfail-new.txt`: 92 entries removed, the 86 that need only `.priority` and `.inherit` and 6
+      include-family cases whose golden error lies in the macro syntax (argument parse error,
+      quoted and braced value errors, a `,` after the value). The notes of the remaining `macro`
+      entries name the C3b macros their input uses; header updated. `tests/conformance.rs` doc
+      comment updated.
+    - `QUESTIONS.md` #23–#27.
+    - For C3b: the include family is read in full and the skipping after it is checked before the
+      "unsupported" error; for the silent stops of #23 (`a = 1⏎.try_include()#`) the include has to
+      run before that check. `bytes_curdir()` in `macros.rs` is the one place that gives `CURDIR`
+      for argument documents (decision 6). `Resolved::bool`, `string` and `array` are in place for
+      the include parameters.
+  - Result: `xfail-new.txt` has 230 entries: 229 `macro` (C3b; notes: 174 `.include`, 41 `.load`,
+    11 `.try_include`, 1 `.includes`, 1 `.include, .try_include`, 1 `.load, .include`) and 1
+    `non-utf8`. New core: 1143 cases, 913 pass. `xfail.txt` is unchanged (old parser: 450 pass,
+    693 expected failures). `cargo test`: 456 tests pass. `cargo build --examples --benches`
+    builds.
+  - Commit: the `C3a:` commit that adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — **Implementation team, C3b (loader, `.include`, `.try_include`, `.includes`, `.load` in the new parser core, `spec-v4`).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `WORKLIST.md` (with *Project decisions for C3*), `LOG.md`
+      (the `spec-v4` and C3a entries), `QUESTIONS.md`;
+    - spec `spec-v4`, read from the working tree after checking that
+      `git diff --stat spec-v4 HEAD -- docs/spec/` is empty: §9 in full; §7.1, §7.2, §7.8;
+      §10.1; §11; §12 (flag table, §12.6, §12.7, §12.8); README lines 1–150;
+    - `tests/conformance/README.md`, `xfail-new.txt`, `tests/conformance.rs`; the inputs,
+      `.flags` and golden files of the 229 `macro` entries; the helper files under
+      `cases/spec/09-macros/files/`, `cases/spec/08-duplicates/files/` and `libucl/basic/`
+      (`*.inc`, `include_dir/`, `load.inc`);
+    - the crate's own code: `src/parse/*`, `src/value.rs`, `src/error.rs` (`UclError`),
+      `Cargo.toml`; the C3a scratch differential tool, copied to `target/c3b/difftool/` and
+      given a base directory, silent stops, generators for include and `.load` inputs and a
+      mode that prints both results (implementation-team code, not committed);
+    - black-box runs of `target/libucl-oracle/ucl-dump`: its usage message; about 210 probes
+      on scratch inputs and helper files under `target/c3b/p/` (a copy of
+      `cases/spec/09-macros/files/` plus files of my own), options `-c`, `-l`, `-I`, `-F`,
+      `-S`, `-v`, `-s`, stderr always discarded; differential runs through the oracle and the
+      new core (include, `.load` and the C3a generators; flags `-c`, `-l`, `-I`, `-F`, `-S`,
+      `-s merge|rewrite|error`, `-l -I -c`). The final runs generated 91,722 inputs (a run
+      repeated with an identical seed counted once). The tool skipped 24,280 of them, inputs
+      with a macro right after a section name (QUESTIONS.md #31), and compared 67,442, among
+      them two runs with the skip turned off, 8,112 inputs in all, which found one difference, of
+      that shape. The compared inputs leave no other difference. Several probes crashed the oracle (SIGSEGV, exit
+      139): silent stops inside files included by a glob or a search path (#30), a `}` in a file
+      nested under a key (#32), and `"s".include "files/a.inc" # [` (#31). The findings the
+      spec does not cover are in QUESTIONS.md #28–#33 with their inputs and results;
+    - the clean `CLAUDE.md` embedded in the agent definition; Cargo documentation on features
+      and dev-dependencies (general knowledge); `cargo build`, `cargo test`, `cargo clippy`,
+      `rustfmt --check` output.
+  - Seen without opening the files:
+    - the session's git status listed `PLAN.md`, `REVIEW.md` and `.claude/` as untracked and
+      `CLAUDE.md` as modified in the main checkout, by name;
+    - `tests/conformance/README.md` names `tools/ucl-dump/ucl_dump.c`, `PLAN.md` and
+      `REVIEW.md`; the doc comments of `tests/conformance.rs` name `PLAN.md` items; none was
+      followed;
+    - `clippy` printed the file and line of two `src/parser.rs` warnings, and one run printed
+      one code line of a pre-existing file outside `src/parse/` (`character: ch,`, line 627,
+      so `src/lexer.rs` or `src/parser.rs`). Neither file was opened and nothing from them was
+      used;
+    - `cargo test` runs a pre-existing unit test that writes and removes a scratch file in
+      the system temporary directory; nothing there was listed or opened.
+  - Not consulted: libucl source; anything under `target/libucl-oracle/` other than running
+    `ucl-dump`; the oracle tool's sources; `scripts/regen-golden.sh` (neither read nor run);
+    `REVIEW.md`, `PLAN.md`, `PROGRESS.md`; `quarantine/*`; history of `src/` before `ef8007e`;
+    history of `CLAUDE.md`; `src/lexer.rs`, `src/parser.rs`; `/tmp`, `/private/tmp` and the
+    session scratchpad. `docs/spec/` and golden files were not edited.
+  - Changes:
+    - `src/parse/loader.rs` (new): the `Loader` trait (`current_dir`, `canonicalize`, `kind`,
+      `read`, `read_dir`), `FileKind`, `FsLoader` (Cargo feature `fs`, on by default) and
+      `MemoryLoader`.
+    - `src/parse/include.rs` (new): `.include`, `.try_include` and `.includes` with every
+      parameter, the search path, the `try`/`.try_include` matrix of the oracle runs, nesting
+      under a key, and `.load` (feature `load`, off by default; without it `.load` is
+      unsupported). `src/parse/glob.rs` (new): glob patterns as the oracle matches them (#29).
+    - `src/parse/core.rs`: an included file is an input unit with a `Core` of its own that
+      takes over the container stack, tree and comments and hands them back; frames record
+      their unit; an included file's leading `{` takes over the object's brace, and its `}`
+      keeps root and braced objects open but closes section objects (#32); the end-of-unit
+      checks; section objects of both kinds close together.
+    - `src/parse/macros.rs`: the include macros run before what follows them is checked
+      (goal 6, QUESTIONS.md #23), so `a = 1⏎.try_include()#` stops silently; argument lists may
+      include files, and a stop there makes the macro fail; their `CURDIR` is the base
+      directory.
+    - `src/parse/vars.rs`: the expander owns its variables; an included file sets `FILENAME`
+      and `CURDIR`, which move to the end of the lookup order (#28) and are restored after it,
+      or kept under `NO_FILEVARS`.
+    - `src/parse/comments.rs`: comments are collected across units, each with its text and
+      position in its own input.
+    - `src/parse/error.rs`: `Error::file`, `Error::is_stopped`, `Error::partial`,
+      `Error::into_partial`; kinds `FileNotFound`, `NotAFile`, `IncludeSelf`,
+      `IncludeTooDeep`, `IncludeArrayRoot`, `IncludeTargetNotObject`, `UrlNotSupported`,
+      `LoadKeyMissing`, `LoadKeyExists`, `Stopped`, `StoppedInArguments`. `Error` is no longer
+      `Eq` (it may hold the partial tree).
+    - `src/parse/mod.rs`: `Parser::set_loader`, `Parser::set_base_dir`, `Parser::base_dir`;
+      `parse` uses the base directory for `CURDIR`; `parse_file` reads through the loader and
+      defines `FILENAME` and `CURDIR` whatever `NO_FILEVARS` says (decision 5);
+      `MAX_INCLUDE_DEPTH` = 16; re-exports of the loader types.
+    - `src/error.rs`: `UclError::Stopped`, and a `From<parse::Error>` that maps stops there
+      (decision 4). `src/value.rs`: `Slot::collection` (crate-internal).
+    - `Cargo.toml`: features `fs` (default) and `load`; the crate is its own dev-dependency with
+      `load`, so plain `cargo test` builds and tests the core with `.load` while `cargo build`
+      leaves it off (checked with a temporary `compile_error!`).
+    - `tests/conformance.rs`: the case's directory is the parser's base directory (the process
+      working directory is never changed); cases with `string-input` or `no-filevars` are
+      parsed as bytes, the others as files; a stop is compared through its partial tree;
+      entries with reason `divergence:signature` must fail with the unsupported error; an
+      unsupported outcome is hinted `unsupported`.
+    - `xfail-new.txt`: 227 `macro` entries removed; `includes_like_include` and
+      `include_sign_param_no_effect` relabelled `divergence:signature`; header rewritten.
+    - Choices: `url=true` with `://` is an error with `try=true` and for `.try_include` too
+      (decision 2 as written; the oracle skips there). A stop inside a file included by a glob
+      or a search path ends the parse (#30). A macro right after a section name keeps the
+      section object open for later entries (#31).
+    - `QUESTIONS.md` #28–#33.
+  - Result: `xfail-new.txt` has 3 entries: 2 `divergence:signature`, 1 `non-utf8`; none has
+    reason `macro`. New core: 1143 cases, 1140 pass. `xfail.txt` is unchanged (old parser: 450
+    pass, 693 expected failures). `cargo test`: 476 tests pass. `cargo build --examples
+    --benches` builds; `cargo build --no-default-features` and `--features load` build.
+  - Commits: the `C3b:` commits `2d339c3`, `f18d87c` and the one that adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
