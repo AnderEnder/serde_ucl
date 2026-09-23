@@ -1,0 +1,79 @@
+{
+  "t": "array",
+  "v": [
+    {
+      "t": "string",
+      "v": "Point"
+    },
+    {
+      "entries": [
+        {
+          "k": "Circle",
+          "v": [
+            {
+              "t": "float",
+              "v": "-inf"
+            }
+          ]
+        }
+      ],
+      "t": "object"
+    },
+    {
+      "entries": [
+        {
+          "k": "Rect",
+          "v": [
+            {
+              "t": "array",
+              "v": [
+                {
+                  "t": "int",
+                  "v": "0"
+                },
+                {
+                  "t": "int",
+                  "v": "0"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "t": "object"
+    },
+    {
+      "entries": [
+        {
+          "k": "Poly",
+          "v": [
+            {
+              "entries": [
+                {
+                  "k": "sides",
+                  "v": [
+                    {
+                      "t": "int",
+                      "v": "0"
+                    }
+                  ]
+                },
+                {
+                  "k": "name",
+                  "v": [
+                    {
+                      "t": "string",
+                      "v": "$5"
+                    }
+                  ]
+                }
+              ],
+              "t": "object"
+            }
+          ]
+        }
+      ],
+      "t": "object"
+    }
+  ]
+}

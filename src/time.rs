@@ -1,27 +1,51 @@
-//! Serde helper for [`std::time::Duration`] fields (PLAN.md §2.3).
+//! Serde helper for [`std::time::Duration`] fields.
 //!
 //! ```
-//! use serde::Deserialize;
+//! use serde::{Deserialize, Serialize};
 //! use std::time::Duration;
 //!
-//! #[derive(Deserialize)]
+//! #[derive(Serialize, Deserialize)]
 //! struct Config {
 //!     #[serde(with = "ucl_lexer::time")]
 //!     timeout: Duration,
 //! }
 //!
-//! let config: Config = ucl_lexer::from_str("timeout = 90s").unwrap();
+//! let value = ucl_lexer::parse::parse(b"timeout = 90s").unwrap();
+//! let config: Config = ucl_lexer::from_value(value).unwrap();
 //! assert_eq!(config.timeout, Duration::from_secs(90));
+//! assert_eq!(ucl_lexer::to_string(&config).unwrap(), "timeout = 90.0s;\n");
 //! ```
 //!
 //! Any number is read as seconds: a UCL time (`30s`, `10ms`, `2h`), a float or an integer. The
 //! time type does not survive emission in libucl either (`1s` is written back as `1.0`, upstream
 //! `tests/basic/2.res`), so a stricter rule could not read libucl's own output. Negative,
 //! non-finite and out-of-range values are errors.
+//!
+//! A `Duration` is written as a UCL time, its seconds followed by `s` ([`crate::ser`]); other
+//! serializers see the number of seconds as an `f64`.
 
 use serde::de::{self, Deserializer, Visitor};
+use serde::ser::{self as ser, Serializer};
 use std::fmt;
 use std::time::Duration;
+
+/// Serializes a [`Duration`] as a UCL time: its number of seconds as an `f64`, which the crate's
+/// serializer writes with the suffix `s` (spec §5.4, §10.8) and other serializers as a plain
+/// number.
+///
+/// UCL times are 64-bit floats, which cannot hold every `Duration` to the nanosecond, for
+/// example `Duration::new(1_000_000_000, 1)`. Such a duration is an error rather than a value
+/// that reads back as another duration.
+pub fn serialize<S: Serializer>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    let seconds = duration.as_secs_f64();
+    if Duration::try_from_secs_f64(seconds).ok() != Some(*duration) {
+        return Err(<S::Error as ser::Error>::custom(format!(
+            "the duration {duration:?}: a UCL time is a 64-bit float of seconds, and none reads \
+             back as exactly this duration"
+        )));
+    }
+    serializer.serialize_newtype_struct(crate::ser::marker::TIME, &seconds)
+}
 
 /// Deserializes a number of seconds into a [`Duration`].
 pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -64,17 +88,72 @@ impl<'de> Visitor<'de> for SecondsVisitor {
 
 #[cfg(test)]
 mod tests {
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use std::time::Duration;
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
     struct Config {
         #[serde(with = "crate::time")]
         t: Duration,
     }
 
+    /// Serializes, reads the config text back with the new core, and deserializes.
+    fn round_trip(t: Duration) -> Result<Duration, crate::UclError> {
+        let text = crate::to_string(&Config { t })?;
+        let value = crate::parse::parse(text.as_bytes())?;
+        crate::from_value::<Config>(value).map(|c| c.t)
+    }
+
+    #[test]
+    fn test_durations_round_trip_as_times() {
+        for t in [
+            Duration::ZERO,
+            Duration::from_secs(90),
+            Duration::from_millis(1500),
+            Duration::from_nanos(1),
+            Duration::from_nanos(300_000_000),
+            Duration::new(4_000_000, 123_456_789),
+            Duration::from_secs(u64::MAX >> 11),
+        ] {
+            assert_eq!(round_trip(t).unwrap(), t, "{t:?}");
+        }
+        assert_eq!(
+            crate::to_string(&Config {
+                t: Duration::from_millis(1500)
+            })
+            .unwrap(),
+            "t = 1.5s;\n"
+        );
+        let value = crate::to_value(&Config {
+            t: Duration::from_secs(2),
+        })
+        .unwrap();
+        assert_eq!(value.as_object().unwrap()["t"], crate::UclValue::Time(2.0));
+        // Other serializers see the seconds.
+        let json = serde_json::to_string(&Config {
+            t: Duration::from_millis(250),
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"t":0.25}"#);
+    }
+
+    #[test]
+    fn test_durations_without_an_exact_float_are_errors() {
+        for t in [Duration::new(1_000_000_000, 1), Duration::MAX] {
+            let err = crate::to_string(&Config { t }).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    crate::UclError::Serde(crate::error::SerdeError::Custom(_))
+                ),
+                "{t:?}: {err:?}"
+            );
+        }
+    }
+
     fn parse(input: &str) -> Result<Duration, crate::UclError> {
-        crate::from_str::<Config>(input).map(|c| c.t)
+        let value = crate::parse::parse(input.as_bytes())?;
+        crate::from_value::<Config>(value).map(|c| c.t)
     }
 
     #[test]

@@ -151,6 +151,32 @@
 //! # Ok::<(), ucl_lexer::UclError>(())
 //! ```
 //!
+//! ## Serialization
+//!
+//! [`to_string`] writes any `Serialize` value in the UCL config format; [`to_json_string`],
+//! [`to_json_string_compact`] and [`to_yaml_string`] write the other output formats, and
+//! [`to_writer`] writes the config format to an `io::Write`. The output reads back, in libucl and
+//! in the new parser core ([`parse`]), as exactly the value written, floats included; see [`ser`]
+//! for the forms used and the values that have none. [`to_value`] and [`from_value`] convert
+//! between Rust values and the [`UclValue`] tree.
+//!
+//! ```rust
+//! use serde::{Deserialize, Serialize};
+//!
+//! #[derive(Debug, PartialEq, Serialize, Deserialize)]
+//! struct Limits {
+//!     name: String,
+//!     ratio: f64,
+//! }
+//!
+//! let limits = Limits { name: "$HOME/db".into(), ratio: 0.1 };
+//! let text = ucl_lexer::to_string(&limits)?;
+//! assert_eq!(text, "name = '$HOME/db';\nratio = 0.1;\n");
+//! let back: Limits = ucl_lexer::from_value(ucl_lexer::parse::parse(text.as_bytes())?)?;
+//! assert_eq!(back, limits);
+//! # Ok::<(), ucl_lexer::UclError>(())
+//! ```
+//!
 //! ## Performance Features
 //!
 //! ### Zero-Copy Parsing
@@ -269,6 +295,7 @@ pub mod error;
 pub mod lexer;
 pub mod parse;
 pub mod parser;
+pub mod ser;
 pub mod time;
 pub mod value;
 
@@ -276,13 +303,16 @@ pub mod value;
 mod error_tests;
 
 // Re-export main types and functions
-pub use de::{UclDeserializer, from_str, from_str_with_variables};
+pub use de::{UclDeserializer, from_str, from_str_with_variables, from_value};
 pub use error::{LexError, ParseError, UclError};
 pub use lexer::{
     LexerConfig, StreamingUclLexer, StringFormat, Token, UclLexer, streaming_lexer_from_file,
     streaming_lexer_from_reader,
 };
 pub use parser::{DuplicateKeyBehavior, ParserConfig, UclParser};
+pub use ser::{
+    to_json_string, to_json_string_compact, to_string, to_value, to_writer, to_yaml_string,
+};
 pub use value::{
     DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclArray, UclObject,
     UclValue, Values,

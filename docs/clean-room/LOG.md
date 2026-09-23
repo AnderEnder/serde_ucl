@@ -727,3 +727,81 @@
     it, in which the runner accepts only cases the core does not parse in `xfail-emit.txt`.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — Role: implementation team. Item: C4b, serde serialization (WORKLIST C4 item 2,
+  spec-v6 §10.8).
+  - Inputs consulted: `docs/spec/` at `spec-v6` (checked identical to the tag: §10 in full,
+    §1.1, §3.1–§3.2, §4, §5, §6, §7, §11, the README); `docs/clean-room/` (PROTOCOL, WORKLIST with
+    the C4 decisions, QUESTIONS #48–#52 and the table format, LOG); `tests/conformance/README.md`, `tests/conformance.rs`
+    (dump schema and comparison, copied into the new test) and the inputs of the `10-output`
+    read-back cases; the crate's own code (`src/de.rs`, `src/time.rs`, `src/value.rs`,
+    `src/error.rs`, `src/emit/`, the public API of `src/parse/`); black-box runs of
+    `target/libucl-oracle/ucl-dump` (typed dump, `-e config`, `-v`) on probe inputs under
+    `target/c4b/` and on the serializer's output; Rust standard library and serde documentation.
+    The source of `scripts/regen-golden.sh` and of `tools/ucl-dump` was not opened; nothing under
+    `/tmp` or `/private/tmp` was used.
+  - `src/ser/` (new): `to_value`, `to_string` (config), `to_json_string`,
+    `to_json_string_compact`, `to_yaml_string`, `to_writer` (config), all
+    `Result<_, UclError>`; `Serialize` for `UclValue` and `UclObject`. A private serializer builds
+    a `UclValue`; the text is written by a crate-private round-trip mode of the C4a emitters
+    (`Emitter::round_trip`, `try_emit`), which keeps libucl's layouts and changes the forms.
+    Time values and the values of a multi-value entry travel as newtype structs with private
+    names, which other serializers see as an `f64` and a sequence.
+  - `src/de/value.rs` (new, split from `src/de.rs`, no parser imports): `from_value`; the value
+    deserializer; `Deserialize` for `UclValue` (from this crate's deserializer a time stays a
+    time and every value of a multi-value entry is kept) and `UclObject`; map keys parsed into
+    integer, `bool`, `char` and float targets; bytes from arrays of integers.
+  - `src/time.rs`: `serialize` writes a `Duration` as a time; the `time` tests now parse with the
+    new core. `src/error.rs`: `SerdeError::Unrepresentable`, `serde::ser::Error for UclError`.
+  - Choices under goal 2, documented in `src/ser/mod.rs`:
+    1. Floats: the shortest digits that identify the double, with `.` or an exponent (Rust's
+       `Debug` form: `0.1`, `-0.0`, `1e16`); NaN `nan` (sign and payload not kept), +∞ `inf`,
+       −∞ `-1e308k` (§10.8). Subnormal floats and times: error (§5.3, no literal reads back).
+    2. Times: the float digits followed by `s`; ±∞ `1e308ks` and `-1e308ks` (oracle and core
+       read them; QUESTIONS.md #54); NaN time: error. The same forms in JSON, so JSON output with
+       a time or a non-finite float is not JSON (documented).
+    3. Integers outside `i64` (from `u64`, `i128`, `u128`): error, in `to_value` too.
+    4. Strings: double-quoted with the §6.1 escapes (every byte). In the config format a string
+       containing `$` is single-quoted, so the output reads back exactly whatever variables the
+       reader registers; one that single quotes cannot hold (a backslash, paired from the left,
+       before `'`, LF, CR or the end; QUESTIONS.md #53) is an error in the config format. JSON,
+       compact JSON and YAML always use double quotes; there a string that refers to `FILENAME`
+       or `CURDIR` (`$NAME…`, `${NAME}`), which libucl and the core define by default (§7.8), is
+       an error (conservative: also when `$$` would keep it), and variables that the application
+       registers when reading are a documented reader precondition, like the reader's flags.
+    5. Keys: bare where §3.1 allows (config, YAML), otherwise double-quoted; the empty key: error.
+    6. Multi-value entries: one entry per value with the same key in every format (libucl's
+       JSON and YAML array form of §10.7 loses values).
+    7. Root: must be an object or an array (§1.1), else error; more than 1024 nested containers
+       (§11.2): error. `Duration` that no `f64` of seconds holds exactly: error.
+    8. Reader assumptions, documented: default flags, the `append` strategy, and for the
+       double-quoted formats no registered variable that a string refers to.
+  - Tests (`tests/serde_roundtrip.rs`): values compared as typed dumps (entry order, every value,
+    floats by bits), not with `PartialEq`. Generated (SplitMix64, fixed seed, `UCL_SERDE_SEED`):
+    3000 `UclValue` roots through the core: config 2977 read back exactly and 23 fail as they
+    must; JSON, compact JSON and YAML 2500 each read back exactly, 366 fail as they must (file
+    variables), 134 are written but not compared (they refer to `ABI`, which the test readers
+    register). 600 typed structs (every serde shape, `Duration`, a `UclValue` field): config 575
+    exact and 25 errors; the other formats 386 exact, 173 errors, 41 not compared. Oracle (skips
+    when the binary is missing): of 400 generated values, the 397 with a config form and the 366
+    with a JSON form that the oracle's variables leave alone, and of 200 typed values 194 and
+    119, in root objects of 100 entries and a root array, one `ucl-dump` run per document, 32
+    documents: all read back exactly. Corpus
+    `tests/serde_corpus/`: 13 values, 49 files, each with libucl's typed dump
+    (`<file>.golden.json`), checked without the binary (serializer output unchanged, core
+    reading and libucl's dump equal the value) and, with it, the dumps checked current;
+    `UCL_SERDE_REGEN=1` rewrites them and refuses a dump that differs or contains the checkout
+    path. Also error cases, the nesting limit, `from_value` on core-parsed documents (one-or-many,
+    object into a sequence, enum shapes, floats into integers, keys into integers), and
+    `UclValue` through `serde_json`.
+  - Result: `cargo test` 517 tests pass. Conformance unchanged: new core 1371 of 1375,
+    emitters 1019 of 1023, existing parser 502; no xfail list changed.
+    `cargo build --examples --benches`, `cargo check --no-default-features` and
+    `cargo check --features load` succeed.
+  - Found and not changed: the core keeps a backslash and a lone CR inside single quotes, where
+    libucl removes both (QUESTIONS.md #53; §6.2 says CR LF only and no case pins it).
+  - Questions: #53, #54.
+  - Commits: `d66f3c7`, and the `C4b:` commit after it, in which strings that refer to
+    `FILENAME` or `CURDIR` are an error in the double-quoted formats instead of a documented
+    exception.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

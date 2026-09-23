@@ -25,7 +25,8 @@
 //! ```
 //!
 //! The default formats do not always read back as the same value; spec §10.8 lists where they
-//! differ. Floats, for instance, keep at most six decimals.
+//! differ. Floats, for instance, keep at most six decimals. The serde functions of
+//! [`crate::ser`] use the same layouts with forms that read back exactly.
 
 mod config;
 mod json;
@@ -53,12 +54,23 @@ pub enum Format {
     Yaml,
 }
 
+/// How an [`Emitter`] writes scalars, keys and multi-value entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// As libucl writes them (spec §10.2–§10.7), quirks included.
+    Libucl,
+    /// In forms that read back as exactly the value written (spec §10.8), for serde
+    /// serialization ([`crate::ser`]). Output facts and saved comments are not used.
+    RoundTrip,
+}
+
 /// Writes values in one [`Format`], with optional output facts and saved comments.
 #[derive(Debug, Clone, Copy)]
 pub struct Emitter<'a> {
     format: Format,
     facts: Option<&'a OutputFacts>,
     comments: Option<(&'a [Comment], &'a [AttachedComments])>,
+    mode: Mode,
 }
 
 impl<'a> Emitter<'a> {
@@ -68,7 +80,17 @@ impl<'a> Emitter<'a> {
             format,
             facts: None,
             comments: None,
+            mode: Mode::Libucl,
         }
+    }
+
+    /// The emitter in round-trip mode: every value is written in a form that libucl and
+    /// [`crate::parse`] read back as exactly that value (spec §10.8), in the layouts of the
+    /// emitter's format. Use [`Emitter::try_emit`]; see [`crate::ser`] for the forms and for the
+    /// values that have none.
+    pub(crate) fn round_trip(mut self) -> Self {
+        self.mode = Mode::RoundTrip;
+        self
     }
 
     /// The format this emitter writes.
@@ -100,26 +122,83 @@ impl<'a> Emitter<'a> {
 
     /// The text of `value` in the emitter's format.
     pub fn emit(&self, value: &UclValue) -> String {
+        self.run(value).out
+    }
+
+    /// The text of `value` in round-trip mode, or a description of the first value that has no
+    /// form that reads back exactly.
+    pub(crate) fn try_emit(&self, value: &UclValue) -> Result<String, String> {
+        let writer = self.run(value);
+        match writer.error {
+            Some(error) => Err(error),
+            None => Ok(writer.out),
+        }
+    }
+
+    fn run(&self, value: &UclValue) -> Writer<'a> {
+        let exact = self.mode == Mode::RoundTrip;
         let comments = match (self.format, self.comments) {
-            (Format::Config, Some((comments, attached))) => comment_map(comments, attached),
+            (Format::Config, Some((comments, attached))) if !exact => {
+                comment_map(comments, attached)
+            }
             _ => HashMap::new(),
         };
-        let facts = self.facts.filter(|f| !f.is_empty());
+        let facts = self.facts.filter(|f| !f.is_empty() && !exact);
         let mut writer = Writer {
             out: String::new(),
             track: facts.is_some() || !comments.is_empty(),
             facts,
             comments,
             path: Vec::new(),
+            mode: self.mode,
+            error: None,
         };
+        if exact && !matches!(value, UclValue::Object(_) | UclValue::Array(_)) {
+            writer.fail(format!(
+                "a root {}: a UCL document is an object or an array (spec §1.1)",
+                value.type_name()
+            ));
+        }
+        if exact && nesting(value) > crate::parse::MAX_NESTING {
+            writer.fail(format!(
+                "a value nested more than {} containers deep, the root included (spec §11.2)",
+                crate::parse::MAX_NESTING
+            ));
+            return writer;
+        }
         match self.format {
             Format::Json => writer.json_root(value, json::Style::Json),
             Format::JsonCompact => writer.json_root(value, json::Style::Compact),
             Format::Yaml => writer.json_root(value, json::Style::Yaml),
             Format::Config => writer.config_root(value),
         }
-        writer.out
+        writer
     }
+}
+
+/// The most containers (objects and arrays) open at once in `value`, itself included.
+fn nesting(value: &UclValue) -> usize {
+    let mut deepest = 0;
+    let mut stack = vec![(value, 1)];
+    while let Some((value, depth)) = stack.pop() {
+        match value {
+            UclValue::Object(object) => {
+                deepest = deepest.max(depth);
+                stack.extend(
+                    object
+                        .entries()
+                        .flat_map(|e| e.values())
+                        .map(|v| (v, depth + 1)),
+                );
+            }
+            UclValue::Array(items) => {
+                deepest = deepest.max(depth);
+                stack.extend(items.iter().map(|v| (v, depth + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// `value` as pretty JSON (spec §10.4).
@@ -167,9 +246,19 @@ struct Writer<'a> {
     comments: CommentMap<'a>,
     track: bool,
     path: Vec<PathSegment>,
+    mode: Mode,
+    /// In round-trip mode, the first value that has no exact form.
+    error: Option<String>,
 }
 
 impl<'a> Writer<'a> {
+    /// Records that a value has no exact form (round-trip mode). The first failure is kept.
+    fn fail(&mut self, error: String) {
+        if self.error.is_none() {
+            self.error = Some(error);
+        }
+    }
+
     fn indent(&mut self, depth: usize) {
         for _ in 0..depth {
             self.out.push_str("    ");
@@ -207,6 +296,10 @@ impl<'a> Writer<'a> {
     /// Writes the key of the entry value being written, whose entry is `entry_key`: its own
     /// spelling, bare or in the JSON form (spec §10.1). The empty key is written as nothing.
     fn write_key(&mut self, entry_key: &str) {
+        if self.mode == Mode::RoundTrip {
+            self.exact_key(entry_key, true);
+            return;
+        }
         let (spelling, quoted) = match self.facts() {
             Some(facts) => {
                 let spelling = facts.key_spelling.as_deref().unwrap_or(entry_key);
@@ -228,8 +321,55 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// Round-trip mode: a key that reads back exactly (spec §10.8). Bare where `bare_allowed` and
+    /// spec §3.1 allow it, otherwise double-quoted with the escapes of §6.1. The empty key has no
+    /// form, since parsing rejects it (§3.2).
+    fn exact_key(&mut self, key: &str, bare_allowed: bool) {
+        if key.is_empty() {
+            self.fail("the empty key, which parsing rejects (spec §3.2, §10.8)".to_owned());
+        } else if bare_allowed && text::is_bare_key(key) {
+            self.out.push_str(key);
+        } else {
+            text::write_escaped_string(&mut self.out, key);
+        }
+    }
+
+    /// Round-trip mode: a scalar in a form that reads back exactly (spec §10.8). Strings of the
+    /// config format may use single quotes (`config`); the other formats use double quotes.
+    fn exact_scalar(&mut self, value: &UclValue, config: bool) {
+        let result = match value {
+            UclValue::Integer(i) => {
+                use std::fmt::Write;
+                let _ = write!(self.out, "{i}");
+                Ok(())
+            }
+            UclValue::Float(f) => number::write_exact_float(&mut self.out, *f),
+            UclValue::Time(t) => number::write_exact_time(&mut self.out, *t),
+            UclValue::String(s) if config => text::write_exact_config_string(&mut self.out, s),
+            UclValue::String(s) => text::write_exact_double_quoted(&mut self.out, s),
+            UclValue::Boolean(b) => {
+                self.out.push_str(if *b { "true" } else { "false" });
+                Ok(())
+            }
+            UclValue::Null => {
+                self.out.push_str("null");
+                Ok(())
+            }
+            UclValue::Object(_) | UclValue::Array(_) => {
+                unreachable!("containers are written by the format")
+            }
+        };
+        if let Err(error) = result {
+            self.fail(error);
+        }
+    }
+
     /// A scalar in the form every format shares (spec §10.2), strings in the JSON form.
     fn scalar(&mut self, value: &UclValue) {
+        if self.mode == Mode::RoundTrip {
+            self.exact_scalar(value, false);
+            return;
+        }
         match value {
             UclValue::Integer(i) => {
                 use std::fmt::Write;

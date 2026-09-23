@@ -1,8 +1,11 @@
 //! JSON, compact JSON (spec §10.4) and YAML (spec §10.6), with multi-value entries as spec §10.7
 //! describes. The three share one layout; YAML differs in its keys and at the root.
+//!
+//! In round-trip mode a multi-value entry is written as one member per value, all with the same
+//! key, which reads back as the same entry (spec §10.8), instead of the array of §10.7.
 
-use super::Writer;
 use super::text;
+use super::{Mode, Writer};
 use crate::value::{Entry, UclArray, UclObject, UclValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +26,19 @@ impl Writer<'_> {
     /// The root object of YAML: its entries without braces, one per line (§10.6). A multi-value
     /// entry that is not the first is preceded by `,⏎` instead of `⏎` (§10.7, *Quirk*).
     fn yaml_root(&mut self, object: &UclObject) {
+        if self.mode == Mode::RoundTrip {
+            let mut first = true;
+            for (key, entry) in object.iter() {
+                for (index, value) in entry.values().enumerate() {
+                    if !first {
+                        self.out.push('\n');
+                    }
+                    first = false;
+                    self.exact_member(key, index, value, 0, Style::Yaml);
+                }
+            }
+            return;
+        }
         for (i, (key, entry)) in object.iter().enumerate() {
             if i > 0 {
                 self.out
@@ -61,6 +77,17 @@ impl Writer<'_> {
         self.out.push('{');
         self.newline(style);
         for (i, (key, entry)) in object.iter().enumerate() {
+            if self.mode == Mode::RoundTrip {
+                for (index, value) in entry.values().enumerate() {
+                    if i > 0 || index > 0 {
+                        self.out.push(',');
+                        self.newline(style);
+                    }
+                    self.line_indent(depth + 1, style);
+                    self.exact_member(key, index, value, depth + 1, style);
+                }
+                continue;
+            }
             if i > 0 {
                 self.out.push(',');
                 self.newline(style);
@@ -149,9 +176,33 @@ impl Writer<'_> {
         self.out.push(']');
     }
 
+    /// Round-trip mode: `key: value` for value `index` of the entry `key`, whose line is indented
+    /// `depth` levels.
+    fn exact_member(
+        &mut self,
+        key: &str,
+        index: usize,
+        value: &UclValue,
+        depth: usize,
+        style: Style,
+    ) {
+        self.enter_key(key, index);
+        self.member_key(key, style);
+        self.out.push(':');
+        if style != Style::Compact {
+            self.out.push(' ');
+        }
+        self.json_value(value, depth, style);
+        self.leave();
+    }
+
     /// A member key: always in the JSON form in JSON, bare unless it needs quoting in YAML; the
-    /// empty key is `null` in both (§10.1).
+    /// empty key is `null` in both (§10.1). In round-trip mode, see [`Writer::exact_key`].
     fn member_key(&mut self, key: &str, style: Style) {
+        if self.mode == Mode::RoundTrip {
+            self.exact_key(key, style == Style::Yaml);
+            return;
+        }
         let spelling = self
             .facts()
             .and_then(|f| f.key_spelling.clone())

@@ -1,0 +1,118 @@
+flag: true
+small: -128
+medium: 32767
+word: -7
+big: -9223372036854775808
+byte: 255
+ushort: 65535
+uword: 4294967295
+ubig: 9223372036854775807
+wide: -1
+uwide: 4611686018427387904
+single: 0.10000000149011612
+double: 0.3333333333333333
+letter: "\""
+text: "Hello, \"world\"\n\ttab\\"
+maybe: 3
+nothing: null
+list: [
+    1,
+    -2,
+    3
+]
+octets: [
+    0,
+    127,
+    255
+]
+raw: [
+    0,
+    255,
+    85,
+    67,
+    76
+]
+nested: [
+    {
+        name: "first",
+        weight: 1.5,
+        tags: [
+            "x",
+            "y z"
+        ]
+    },
+    {
+        name: "",
+        weight: nan,
+        tags: []
+    }
+]
+by_name: {
+    e: 2.718281828459045,
+    pi: 3.141592653589793
+}
+by_number: {
+    1: "one",
+    40000: "big"
+}
+by_signed: {
+    "-5": true,
+    9223372036854775807: false
+}
+by_flag: {
+    false: 0,
+    true: 1
+}
+by_char: {
+    " ": 3,
+    a: 1,
+    é: 2
+}
+by_color: {
+    Red: 1,
+    Blue: 3
+}
+ordered: {
+    z: [
+        "last"
+    ],
+    "a b": []
+}
+pair: [
+    -1,
+    "two",
+    3.25
+]
+fixed: [
+    1,
+    2,
+    3
+]
+unit: null
+marker: null
+id: 99
+shapes: [
+    "Point",
+    {
+        Circle: 0.5
+    },
+    {
+        Rect: [
+            2,
+            -3
+        ]
+    },
+    {
+        Poly: {
+            sides: 6,
+            name: "hex"
+        }
+    }
+]
+timeout: 1.5s
+empty_list: []
+empty_map: {}
+tree: {
+    t: 0.25s,
+    n: null
+}

@@ -1,0 +1,15 @@
+a {
+    b {
+        c [
+            [
+                []
+            ]
+            {}
+            {
+                d = "deep";
+            }
+        ]
+    }
+}
+empty_object {}
+empty_array []

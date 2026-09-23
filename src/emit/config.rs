@@ -1,7 +1,7 @@
 //! The UCL config format (spec §10.5), with saved comments when they are asked for (§10.10).
 
-use super::Writer;
 use super::text;
+use super::{Mode, Writer};
 use crate::parse::CommentPlacement;
 use crate::value::{UclArray, UclObject, UclValue};
 
@@ -96,6 +96,10 @@ impl Writer<'_> {
 
     /// A scalar; strings in the heredoc, single-quoted or JSON form (§10.5).
     fn config_scalar(&mut self, value: &UclValue) {
+        if self.mode == Mode::RoundTrip {
+            self.exact_scalar(value, true);
+            return;
+        }
         match value {
             UclValue::String(s) => {
                 let (single_quoted, multiline) = self

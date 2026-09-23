@@ -1,0 +1,71 @@
+{
+  "entries": [
+    {
+      "k": "v",
+      "v": [
+        {
+          "t": "array",
+          "v": [
+            {
+              "t": "string",
+              "v": "$ABI"
+            },
+            {
+              "t": "string",
+              "v": "${ABI}"
+            },
+            {
+              "t": "string",
+              "v": "$FILENAME"
+            },
+            {
+              "t": "string",
+              "v": "${CURDIR}/x"
+            },
+            {
+              "t": "string",
+              "v": "$ABI$$ABI"
+            },
+            {
+              "t": "string",
+              "v": "it's $ABI"
+            },
+            {
+              "t": "string",
+              "v": "$ABI\\x"
+            },
+            {
+              "t": "string",
+              "v": "$ABI\\\\"
+            },
+            {
+              "t": "string",
+              "v": "$ABI\\\\'"
+            },
+            {
+              "t": "string",
+              "v": "tab\t$ABI"
+            },
+            {
+              "t": "string",
+              "v": "nul\u0000$ABI"
+            },
+            {
+              "t": "string",
+              "v": "line\n$ABI\r\n"
+            },
+            {
+              "t": "string",
+              "v": "\\$ABI"
+            },
+            {
+              "t": "string",
+              "v": "$ABI''"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "t": "object"
+}

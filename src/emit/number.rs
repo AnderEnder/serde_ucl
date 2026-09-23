@@ -51,6 +51,60 @@ fn write_g15(out: &mut String, v: f64) {
     }
 }
 
+/// Round-trip mode: writes a float so that it reads back as the same double (spec §10.8).
+///
+/// A finite value is written with the fewest significant digits that identify it, with a `.` or an
+/// exponent so that it reads as a float (§5.1): `0.1`, `1.0`, `-0.0`, `1e16`, `1.5e-10`. NaN is the
+/// keyword `nan` (its sign and payload are not kept), +∞ the keyword `inf`, and −∞, which has no
+/// keyword, `-1e308k`: a multiplier that overflows (§4.5, §5.4). A subnormal value has no form,
+/// since every literal below the normal range is an error (§5.3).
+pub(crate) fn write_exact_float(out: &mut String, v: f64) -> Result<(), String> {
+    if v.is_nan() {
+        out.push_str("nan");
+    } else if v == f64::INFINITY {
+        out.push_str("inf");
+    } else if v == f64::NEG_INFINITY {
+        out.push_str("-1e308k");
+    } else {
+        write_finite(out, v, "float")?;
+    }
+    Ok(())
+}
+
+/// Round-trip mode: writes a time (in seconds) so that it reads back as the same time
+/// (spec §10.8): the digits of [`write_exact_float`] followed by `s`, as in `1.5s` or `1e-3s`. +∞
+/// and −∞ are `1e308ks` and `-1e308ks`, a multiplier that overflows; NaN and subnormal values have
+/// no form.
+pub(crate) fn write_exact_time(out: &mut String, v: f64) -> Result<(), String> {
+    if v.is_nan() {
+        return Err("a NaN time, which no literal reads back as (spec §10.8)".to_owned());
+    } else if v == f64::INFINITY {
+        out.push_str("1e308ks");
+    } else if v == f64::NEG_INFINITY {
+        out.push_str("-1e308ks");
+    } else {
+        write_finite(out, v, "time")?;
+        out.push('s');
+    }
+    Ok(())
+}
+
+/// The shortest digits that identify the finite double `v`, in a form that has a `.` or an
+/// exponent: Rust's `Debug` formatting of `f64`, which writes the shortest representation that
+/// round-trips (at most 24 bytes, far below the length limit of §5.3).
+fn write_finite(out: &mut String, v: f64, kind: &str) -> Result<(), String> {
+    if v.is_subnormal() {
+        return Err(format!(
+            "the subnormal {kind} {v:e}: every literal below the normal range is an error \
+             (spec §5.3, §10.8)"
+        ));
+    }
+    let start = out.len();
+    let _ = write!(out, "{v:?}");
+    debug_assert!(out[start..].contains(['.', 'e']), "{}", &out[start..]);
+    Ok(())
+}
+
 fn strip_zeros(s: &str) -> &str {
     if !s.contains('.') {
         return s;
@@ -106,6 +160,40 @@ mod tests {
             assert_eq!(f(v), text, "{v:?}");
         }
         assert_eq!(f(1e300).len(), 301 + 7);
+    }
+
+    #[test]
+    fn exact_forms() {
+        let float = |v: f64| {
+            let mut s = String::new();
+            write_exact_float(&mut s, v).map(|()| s)
+        };
+        let time = |v: f64| {
+            let mut s = String::new();
+            write_exact_time(&mut s, v).map(|()| s)
+        };
+        for (v, text) in [
+            (0.1, "0.1"),
+            (1.0, "1.0"),
+            (-0.0, "-0.0"),
+            (1e16, "1e16"),
+            (1.5e-10, "1.5e-10"),
+            (f64::MAX, "1.7976931348623157e308"),
+            (f64::MIN_POSITIVE, "2.2250738585072014e-308"),
+            (f64::NAN, "nan"),
+            (f64::INFINITY, "inf"),
+            (f64::NEG_INFINITY, "-1e308k"),
+        ] {
+            assert_eq!(float(v).unwrap(), text, "{v:?}");
+        }
+        assert!(float(5e-324).is_err());
+        assert_eq!(time(1.5).unwrap(), "1.5s");
+        assert_eq!(time(0.001).unwrap(), "0.001s");
+        assert_eq!(time(-0.0).unwrap(), "-0.0s");
+        assert_eq!(time(f64::INFINITY).unwrap(), "1e308ks");
+        assert_eq!(time(f64::NEG_INFINITY).unwrap(), "-1e308ks");
+        assert!(time(f64::NAN).is_err());
+        assert!(time(-1e-310).is_err());
     }
 
     #[test]

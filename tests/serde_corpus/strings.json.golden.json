@@ -1,0 +1,145 @@
+{
+  "entries": [
+    {
+      "k": "bytes",
+      "v": [
+        {
+          "t": "string",
+          "v": "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+        }
+      ]
+    },
+    {
+      "k": "forms",
+      "v": [
+        {
+          "t": "array",
+          "v": [
+            {
+              "t": "string",
+              "v": ""
+            },
+            {
+              "t": "string",
+              "v": "true"
+            },
+            {
+              "t": "string",
+              "v": "null"
+            },
+            {
+              "t": "string",
+              "v": "123"
+            },
+            {
+              "t": "string",
+              "v": "1s"
+            },
+            {
+              "t": "string",
+              "v": "nan"
+            },
+            {
+              "t": "string",
+              "v": "inf"
+            },
+            {
+              "t": "string",
+              "v": "-inf"
+            },
+            {
+              "t": "string",
+              "v": "<<EOD\nx\nEOD"
+            },
+            {
+              "t": "string",
+              "v": "EOD\nx"
+            },
+            {
+              "t": "string",
+              "v": "a\nEOD\nb"
+            },
+            {
+              "t": "string",
+              "v": "/* c */"
+            },
+            {
+              "t": "string",
+              "v": "# c"
+            },
+            {
+              "t": "string",
+              "v": "a;b,c"
+            },
+            {
+              "t": "string",
+              "v": "{["
+            },
+            {
+              "t": "string",
+              "v": "]}"
+            },
+            {
+              "t": "string",
+              "v": "'single'"
+            },
+            {
+              "t": "string",
+              "v": "\\'"
+            },
+            {
+              "t": "string",
+              "v": "back\\"
+            },
+            {
+              "t": "string",
+              "v": "é€😀"
+            },
+            {
+              "t": "string",
+              "v": "cost $5"
+            },
+            {
+              "t": "string",
+              "v": "a$"
+            },
+            {
+              "t": "string",
+              "v": "$"
+            },
+            {
+              "t": "string",
+              "v": "$$"
+            },
+            {
+              "t": "string",
+              "v": "^a$|b$"
+            },
+            {
+              "t": "string",
+              "v": "${"
+            },
+            {
+              "t": "string",
+              "v": "${unknown}"
+            },
+            {
+              "t": "string",
+              "v": "$abi"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "k": "long",
+      "v": [
+        {
+          "t": "string",
+          "v": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nyyyyyyyyyy"
+        }
+      ]
+    }
+  ],
+  "t": "object"
+}

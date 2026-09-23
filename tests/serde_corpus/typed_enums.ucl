@@ -1,0 +1,18 @@
+[
+    "Point",
+    {
+        Circle = -1e308k;
+    }
+    {
+        Rect [
+            0,
+            0,
+        ]
+    }
+    {
+        Poly {
+            sides = 0;
+            name = '$5';
+        }
+    }
+]

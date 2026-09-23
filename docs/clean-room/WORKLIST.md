@@ -85,6 +85,11 @@ serde serialization (item 2).
 1. **Saved comments in output (§10.10).** The crate writes saved comments in config output only
    when the caller asks for it, through an emitter option; the default config output writes none.
    With the option on, output is byte-identical to the `config-comments` golden files.
+2. **serde JSON output is valid JSON (RFC 8259).** `to_json_string` and
+   `to_json_string_compact` never write UCL-only forms: a time is written as its number of
+   seconds, and a NaN or infinite float or time is a serialization error. A Rust value still
+   round-trips where its deserializer accepts a number of seconds (for example `Duration` through
+   the `time` module). The config and YAML formats keep the C4b forms.
 
 ## C5 — Cut-over
 

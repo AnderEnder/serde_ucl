@@ -653,6 +653,12 @@ pub enum SerdeError {
     /// Unknown field encountered
     #[error("Unknown field '{field}' at {position}")]
     UnknownField { field: String, position: Position },
+
+    /// Serialization met a value that has no form that reads back as the same value (spec §10.8),
+    /// such as an integer outside the 64-bit signed range, a subnormal float, the empty key or a
+    /// root that is not an object or an array. See [`crate::ser`] for the full list.
+    #[error("cannot serialize {0}")]
+    Unrepresentable(String),
 }
 
 /// Enhanced error with context information
@@ -1016,6 +1022,12 @@ impl UclError {
 }
 
 impl serde::de::Error for UclError {
+    fn custom<T: fmt::Display>(msg: T) -> Self {
+        UclError::Serde(SerdeError::Custom(msg.to_string()))
+    }
+}
+
+impl serde::ser::Error for UclError {
     fn custom<T: fmt::Display>(msg: T) -> Self {
         UclError::Serde(SerdeError::Custom(msg.to_string()))
     }
