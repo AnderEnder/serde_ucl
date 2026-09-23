@@ -1,0 +1,7 @@
+underscore_word: "hello_world"
+hyphen_word: "hello-world"
+dot_word: "hello.world"
+number_prefix: "123abc"
+mixed_case: "HelloWorld"
+single_char: "a"
+empty_like: ""

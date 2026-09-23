@@ -1,0 +1,5 @@
+{
+    "x": {
+        "all-depends": "query %dn-%dv"
+    }
+}

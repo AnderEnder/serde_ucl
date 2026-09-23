@@ -116,12 +116,23 @@ followed by an object adds the object as a further value: `a = 1⏎a = 2⏎a { y
   `a { x = 1 }⏎a = 2` → `{ a: int 2 }`; `a = [1]⏎a = 2` → `{ a: int 2 }`; an object at priority 3
   followed by `a = 2` at priority 1 → `a: int 2 @3`, and at priorities 1 and 3 → `a: int 2 @1`
   (`strategy_merge_object_then_scalar`, `strategy_merge_array_then_scalar`,
-  `strategy_merge_scalar_keeps_container_priority`).
+  `strategy_merge_scalar_keeps_container_priority`). **Quirk.** A value left empty at the end of
+  a unit, which is `null` elsewhere (§1.6), is not such a scalar: it adds nothing, and the
+  container stays as it was, whatever the priorities and also at the end of an included file:
+  `k { a = 1 }⏎k =⏎` → `k: { a: int 1 }`, `k = [1]⏎k =⏎` → `k: [int 1]`, while an explicit
+  `k { a = 1 }⏎k = null` → `k: null` (`merge_empty_value_at_end_keeps_object`,
+  `merge_empty_value_at_end_keeps_array`, `merge_empty_value_at_end_higher_priority`,
+  `merge_empty_value_at_end_of_included_file`, `merge_explicit_null_replaces_object`). Comments
+  pending there attach to the container, as a merge into it would (§12.5):
+  `k { a = 1 }⏎# c⏎k =⏎` → the object `k` has `"c": ["# c"]`
+  (`merge_empty_value_at_end_comments_join_object`).
 - **A scalar**: behaves like `append`, priorities included: `a = 1⏎a = 2` → `⟨int 1 | int 2⟩`;
   `a = 1⏎a { y = 2 }` → `⟨int 1 | {y: int 2}⟩`; a lower priority is dropped and a higher one
   replaces (`strategy_merge_scalars_append`, `strategy_merge_scalar_then_object`,
   `cases/spec/09-macros/include_merge_scalar_lower_priority_dropped`,
-  `cases/spec/09-macros/include_merge_scalar_higher_priority_replaces`).
+  `cases/spec/09-macros/include_merge_scalar_higher_priority_replaces`). A value left empty at
+  the end of a unit is then a further value, `null`: `k = 1⏎k =⏎` → `k: ⟨int 1 | null⟩`
+  (`merge_empty_value_at_end_after_scalar`).
 
 ## 8.5 Without implicit arrays
 

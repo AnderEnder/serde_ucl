@@ -1,0 +1,7 @@
+positive_infinity = inf;
+positive_infinity2 = "infinity";
+negative_infinity = "-inf";
+negative_infinity2 = "-infinity";
+not_a_number = nan;
+not_a_number2 = "NaN";
+not_a_number3 = "NAN";

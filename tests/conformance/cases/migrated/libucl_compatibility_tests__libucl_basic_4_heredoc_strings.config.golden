@@ -1,0 +1,13 @@
+multiline-key = <<EOD
+test
+test
+test\n
+/* comment like */
+# Some invalid endings
+ EOD
+EOD   
+EOF
+# This should be in content
+
+EOD;
+normal-key = "value";

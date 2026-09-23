@@ -1,0 +1,10 @@
+single_value: "alone",
+empty_strings: [    "",
+    ""],
+null_values: [    null,
+    null],
+mixed_single: [
+    "first",
+    null,
+    ""
+]

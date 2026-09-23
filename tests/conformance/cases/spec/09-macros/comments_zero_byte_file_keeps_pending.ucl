@@ -1,0 +1,4 @@
+a = 1
+# c
+.include "files/v4/empty.txt"
+b = 1

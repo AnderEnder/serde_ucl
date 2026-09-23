@@ -1,0 +1,4 @@
+a = 1
+# c
+.include "files/v6/lf.txt"
+b = 1

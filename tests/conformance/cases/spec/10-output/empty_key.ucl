@@ -1,0 +1,2 @@
+.include(key="") "../09-macros/files/a.inc"
+b = 2

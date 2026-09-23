@@ -1,0 +1,3 @@
+a {
+.include "files/v6/q41_lost_brace.inc"
+k = 1

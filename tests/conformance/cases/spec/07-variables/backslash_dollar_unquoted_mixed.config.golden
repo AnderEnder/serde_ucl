@@ -1,0 +1,10 @@
+a = "x$ABI";
+b = "$A$ABI";
+c = "unknownunknown";
+d = "unknownunknown";
+e = "unknownc$";
+f = "${unknown";
+g = "x$$ABI";
+h = "\\unknown";
+i = "\\$ABI";
+j = "unknown $";

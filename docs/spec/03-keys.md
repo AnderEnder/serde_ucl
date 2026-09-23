@@ -153,6 +153,24 @@ it, so a bracket in them counts:
   `a <FF># c⏎b { c = 1 }` → `{ a: "b { c = 1 }" }` (`section_lookahead_ff_then_line_comment`).
   Inside a bare name a VT or FF is invalid (§3.1): `a b<FF>c { d = 1 }` is an error
   (`section_ff_inside_name_error`).
+- **Quirk.** Because a comment after a VT or FF is part of the rest of the line, a bracket inside
+  it makes the word a name. What follows then behaves as after a separator and a line break
+  (above): the next name may come after any whitespace and comments, on any later line, and if the
+  input ends first the objects are kept, empty: `a <FF># {`, `"a" <FF>/* { */`,
+  `a <VT><FF>/* { */<VT>` and `a <FF># {⏎⏎` → `{ a: {} }`; `a b <FF># {` →
+  `{ a: { b: {} } }`; `a <FF># {⏎⏎b {}` and `a <FF>/* { */⏎b {}` → `{ a: { b: {} } }`
+  (`section_bracket_in_comment_after_ff_at_end`, `section_bracket_in_block_comment_after_ff_at_end`,
+  `section_bracket_in_comment_after_vt_ff_at_end`,
+  `section_bracket_in_comment_after_ff_then_blank_lines`,
+  `section_bracket_in_comment_after_ff_two_names`,
+  `section_bracket_in_comment_after_ff_name_on_later_line`,
+  `section_bracket_in_block_comment_after_ff_name_next_line`). A `#` that is the last byte after
+  whitespace is an error there (§2.2): `a <FF># {⏎ #` and `a <FF>/* { */ #`, while
+  `a <FF># {⏎#` → `{ a: {} }` (`section_bracket_in_comment_after_ff_last_byte_hash_error`,
+  `section_bracket_in_block_comment_after_ff_last_byte_hash_error`,
+  `section_bracket_in_comment_after_ff_last_byte_hash_saved`). The next key is a name even with a
+  separator, as above, so `"a" <FF># {⏎b = 1` is an error
+  (`section_bracket_in_comment_after_ff_separator_key_error`).
 - The bracket must be on the same line: `a b⏎{ c = 1 }` is an error, because `b` is the value of
   `a` and a `{` cannot start an entry (`section_newline_before_brace_error`).
 - A bare key followed by a quoted string and a separator is an error: `a "b" = 1`

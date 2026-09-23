@@ -1,0 +1,4 @@
+// = "C++ style comment";
+// = "End-of-line comment";
+key1 = "value1";
+key2 = "value2";

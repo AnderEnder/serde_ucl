@@ -1,0 +1,2 @@
+k { a = 1 }
+.include(duplicate="merge") "../09-macros/files/v6/q44_empty_value.inc"

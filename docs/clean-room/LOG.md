@@ -644,3 +644,25 @@
     and amend this entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — Role: spec team. Item: C0, release `spec-v6` (tag on `c38da8e`). Answers implementer
+  questions #34–#49 from C3c, and audits §10 for the C4 output work. Inputs consulted: libucl
+  source at the pinned commit (the emitter and its string, number and comment writers, the
+  character table, the key-escape and string-origin marks, the parser's key, macro and
+  after-value handling, container opening and closing, the end-of-unit check, the include handler's
+  URL, search-path and key-nesting code, empty-chunk handling), black-box oracle runs, the
+  conformance corpus, and `spec-v5`. Confirmed and written down: #34, #35, #36, #38 (§9.1), #37
+  (§9.4 URLs), #39 (§9.4 *Nesting under a key*), #40, #41, #42, #47 (§9.4 *Where the entries go*,
+  *The check at the end of a unit*), #43 (§9.4, §12.5), #44 (§8.4), #46 (§3.4). Specified: #49
+  (§1.5). Marked **Uncertain** with the crate's behaviour recorded as the project's choice: #45 (an
+  included file starting with `[`) and #48 (a `}` in an included file closing an array element).
+  §10: the output of multi-value entries with per-value keys, the empty key, the exact digits of
+  floats and the `%.15g` form, nested layouts, the inline layout for every first-value kind, what
+  libucl reads back and which forms read back exactly (§10.8, found by reading back the output of
+  every case), and the config output with saved comments (§10.10). Oracle tool: output written by
+  length, so NUL bytes are kept, and a `config-comments` format. Regen script: every case that
+  parses gets `<case>.config.golden`, `.json.golden`, `.json-compact.golden` and `.yaml.golden`,
+  and cases that save comments `<case>.config-comments.golden`; two regenerations gave identical
+  files, and no golden file contains the checkout path. 121 new cases (1375 in all); no existing
+  golden file changed. The new core fails 4 of them (`spec-v6`, #49); the old parser fails 89.
+  Both runners and full `cargo test` green at every commit. Commits: `1e2604a`, `c38da8e`. The spec
+  contains behaviour only: no libucl code, internal names, or procedures.

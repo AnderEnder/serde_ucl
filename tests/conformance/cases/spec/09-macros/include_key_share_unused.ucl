@@ -1,0 +1,4 @@
+.include "files/v4/open_brace.inc"
+.include(key="k") "files/a.inc"
+q = 1
+}

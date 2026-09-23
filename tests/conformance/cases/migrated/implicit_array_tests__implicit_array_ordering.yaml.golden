@@ -1,0 +1,7 @@
+priority_order: [
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth"
+]

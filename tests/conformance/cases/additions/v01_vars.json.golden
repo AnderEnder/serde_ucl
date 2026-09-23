@@ -1,0 +1,8 @@
+{
+    "keyvar": [
+        "unknowntest",
+        "unknownunknownunknown${unknown}",
+        "${some}$no${}$$test$$$$$$$",
+        "unknown$ABI$unknown$$"
+    ]
+}

@@ -1,0 +1,4 @@
+{
+    "multiline-key": "test\ntest\ntest\\n\n/* comment like */\n# Some invalid endings\n EOD\nEOD   \nEOF\n# This should be in content\n",
+    "normal-key": "value"
+}

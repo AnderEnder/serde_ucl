@@ -1,0 +1,4 @@
+keyvar = "unknowntest";
+keyvar = "unknownunknownunknown${unknown}";
+keyvar = "${some}$no${}$$test$$$$$$$";
+keyvar = "unknown$ABI$unknown$$";

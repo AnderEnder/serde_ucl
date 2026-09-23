@@ -1,0 +1,4 @@
+a = 1
+# c
+.include(glob=true) "files/v6/eg/*"
+b = 1

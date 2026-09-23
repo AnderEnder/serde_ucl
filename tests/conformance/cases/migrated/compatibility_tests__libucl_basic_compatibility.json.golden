@@ -1,0 +1,25 @@
+{
+    "param": "value",
+    "section": {
+        "flag": true,
+        "number": 10000,
+        "time": 0.200000,
+        "string": "something",
+        "subsection": {
+            "host": {
+                "host": "hostname",
+                "port": 900
+            }
+        }
+    },
+    "array": [
+        "item1",
+        "item2",
+        "item3"
+    ],
+    "servers": [
+        "server1",
+        "server2",
+        "server3"
+    ]
+}

@@ -1,0 +1,5 @@
+{
+    "double": "double quoted",
+    "single": "single quoted",
+    "escaped": "line1\nline2\ttab"
+}

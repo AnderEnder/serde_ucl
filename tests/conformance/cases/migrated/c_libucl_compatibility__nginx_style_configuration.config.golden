@@ -1,0 +1,13 @@
+worker_processes = "auto";
+events {
+    worker_connections = 1024;
+}
+http {
+    sendfile = true;
+    tcp_nopush = true;
+    server {
+        listen = 80;
+        server_name = "example.com";
+        root = "/var/www/html";
+    }
+}

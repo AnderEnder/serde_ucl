@@ -1,0 +1,4 @@
+t = <<EOD
+  hello world  
+
+EOD;

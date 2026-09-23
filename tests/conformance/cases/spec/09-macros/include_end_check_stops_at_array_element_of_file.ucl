@@ -1,0 +1,2 @@
+.include "files/v6/q41_array_elem.inc"
+m { n = 1 }

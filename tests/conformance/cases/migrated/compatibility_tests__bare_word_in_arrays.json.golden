@@ -1,0 +1,10 @@
+{
+    "array": [
+        true,
+        false,
+        null,
+        "production",
+        "quoted",
+        123
+    ]
+}

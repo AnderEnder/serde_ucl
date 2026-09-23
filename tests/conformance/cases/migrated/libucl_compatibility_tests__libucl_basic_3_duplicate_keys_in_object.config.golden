@@ -1,0 +1,4 @@
+ALIAS {
+    leaf = "query -e '%a == 0' '%n-%v'";
+    leaf = "query -e '%a == 0' '%n-%v'";
+}

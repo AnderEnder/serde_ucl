@@ -1,0 +1,4 @@
+// = "This is a C++ comment";
+// = "Inline C++ comment";
+key1 = "value1";
+key2 = "value2";

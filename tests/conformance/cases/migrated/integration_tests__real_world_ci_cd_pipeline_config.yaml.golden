@@ -1,0 +1,39 @@
+version: "1.0"
+global: {
+    timeout: "2h",
+    retry_attempts: 3
+}
+stages: {
+    test: {
+        jobs: {
+            unit_tests: {
+                image: "node:16-alpine",
+                script: [
+                    "npm test"
+                ]
+            },
+            integration_tests: {
+                image: "node:16-alpine",
+                script: [
+                    "npm run test:integration"
+                ]
+            },
+            e2e_tests: {
+                image: "cypress/included:10.3.0",
+                script: [
+                    "cypress run"
+                ]
+            }
+        }
+    },
+    build: {
+        jobs: {
+            docker_build: {
+                image: "docker:20.10",
+                script: [
+                    "docker build -t app:latest ."
+                ]
+            }
+        }
+    }
+}

@@ -1,0 +1,12 @@
+server {
+    listen = 80;
+    listen = 443;
+    location = "/";
+    location = "/api";
+    location = "/static";
+    upstream {
+        server = "backend1:3000";
+        server = "backend2:3000";
+        server = "backend3:3000";
+    }
+}

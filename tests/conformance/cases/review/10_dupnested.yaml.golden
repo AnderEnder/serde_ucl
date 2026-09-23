@@ -1,0 +1,14 @@
+section: [
+    {
+        foo: {
+            bar: {
+                key: "value"
+            }
+        }
+    },
+    {
+        foo: {
+            bar: "lol"
+        }
+    }
+]

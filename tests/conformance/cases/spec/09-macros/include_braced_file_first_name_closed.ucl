@@ -1,0 +1,3 @@
+.include "files/v6/q42_closed.inc"
+q = 1
+}

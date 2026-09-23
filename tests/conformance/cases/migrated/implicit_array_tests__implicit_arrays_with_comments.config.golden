@@ -1,0 +1,5 @@
+server = "primary.example.com";
+server = "backup.example.com";
+server = "backup2.example.com";
+server = "emergency.example.com";
+// = "Another backup";

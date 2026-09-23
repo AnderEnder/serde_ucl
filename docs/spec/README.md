@@ -7,8 +7,8 @@ which inputs are accepted, which value each produces, which are rejected, and wh
 formats look like. It says nothing about how libucl is built internally.
 
 Every rule cites conformance cases. A case is an input file under `tests/conformance/` whose
-expected result (`<case>.golden.json`, and for output-format cases also `<case>.<format>.golden`)
-was produced by running libucl on it. **Where this text and a golden file disagree, the golden
+expected result (`<case>.golden.json`, and for every case that parses also its output in each
+format, `<case>.<format>.golden`, §10) was produced by running libucl on it. **Where this text and a golden file disagree, the golden
 file is right**; please report the discrepancy in `docs/clean-room/QUESTIONS.md`.
 
 The project matches libucl's quirks exactly. Behaviour that looks accidental is still specified
@@ -152,13 +152,24 @@ platform, is left uncertain:
   bracket (§9.4, *Nesting under a key*).
 - Whether a container opened by an included file that has ended counts as opened by a later
   included file, at the check at the end of that file (§9.4, *Where the entries go*).
+- An included file that starts with `[`: libucl reads on instead of reporting the error at the
+  `[`, and can stop silently or crash first; the project reports the error at the `[` (§9.4,
+  *Where the entries go*).
+- A `}` in an included file that closes an object which is an array element opened by the
+  including unit: libucl then reads keys into the array and crashes; the project goes on inside
+  the array (§9.4, *Where the entries go*).
 
 ## Known gaps
 
 All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed. `spec-v2`
 answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, `spec-v3` answers
-#5–#16, `spec-v4` answers #17–#22 and completes §9 for the macro work, and `spec-v5` answers
-#23–#33.
+#5–#16, `spec-v4` answers #17–#22 and completes §9 for the macro work, `spec-v5` answers
+#23–#33, and `spec-v6` answers #34–#49 and completes §10 for the output work: every case that
+parses now has libucl's output in each format, §10.8 says what reads back exactly, and §10.10
+specifies the config output with saved comments.
+
+The project has not decided whether it writes saved comments (§10.10); libucl does so only when
+the application asks for it.
 
 The places where §9 left the project's behaviour open (the include parameters `sign`, `url` and
 `path`, how the API reports a silent stop, and parsing a file under `no-filevars`) are decided;
@@ -173,9 +184,11 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1254 cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1375 cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
+- Every case that parses also has output golden files (§10); the table lists §10 only for the
+  cases in `cases/spec/10-output/` and the upstream cases.
 - The mappings for `cases/review/`, `cases/additions/`, `cases/errors/` and `libucl/basic/` were
   assigned by hand. Every upstream case is also mapped to §10, because its `.res` file is
   config output.
@@ -472,16 +485,24 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/01-structure/array_containers_need_no_separator` | §1 |
 | `cases/spec/01-structure/array_double_comma` | §1 |
 | `cases/spec/01-structure/array_empty_forms` | §1 |
+| `cases/spec/01-structure/array_ff_then_block_comment_element` | §1, §2 |
+| `cases/spec/01-structure/array_ff_then_block_comment_newline_close_error` | §1, §2 |
 | `cases/spec/01-structure/array_first_element_after_comment_group` | §1 |
 | `cases/spec/01-structure/array_key_without_separator` | §1 |
 | `cases/spec/01-structure/array_leading_comma_error` | §1 |
 | `cases/spec/01-structure/array_nested` | §1 |
+| `cases/spec/01-structure/array_newline_block_comment_newline_close` | §1, §2 |
 | `cases/spec/01-structure/array_newline_separated` | §1 |
 | `cases/spec/01-structure/array_of_objects_trailing_comma` | §1 |
 | `cases/spec/01-structure/array_semicolon_separated` | §1 |
 | `cases/spec/01-structure/array_space_separated_numbers` | §1 |
 | `cases/spec/01-structure/array_strings_need_separator_error` | §1 |
 | `cases/spec/01-structure/array_trailing_comma` | §1 |
+| `cases/spec/01-structure/array_vt_then_block_comment_newline_close_error` | §1, §2 |
+| `cases/spec/01-structure/array_vt_then_block_comment_starts_element` | §1, §2 |
+| `cases/spec/01-structure/array_vt_then_close` | §1, §2 |
+| `cases/spec/01-structure/array_vt_then_line_comment_close` | §1, §2 |
+| `cases/spec/01-structure/array_vt_then_line_comment_starts_element` | §1, §2 |
 | `cases/spec/01-structure/close_without_open_error` | §1 |
 | `cases/spec/01-structure/comment_only_document` | §1 |
 | `cases/spec/01-structure/empty_document` | §1 |
@@ -633,6 +654,17 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/03-keys/quoted_value_after_bare_key_error` | §3 |
 | `cases/spec/03-keys/section_any_keyword` | §3 |
 | `cases/spec/03-keys/section_array_value` | §3 |
+| `cases/spec/03-keys/section_bracket_in_block_comment_after_ff_at_end` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_block_comment_after_ff_last_byte_hash_error` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_block_comment_after_ff_name_next_line` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_at_end` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_last_byte_hash_error` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_last_byte_hash_saved` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_name_on_later_line` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_separator_key_error` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_then_blank_lines` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_ff_two_names` | §3, §2 |
+| `cases/spec/03-keys/section_bracket_in_comment_after_vt_ff_at_end` | §3, §2 |
 | `cases/spec/03-keys/section_ff_before_bracket_error` | §3 |
 | `cases/spec/03-keys/section_ff_inside_name_error` | §3 |
 | `cases/spec/03-keys/section_lookahead_after_block_comment` | §3 |
@@ -875,6 +907,13 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/08-duplicates/inherit_strategy_error` | §8 |
 | `cases/spec/08-duplicates/inherit_strategy_rewrite` | §8 |
 | `cases/spec/08-duplicates/keeps_first_position` | §8 |
+| `cases/spec/08-duplicates/merge_empty_value_at_end_after_scalar` | §8, §1 |
+| `cases/spec/08-duplicates/merge_empty_value_at_end_comments_join_object` | §8, §12 |
+| `cases/spec/08-duplicates/merge_empty_value_at_end_higher_priority` | §8, §1 |
+| `cases/spec/08-duplicates/merge_empty_value_at_end_keeps_array` | §8, §1 |
+| `cases/spec/08-duplicates/merge_empty_value_at_end_keeps_object` | §8, §1 |
+| `cases/spec/08-duplicates/merge_empty_value_at_end_of_included_file` | §8, §9 |
+| `cases/spec/08-duplicates/merge_explicit_null_replaces_object` | §8 |
 | `cases/spec/08-duplicates/merge_include_first_array_only` | §8 |
 | `cases/spec/08-duplicates/merge_include_first_value_only` | §8 |
 | `cases/spec/08-duplicates/merge_include_first_value_scalar` | §8 |
@@ -935,17 +974,42 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/comments_include_key_takes_no_pending` | §9, §12 |
 | `cases/spec/09-macros/comments_load_value_takes_none_after` | §9, §12 |
 | `cases/spec/09-macros/comments_load_value_takes_none_before` | §9, §12 |
+| `cases/spec/09-macros/comments_one_byte_file_attaches_pending` | §9, §12 |
+| `cases/spec/09-macros/comments_zero_byte_file_keeps_pending` | §9, §12 |
+| `cases/spec/09-macros/comments_zero_byte_file_with_key_keeps_pending` | §9, §12 |
+| `cases/spec/09-macros/comments_zero_byte_glob_match_keeps_pending` | §9, §12 |
 | `cases/spec/09-macros/include_array_root_error` | §9 |
 | `cases/spec/09-macros/include_bare` | §9 |
 | `cases/spec/09-macros/include_braced_file_after_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_at_braced_root_error` | §9 |
 | `cases/spec/09-macros/include_braced_file_closes_section_object` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_entry_first_then_path_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_after_comment_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_and_brace_closed` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_closed` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_closed_root_open_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_same_line_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_separator_newline_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_then_macro_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_unclosed_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_quoted_name_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_inside_braces_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_priority_then_first_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_then_entries` | §9 |
 | `cases/spec/09-macros/include_braced_file_twice` | §9 |
+| `cases/spec/09-macros/include_braced_file_two_names_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_with_key_inside_braces` | §9 |
 | `cases/spec/09-macros/include_braces` | §9 |
 | `cases/spec/09-macros/include_braces_variables` | §9 |
+| `cases/spec/09-macros/include_closes_braced_root` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_in_nested_file_error` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_rest_of_file_ignored` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_rest_of_file_macro_ignored` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_then_block_comment_error` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_then_brace_error` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_then_comment_error` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_then_entry_error` | §9, §3 |
+| `cases/spec/09-macros/include_closes_braced_root_then_semicolons` | §9, §3 |
 | `cases/spec/09-macros/include_comment_blank_line_brace_error` | §9 |
 | `cases/spec/09-macros/include_curdir` | §9 |
 | `cases/spec/09-macros/include_curdir_restored_after_include` | §9 |
@@ -963,6 +1027,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/include_empty_file` | §9 |
 | `cases/spec/09-macros/include_empty_path_try` | §9 |
 | `cases/spec/09-macros/include_empty_value_is_null` | §9 |
+| `cases/spec/09-macros/include_end_check_stops_at_array_element_of_file` | §9, §3 |
+| `cases/spec/09-macros/include_end_check_stops_at_braced_object_of_file` | §9, §3 |
+| `cases/spec/09-macros/include_end_check_stops_at_object_with_taken_over_brace` | §9, §3 |
 | `cases/spec/09-macros/include_file_closes_including_object` | §9 |
 | `cases/spec/09-macros/include_file_closing_brace_at_top_level_error` | §9 |
 | `cases/spec/09-macros/include_glob` | §9 |
@@ -1004,6 +1071,13 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/include_key_file_containers_close_at_end` | §9 |
 | `cases/spec/09-macros/include_key_not_lowercased_but_matched` | §9 |
 | `cases/spec/09-macros/include_key_open_brace_then_close_error` | §9 |
+| `cases/spec/09-macros/include_key_share_braced_file` | §9, §3 |
+| `cases/spec/09-macros/include_key_share_prefix` | §9 |
+| `cases/spec/09-macros/include_key_share_section_object` | §9, §3 |
+| `cases/spec/09-macros/include_key_share_target_array` | §9 |
+| `cases/spec/09-macros/include_key_share_two_includes` | §9 |
+| `cases/spec/09-macros/include_key_share_unused` | §9 |
+| `cases/spec/09-macros/include_key_share_used_twice_error` | §9 |
 | `cases/spec/09-macros/include_key_without_prefix` | §9 |
 | `cases/spec/09-macros/include_left_open_after_separator_and_newline` | §9, §3 |
 | `cases/spec/09-macros/include_left_open_closed_then_checked_error` | §9, §3 |
@@ -1075,6 +1149,11 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/include_space_before_args` | §9 |
 | `cases/spec/09-macros/include_strategy_only_for_included_entries` | §9 |
 | `cases/spec/09-macros/include_syntax_error_in_file_error` | §9 |
+| `cases/spec/09-macros/include_taken_over_section_closed_by_inner_array` | §9, §3 |
+| `cases/spec/09-macros/include_taken_over_section_closed_by_inner_object` | §9, §3 |
+| `cases/spec/09-macros/include_taken_over_section_closed_inside_braces` | §9, §3 |
+| `cases/spec/09-macros/include_taken_over_section_closed_then_brace_error` | §9, §3 |
+| `cases/spec/09-macros/include_taken_over_section_closed_with_inner_path` | §9, §3 |
 | `cases/spec/09-macros/include_target_case_insensitive` | §9 |
 | `cases/spec/09-macros/include_target_unknown_means_object` | §9 |
 | `cases/spec/09-macros/include_then_keys` | §9 |
@@ -1086,10 +1165,14 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/include_unclosed_brace_inside_braces` | §9 |
 | `cases/spec/09-macros/include_unclosed_object_in_file_error` | §9 |
 | `cases/spec/09-macros/include_unknown_param_ignored` | §9 |
+| `cases/spec/09-macros/include_url_any_scheme_separator` | §9 |
 | `cases/spec/09-macros/include_url_before_search_path` | §9 |
+| `cases/spec/09-macros/include_url_glob_prefix_no_difference` | §9 |
 | `cases/spec/09-macros/include_url_key_not_created` | §9 |
 | `cases/spec/09-macros/include_url_like_path_is_a_path` | §9 |
 | `cases/spec/09-macros/include_url_param_error` | §9 |
+| `cases/spec/09-macros/include_url_path_param_replaces_list` | §9 |
+| `cases/spec/09-macros/include_url_path_param_takes_effect` | §9 |
 | `cases/spec/09-macros/include_url_try_skipped` | §9 |
 | `cases/spec/09-macros/includes_like_include` | §9 |
 | `cases/spec/09-macros/inherit_at_top_level` | §9 |
@@ -1183,17 +1266,40 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/load_unknown_target_inserts_nothing` | §9 |
 | `cases/spec/09-macros/load_without_key_error` | §9 |
 | `cases/spec/09-macros/macro_after_entry_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_after_name_block_comment_reopens` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_closed_by_brace_no_reopen` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_comment_after_blank_lines_reopens` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_comment_to_end` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_comment_to_end_after_bracket_closed` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_comment_to_end_of_included_file` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_ignored_name_at_end_no_reopen` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_include_of_empty_file_comment_to_end` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_later_macro_next_line_reopens` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_later_macro_same_line_reopens` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_later_macro_then_newline_no_reopen` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_next_line_separator_key_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_nothing_after_no_reopen` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_priority_then_separator_key_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_reopen_end_check_stops` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_reopened_object_belongs_to_file_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_reopens_deeper_value` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_reopens_discarded_value` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_run_ignores_included_keys_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_run_survives_closing_brace_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_run_survives_closing_brace_name` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_run_survives_closing_bracket_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_run_survives_macro_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_semicolon_then_comment_reopens` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_separator_key_scalar_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_separator_key_then_brace_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_separator_key_then_bracket_key` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_separator_keys_chain` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_then_bracketed_value_closes` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_then_key_without_separator` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_then_left_open_path` | §9, §3 |
 | `cases/spec/09-macros/macro_after_name_then_separator_key_is_name_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_whitespace_to_end_no_reopen` | §9, §3 |
+| `cases/spec/09-macros/macro_after_separator_newline_name_starts_run_error` | §9, §3 |
 | `cases/spec/09-macros/macro_args_after_comment_then_space_error` | §9 |
 | `cases/spec/09-macros/macro_args_array_root_ignored` | §9 |
 | `cases/spec/09-macros/macro_args_backslash_pair_quote_error` | §9 |
@@ -1277,6 +1383,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/macro_value_variables` | §9 |
 | `cases/spec/09-macros/macro_word_after_section_name_error` | §9, §3 |
 | `cases/spec/09-macros/macro_word_after_section_name_ignored` | §9, §3 |
+| `cases/spec/09-macros/main_braced_root_first_name_has_no_brace_error` | §9 |
 | `cases/spec/09-macros/no_filevars_include_defines_them` | §9, §12 |
 | `cases/spec/09-macros/no_filevars_included_file_has_curdir` | §9, §12 |
 | `cases/spec/09-macros/priority_args_must_be_integer_error` | §9 |
@@ -1324,10 +1431,21 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/09-macros/try_include_url_skipped` | §9 |
 | `cases/spec/09-macros/try_include_url_try_false_error` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
+| `cases/spec/09-macros/zero_byte_file_moves_filevars` | §9, §7 |
 | `cases/spec/10-output/arrays` | §10 |
+| `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
+| `cases/spec/10-output/comments_output_before_and_after` | §10, §12 |
+| `cases/spec/10-output/comments_output_block_and_cr` | §10, §12 |
+| `cases/spec/10-output/comments_output_multi_value` | §10, §12 |
+| `cases/spec/10-output/comments_output_nested_after` | §10, §12 |
+| `cases/spec/10-output/comments_output_root_only` | §10, §12 |
+| `cases/spec/10-output/comments_output_save_comments_flag` | §10, §12 |
+| `cases/spec/10-output/comments_output_top_level_array` | §10, §12 |
 | `cases/spec/10-output/empty_document` | §10 |
+| `cases/spec/10-output/empty_key` | §10, §9 |
 | `cases/spec/10-output/floats` | §10 |
 | `cases/spec/10-output/floats_boundaries` | §10 |
+| `cases/spec/10-output/floats_exact_decimal_expansion` | §10 |
 | `cases/spec/10-output/floats_special` | §10 |
 | `cases/spec/10-output/heredoc_first_line_eod` | §10 |
 | `cases/spec/10-output/heredoc_kept` | §10 |
@@ -1342,17 +1460,33 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1254 case
 | `cases/spec/10-output/long_string_boundary` | §10 |
 | `cases/spec/10-output/long_string_with_newline` | §10 |
 | `cases/spec/10-output/macro_created_keys_quoting` | §10, §9 |
+| `cases/spec/10-output/multi_value_first_entry_at_root` | §10 |
+| `cases/spec/10-output/multi_value_inline_first_kinds` | §10 |
+| `cases/spec/10-output/multi_value_key_quoting_per_value` | §10 |
+| `cases/spec/10-output/multi_value_key_spelling_per_value` | §10, §12 |
+| `cases/spec/10-output/multi_value_mixed_values` | §10 |
 | `cases/spec/10-output/nested_implicit_arrays` | §10 |
+| `cases/spec/10-output/nested_layout` | §10 |
 | `cases/spec/10-output/objects` | §10 |
 | `cases/spec/10-output/priorities_not_emitted` | §10 |
 | `cases/spec/10-output/priority_not_emitted` | §10 |
+| `cases/spec/10-output/readback_config_output` | §10 |
+| `cases/spec/10-output/readback_fifteen_digit_min_normal_error` | §10, §5 |
+| `cases/spec/10-output/readback_float_above_max_error` | §10, §5 |
+| `cases/spec/10-output/readback_float_forms` | §10, §5 |
+| `cases/spec/10-output/readback_json_output` | §10 |
+| `cases/spec/10-output/readback_time_forms` | §10, §5 |
+| `cases/spec/10-output/readback_yaml_output` | §10 |
 | `cases/spec/10-output/scalars` | §10 |
 | `cases/spec/10-output/single_quoted_kept` | §10 |
+| `cases/spec/10-output/single_quoted_raw_bytes` | §10 |
 | `cases/spec/10-output/string_control_chars` | §10 |
 | `cases/spec/10-output/string_escapes` | §10 |
 | `cases/spec/10-output/string_utf8` | §10 |
+| `cases/spec/10-output/strings_every_control_byte` | §10 |
 | `cases/spec/10-output/times` | §10 |
 | `cases/spec/10-output/top_level_array` | §10 |
+| `cases/spec/10-output/top_level_array_nested` | §10 |
 | `cases/spec/11-errors/depth_limit_error` | §11 |
 | `cases/spec/11-errors/garbage_after_value_error` | §11 |
 | `cases/spec/11-errors/lone_bracket_error` | §11 |

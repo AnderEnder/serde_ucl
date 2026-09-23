@@ -54,7 +54,10 @@
  *   -c  save comments (implies -C) and add them to the typed dump as "c"/"ca"
  *   -e  instead of the typed dump, print libucl's own output for the parsed
  *       object in FORMAT: config, json, json-compact or yaml (exact bytes, as
- *       ucl_object_emit returns them). A parse failure prints "error\n".
+ *       ucl_object_emit_len returns them, NUL bytes included), or
+ *       config-comments: the config output with the comments the parser saved
+ *       (implies -C; ucl_object_emit_full with the parser's comments). A parse
+ *       failure prints "error\n".
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -371,6 +374,7 @@ main(int argc, char **argv)
 	int nvars = 0;
 	bool handler = false;
 	bool dump_comm = false;
+	bool emit_comments = false;
 	unsigned priority = 0;
 	enum ucl_duplicate_strategy strat = UCL_DUPLICATE_APPEND;
 	struct ucl_parser *parser;
@@ -451,6 +455,11 @@ main(int argc, char **argv)
 			else if (strcmp(optarg, "yaml") == 0) {
 				emit = UCL_EMIT_YAML;
 			}
+			else if (strcmp(optarg, "config-comments") == 0) {
+				emit = UCL_EMIT_CONFIG;
+				emit_comments = true;
+				flags |= UCL_PARSER_SAVE_COMMENTS;
+			}
 			else {
 				fprintf(stderr, "unknown format '%s'\n", optarg);
 				return 2;
@@ -508,10 +517,21 @@ main(int argc, char **argv)
 		if (top == NULL) {
 			fputs("error\n", stdout);
 		}
+		else if (emit_comments) {
+			struct ucl_emitter_functions *f = ucl_object_emit_file_funcs(stdout);
+
+			if (f != NULL) {
+				ucl_object_emit_full(top, (enum ucl_emitter) emit, f,
+									 ucl_parser_get_comments(parser));
+				ucl_object_emit_funcs_free(f);
+			}
+			ucl_object_unref(top);
+		}
 		else {
-			unsigned char *out = ucl_object_emit(top, (enum ucl_emitter) emit);
+			size_t out_len = 0;
+			unsigned char *out = ucl_object_emit_len(top, (enum ucl_emitter) emit, &out_len);
 			if (out != NULL) {
-				fputs((const char *) out, stdout);
+				fwrite(out, 1, out_len, stdout);
 				free(out);
 			}
 			ucl_object_unref(top);

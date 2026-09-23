@@ -1,0 +1,6 @@
+decimal = 42;
+float = 3.140000;
+scientific = 0.000123;
+hex = 255;
+size = 65536;
+time = 30.0;

@@ -1,0 +1,1 @@
+{"arrays":{"simple":["item1","item2","item3"],"trailing_comma":["item1","item2","item3"],"mixed":[1,"string",true,3.140000],"nested":[["a","b"],["c","d"],[1,2,3]],"objects":[{"name":"obj1","value":1},{"name":"obj2","value":2}]},"multi_assign":["value1","value2","value3"]}

@@ -1,0 +1,6 @@
+a = 'x	y';
+b = 'two
+lines';
+c = 'back\\slash';
+d = 'it\'s';
+e = '$ABI';

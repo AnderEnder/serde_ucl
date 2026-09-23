@@ -1,0 +1,7 @@
+content = <<EOD
+This line contains END but not as terminator
+Another line with END in the middle
+ENDING is not the terminator
+END_SUFFIX is not the terminator
+PREFIX_END is not the terminator
+EOD;

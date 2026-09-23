@@ -1,0 +1,7 @@
+double_quoted = "Hello World";
+single_quoted = 'Hello World';
+escaped_string = "Line 1\nLine 2\tTabbed";
+heredoc_string = <<EOD
+This is a heredoc string
+with multiple lines
+EOD;

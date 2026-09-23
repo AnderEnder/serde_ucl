@@ -1,0 +1,5 @@
+{
+    "a": "$FILENAME",
+    "b": "$CURDIR",
+    "c": "unknown"
+}

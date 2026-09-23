@@ -1,0 +1,2 @@
+.include(url=true, try=true, glob=true, prefix=true) "http://x.invalid/*"
+b = 1

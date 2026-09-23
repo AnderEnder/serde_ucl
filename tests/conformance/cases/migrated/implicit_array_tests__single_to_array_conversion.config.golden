@@ -1,0 +1,4 @@
+database_host = "primary.db.com";
+database_host = "secondary.db.com";
+timeout = 30;
+timeout = 60;

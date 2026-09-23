@@ -1,0 +1,1 @@
+{"upstream":{"backend":{"server":["127.0.0.1:3000","127.0.0.1:3001","127.0.0.1:3002"]}},"server":{"listen":[80,443],"location":[{"/":{"proxy_pass":"http://backend"}},{"/api":{"proxy_pass":"http://api_backend"}}]}}

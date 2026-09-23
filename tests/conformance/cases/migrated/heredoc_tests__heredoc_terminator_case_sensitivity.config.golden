@@ -1,0 +1,6 @@
+content = <<EOD
+This is the content
+eof should not terminate
+Eof should not terminate
+eOf should not terminate
+EOD;

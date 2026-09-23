@@ -1,0 +1,5 @@
+server {
+    web {
+        port = 80;
+    }
+}

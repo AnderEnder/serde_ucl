@@ -1,0 +1,4 @@
+.priority 5
+s = 1
+.include "files/v6/q36_discarded.inc"
+k = 1

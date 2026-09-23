@@ -17,14 +17,21 @@ None of them is written by hand.
   per spec section. `cases/spec/09-macros/files/` and `cases/spec/08-duplicates/files/` hold files
   that those cases include or load (`*.inc` and others, among them an empty file, a directory and a
   symbolic link under `files/v4/`, and file names with `[` and `]` under `files/v5/g/`); they are
-  not cases themselves. Some `09-macros` cases include
-  other cases, or themselves, by name, and two `10-output` cases use `../09-macros/files/`. Cases in `cases/spec/10-output/` also have libucl's own output
-  in every text format: `<case>.config.golden`, `<case>.json.golden`, `<case>.json-compact.golden`
-  and `<case>.yaml.golden` (exact bytes of `ucl_object_emit` for the parsed value).
+  not cases themselves (`files/v6/` among them, with fixtures for spec-v6). Some `09-macros` cases
+  include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
+  `../09-macros/files/`.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
   are now libucl's, not the old hand-written assertions.
 - `<case>.golden.json` next to each case is libucl's typed dump of that case, produced by
   `tools/ucl-dump`.
+- Every case whose typed dump is not an error also has libucl's own output for the parsed value,
+  byte for byte, in each text format of spec §10: `<case>.config.golden`, `<case>.json.golden`,
+  `<case>.json-compact.golden` and `<case>.yaml.golden`. Cases whose `.flags` include
+  `save-comments` or `dump-comments` also have `<case>.config-comments.golden`: the config output
+  with the comments the parser saved (spec §10.10). An error case has none of these files. The
+  bytes are exact, including NUL bytes and bytes that are not UTF-8, and there is no final line
+  break unless libucl writes one. The conformance runner does not compare these files yet; the C4
+  work item adds that comparison, with a known-failure list of its own if one is needed.
 - `<case>.flags` (optional) lists parser settings, one per line:
   `key-lowercase`, `zerocopy`, `no-time`, `no-implicit-arrays`, `save-comments`, `disable-macro`,
   `no-filevars` (the parser flags); `dump-comments` (like `save-comments`, and the golden file also

@@ -1,0 +1,1 @@
+{"server":{"listen":80,"server_name":"example.com","root":"/var/www","location":{"/":{"try_files":"$uri $uri/ =404","proxy_pass":"http://backend"}}},"array_with_bare_words":["production","staging","development"],"mixed_array":["quoted string","bare_word",123,true]}

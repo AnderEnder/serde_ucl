@@ -1,0 +1,8 @@
+{
+    "database_host": [
+        "primary.db.com",
+        "secondary.db.com"
+    ],
+    "timeout": [        30,
+        60]
+}

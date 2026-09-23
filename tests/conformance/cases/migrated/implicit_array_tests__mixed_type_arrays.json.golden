@@ -1,0 +1,9 @@
+{
+    "mixed_values": [
+        "string",
+        42,
+        true,
+        null,
+        3.140000
+    ]
+}

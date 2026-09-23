@@ -1,0 +1,2 @@
+.include "files/v6/q35_then_newline.inc"
+k = 1

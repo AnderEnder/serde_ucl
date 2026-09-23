@@ -1,0 +1,2 @@
+.include(url=true, try=true, path=["files/v4/p1"]) "http://x.invalid/y"
+.include "pa.inc"

@@ -135,6 +135,19 @@ breaks).
   by a line break, or by a space and another comment: `[ /* c */ ]`, `[ /* c */⏎ x]`,
   `[ /* c */ /* d */ x ]` (`array_comment_group_then_space_close_error`,
   `array_comment_group_then_newline_error`, `array_comment_group_spaced_comments_error`).
+- **Quirk: a VT or FF before comments between elements.** After an element, spaces, tabs,
+  separators and comments are skipped up to the next element, but a VT or FF stops that. The next
+  element is then read like the first one (above): whitespace, VT, FF and line breaks included, is
+  skipped, then a group of comments, and whitespace after the group is part of the element:
+  `[1, <VT># d⏎ 2]` and `[1, <VT>/* d */ 2]` → `[int 1, " 2"]`, while `[1, <FF>/* d */2]` →
+  `[int 1, int 2]` (`array_vt_then_line_comment_starts_element`,
+  `array_vt_then_block_comment_starts_element`, `array_ff_then_block_comment_element`). A line
+  break after the group leaves the element empty, an error: `[1⏎<VT>/* d */⏎]`,
+  `[1⏎<FF>/* d */⏎]` (`array_vt_then_block_comment_newline_close_error`,
+  `array_ff_then_block_comment_newline_close_error`). `[1⏎<VT># d⏎]` and `[1⏎<VT>]` → `[int 1]`,
+  as `]` follows directly (`array_vt_then_line_comment_close`, `array_vt_then_close`). Without a
+  VT or FF the comments are skipped with the separators: `[1⏎/* d */⏎]` → `[int 1]`
+  (`array_newline_block_comment_newline_close`).
 - A missing `]` is an error, and so is a `}` closing an array (`unterminated_array_error`,
   `mismatched_close_array_error`, `cases/errors/e07_unterminated_array`).
 - Macros are not recognised inside arrays (§9.1).

@@ -1,0 +1,8 @@
+single_value = "alone";
+empty_strings = "";
+empty_strings = "";
+null_values = null;
+null_values = null;
+mixed_single = "first";
+mixed_single = null;
+mixed_single = "";

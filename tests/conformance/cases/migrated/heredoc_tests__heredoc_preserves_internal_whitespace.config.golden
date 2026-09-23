@@ -1,0 +1,6 @@
+formatted_text = <<EOD
+    This line has leading spaces
+This line has no leading spaces
+        This line has many leading spaces
+	This line has a tab
+EOD;

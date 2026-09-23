@@ -1,0 +1,23 @@
+{
+    "section": [
+        {
+            "foo": {
+                "bar": {
+                    "key": "value"
+                }
+            }
+        },
+        {
+            "foo": {
+                "baz": {
+                    "key": "value2"
+                }
+            }
+        },
+        {
+            "foo": {
+                "bar": "lol"
+            }
+        }
+    ]
+}

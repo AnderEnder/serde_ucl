@@ -23,6 +23,10 @@
 # The list may only shrink. The runner fails when a listed case passes: delete its line.
 # New cases may be added here only together with the case itself.
 
+cases/spec/01-structure/array_ff_then_block_comment_newline_close_error spec-v6  # §1.5 (QUESTIONS #49)
+cases/spec/01-structure/array_vt_then_block_comment_newline_close_error spec-v6  # §1.5 (QUESTIONS #49)
+cases/spec/01-structure/array_vt_then_block_comment_starts_element spec-v6  # §1.5 (QUESTIONS #49)
+cases/spec/01-structure/array_vt_then_line_comment_starts_element spec-v6  # §1.5 (QUESTIONS #49)
 cases/spec/09-macros/include_sign_param_no_effect divergence:signature  # sign=true is rejected
 cases/spec/09-macros/includes_like_include divergence:signature  # .includes is rejected
 cases/spec/09-macros/macro_args_nested_100_levels divergence:argument-depth  # argument documents nest at most 64 deep (§9.2)

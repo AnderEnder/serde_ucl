@@ -1,0 +1,10 @@
+# top
+a = 1 # after a
+# before b
+b {
+  # in b
+  c = [1, # after 1
+   2]
+  /* blk */ d = "x"
+}
+# end

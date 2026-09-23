@@ -1,0 +1,6 @@
+a = "some[]value";
+b = "a[b]c";
+c [
+    "a[b]c",
+    "d",
+]

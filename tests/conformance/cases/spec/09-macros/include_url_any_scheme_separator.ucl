@@ -1,0 +1,3 @@
+.include(url=true, try=true) "files://a.inc"
+.include(url=true, try=true) "://"
+b = 1

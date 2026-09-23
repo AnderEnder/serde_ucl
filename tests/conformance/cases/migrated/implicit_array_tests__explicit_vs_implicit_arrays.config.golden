@@ -1,0 +1,12 @@
+explicit_array [
+    "item1",
+    "item2",
+]
+implicit_array = "item1";
+implicit_array = "item2";
+mixed_array [
+    "initial1",
+    "initial2",
+]
+mixed_array = "added1";
+mixed_array = "added2";

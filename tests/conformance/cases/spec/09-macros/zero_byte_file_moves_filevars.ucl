@@ -1,0 +1,2 @@
+.include "files/v4/empty.txt"
+x = "$FILENAME"

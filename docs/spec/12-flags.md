@@ -140,8 +140,9 @@ Where they attach:
   (`comments_trailing_at_container_close`).
 - At the end of input, likewise as *after* comments to the value created most recently, or to the
   root when there is none: `a = 1⏎# c` (`comments_trailing_at_end`), `# c`
-  (`comments_only_attach_to_root`). The end of an included file counts as an end of input here, and
-  comments pending before an include may go to a value of the included file (§9.4;
+  (`comments_only_attach_to_root`). The end of an included file counts as an end of input here,
+  except for a file of zero bytes, which is not read at all (§9.4), and comments pending before
+  an include may go to a value of the included file (§9.4;
   `cases/spec/09-macros/comments_carry_into_included_file`,
   `cases/spec/09-macros/comments_end_of_included_file`).
 - When the objects of a section path close together with its bracket, the outermost of them counts
@@ -173,8 +174,8 @@ Comments and the rules of §8:
   value created later, depending on memory reuse (under `rewrite`, `# c⏎k = 2⏎k = 3⏎q = 4` gave
   `q` the comment `# c`). No case pins this.
 
-libucl's config output can include saved comments when the application passes them in. The output
-formats of §10 are specified without them.
+libucl's config output can include saved comments when the application passes them in; §10.10
+specifies that output. The other output formats of §10 never contain comments.
 
 ## 12.6 `disable-macro`
 

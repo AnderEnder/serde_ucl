@@ -1,0 +1,7 @@
+server: [
+    "primary.example.com",
+    "backup.example.com",
+    "backup2.example.com",
+    "emergency.example.com"
+]
+//: "Another backup"

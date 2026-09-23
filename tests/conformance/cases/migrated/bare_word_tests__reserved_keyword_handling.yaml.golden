@@ -1,0 +1,9 @@
+bool_true: true
+bool_false: false
+null_value: null
+string_true: "true"
+string_false: "false"
+string_null: "null"
+word_true: true
+word_false: false
+word_null: "Null"

@@ -1,0 +1,10 @@
+{
+    "database": {
+        "migrations": [
+            {
+                "name": "create_users",
+                "sql": "CREATE TABLE users (\n    id SERIAL PRIMARY KEY,\n    name VARCHAR(255) NOT NULL\n);"
+            }
+        ]
+    }
+}

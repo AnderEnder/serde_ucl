@@ -1,0 +1,6 @@
+a {
+x "y{" z
+.include "files/v4/open_brace.inc"
+m { }
+n = 1
+}

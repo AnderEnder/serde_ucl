@@ -1,0 +1,11 @@
+key1: "value1"
+key2: "value2"
+nested: {
+    inner_key: 42,
+    another: "test"
+}
+array: [
+    1,
+    2,
+    3
+]

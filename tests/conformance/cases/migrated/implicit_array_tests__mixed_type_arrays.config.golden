@@ -1,0 +1,5 @@
+mixed_values = "string";
+mixed_values = 42;
+mixed_values = true;
+mixed_values = null;
+mixed_values = 3.140000;

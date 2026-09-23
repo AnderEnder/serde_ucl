@@ -1,0 +1,1 @@
+{"environment":"production","log_level":"debug","server_name":"nginx","worker_processes":"auto","database_host":"localhost","file_path":"/var/log/app.log"}

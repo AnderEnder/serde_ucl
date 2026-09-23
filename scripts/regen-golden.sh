@@ -1,5 +1,6 @@
 #!/bin/sh
-# Regenerates every tests/conformance/**/<case>.golden.json from libucl (PLAN.md P0.3).
+# Regenerates every golden file under tests/conformance/ from libucl: the typed dump
+# <case>.golden.json and, for every case that parses, the output files <case>.<format>.golden.
 #
 # The expected results of the conformance suite come only from here. The script
 # clones libucl at the pinned commit (or reuses LIBUCL_DIR), builds the static
@@ -105,22 +106,25 @@ for case in $list; do
 	# shellcheck disable=SC2086
 	(cd "$dir" && "$DUMP" $opts "$base" 2>/dev/null) > "$dir/$stem.golden.json"
 	count=$((count + 1))
-	# Output-format cases also get libucl's own output in every text format.
-	case "$dir" in
-	*/cases/spec/10-output)
-		for fmt in config json json-compact yaml; do
+	# Every case that parses also gets libucl's own output in every text format, and cases that
+	# save comments get the config output with those comments (spec section 10).
+	if [ "$(cat "$dir/$stem.golden.json")" != '{"error":true}' ]; then
+		fmts="config json json-compact yaml"
+		case " $opts " in
+		*" -C "* | *" -c "*) fmts="$fmts config-comments" ;;
+		esac
+		for fmt in $fmts; do
 			# shellcheck disable=SC2086
 			(cd "$dir" && "$DUMP" $opts -e "$fmt" "$base" 2>/dev/null) > "$dir/$stem.$fmt.golden"
 			count=$((count + 1))
 		done
-		;;
-	esac
+	fi
 done
 
 # Golden files must not depend on where the repository is checked out.
-if grep -rl --include='*.golden.json' -F "$ROOT" "$CONF" >/dev/null 2>&1; then
+if grep -rl --include='*.golden.json' --include='*.golden' -F "$ROOT" "$CONF" >/dev/null 2>&1; then
 	echo "error: golden files contain the checkout path $ROOT:" >&2
-	grep -rl --include='*.golden.json' -F "$ROOT" "$CONF" >&2
+	grep -rl --include='*.golden.json' --include='*.golden' -F "$ROOT" "$CONF" >&2
 	exit 1
 fi
 

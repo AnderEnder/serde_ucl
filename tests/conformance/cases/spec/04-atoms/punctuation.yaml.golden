@@ -1,0 +1,4 @@
+a: "query %dn-%dv"
+b: "a=b"
+c: "a:b"
+d: "x@y!z"

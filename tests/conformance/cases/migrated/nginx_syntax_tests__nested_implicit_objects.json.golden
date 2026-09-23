@@ -1,0 +1,12 @@
+{
+    "http": {
+        "server": {
+            "location": {
+                "/api/": {
+                    "proxy_pass": "http://backend",
+                    "proxy_timeout": 30.0
+                }
+            }
+        }
+    }
+}

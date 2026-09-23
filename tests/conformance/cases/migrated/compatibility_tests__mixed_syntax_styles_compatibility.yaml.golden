@@ -1,0 +1,6 @@
+explicit_key: "explicit_value"
+explicit_nested: {
+    key1: "value1",
+    key2: "value2"
+}
+implicit_test: "still_explicit"

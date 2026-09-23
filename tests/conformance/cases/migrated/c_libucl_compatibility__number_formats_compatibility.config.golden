@@ -1,0 +1,9 @@
+decimal = 42;
+hex = 255;
+octal = "0o755";
+float = 3.141590;
+scientific = 0.000123;
+size_kb = 65536;
+size_mb = 536870912;
+time_sec = 30.0;
+time_min = 300.0;

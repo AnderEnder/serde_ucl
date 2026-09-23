@@ -1,0 +1,2 @@
+a = "http://pkg.freebsd.org/latest";
+b = "https://x.y:8080/p?q=1&r=2";

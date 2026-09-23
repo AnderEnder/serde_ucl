@@ -1,0 +1,13 @@
+packagesite = "http://pkg-test.freebsd.org/pkg-test/unknown/latest";
+squaretest = "some[]value";
+ALIAS {
+    all-depends = "query %dn-%dv";
+    annotations = "info -A";
+    build-depends = "info -qd";
+    download = "fetch";
+    list = "info -ql";
+}
+repo_dirs [
+    "/home/bapt",
+    "/usr/local/etc",
+]

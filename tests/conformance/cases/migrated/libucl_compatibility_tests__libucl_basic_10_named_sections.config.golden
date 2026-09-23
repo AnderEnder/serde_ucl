@@ -1,0 +1,19 @@
+section {
+    foo {
+        bar {
+            key = "value";
+        }
+    }
+}
+section {
+    foo {
+        baz {
+            key = "value2";
+        }
+    }
+}
+section {
+    foo {
+        bar = "lol";
+    }
+}

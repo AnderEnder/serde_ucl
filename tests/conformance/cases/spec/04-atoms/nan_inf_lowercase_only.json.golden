@@ -1,0 +1,9 @@
+{
+    "a": nan,
+    "b": inf,
+    "c": "NaN",
+    "d": "Inf",
+    "e": "-inf",
+    "f": "+inf",
+    "g": "infinity"
+}

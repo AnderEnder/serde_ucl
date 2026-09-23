@@ -1,0 +1,14 @@
+{
+    "param": "value",
+    "number": 42,
+    "boolean": true,
+    "section": {
+        "nested_param": "nested_value",
+        "nested_number": 123
+    },
+    "array": [
+        "item1",
+        "item2",
+        "item3"
+    ]
+}

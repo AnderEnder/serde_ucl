@@ -1,0 +1,136 @@
+{
+    "logging": {
+        "type": "file",
+        "filename": "/var/log/rspamd/rspamd.log",
+        "level": "info",
+        "log_buffer": 32768,
+        "log_urls": false
+    },
+    "options": {
+        "pidfile": "/var/run/rspamd/rspamd.pid",
+        "filters": [
+            "chartable",
+            "dkim",
+            "spf",
+            "surbl",
+            "regexp"
+        ],
+        "raw_mode": false,
+        "one_shot": false,
+        "cache_file": "/var/lib/rspamd/symbols.cache",
+        "map_watch_interval": 60,
+        "dynamic_conf": "/var/lib/rspamd/rspamd_dynamic",
+        "history_file": "/var/lib/rspamd/rspamd.history",
+        "check_all_filters": false,
+        "dns": {
+            "timeout": 1,
+            "sockets": 16,
+            "retransmits": 5,
+            "nameserver": [
+                "8.8.8.8",
+                "1.1.1.1"
+            ]
+        }
+    },
+    "worker": [
+        {
+            "normal": {
+                "bind_socket": "localhost:11333",
+                "count": 1,
+                "max_tasks": 1000,
+                "task_timeout": 8,
+                "keypair": {
+                    "pubkey": "ob6kwq45w9pbs3s4hrbe1ky4w3r6o6t1xbixbqx6r4dxngz5m6c1y",
+                    "privkey": "ed25519:private_key_here"
+                }
+            }
+        },
+        {
+            "controller": {
+                "bind_socket": "localhost:11334",
+                "count": 1,
+                "secure_ip": [
+                    "127.0.0.1",
+                    "::1"
+                ],
+                "password": "$2$rounds=12000$salt$hash",
+                "enable_password": "$2$rounds=12000$salt$hash",
+                "static_dir": "/usr/share/rspamd/www/",
+                "stats_path": "/var/lib/rspamd/stats.ucl"
+            }
+        },
+        {
+            "rspamd_proxy": {
+                "bind_socket": "localhost:11332",
+                "milter": true,
+                "timeout": 120,
+                "upstream": {
+                    "local": {
+                        "default": true,
+                        "hosts": "localhost:11333"
+                    }
+                }
+            }
+        }
+    ],
+    "modules": {
+        "path": "/usr/share/rspamd/lib/"
+    },
+    "lua": "/etc/rspamd/rspamd.lua",
+    "metric": {
+        "default": {
+            "actions": {
+                "reject": 15,
+                "add_header": 6,
+                "greylist": 4,
+                "soft reject": 10
+            },
+            "unknown_weight": 1,
+            "subject": "***SPAM*** %s",
+            "group": [
+                {
+                    "header": {
+                        "weight": 1,
+                        "description": "Header-based checks"
+                    }
+                },
+                {
+                    "content": {
+                        "weight": 1,
+                        "description": "Content-based checks"
+                    }
+                }
+            ]
+        }
+    },
+    "classifier": {
+        "bayes": {
+            "tokenizer": {
+                "name": "osb-text"
+            },
+            "cache": {
+                "path": "/var/lib/rspamd/learn_cache.sqlite"
+            },
+            "min_learns": 200,
+            "backend": "sqlite3",
+            "languages_enabled": true,
+            "statfile": [
+                {
+                    "symbol": "BAYES_HAM",
+                    "path": "/var/lib/rspamd/bayes.ham.sqlite",
+                    "spam": false
+                },
+                {
+                    "symbol": "BAYES_SPAM",
+                    "path": "/var/lib/rspamd/bayes.spam.sqlite",
+                    "spam": true
+                }
+            ]
+        }
+    },
+    "composites": {
+        "FORGED_RECIPIENTS": "FORGED_RECIPIENTS_MAILRU | FORGED_RECIPIENTS_GMAIL",
+        "SUSPICIOUS_RECIPS": "SUSPICIOUS_RECIPS & !WHITELIST_SPF",
+        "DKIM_MIXED": "R_DKIM_ALLOW & R_DKIM_REJECT"
+    }
+}

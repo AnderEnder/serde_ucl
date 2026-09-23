@@ -1,0 +1,4 @@
+key1: "line1\nline2"
+key2: "tab\there"
+key3: "quote\"inside"
+key4: "backslash\\here"

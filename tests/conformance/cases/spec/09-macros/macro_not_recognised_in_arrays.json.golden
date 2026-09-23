@@ -1,0 +1,5 @@
+{
+    "arr": [
+        ".include \"files/a.inc\""
+    ]
+}

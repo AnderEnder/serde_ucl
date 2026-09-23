@@ -1,0 +1,8 @@
+{
+    "a": "$$test",
+    "b": "$$",
+    "c": "$$ABI",
+    "d": "unknown$ABI",
+    "e": "unknown$",
+    "f": "unknown$$"
+}
