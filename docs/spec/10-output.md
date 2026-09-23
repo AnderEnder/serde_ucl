@@ -28,7 +28,21 @@ Values created by macros (§9):
   (`inherit_copies_keep_output_facts`).
 - A key created by `.load` needs quoting when it contains any of the bytes listed in fact 3,
   however it was written. **Quirk:** a key created by `.include` with `key` or `prefix` never does,
-  so `.include(key="x y") …` is written `x y {…}` (`macro_created_keys_quoting`).
+  so `.include(key="x y") …` is written `x y {…}` (`macro_created_keys_quoting`). This includes
+  the array that `target="array"` builds in place of an existing value that is not an array
+  (§9.4, *Nesting under a key*): it is spelled as the existing entry's key, and its key never
+  needs quoting, so `"p q" = 1⏎.include(key="p q", target="array") …` is written `p q [`, and
+  under `key-lowercase`, `"\u0041 b" = 1⏎.include(key="a b", target="array") …` is written
+  `A b [`. An existing array that is kept keeps its key as written: `"r s" = [1]` then the same
+  include → `"r s" [` (`include_target_array_converted_key_bare`,
+  `include_target_array_converted_key_spelling`).
+
+Arrays that parsing builds from repeated keys (§8.5, `no-implicit-arrays`): **quirk**, the array's
+key never needs quoting, whatever the keys of its values were, and it is spelled as the key of
+the entry's first value: `"x y" = 1⏎"x y" = 2` → config `x y [`, YAML `x y: [`; `"a=b" = 5⏎"a=b" = 6`
+→ `a=b [`; under `key-lowercase`, `"\u0041" = 1⏎a = 2` → `A [`, and `a = 1⏎"\u0041" = 2` →
+`a [` (`no_implicit_arrays_collection_key_first_spelling`). JSON writes these keys in its usual
+form.
 
 Keys of multi-value entries (§8): each value of the entry keeps the key as it was written for that
 value, its spelling (which can differ under `key-lowercase`, §12.1) and fact 3. The config format
@@ -113,7 +127,8 @@ Cases: `floats`, `floats_special`, `floats_boundaries`, `times`.
 ## 10.4 JSON and compact JSON
 
 - The root is always written with its brackets: `{…}` for an object, `[…]` for an array. An empty
-  document gives `{}` (`empty_document`, `top_level_array`).
+  document gives `{}`, and an empty root array `[]` (`empty_document`, `top_level_array`,
+  `top_level_array_empty`).
 - Pretty JSON puts one member per line, indented four spaces per level, as `"key": value`, joined
   by `,⏎`. Arrays likewise, one element per line. Empty objects and arrays are `{}` and `[]`. There
   is no final line break (`objects`, `arrays`, `scalars`).
@@ -133,7 +148,7 @@ The config format writes UCL that libucl can read back (`objects`, `arrays`, `sc
 Layout:
 
 - The root object's entries are written without braces. An empty root gives empty output. A root
-  array is written `[`…`]` with no final line break.
+  array is written `[`…`]` with no final line break; an empty one is `[]` (`top_level_array_empty`).
 - Indentation is four spaces per level (`nested_layout`, `top_level_array_nested`).
 - A scalar entry: `key = value;⏎`.
 - An object entry: `key {⏎ … }⏎`. An array entry: `key [⏎ … ]⏎`. When empty: `key {}⏎`, `key []⏎`.
@@ -166,7 +181,7 @@ Strings in the config format:
 
 - Root object entries are written `key: value`, one per line, joined by a single LF, without
   braces. An empty root object gives empty output (`empty_document`). A root array is written
-  `[`…`]` in the JSON layout of §10.4.
+  `[`…`]` in the JSON layout of §10.4, so an empty one is `[]` (`top_level_array_empty`).
 - Nested objects and arrays use the JSON layout of §10.4, with `key: ` before members, and members
   joined by `,⏎` as in JSON.
 - Keys are bare unless they need quoting (§10.1); the empty key is written `null`.
@@ -189,6 +204,20 @@ A multi-value entry is written as an array under its key, with these **quirks**:
   elements whatever their kinds; a container among them has the normal layout of §10.4 at its
   depth, also inside an inline array (`multi_value_inline_first_kinds` key `l`,
   `multi_value_mixed_values`).
+- **Quirk.** A first value that took the place of an object or array under `merge` (§8.4) is laid
+  out by what it is written as:
+  - a number written with digits (§5, also one that overflows to ±∞), a time or a boolean counts as
+    the container it replaced: the normal layout if that container had at least one entry or
+    element, the inline layout if it was empty. `b = [1]⏎b = 5⏎b = 6` → `"b": [⏎        5,⏎        6⏎    ]`,
+    and likewise after `b { x = 1 }` with `true`, `1s`, `1.5`, `1e308k` or `0x10`; after `b = []` or
+    `b {}` the array is inline (`multi_value_merge_quirk_layout_nonempty`,
+    `multi_value_merge_quirk_layout_empty`, `cases/spec/08-duplicates/include_merge_scalar_quirk_default_mode`,
+    `cases/spec/08-duplicates/merge_include_first_value_scalar`);
+  - a string, `null`, `nan` or `inf` follows its own kind as above: `null`, `nan`, `inf` and the
+    empty string give the inline layout, a non-empty string the normal one
+    (`multi_value_merge_quirk_layout_own_kind`).
+
+  Copies made by `.inherit` keep this layout (`multi_value_merge_quirk_layout_inherited`).
 - At the root of YAML, a multi-value entry that is the first entry has nothing before it
   (`multi_value_first_entry_at_root`).
 - In YAML at the root level, a multi-value entry that is not the first entry is preceded by `,⏎`
@@ -215,7 +244,8 @@ from these exceptions (found by reading back the config output of every conforma
   smallest normal float, `2.2250738585072e-308`, lies below the normal range and is rejected
   (`readback_fifteen_digit_min_normal_error`).
 - Keys written bare that cannot be read bare make the output unreadable: the quirk keys of §10.1,
-  keys created by `.include` with `key` or `prefix`, and keys that do not begin with a byte a bare
+  keys created by `.include` with `key` or `prefix`, the keys of arrays built from repeated keys
+  under `no-implicit-arrays` or by `target="array"` (§10.1), and keys that do not begin with a byte a bare
   key may begin with (§3), such as a quoted key `$ABI` (`keys_quoting`,
   `macro_created_keys_quoting`, `cases/spec/03-keys/quoted_no_variable_expansion`). The empty key
   of §10.1 does not read back either: its line ` {` starts a braced root when it comes first
@@ -244,8 +274,8 @@ written:
 | --- | --- |
 | int | decimal, −9223372036854775808 to 9223372036854775807 (§5.3) |
 | float | a decimal number with a `.` or an exponent (§5.1) and enough digits to identify the double; 17 significant digits always suffice: `1e16`, `1E16`, `0.10000000000000001`, `1.7976931348623157e308`, `2.2250738585072014e-308`, `-0.0`, `1.5e-10` (`readback_float_forms`). Without `.` or exponent the number reads as `int` (`10000000000000000`). NaN and +∞ are the keywords `nan` and `inf` (§4); −∞ has no keyword, since `-inf` is a string, but a multiplier that overflows gives it: `-1e308k` (§5.4; `readback_float_forms` keys `h` and `i`, `floats_boundaries` key `l`) |
-| time | a decimal number, in the int or the float form, followed by `s`: that many seconds, exactly as the number reads as a float: `1.5s`, `1e-3s`, `0.30000000000000004s`, `-2.5s`, `1.5e3s` (`readback_time_forms`). Other suffixes multiply and can round (§5.4) |
-| string | the JSON form with the escapes of §6.1, which can express every byte (`\u0000` for NUL), unless the string contains a reference to a variable registered when reading, or one a variable handler resolves (§7.7); the single-quoted form (§6.2), which never expands, for any string that does not end in a backslash and has no backslash directly before a `'` |
+| time | a decimal number, in the int or the float form, followed by `s`: that many seconds, exactly as the number reads as a float: `1.5s`, `1e-3s`, `0.30000000000000004s`, `-2.5s`, `1.5e3s` (`readback_time_forms`). Other suffixes multiply and can round (§5.4). A time of +∞ or −∞ is written with a suffix that overflows: `1e308ks`, `-1e308ks` (§5.4; `cases/spec/05-numbers/time_suffix_overflow_infinite`) |
+| string | the JSON form with the escapes of §6.1, which can express every byte (`\u0000` for NUL), unless the string contains a reference to a variable registered when reading, or one a variable handler resolves (§7.7); the single-quoted form (§6.2), with each `'` written `\'` and every other byte as it is, which never expands, for any string in which every run of backslashes that comes directly before a `'`, an LF, a CR or the end of the string has even length, since backslashes pair from the left and a backslash takes a line break away (§6.2): the strings `a\\` (two backslashes at the end), `a\\'` and `\\⏎y` read back exactly from `'a\\'`, `'a\\\''` and `'\\⏎y'`, while `x\⏎y` written `'x\⏎y'` reads back as `xy` (`readback_single_quoted_backslash_runs`) |
 | key | double-quoted, with the escapes of §6.1, any bytes except the empty key; keys never expand (§7.2); `key-lowercase` lowercases them when reading (§12.1) |
 | true, false, null | `true`, `false`, `null` |
 | empty object, empty array | `{}`, `[]` |
@@ -255,11 +285,16 @@ Some values cannot be written so that libucl reads them back:
 
 - **Floats beyond the range**: a literal larger than the largest double is an error
   (`readback_float_above_max_error`); only the infinities themselves can be written, as above.
+- **NaN times**: no text reads as a time that is NaN (§5.4).
+- **Subnormal times**: a time below the normal range comes only from `ms` (§5.4). It can be written
+  as a normal float followed by `ms` whose quotient by 1000 rounds to it; since the smallest normal
+  float gives `2.2250738585069563e-311` (`cases/spec/05-numbers/time_subnormal_through_ms`), a
+  time closer to zero than that, other than zero, cannot be written.
 - **Subnormal floats**: every literal below the normal range is an error
   (`cases/spec/05-numbers/subnormal_error`).
-- A string that contains a reference to a registered variable **and** ends in a backslash or has
-  a backslash before a `'`: the JSON form expands the reference, and the single-quoted form cannot
-  hold it. There is no escape that prevents expansion in a double-quoted string, because `\$` is
+- A string that contains a reference to a registered variable **and** has a run of backslashes of
+  odd length directly before a `'`, an LF, a CR or its end: the JSON form expands the reference,
+  and the single-quoted form cannot hold it. There is no escape that prevents expansion in a double-quoted string, because `\$` is
   decoded before expansion (§7.6).
 - The empty key (§10.1), which parsing rejects (§3).
 

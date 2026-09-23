@@ -51,10 +51,18 @@ expansion inside double quotes (§7.6).
 `'…'` is literal, with only two escapes (`sq_basic`, `libucl/basic/squote`):
 
 - `\'` gives `'` (`sq_escaped_quote`).
-- A backslash followed by LF, or by CR LF, is removed together with the line break (line
-  continuation): `'one\⏎two'` → `"onetwo"` (`sq_line_continuation`, `cases/additions/a29_single_quote_cont`).
+- A backslash followed by LF, by CR LF, or by a CR that no LF follows, is removed together with
+  the line break (line continuation): `'one\⏎two'` → `"onetwo"`, and likewise `'x\␍y'` →
+  `"xy"`; after a lone CR a further CR stays, `'x\␍␍y'` → `"x␍y"`
+  (`sq_line_continuation`, `cases/additions/a29_single_quote_cont`).
 - Any other backslash stays, with the byte after it: `'x\ny'` → `"x\\ny"`, and `'x\\y'` keeps both
   backslashes (`sq_no_escapes`).
+- Backslashes pair from the left: the byte after a backslash always belongs to it, even when it is
+  another backslash, so it never starts an escape itself. `'a\\'` is `a` and two backslashes, and
+  the `'` ends the string; in `'\\⏎y'` both backslashes and the LF stay; `'a\\\''` is `a`, two
+  backslashes and `'` (`cases/spec/10-output/readback_single_quoted_backslash_runs`). A run of
+  backslashes before a line break therefore removes the line break only when the run has odd
+  length.
 - Raw line breaks are allowed: `'x⏎y'` → `"x⏎y"` (`sq_raw_newline`).
 - Variables are not expanded (`sq_no_variables`).
 - A missing closing quote is an error, and so is a backslash as the last byte of input

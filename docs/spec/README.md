@@ -55,7 +55,8 @@ means the case of that name in the section's own directory, `cases/spec/NN-topic
 | `v @3` | value `v` carries priority 3 (priority 0 is not written); see §8 |
 | **error** | the whole document is rejected |
 
-Examples are written `input` → result. `⏎` marks a line feed where it matters.
+Examples are written `input` → result. `⏎` marks a line feed where it matters, and `␍` a
+carriage return.
 
 ### How the conformance oracle runs every case
 
@@ -98,8 +99,8 @@ those of array elements (§8.7). The conformance runner ignores them.
 ## Divergences decided by the project
 
 The project deliberately differs from libucl in these places. The spec still describes libucl's
-behaviour, and each place says so. The decisions for §9 are recorded in
-`docs/clean-room/WORKLIST.md` (C3, *Project decisions*).
+behaviour, and each place says so. The decisions for §9 and §10 are recorded in
+`docs/clean-room/WORKLIST.md` (C3 and C4, *Project decisions*).
 
 - Non-UTF-8 bytes in keys and strings are an **error** in the project (libucl accepts them;
   `libucl/basic/22`). This also covers strings made invalid by `\u` escapes of surrogate code
@@ -129,6 +130,12 @@ These are project decisions that match libucl's behaviour rather than differ fro
 - The API reports a silent stop (§9.4) as an error of its own kind, from which the partial result
   can be retrieved. Where relative include paths resolve, and what `CURDIR` is for a document given
   as bytes, are parser options; the conformance runner sets them to the case's directory.
+- Saved comments are written in config output only when the caller asks for it, as libucl writes
+  them only when the application asks (§10.10); the default config output has none.
+- serde serialization need not use the default formats (§10.8). Its JSON output is valid JSON
+  (RFC 8259), unlike libucl's JSON output of NaN and infinities (§10.3): a time is written as its
+  number of seconds, and a NaN or infinite float or time cannot be serialized to JSON. The config
+  and YAML forms of serde follow §10.8.
 
 ## Uncertain behaviour (summary)
 
@@ -164,16 +171,20 @@ platform, is left uncertain:
 All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed. `spec-v2`
 answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, `spec-v3` answers
 #5–#16, `spec-v4` answers #17–#22 and completes §9 for the macro work, `spec-v5` answers
-#23–#33, and `spec-v6` answers #34–#49 and completes §10 for the output work: every case that
+#23–#33, `spec-v6` answers #34–#49 and completes §10 for the output work: every case that
 parses now has libucl's output in each format, §10.8 says what reads back exactly, and §10.10
-specifies the config output with saved comments.
+specifies the config output with saved comments. `spec-v7` answers #50–#54.
 
-The project has not decided whether it writes saved comments (§10.10); libucl does so only when
-the application asks for it.
+The places where §9 and §10 left the project's behaviour open (the include parameters `sign`,
+`url` and `path`, how the API reports a silent stop, parsing a file under `no-filevars`, whether
+saved comments are written, and serde's JSON forms) are decided; see *Divergences decided by the
+project*.
 
-The places where §9 left the project's behaviour open (the include parameters `sign`, `url` and
-`path`, how the API reports a silent stop, and parsing a file under `no-filevars`) are decided;
-see *Divergences decided by the project*.
+Three rules of `spec-v7` have no committed case yet, because the conformance runner accepts no
+known failure for output that the new core writes differently: the lone CR after a backslash in
+a single-quoted string (§6.2), the `nan` and `inf` layout under the merge quirk (§10.7), and the
+unquoted key of a `no-implicit-arrays` collection (§10.1). Their cases are added once the core
+follows these rules.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
@@ -184,7 +195,7 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1375 cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1390 cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -781,6 +792,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/05-numbers/malformed_before_range_is_string` | §5 |
 | `cases/spec/05-numbers/min_normal` | §5 |
 | `cases/spec/05-numbers/multiplier_overflow_wraps` | §5 |
+| `cases/spec/05-numbers/nan_inf_time_lookalikes_are_strings` | §5 |
 | `cases/spec/05-numbers/negative_multipliers` | §5 |
 | `cases/spec/05-numbers/no_binary_or_octal` | §5 |
 | `cases/spec/05-numbers/not_numbers` | §5 |
@@ -806,11 +818,14 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/05-numbers/suffix_then_space_comment_is_string` | §5 |
 | `cases/spec/05-numbers/suffix_then_whitespace_is_string` | §5 |
 | `cases/spec/05-numbers/time_hour_day_week_year` | §5 |
+| `cases/spec/05-numbers/time_infinite_in_json_form` | §5 |
 | `cases/spec/05-numbers/time_kilo_giga_seconds` | §5 |
 | `cases/spec/05-numbers/time_lookalikes_are_strings` | §5 |
 | `cases/spec/05-numbers/time_milliseconds` | §5 |
 | `cases/spec/05-numbers/time_minutes` | §5 |
 | `cases/spec/05-numbers/time_seconds` | §5 |
+| `cases/spec/05-numbers/time_subnormal_through_ms` | §5, §10 |
+| `cases/spec/05-numbers/time_suffix_overflow_infinite` | §5, §10 |
 | `cases/spec/05-numbers/unknown_multipliers_are_strings` | §5 |
 | `cases/spec/05-numbers/very_long_number_is_string` | §5 |
 | `cases/spec/06-strings/concatenation_error` | §6 |
@@ -919,6 +934,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/08-duplicates/merge_include_first_value_scalar` | §8 |
 | `cases/spec/08-duplicates/merge_nested_priority_higher` | §8 |
 | `cases/spec/08-duplicates/merge_nested_priority_lower` | §8 |
+| `cases/spec/08-duplicates/merge_quirk_scalar_keeps_container_key` | §8 |
+| `cases/spec/08-duplicates/merge_quirk_scalar_keeps_container_key_spelling` | §8 |
 | `cases/spec/08-duplicates/mixed_types` | §8 |
 | `cases/spec/08-duplicates/nia_chunk_priority` | §8 |
 | `cases/spec/08-duplicates/nia_collection_has_priority_0` | §8 |
@@ -1453,6 +1470,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/10-output/implicit_array_layouts` | §10 |
 | `cases/spec/10-output/implicit_array_of_arrays` | §10 |
 | `cases/spec/10-output/implicit_arrays` | §10 |
+| `cases/spec/10-output/include_target_array_converted_key_bare` | §10 |
+| `cases/spec/10-output/include_target_array_converted_key_spelling` | §10 |
 | `cases/spec/10-output/inherit_copies_keep_output_facts` | §10, §9 |
 | `cases/spec/10-output/integers_large` | §10 |
 | `cases/spec/10-output/keys_quoting` | §10 |
@@ -1464,9 +1483,14 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/10-output/multi_value_inline_first_kinds` | §10 |
 | `cases/spec/10-output/multi_value_key_quoting_per_value` | §10 |
 | `cases/spec/10-output/multi_value_key_spelling_per_value` | §10, §12 |
+| `cases/spec/10-output/multi_value_merge_quirk_layout_empty` | §10 |
+| `cases/spec/10-output/multi_value_merge_quirk_layout_inherited` | §10 |
+| `cases/spec/10-output/multi_value_merge_quirk_layout_nonempty` | §10 |
+| `cases/spec/10-output/multi_value_merge_quirk_layout_own_kind` | §10 |
 | `cases/spec/10-output/multi_value_mixed_values` | §10 |
 | `cases/spec/10-output/nested_implicit_arrays` | §10 |
 | `cases/spec/10-output/nested_layout` | §10 |
+| `cases/spec/10-output/no_implicit_arrays_collection_key_first_spelling` | §10 |
 | `cases/spec/10-output/objects` | §10 |
 | `cases/spec/10-output/priorities_not_emitted` | §10 |
 | `cases/spec/10-output/priority_not_emitted` | §10 |
@@ -1475,6 +1499,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/10-output/readback_float_above_max_error` | §10, §5 |
 | `cases/spec/10-output/readback_float_forms` | §10, §5 |
 | `cases/spec/10-output/readback_json_output` | §10 |
+| `cases/spec/10-output/readback_single_quoted_backslash_runs` | §6, §10 |
 | `cases/spec/10-output/readback_time_forms` | §10, §5 |
 | `cases/spec/10-output/readback_yaml_output` | §10 |
 | `cases/spec/10-output/scalars` | §10 |
@@ -1486,6 +1511,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1375 case
 | `cases/spec/10-output/strings_every_control_byte` | §10 |
 | `cases/spec/10-output/times` | §10 |
 | `cases/spec/10-output/top_level_array` | §10 |
+| `cases/spec/10-output/top_level_array_empty` | §10 |
 | `cases/spec/10-output/top_level_array_nested` | §10 |
 | `cases/spec/11-errors/depth_limit_error` | §11 |
 | `cases/spec/11-errors/garbage_after_value_error` | §11 |

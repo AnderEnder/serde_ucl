@@ -9,7 +9,8 @@ None of them is written by hand.
   <https://github.com/vstakhov/libucl> at commit `24c8b399062ae4691168c243e3b7345ef7f31956`
   (2026-09-20). libucl is BSD-2-Clause; see `LICENSE-libucl` in the repository root. Every `*.in`
   file is a case. The `*.inc` files and `include_dir/` are included by the cases. The `*.res` files
-  are libucl's config-emitter output; they are used by tier-2 conformance (PLAN.md P5.1).
+  are libucl's config output, produced by the two passes of spec §10.9; the emitter runner compares
+  them (see *Running*).
 - `cases/review/` holds the 30 cases behind REVIEW.md.
 - `cases/additions/` holds the 53 cases behind PLAN.md §5.
 - `cases/errors/` holds inputs libucl rejects.
@@ -30,8 +31,7 @@ None of them is written by hand.
   `save-comments` or `dump-comments` also have `<case>.config-comments.golden`: the config output
   with the comments the parser saved (spec §10.10). An error case has none of these files. The
   bytes are exact, including NUL bytes and bytes that are not UTF-8, and there is no final line
-  break unless libucl writes one. The conformance runner does not compare these files yet; the C4
-  work item adds that comparison, with a known-failure list of its own if one is needed.
+  break unless libucl writes one. The emitter runner compares them byte for byte (see *Running*).
 - `<case>.flags` (optional) lists parser settings, one per line:
   `key-lowercase`, `zerocopy`, `no-time`, `no-implicit-arrays`, `save-comments`, `disable-macro`,
   `no-filevars` (the parser flags); `dump-comments` (like `save-comments`, and the golden file also
@@ -46,7 +46,16 @@ None of them is written by hand.
 - Every case is parsed with the variable `ABI` registered as `unknown`, and with the file variables
   `FILENAME` and `CURDIR` set from the case path (unless `no-filevars`). The oracle runs each case
   from the case's own directory, so relative include paths resolve against that directory.
-- `xfail.txt` lists the cases known to fail, with a reason.
+- Known failures, one list per runner, each entry `<case-id> <reason>` with an optional `# note`:
+  - `xfail.txt`: the existing parser (`libucl_conformance`);
+  - `xfail-new.txt`: the new parser core (`libucl_conformance_new_core`). Reasons are a spec
+    version (`spec-vN`) for rules that version added, `divergence:<topic>` for a place where the
+    project decided to differ from libucl (spec README, *Divergences decided by the project*), and
+    `non-utf8`;
+  - `xfail-emit.txt`: the output of the new core's emitters (`libucl_conformance_emitters`). It may
+    hold only cases that the new core does not parse and that `xfail-new.txt` also lists, with
+    reason `divergence:<topic>`; an entry covers every output of its case. Output that the new
+    core writes differently for a case it parses cannot be listed, so such a case fails the run.
 
 ## Regenerating
 
@@ -60,5 +69,35 @@ None of them is written by hand.
     cargo test --test conformance
     UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture   # per-case detail
 
-The run fails when a case fails without an entry in `xfail.txt`, and also when a listed case passes.
-So the list can only shrink; remove an entry as soon as its case passes.
+The test target has three tests, each with its own known-failure list:
+
+- `libucl_conformance` parses every case with the existing parser and compares the result with
+  `<case>.golden.json`.
+- `libucl_conformance_new_core` does the same with the new parser core.
+- `libucl_conformance_emitters` takes every case that has output golden files, parses it with the
+  new core, writes the result in each format and compares the bytes with `<case>.config.golden`,
+  `<case>.json.golden`, `<case>.json-compact.golden`, `<case>.yaml.golden` and, where present,
+  `<case>.config-comments.golden`. For upstream cases it also reproduces the two passes of spec
+  §10.9 and compares the result with the `.res` file. A case that parses without error but has no
+  output golden files fails the run. The report line gives the number of matching outputs per
+  format.
+
+A run fails when a case fails without an entry in its list, and also when a listed case passes.
+So the lists can only shrink; remove an entry as soon as its case passes.
+
+## serde corpus
+
+`tests/serde_corpus/` holds values written by the crate's serde serialization, checked by
+`cargo test --test serde_roundtrip`. Each value has one file per format: `<name>.ucl` (config),
+`<name>.json`, `<name>.compact.json` and `<name>.yaml` (`dollar_strings` has the config file
+only). Next to each file, `<file>.golden.json` is libucl's typed dump of reading that file back,
+in the format of the conformance golden files.
+
+- Without the oracle binary (`target/libucl-oracle/ucl-dump`), the test `corpus_reads_back` checks
+  that the serializer still writes the same bytes, and that both the new core's reading and the
+  stored libucl reading give the value that was serialized.
+- With the binary present, it also checks that the stored readings are current, and the tests
+  that give generated values to libucl (`oracle_reads_generated_values_back`,
+  `oracle_reads_generated_typed_values_back`) run; without it they skip.
+- `UCL_SERDE_REGEN=1 cargo test --test serde_roundtrip` regenerates the corpus files and their
+  readings; it needs the binary.

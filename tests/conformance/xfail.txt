@@ -905,3 +905,16 @@ cases/spec/10-output/readback_config_output parser  # spec-v6 §10
 cases/spec/10-output/readback_fifteen_digit_min_normal_error parser  # spec-v6 §10
 cases/spec/10-output/readback_float_above_max_error parser  # spec-v6 §10
 cases/spec/10-output/readback_json_output parser  # spec-v6 §10
+# --- added with spec-v7
+cases/spec/05-numbers/time_infinite_in_json_form parser  # spec-v7 §5.4
+cases/spec/05-numbers/time_suffix_overflow_infinite parser  # spec-v7 §5.4
+cases/spec/08-duplicates/merge_quirk_scalar_keeps_container_key flags  # spec-v7 §8.4
+cases/spec/08-duplicates/merge_quirk_scalar_keeps_container_key_spelling flags  # spec-v7 §8.4
+cases/spec/10-output/include_target_array_converted_key_bare macro  # spec-v7 §10
+cases/spec/10-output/include_target_array_converted_key_spelling flags  # spec-v7 §10
+cases/spec/10-output/multi_value_merge_quirk_layout_empty flags  # spec-v7 §10
+cases/spec/10-output/multi_value_merge_quirk_layout_inherited flags  # spec-v7 §10
+cases/spec/10-output/multi_value_merge_quirk_layout_nonempty flags  # spec-v7 §10
+cases/spec/10-output/multi_value_merge_quirk_layout_own_kind flags  # spec-v7 §10
+cases/spec/10-output/no_implicit_arrays_collection_key_first_spelling flags  # spec-v7 §10
+cases/spec/10-output/readback_single_quoted_backslash_runs parser  # spec-v7 §10.8

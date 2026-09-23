@@ -116,7 +116,13 @@ followed by an object adds the object as a further value: `a = 1⏎a = 2⏎a { y
   `a { x = 1 }⏎a = 2` → `{ a: int 2 }`; `a = [1]⏎a = 2` → `{ a: int 2 }`; an object at priority 3
   followed by `a = 2` at priority 1 → `a: int 2 @3`, and at priorities 1 and 3 → `a: int 2 @1`
   (`strategy_merge_object_then_scalar`, `strategy_merge_array_then_scalar`,
-  `strategy_merge_scalar_keeps_container_priority`). **Quirk.** A value left empty at the end of
+  `strategy_merge_scalar_keeps_container_priority`). The scalar also keeps the container's key as
+  it was written, its spelling and whether it needs quoting in output (§10.1), not the key of the
+  repeat: `"x\u0041" { a = 1 }⏎xA = 2⏎xA = 3` → config `"xA" = 2;⏎xA = 3;`, and
+  `yB { a = 1 }⏎"y\u0042" = 2` → `yB = 2;`; under `key-lowercase`, `"\u0041" { a = 1 }⏎a = 2` keeps
+  the spelling `A` (`merge_quirk_scalar_keeps_container_key`,
+  `merge_quirk_scalar_keeps_container_key_spelling`). This is not a replacement in the sense of
+  §12.1. How such a scalar lays out a multi-value entry in JSON and YAML: §10.7. **Quirk.** A value left empty at the end of
   a unit, which is `null` elsewhere (§1.6), is not such a scalar: it adds nothing, and the
   container stays as it was, whatever the priorities and also at the end of an included file:
   `k { a = 1 }⏎k =⏎` → `k: { a: int 1 }`, `k = [1]⏎k =⏎` → `k: [int 1]`, while an explicit

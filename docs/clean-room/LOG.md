@@ -805,3 +805,24 @@
     exception.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — Role: spec team. Item: C0, release `spec-v7` (tag on `6a8b1d9`). Answers implementer
+  questions #50–#54 from C4a and C4b. Inputs consulted: libucl source at the pinned commit (the
+  parser's single-quote lexer and unescape, number and suffix parsing, atom parsing of `null`,
+  `nan` and `inf`, the duplicate-key handling under `merge` and `no-implicit-arrays`, the key
+  parser's quoting mark, the include handler's `target="array"` conversion, and the emitter's
+  key and array writers), black-box oracle runs, the conformance corpus, and `spec-v6`.
+  Confirmed and written down: #50 (§10.7, §8.4; the layout rule extended to `nan`, `inf`, strings
+  and `.inherit` copies, and the scalar keeps the container's key), #51 (b) (§10.1), #52 (§10.4–
+  §10.6), #54 (§5.4 time-suffix overflow to ±∞, `ms` giving subnormal times, no NaN time; §10.8
+  forms). Corrected: #51 (a), the key of a `no-implicit-arrays` collection array is never quoted;
+  #53 (a), a backslash before a lone CR is removed with it (§6.2, plus the pairing rule); #53 (b),
+  the exact single-quote read-back condition (§10.8). Also: the conformance README now describes
+  the three runners, the three known-failure lists and the serde corpus; spec README *Known gaps*
+  and *Divergences decided by the project* carry the C4 decisions. 15 new cases (1390 in all),
+  with typed and output golden files; no existing golden file changed. The new core and its
+  emitters pass all 15; the old parser fails 12 (`xfail.txt`). Held back, not committed, because
+  the new core writes their output differently and `xfail-emit.txt` cannot list them:
+  `sq_line_continuation_lone_cr` (§6.2, #53 a), `no_implicit_arrays_collection_key_bare` (§10.1,
+  #51 a) and `multi_value_merge_quirk_layout_nan_inf` (§10.7, #50). Both runners and full
+  `cargo test` green at every commit. Commits: `f4c8fac`, `6a8b1d9`. The spec contains behaviour
+  only: no libucl code, internal names, or procedures.

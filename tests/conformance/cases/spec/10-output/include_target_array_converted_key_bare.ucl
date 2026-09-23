@@ -1,0 +1,4 @@
+"p q" = 1
+.include(key="p q", target="array") "../09-macros/files/a.inc"
+"r s" = [1]
+.include(key="r s", target="array") "../09-macros/files/a.inc"

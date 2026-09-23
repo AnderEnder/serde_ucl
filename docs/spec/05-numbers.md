@@ -117,7 +117,20 @@ Notes:
 - **Quirk.** Multiplying an int can overflow, and the result wraps around in 64-bit two's
   complement without error: `9223372036854775807k` → `int -1000`,
   `9223372036854775807kb` → `int -1024`. A float that overflows through a multiplier becomes
-  `float +∞`: `1e308k` (`multiplier_overflow_wraps`).
+  `float +∞`: `1e308k` (`multiplier_overflow_wraps`), and `-1e308k` gives `float −∞`.
+- **Quirk.** Time suffixes overflow the same way, without error: every suffix that multiplies
+  (`ks`, `gs`, `min`, `h`, `d`, `w`, `y`) turns a large enough float into `time +∞` or `time −∞`:
+  `1e308ks`, `1e300gs`, `1e308min`, `1e306h`, `1e304d`, `1e303w` and `1e301y` → `time +∞`,
+  `-1e308ks` and `-1e301y` → `time −∞`, also in the JSON form, `{"u":1e308ks}`
+  (`time_suffix_overflow_infinite`, `time_infinite_in_json_form`). `s` and `ms` never overflow
+  (`1e308s` → `time 1e308`, `1e308ms` → `time 1e305`). An int never overflows through a time
+  suffix, because it becomes a float first: `9223372036854775807y` → `time 2.9086826055425221e26`.
+- **Quirk.** `ms` divides without a range check, so it can give a time below the normal float
+  range, which no number written directly can be (§5.8): `2.2250738585072014e-308ms` →
+  `time 2.2250738585069563e-311` (`time_subnormal_through_ms`).
+- No number is ever NaN, and no text gives a NaN time: NaN comes only from the keyword `nan`
+  (§4), which takes no suffix; `nans`, `infs`, `nanms` and `infh` are strings
+  (`nan_inf_time_lookalikes_are_strings`).
 - No other suffix exists; `1t`, `1tb`, `1b`, `1B`, `1mins`, `1sec`, `1hr` are strings
   (`unknown_multipliers_are_strings`, `time_lookalikes_are_strings`, `cases/additions/a50_b_suffix`).
 - **Quirk.** Hex numbers take the multipliers (`0x10k` → `int 16000`, `0x10kb` → `int 16384`), but
