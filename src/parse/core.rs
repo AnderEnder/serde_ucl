@@ -14,6 +14,7 @@
 use super::comments::{Notes, ValuePath};
 use super::error::position_at;
 use super::include::Includes;
+use super::macros::find_key;
 use super::number::{self, Number};
 use super::string;
 use super::vars::Expander;
@@ -84,6 +85,12 @@ fn parse_unit(
         depth,
         unit: 0,
         unit_done: false,
+        name_run: false,
+        run_macro_end: None,
+        outer_run: false,
+        recent: None,
+        first_key_shares: false,
+        section_shares: false,
     };
     let result = core.run();
     if let (Some(sink), Some(notes)) = (sink, core.notes.take()) {
@@ -134,6 +141,8 @@ enum Close {
 enum Revert {
     /// It stays open as [`Close::Eof`]: the root, an object nested under a key, or an object
     /// written with a brace, which has lost its own brace, so only the end of input closes it.
+    /// Also the object a file nested under a key goes into, when it holds a share of the brace
+    /// of the object where the macro stands ([`Core::open_nest_target`]).
     Open,
     /// A section object ([`Close::Section`], [`Close::LeftOpen`]): it closes, with the section
     /// objects around it, as when a bracketed container opened in it closes.
@@ -152,6 +161,13 @@ impl Close {
     fn is_section(self) -> bool {
         matches!(self, Close::Section | Close::LeftOpen)
     }
+
+    /// Whether the container closes when a bracketed container opened in it closes (§3.4): a
+    /// section object, also one whose brace an included file took over, which loses that brace
+    /// then (oracle runs, QUESTIONS.md #40).
+    fn closes_with_inner(self) -> bool {
+        self.is_section() || self == Close::IncludedBrace(Revert::Section)
+    }
 }
 
 /// How to reach a frame's container from the container of the frame below.
@@ -164,6 +180,9 @@ enum Step {
     Collected { key: String, index: usize },
     /// Element `index` of an array.
     Element(usize),
+    /// These steps in turn: a value reopened below the container of the frame below (§9.1,
+    /// [`Core::reopen_recent`]).
+    Path(Vec<Step>),
 }
 
 impl Step {
@@ -181,11 +200,23 @@ impl Step {
                 PathSegment::Index(*index),
             ],
             Step::Element(index) => vec![PathSegment::Index(*index)],
+            Step::Path(steps) => steps.iter().flat_map(Step::segments).collect(),
         }
     }
 
-    fn enter<'v>(&self, value: &'v mut UclValue) -> &'v mut UclValue {
-        let target = match self {
+    /// The step that follows `segment` of a value path.
+    fn from_segment(segment: &PathSegment) -> Step {
+        match segment {
+            PathSegment::Key { key, index } => Step::Entry {
+                key: key.clone(),
+                slot: *index,
+            },
+            PathSegment::Index(index) => Step::Element(*index),
+        }
+    }
+
+    fn try_enter<'v>(&self, value: &'v mut UclValue) -> Option<&'v mut UclValue> {
+        match self {
             Step::Entry { key, slot } => value
                 .as_object_mut()
                 .and_then(|o| o.entry_mut(key))
@@ -197,8 +228,71 @@ impl Step {
                 .and_then(UclValue::as_array_mut)
                 .and_then(|a| a.get_mut(*index)),
             Step::Element(index) => value.as_array_mut().and_then(|a| a.get_mut(*index)),
-        };
-        target.expect("an open container stays where it was inserted")
+            Step::Path(steps) => steps
+                .iter()
+                .try_fold(value, |value, step| step.try_enter(value)),
+        }
+    }
+
+    fn enter<'v>(&self, value: &'v mut UclValue) -> &'v mut UclValue {
+        self.try_enter(value)
+            .expect("an open container stays where it was inserted")
+    }
+}
+
+/// The offset after the `*/` that ends the block comment at `start` (§2.3), or `None` when it is
+/// not terminated. Comments nest. A `"` that does not directly follow a `\` begins or ends a
+/// quoted part, inside which `/*` and `*/` have no effect.
+fn block_comment_end(src: &[u8], start: usize) -> Option<usize> {
+    let mut i = start + 2;
+    let mut depth = 1;
+    let mut in_quotes = false;
+    while depth > 0 {
+        match src.get(i)? {
+            b'"' => {
+                if src[i - 1] != b'\\' {
+                    in_quotes = !in_quotes;
+                }
+                i += 1;
+            }
+            b'/' if !in_quotes && src.get(i + 1) == Some(&b'*') => {
+                depth += 1;
+                i += 2;
+            }
+            b'*' if !in_quotes && src.get(i + 1) == Some(&b'/') => {
+                depth -= 1;
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+    Some(i)
+}
+
+/// Whether `src[from..]` holds only whitespace and comments, and at least one comment.
+fn only_comments(src: &[u8], from: usize) -> bool {
+    let mut i = from;
+    let mut comment = false;
+    loop {
+        match src.get(i) {
+            None => return comment,
+            Some(&b) if is_space(b) => i += 1,
+            Some(b'#') => {
+                comment = true;
+                i = src[i..]
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .map_or(src.len(), |n| i + n + 1);
+            }
+            Some(b'/') if src.get(i + 1) == Some(&b'*') => {
+                comment = true;
+                match block_comment_end(src, i) {
+                    Some(end) => i = end,
+                    None => return false,
+                }
+            }
+            Some(_) => return false,
+        }
     }
 }
 
@@ -319,6 +413,22 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     unit: usize,
     /// The input of this included unit has ended.
     unit_done: bool,
+    /// A name run (§9.1, *A macro directly after a name*): a macro ran directly after a name in
+    /// this unit, and no key has been read in it since. The next key read counts as a word
+    /// that follows a name.
+    name_run: bool,
+    /// Where the input continues after the last macro of this unit's name run.
+    run_macro_end: Option<usize>,
+    /// An including unit is in a name run, so the values this unit creates count for `recent`.
+    outer_run: bool,
+    /// The value created most recently (§12.5), kept while a name run is in effect in this unit
+    /// or an including one: its path from the root, or `None` when it is not part of the result.
+    recent: Option<ValuePath>,
+    /// This included unit's leading `{` took over a brace (§9.4), and no key has been read yet.
+    first_key_shares: bool,
+    /// The key being read is that first key: if it starts a section path, the object of its
+    /// first name gets a share of the taken-over brace.
+    section_shares: bool,
 }
 
 /// The container an included file's contents go into when it is nested under a key (§9.4,
@@ -372,37 +482,15 @@ impl Core<'_, '_, '_, '_> {
         self.pos = (end + 1).min(self.src.len());
     }
 
-    /// Skips a `/* … */` comment (§2.3). Comments nest. A `"` that does not directly follow a
-    /// `\` begins or ends a quoted part, inside which `/*` and `*/` have no effect.
+    /// Skips a `/* … */` comment (§2.3; [`block_comment_end`]).
     ///
     /// The saved text includes the byte after `*/` when there is one (§12.5, *Quirk*). At the
     /// end of input libucl's saved byte is undefined; nothing is added then.
     fn skip_block_comment(&mut self) -> Result<(), Error> {
         let start = self.pos;
         let src = self.src;
-        let mut i = start + 2;
-        let mut depth = 1;
-        let mut in_quotes = false;
-        while depth > 0 {
-            match src.get(i) {
-                None => return Err(self.error(ErrorKind::UnterminatedComment, start)),
-                Some(b'"') => {
-                    if src[i - 1] != b'\\' {
-                        in_quotes = !in_quotes;
-                    }
-                    i += 1;
-                }
-                Some(b'/') if !in_quotes && src.get(i + 1) == Some(&b'*') => {
-                    depth += 1;
-                    i += 2;
-                }
-                Some(b'*') if !in_quotes && src.get(i + 1) == Some(&b'/') => {
-                    depth -= 1;
-                    i += 2;
-                }
-                Some(_) => i += 1,
-            }
-        }
+        let i = block_comment_end(src, start)
+            .ok_or_else(|| self.error(ErrorKind::UnterminatedComment, start))?;
         if let Some(notes) = &mut self.notes {
             notes.save(start, (i + 1).min(src.len()));
         }
@@ -445,14 +533,28 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// Skips spaces, tabs, VT, FF and comments before a section name (§3.4): VT and FF, which
-    /// end a line before a value (§1.6), are ordinary whitespace between names.
+    /// end a line before a value (§1.6), are ordinary whitespace between names. A line comment
+    /// takes its line break. A `#` that is the last byte of the input directly after such
+    /// whitespace is an error there (§2.2, *Quirk*; oracle runs).
     fn skip_before_name(&mut self) -> Result<(), Error> {
+        let mut after_space = false;
         loop {
-            self.skip_inline()?;
-            if !matches!(self.peek(), Some(0x0B | 0x0C)) {
-                return Ok(());
+            match self.peek() {
+                Some(b' ' | b'\t' | 0x0B | 0x0C) => {
+                    self.pos += 1;
+                    after_space = true;
+                }
+                Some(b'#') => {
+                    self.check_hash_at_end(after_space)?;
+                    self.skip_line_comment();
+                    after_space = false;
+                }
+                _ if self.at_block_comment() => {
+                    self.skip_block_comment()?;
+                    after_space = false;
+                }
+                _ => return Ok(()),
             }
-            self.pos += 1;
         }
     }
 
@@ -524,10 +626,41 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
-    /// The path of a value just placed in the current object under `key`, when comments are
-    /// saved and the value is part of the result.
+    /// A name run is in effect here or in an including unit: the value created most recently is
+    /// kept (§9.1).
+    fn tracking(&self) -> bool {
+        self.name_run || self.outer_run
+    }
+
+    /// Values are identified by their paths: for saved comments, or for a name run.
+    fn wants_paths(&self) -> bool {
+        self.notes.is_some() || self.tracking()
+    }
+
+    /// The path of the top container from the root, or `None` when it is not part of the
+    /// result. Frames record their paths only when comments are saved; otherwise the path is
+    /// built from the frames' steps.
+    fn top_path(&self) -> Option<ValuePath> {
+        if self.notes.is_some() {
+            return self.top().path.clone();
+        }
+        let mut path = Vec::new();
+        for frame in &self.frames {
+            match &frame.home {
+                Home::Root => {}
+                Home::Detached(_) => return None,
+                Home::Attached(step) => path.extend(step.segments()),
+            }
+        }
+        Some(path)
+    }
+
+    /// The path of a value just placed in the current object under `key`, when values need
+    /// paths and the value is part of the result.
     fn placed_path(&self, key: &str, placement: Placement) -> Option<ValuePath> {
-        self.notes.as_ref()?;
+        if !self.wants_paths() {
+            return None;
+        }
         let step = match placement {
             Placement::Slot(slot) => Step::Entry {
                 key: key.to_owned(),
@@ -543,15 +676,29 @@ impl Core<'_, '_, '_, '_> {
             },
             Placement::Dropped => return None,
         };
-        let mut path = self.top().path.clone()?;
+        let mut path = self.top_path()?;
         path.extend(step.segments());
         Some(path)
     }
 
-    /// A value was created at `path`: pending comments attach to it (§12.5).
+    /// A value was created at `path`: pending comments attach to it (§12.5), and it is the
+    /// value created most recently.
     fn created(&mut self, path: Option<ValuePath>) {
+        if self.tracking() {
+            self.recent.clone_from(&path);
+        }
         if let Some(notes) = &mut self.notes {
             notes.created(path);
+        }
+    }
+
+    /// Makes `path` the value created most recently, without attaching comments.
+    fn made_recent(&mut self, path: Option<ValuePath>) {
+        if self.tracking() {
+            self.recent.clone_from(&path);
+        }
+        if let Some(notes) = &mut self.notes {
+            notes.set_last(path);
         }
     }
 
@@ -743,8 +890,10 @@ impl Core<'_, '_, '_, '_> {
     }
 
     fn element_path(&self, index: usize) -> Option<ValuePath> {
-        self.notes.as_ref()?;
-        let mut path = self.top().path.clone()?;
+        if !self.wants_paths() {
+            return None;
+        }
+        let mut path = self.top_path()?;
         path.push(PathSegment::Index(index));
         Some(path)
     }
@@ -762,16 +911,27 @@ impl Core<'_, '_, '_, '_> {
     /// Objects left open by a section path close with the first bracketed container that closes
     /// in them, back to the nearest object written with a bracket, or the root. Section objects
     /// of both kinds close together in any order, as the oracle does when an included file
-    /// leaves one inside another.
+    /// leaves one inside another, and so do those whose brace an included file took over
+    /// ([`Close::closes_with_inner`]).
     fn close_sections(&mut self) -> Result<(), Error> {
         let mut outermost = None;
-        while self.frames.last().is_some_and(|f| f.close.is_section()) {
-            outermost = self.frames.pop();
+        while self
+            .frames
+            .last()
+            .is_some_and(|f| f.close.closes_with_inner())
+        {
+            let path = if self.wants_paths() {
+                self.top_path()
+            } else {
+                None
+            };
+            self.frames.pop();
+            outermost = Some(path);
         }
-        if let (Some(notes), Some(frame)) = (&mut self.notes, outermost) {
+        if let Some(path) = outermost {
             // The outermost of the objects that closed with the bracket counts as the value
             // created most recently (§12.5).
-            notes.set_last(frame.path);
+            self.made_recent(path);
         }
         if self.frames.is_empty() {
             // The root's closing bracket: the rest of the input is ignored (§1.1, *Quirk*).
@@ -829,6 +989,7 @@ impl Core<'_, '_, '_, '_> {
         file: &Path,
     ) -> Result<(), Error> {
         let cursor = self.notes.as_mut().map(|n| n.suspend(self.src));
+        let outer_run = self.tracking();
         let mut inner = Core {
             src: input,
             pos: 0,
@@ -842,12 +1003,19 @@ impl Core<'_, '_, '_, '_> {
             depth: self.depth,
             unit: self.unit + 1,
             unit_done: false,
+            name_run: false,
+            run_macro_end: None,
+            outer_run,
+            recent: self.recent.take(),
+            first_key_shares: false,
+            section_shares: false,
         };
         let result = inner.run_included();
         self.root = inner.root;
         self.frames = inner.frames;
         self.uppercase_keys = inner.uppercase_keys;
         self.notes = inner.notes;
+        self.recent = inner.recent;
         if let (Some(notes), Some(cursor)) = (&mut self.notes, cursor) {
             notes.resume(input, cursor);
         }
@@ -875,6 +1043,7 @@ impl Core<'_, '_, '_, '_> {
                     close if close.is_section() => Revert::Section,
                     _ => Revert::Open,
                 });
+                self.first_key_shares = true;
             }
             _ => self.skip_space_checking_hash(after_space)?,
         }
@@ -889,40 +1058,50 @@ impl Core<'_, '_, '_, '_> {
         Ok(())
     }
 
-    /// The input of an included unit has ended. Every container it opened with a bracket must
-    /// be closed; containers opened elsewhere, and section objects, stay open (§9.4). Pending
-    /// comments attach as at the end of input.
+    /// The input of an included unit has ended: the check at the end of a unit, after which the
+    /// containers stay open for the including unit (§9.4). Pending comments attach as at the end
+    /// of input, except after a file of no bytes at all, where they stay pending (oracle runs,
+    /// QUESTIONS.md #43).
     fn end_included_unit(&mut self) -> Result<(), Error> {
-        if let Some(frame) = self
-            .frames
-            .iter()
-            .find(|f| f.unit == self.unit && f.close.has_bracket())
-            .filter(|_| !self.left_by_included_file())
+        self.unit_end_check()?;
+        if let Some(notes) = &mut self.notes
+            && !self.src.is_empty()
         {
-            let kind = match frame.kind {
-                Kind::Object => ErrorKind::UnterminatedObject,
-                Kind::Array => ErrorKind::UnterminatedArray,
-            };
-            return Err(self.error(kind, self.pos));
-        }
-        if let Some(notes) = &mut self.notes {
             notes.trailing();
         }
         self.unit_done = true;
         Ok(())
     }
 
-    /// Whether the innermost open objects, down to the first container that is not a section
-    /// object, include a section object that a file included by this unit left open (§9.4).
-    /// When this unit's input ends then, the containers below them are not checked: they stay
-    /// open, unclosed brackets included, and at the end of the main document the parse succeeds
-    /// (oracle runs, QUESTIONS.md #32).
-    fn left_by_included_file(&self) -> bool {
-        self.frames
-            .iter()
-            .rev()
-            .take_while(|f| f.close.is_section())
-            .any(|f| f.unit > self.unit)
+    /// The input of the main document has ended: the check at the end of a unit, then every
+    /// container closes. Pending comments attach to the value created most recently (§12.5).
+    fn end_document(&mut self) -> Result<(), Error> {
+        self.unit_end_check()?;
+        if let Some(notes) = &mut self.notes {
+            notes.trailing();
+        }
+        self.frames.clear();
+        Ok(())
+    }
+
+    /// The check at the end of a unit (§9.4): the open containers, from the innermost outward,
+    /// up to the first that another unit opened. One that holds a bracket, its own or a taken-over
+    /// one, is not closed, and that is an error. Containers below one that another unit opened
+    /// are not checked, whatever that container is (oracle runs, QUESTIONS.md #41).
+    fn unit_end_check(&self) -> Result<(), Error> {
+        for frame in self.frames.iter().rev() {
+            if frame.unit != self.unit {
+                break;
+            }
+            if frame.close.has_bracket() {
+                let kind = match frame.kind {
+                    Kind::Object => ErrorKind::UnterminatedObject,
+                    Kind::Array => ErrorKind::UnterminatedArray,
+                };
+                return Err(self.error(kind, self.pos));
+            }
+        }
+        Ok(())
     }
 
     /// The number of open containers.
@@ -957,6 +1136,14 @@ impl Core<'_, '_, '_, '_> {
         if key_lowercase && target.key.bytes().any(|b| b.is_ascii_uppercase()) {
             self.uppercase_keys = true;
         }
+        // When the object where the macro stands holds a brace taken over from an included
+        // file, the object the contents go into gets a share of it: a `}` in the file uses up
+        // that share and closes nothing (spec §9.4, *Nesting under a key*; oracle runs for
+        // `target="array"`, `prefix` and section objects, QUESTIONS.md #39).
+        let inner_close = match self.top().close {
+            Close::IncludedBrace(_) => Close::IncludedBrace(Revert::Open),
+            _ => Close::Eof,
+        };
         let object = self
             .current()
             .as_object_mut()
@@ -972,6 +1159,8 @@ impl Core<'_, '_, '_, '_> {
         });
         let empty_object = || UclValue::Object(UclObject::new());
         // Where the array frame (if any) and the object frame go.
+        // The number of values of an entry whose first value moves into a new array.
+        let mut moved_from = None;
         let (key, element) = match found {
             None => {
                 let (value, element) = if target.array {
@@ -988,6 +1177,7 @@ impl Core<'_, '_, '_, '_> {
             Some(index) => {
                 let (name, entry) = object.get_index_mut(index).expect("the key was just found");
                 let name = name.clone();
+                let len = entry.len();
                 let element = match (entry.first_mut(), target.array) {
                     (UclValue::Object(_), false) => None,
                     (_, false) => {
@@ -998,6 +1188,7 @@ impl Core<'_, '_, '_, '_> {
                         Some(items.len() - 1)
                     }
                     (first, true) => {
+                        moved_from = Some(len);
                         let first = std::mem::replace(first, UclValue::Null);
                         let array = UclValue::Array(vec![first, empty_object()]);
                         *entry = Entry::from_slot(Slot::collection(array));
@@ -1007,13 +1198,24 @@ impl Core<'_, '_, '_, '_> {
                 (name, element)
             }
         };
+        if let Some(len) = moved_from
+            && let Some(object_path) = self.top().path.clone()
+            && let Some(notes) = &mut self.notes
+        {
+            // Saved comments go with the first value into the array, and those of the other
+            // values are lost with them (§12.5; oracle runs).
+            for slot in 1..len {
+                notes.replaced(&object_path, &key, Some(slot));
+            }
+            notes.collected(&object_path, &key, 1);
+        }
         let entry_path = self.placed_path(&key, Placement::Slot(0));
         let entry_step = Step::Entry { key, slot: 0 };
         let path = match element {
             None => {
                 self.push_frame(
                     Kind::Object,
-                    Close::Eof,
+                    inner_close,
                     Home::Attached(entry_step),
                     entry_path.clone(),
                     at,
@@ -1031,7 +1233,7 @@ impl Core<'_, '_, '_, '_> {
                 let path = self.element_path(index);
                 self.push_frame(
                     Kind::Object,
-                    Close::Eof,
+                    inner_close,
                     Home::Attached(Step::Element(index)),
                     path.clone(),
                     at,
@@ -1039,9 +1241,7 @@ impl Core<'_, '_, '_, '_> {
                 path
             }
         };
-        if let Some(notes) = &mut self.notes {
-            notes.set_last(path);
-        }
+        self.made_recent(path);
         Ok(())
     }
 
@@ -1083,25 +1283,15 @@ impl Core<'_, '_, '_, '_> {
         self.skip_space()?;
         let at = self.pos;
         match self.peek() {
-            None if self.unit > 0 => self.end_included_unit(),
-            None if self.left_by_included_file() => {
-                // The containers below are not checked (oracle runs, QUESTIONS.md #32).
-                if let Some(notes) = &mut self.notes {
-                    notes.trailing();
-                }
-                self.frames.clear();
-                Ok(())
+            None if self
+                .run_macro_end
+                .take()
+                .is_some_and(|end| only_comments(self.src, end)) =>
+            {
+                self.reopen_recent()
             }
-            None => match self.top().close {
-                Close::Eof | Close::LeftOpen | Close::Section => {
-                    if let Some(notes) = &mut self.notes {
-                        notes.trailing();
-                    }
-                    self.frames.pop();
-                    Ok(())
-                }
-                _ => Err(self.error(ErrorKind::UnterminatedObject, at)),
-            },
+            None if self.unit > 0 => self.end_included_unit(),
+            None => self.end_document(),
             Some(b'}') if self.top().close == Close::Brace => {
                 self.pos += 1;
                 self.close_container()
@@ -1131,9 +1321,59 @@ impl Core<'_, '_, '_, '_> {
             Some(b'.') => self.macro_entry(),
             Some(_) => {
                 let key = self.read_key()?;
-                self.after_key(key)
+                // The unit's first key, while the brace its leading `{` took over is still held.
+                let first_shares = std::mem::take(&mut self.first_key_shares)
+                    && matches!(self.top().close, Close::IncludedBrace(_));
+                if std::mem::take(&mut self.name_run) {
+                    self.run_macro_end = None;
+                    return self.key_after_name_run(key);
+                }
+                self.section_shares = first_shares;
+                let result = self.after_key(key);
+                self.section_shares = false;
+                result
             }
         }
+    }
+
+    /// The end of a unit, where only whitespace and comments, at least one, followed the last
+    /// macro of a name run (§9.1, *Quirk*; that a comment is needed and that any macro of the
+    /// run counts are from oracle runs, QUESTIONS.md #34, #35). The value created most recently
+    /// is opened once more as an object left open by a section path (§3.4), by this unit:
+    ///
+    /// - a value that is not part of the result gives an object that is discarded too
+    ///   (QUESTIONS.md #36);
+    /// - an object inside the current container is reopened where it is;
+    /// - the current container itself, or a container below it, stays as it is;
+    /// - a value that is not an object is left alone. The spec leaves this undefined (libucl
+    ///   crashes, fails or turns the value into an object); this is the project's choice.
+    fn reopen_recent(&mut self) -> Result<(), Error> {
+        let at = self.pos;
+        let Some(top) = self.top_path() else {
+            // The current container is discarded, and so is everything that goes into it.
+            return Ok(());
+        };
+        let (home, path) = match self.recent.clone() {
+            None => (Home::Detached(Self::empty(Kind::Object)), None),
+            Some(path) => {
+                let Some(rest) = path.strip_prefix(top.as_slice()) else {
+                    return Ok(());
+                };
+                if rest.is_empty() {
+                    return Ok(());
+                }
+                let step = Step::Path(rest.iter().map(Step::from_segment).collect());
+                if !step
+                    .try_enter(self.current())
+                    .is_some_and(|v| v.is_object())
+                {
+                    return Ok(());
+                }
+                let path = self.notes.is_some().then_some(path);
+                (Home::Attached(step), path)
+            }
+        };
+        self.push_frame(Kind::Object, Close::LeftOpen, home, path, at)
     }
 
     /// Parses the next element of the current array, or closes it.
@@ -1144,7 +1384,7 @@ impl Core<'_, '_, '_, '_> {
             // other directly, whitespace included (§1.5, *Quirk*).
             return match self.peek() {
                 None if self.unit > 0 => self.end_included_unit(),
-                None => Err(self.error(ErrorKind::UnterminatedArray, self.pos)),
+                None => self.end_document(),
                 Some(b']') => {
                     self.pos += 1;
                     self.close_container()
@@ -1156,7 +1396,7 @@ impl Core<'_, '_, '_, '_> {
         let at = self.pos;
         match self.peek() {
             None if self.unit > 0 => self.end_included_unit(),
-            None => Err(self.error(ErrorKind::UnterminatedArray, at)),
+            None => self.end_document(),
             Some(b']') => {
                 self.pos += 1;
                 self.close_container()
@@ -1332,10 +1572,73 @@ impl Core<'_, '_, '_, '_> {
     /// A key followed by section names: each name gets a nested object, and the last one holds
     /// the object or array that follows (§3.4).
     fn section_path(&mut self, first: Key) -> Result<(), Error> {
+        self.names(first, false, false)
+    }
+
+    /// The first key read in a name run (§9.1, *Quirk*). It counts as a word that follows a
+    /// name: with a `=` or `:` after it, it is a name too and the names go on; without, it is
+    /// tested as any key is.
+    fn key_after_name_run(&mut self, word: Key) -> Result<(), Error> {
+        self.skip_inline()?;
+        if !matches!(self.peek(), Some(b'=' | b':')) {
+            return self.after_key(word);
+        }
+        let (after_separator, after_break) = self.name_separator()?;
+        self.names(word, after_separator, after_break)
+    }
+
+    /// A macro has run, and what follows it has been skipped. During a name run it is the run's
+    /// last macro so far (§9.1).
+    ///
+    /// When a file the macro included has closed the braced root of the document, no container
+    /// is open. The rest of that file is ignored, as after the root's closing bracket (§1.1), but
+    /// here only whitespace and `;` may follow, up to the end of the unit; a comment too is an
+    /// error (oracle runs, QUESTIONS.md #47).
+    pub(super) fn macro_ran(&mut self) -> Result<(), Error> {
+        if self.frames.is_empty() && self.pos < self.src.len() {
+            return Err(self.error(ErrorKind::AfterRootClosedByInclude, self.pos));
+        }
+        if self.name_run {
+            self.run_macro_end = Some(self.pos);
+        }
+        Ok(())
+    }
+
+    /// A macro directly after a name (§9.1): it runs inside the name's object, which stays open
+    /// as a section object, and starts a name run. The name's object is the value created most
+    /// recently.
+    fn macro_after_name(&mut self) -> Result<(), Error> {
+        self.name_run = true;
+        self.recent = self.top_path();
+        self.macro_entry()
+    }
+
+    /// After a word that follows a name: skips a `=` or `:` there, which makes the word a name
+    /// (§3.4, *Quirk*). Returns whether there was one, and whether a line break follows it after
+    /// spaces and comments on its line.
+    fn name_separator(&mut self) -> Result<(bool, bool), Error> {
+        if !matches!(self.peek(), Some(b'=' | b':')) {
+            return Ok((false, false));
+        }
+        self.pos += 1;
+        self.skip_inline()?;
+        match self.peek() {
+            None => Err(self.error(ErrorKind::MissingValue, self.pos)),
+            Some(b'\n' | b'\r' | 0x0B | 0x0C) => Ok((true, true)),
+            Some(_) => Ok((true, false)),
+        }
+    }
+
+    /// Section names from `first` on (§3.4). `after_separator`: a `=` or `:` followed `first`;
+    /// `after_break`: a line break followed that separator.
+    fn names(
+        &mut self,
+        first: Key,
+        mut after_separator: bool,
+        mut after_break: bool,
+    ) -> Result<(), Error> {
         let mut name = first;
         let mut opened = 0;
-        let mut after_separator = false;
-        let mut after_break = false;
         loop {
             match self.peek() {
                 Some(b'{' | b'[') if after_separator => {
@@ -1344,7 +1647,14 @@ impl Core<'_, '_, '_, '_> {
                 Some(b'{' | b'[') => return self.entry_value(name),
                 _ => {}
             }
-            self.open_in_object(name, Kind::Object, Close::Section)?;
+            // The first name of the unit's first key gets a share of a brace that the unit's
+            // leading `{` took over (oracle runs, QUESTIONS.md #42).
+            let close = if std::mem::take(&mut self.section_shares) {
+                Close::IncludedBrace(Revert::Section)
+            } else {
+                Close::Section
+            };
+            self.open_in_object(name, Kind::Object, close)?;
             opened += 1;
             if after_break {
                 // A line break after a separator that follows a name: the next name may come on
@@ -1356,9 +1666,19 @@ impl Core<'_, '_, '_, '_> {
                 }
             }
             self.skip_before_name()?;
+            if matches!(self.peek(), None | Some(b'\n' | b'\r')) {
+                // The bracket that made this word a name was in a comment after a VT or FF
+                // (§3.4). As after a separator and a line break, the next name may come on any
+                // later line, and if the input ends first the objects are kept (oracle runs,
+                // QUESTIONS.md #46).
+                self.skip_space_checking_hash(false)?;
+                if self.peek().is_none() {
+                    return Ok(());
+                }
+            }
             let word = match self.peek() {
                 // A key position inside the new object, so `.` starts a macro (§9.1).
-                Some(b'.') => return self.macro_entry(),
+                Some(b'.') => return self.macro_after_name(),
                 Some(b'"' | b'\'') => self.read_key()?,
                 Some(b) if is_key_start(b) => self.read_key()?,
                 _ => {
@@ -1371,22 +1691,18 @@ impl Core<'_, '_, '_, '_> {
             };
             self.skip_inline()?;
             // A separator after a word that follows a name is ignored, and the word is a name.
-            after_separator = matches!(self.peek(), Some(b'=' | b':'));
-            after_break = false;
-            if after_separator {
-                self.pos += 1;
-                self.skip_inline()?;
-                match self.peek() {
-                    None => return Err(self.error(ErrorKind::MissingValue, self.pos)),
-                    Some(b'\n' | b'\r' | 0x0B | 0x0C) => after_break = true,
-                    Some(_) => {}
-                }
-            } else if !matches!(self.peek(), Some(b'{' | b'[')) && !self.line_has_bracket() {
+            (after_separator, after_break) = self.name_separator()?;
+            if !after_separator
+                && !matches!(self.peek(), Some(b'{' | b'['))
+                && !self.line_has_bracket()
+            {
                 // An ordinary key. The section objects have no closing bracket, so they stay
                 // open (§3.4, *Quirk*; see `Close::LeftOpen`).
                 let n = self.frames.len();
                 for frame in &mut self.frames[n - opened..] {
-                    frame.close = Close::LeftOpen;
+                    if frame.close == Close::Section {
+                        frame.close = Close::LeftOpen;
+                    }
                 }
                 return self.entry_value(word);
             }
@@ -1416,12 +1732,34 @@ impl Core<'_, '_, '_, '_> {
         }
         self.leading_comments()?;
         if self.peek().is_none() {
+            if let Some(existing) = self.null_merges_into(&key) {
+                // Under `merge`, the `null` that ends the input goes into an object or array
+                // that is the entry's first value, adding nothing, instead of taking its place
+                // as a scalar does (§8.4; oracle runs, QUESTIONS.md #44).
+                let path = self.placed_path(&existing, Placement::Merged);
+                self.created(path);
+                return Ok(());
+            }
             let placement = self.insert(&mut key, UclValue::Null)?;
             let path = self.placed_path(&key.name, placement);
             self.created(path);
             return Ok(());
         }
         self.object_value(key)
+    }
+
+    /// Under `merge`, the spelling of the entry `key` names when its first value is an object or
+    /// an array (keys compared as [`Core::insert`] does).
+    fn null_merges_into(&mut self, key: &Key) -> Option<String> {
+        if self.settings.strategy != DuplicateStrategy::Merge {
+            return None;
+        }
+        let ignore_case = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE)
+            && (self.uppercase_keys || key.name.bytes().any(|b| b.is_ascii_uppercase()));
+        let object = self.current().as_object()?;
+        let index = find_key(object, &key.name, ignore_case)?;
+        let (name, entry) = object.get_index(index)?;
+        (entry.first().is_object() || entry.first().is_array()).then(|| name.clone())
     }
 
     fn object_value(&mut self, mut key: Key) -> Result<(), Error> {

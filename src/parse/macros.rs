@@ -336,7 +336,8 @@ impl Core<'_, '_, '_, '_> {
                 ));
             }
         }
-        self.after_macro()
+        self.after_macro()?;
+        self.macro_ran()
     }
 
     /// Skips what may stand between the parts of a macro (§9.2): whitespace, line breaks

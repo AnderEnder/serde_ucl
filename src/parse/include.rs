@@ -143,17 +143,27 @@ impl Core<'_, '_, '_, '_> {
             return Err(self.error(unsupported("signature checking (sign=true)"), call.at));
         }
         let path = self.macro_path(call)?;
-        if params.bool("url") == Some(true) && path.contains("://") {
-            return Err(self.error(ErrorKind::UrlNotSupported { path }, call.value_at));
-        }
         if let Some(dirs) = params.array("path") {
             let dirs = dirs.iter().filter_map(UclValue::as_str).map(str::to_owned);
             self.includes.search = Some(dirs.collect());
         }
         let soft = call.kind == MacroKind::TryInclude;
+        let try_ = params.bool("try").unwrap_or(soft);
+        if params.bool("url") == Some(true) && path.contains("://") {
+            // URLs are never fetched (project decision 2). As in a libucl built without URL
+            // support, such an include is decided before the search path, globs and nesting
+            // under a key: skipped with `try`, which is not a silent stop, an error without it
+            // (spec §9.4, *Signatures, URLs and search paths*). Its `path` list still takes
+            // effect for later includes (oracle runs, QUESTIONS.md #37).
+            return if try_ {
+                Ok(())
+            } else {
+                Err(self.error(ErrorKind::UrlNotSupported { path }, call.value_at))
+            };
+        }
         let request = Request {
             soft,
-            try_: params.bool("try").unwrap_or(soft),
+            try_,
             glob: params.bool("glob").unwrap_or(false),
             prefix: params.bool("prefix").unwrap_or(false),
             key: params.string("key").map(str::to_owned),
@@ -230,15 +240,25 @@ impl Core<'_, '_, '_, '_> {
                 prefix_key(first.as_deref().unwrap_or(&matches[0]))
             })
         });
+        // `.try_include(try=false)` skips a match that is the including file too, but fails when
+        // it included no match at all (spec §9.4, *Globs*).
+        let mut included = false;
+        let mut skipped_self = None;
         for candidate in &matches {
             let shown = candidate.to_string_lossy().into_owned();
             match self.include_candidate(candidate, &shown, request, key.clone())? {
-                Outcome::Done => {}
+                Outcome::Done => included = true,
                 Outcome::Unusable(_) if request.try_ => {}
+                Outcome::Unusable(kind @ ErrorKind::IncludeSelf { .. }) if request.soft => {
+                    skipped_self = Some(kind);
+                }
                 Outcome::Unusable(kind) => return Err(self.error(kind, request.at)),
             }
         }
-        Ok(Outcome::Done)
+        match skipped_self {
+            Some(kind) if !included => Err(self.error(kind, request.at)),
+            _ => Ok(Outcome::Done),
+        }
     }
 
     fn unusable_missing(&self, shown: &str, request: &Request) -> Result<Outcome, Error> {
@@ -751,9 +771,21 @@ mod tests {
         // Section objects left open by a file stay open for the including unit.
         let v = ok(".include \"left_open.inc\"\nk = 1");
         assert_eq!(keys(&obj(&v)["x"]), ["y{", "k"]);
-        // A section object whose brace a file took over closes at its `}`.
+        // A section object whose brace a file took over closes at its `}`, and also when a
+        // bracketed container opened in it closes, which takes the brace with it (oracle runs).
         let v = ok("x \"y{\" z\n.include \"braced.inc\"\nq = 1");
         assert_eq!(keys(&v), ["x", "q"]);
+        let v = ok("x \"y{\" z\n.include \"open.inc\"\nm = [1]\nn = 1");
+        assert_eq!(keys(&v), ["x", "n"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "a", "m"]);
+        assert!(matches!(
+            err("x \"y{\" z\n.include \"open.inc\"\nm { }\n}"),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+        assert_eq!(
+            err("x \"y{\" z\n.include \"open.inc\"\nq = 1"),
+            ErrorKind::UnterminatedObject
+        );
         // At the end of input, section objects from an included file end the parse without
         // the containers below them being checked (QUESTIONS.md #32).
         let v = ok("a { b {\n.include \"left_open.inc\"\nk = 1");
@@ -767,6 +799,334 @@ mod tests {
         assert_eq!(keys(&obj(&v)["x"]), ["k", "y"]);
         let v = ok(".include(key=\"k\") \"left_open.inc\"\nq = 1");
         assert_eq!(keys(&v), ["k", "q"]);
+        // A `}` in a file nested under a key: an error unless the object where the macro stands
+        // holds a taken-over brace, of which the key's object then uses up its share (spec
+        // §9.4, *Nesting under a key*; the other forms from oracle runs).
+        assert!(matches!(
+            err(".include(key=\"k\") \"close.inc\"\nq = 1"),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+        let v = ok(".include \"open.inc\"\n.include(key=\"k\") \"close.inc\"\nq = 1\n}");
+        assert_eq!(keys(&v), ["a", "k", "q"]);
+        assert_eq!(keys(&obj(&v)["k"]), ["a"]);
+        let v = ok(
+            ".include \"open.inc\"\n.include(key=\"k\", target=\"array\") \"close.inc\"\nq = 1\n}",
+        );
+        assert_eq!(keys(&v), ["a", "k", "q"]);
+        assert_eq!(keys(&obj(&v)["k"].as_array().unwrap()[0]), ["a"]);
+        let v = ok(".include \"open.inc\"\n.include(prefix=true) \"close.inc\"\nq = 1\n}");
+        assert_eq!(keys(&v), ["a", "close.inc", "q"]);
+        let v = ok(".include \"open.inc\"\n.include(key=\"k\") \"close.inc\"\n\
+                    .include(key=\"k\") \"close.inc\"\nq = 1\n}");
+        assert_eq!(obj(&obj(&v)["k"]).entry("a").unwrap().len(), 2);
+        let v = ok(
+            "x \"y{\" z\n.include \"open.inc\"\n.include(key=\"k\") \"close.inc\"\nq = 1\n}\nr = 2",
+        );
+        assert_eq!(keys(&v), ["x", "r"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "a", "k", "q"]);
+        let v = ok(".include \"open.inc\"\n.include(key=\"k\") \"braced.inc\"\nq = 1\n}");
+        assert_eq!(keys(&v), ["a", "k", "q"]);
+        for input in [
+            // The share is used once; the root's brace is still unclosed without the last `}`.
+            ".include \"open.inc\"\n.include(key=\"k\") \"close2.inc\"\nq = 1",
+            ".include \"open.inc\"\n.include(key=\"k\") \"close.inc\"\nq = 1",
+            ".include \"open.inc\"\n.include \"open.inc\"\n.include(key=\"k\") \"close.inc\"\nq = 1\n}\n}",
+            // Uncertain in the spec (libucl crashes): the object has only its own brace.
+            "x { .include(key=\"k\") \"close.inc\"\nq = 1",
+        ] {
+            assert!(run(&files_with_close2(&files), input).is_err(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn macros_directly_after_a_name() {
+        // spec §9.1, *A macro directly after a name*; the forms beyond its examples are from
+        // oracle runs (QUESTIONS.md #34–#36, #38).
+        let files = [
+            A,
+            ("/c/o.inc", "o {}\n"),
+            ("/c/m.inc", "m {}\n"),
+            ("/c/closed.inc", "\"s\".include \"o.inc\" # [\n"),
+            ("/c/closed_ws.inc", "\"s\".include {o.inc}\n"),
+            (
+                "/c/closed_later.inc",
+                "\"s\".include {o.inc} # c\n.priority {1} # d\n",
+            ),
+            (
+                "/c/closed_then_macro.inc",
+                "\"s\".include {o.inc} # c\n.priority {1}\n",
+            ),
+            ("/c/closed_brace.inc", "x {\n\"s\".include {o.inc} # c\n}\n"),
+            ("/c/deep.inc", "\"s\".include(key=\"k\") \"m.inc\" # [\n"),
+            ("/c/unit.inc", "a {\n\"s\".include(key=\"k\") {m.inc} # c\n"),
+            ("/c/lower.inc", ".priority 1\n\"s\".include {o.inc} # c\n"),
+            ("/c/key.inc", "\"s\".include {o.inc}\nz = 2\n"),
+        ];
+        for flags in [ParserFlags::DEFAULT, ParserFlags::SAVE_COMMENTS] {
+            let ok = |input: &str| parser(&files, flags).parse(input.as_bytes()).unwrap();
+            let err = |input: &str| {
+                let result = parser(&files, flags).parse(input.as_bytes());
+                assert!(result.is_err(), "{input:?}");
+            };
+            // The next key read in the unit counts as a word that follows a name.
+            for input in [
+                "\"s\".priority {3}k = [1]",
+                "\"s\".priority {3}\n\"k\" = [1]",
+                "\"s\".include \"files/a.inc\"k = [1]",
+                "\"s\".priority {3}\n.priority 4\nk = [1]",
+                "\"s\".priority {3}\n.include \"files/a.inc\"\nk = [1]",
+                "x { \"s\".include {o.inc} }\nk = [1]",
+                "\"s\".priority {3}\na = 1",
+                "\"s\".priority {3}\nk = \n{ z = 1 }",
+                ".include \"key.inc\"",
+            ] {
+                err(input);
+            }
+            let v = ok("\"s\".priority {3}k = l = n { z = 1 }\nm = 1");
+            assert_eq!(keys(&v), ["s", "m"]);
+            let l = &obj(&obj(&obj(&v)["s"])["k"])["l"];
+            assert_eq!(obj(l).entry("n").unwrap().slots()[0].priority(), 3);
+            let v = ok("\"s\".priority {3}\nk =\nl { z = 1 }");
+            assert_eq!(keys(&obj(&obj(&obj(&v)["s"])["k"])["l"]), ["z"]);
+            let v = ok("x { \"s\".priority {3}k = l {} }\nm = 1");
+            assert_eq!(keys(&v), ["x", "m"]);
+            let v = ok("\"s\".priority {3}\nk \"b{\" z\nm = [1]");
+            assert_eq!(keys(&obj(&obj(&v)["s"])["k"]), ["b{", "m"]);
+            // Comments to the end of the unit reopen the value created most recently.
+            let v = ok(".include \"closed.inc\"\nk = 1");
+            assert_eq!(keys(&v), ["s"]);
+            assert_eq!(keys(&obj(&v)["s"]), ["o", "k"]);
+            let v = ok(".include \"closed_later.inc\"\nk = 1");
+            assert_eq!(keys(&obj(&v)["s"]), ["o", "k"]);
+            for input in [
+                ".include \"closed_ws.inc\"\nk = 1",
+                ".include \"closed_then_macro.inc\"\nk = 1",
+            ] {
+                assert_eq!(keys(&ok(input)), ["s", "k"], "{input:?}");
+            }
+            assert_eq!(
+                keys(&ok(".include \"closed_brace.inc\"\nk = 1")),
+                ["x", "k"]
+            );
+            let v = ok(".include \"deep.inc\"\nk2 = 1");
+            assert_eq!(keys(&obj(&obj(&obj(&v)["s"])["k"])["m"]), ["k2"]);
+            // The reopened object belongs to the unit that reopens it (§9.4, the end check).
+            let v = ok("a {\n.include \"closed.inc\"\nk = 1");
+            assert_eq!(keys(&obj(&obj(&v)["a"])["s"]), ["o", "k"]);
+            err("a {\n.include \"closed.inc\"\nk = 1\n}\nm = 1");
+            err(".include \"unit.inc\"\nk2 = 1");
+            // A discarded object is reopened discarded.
+            let v = ok(".priority 5\ns = 1\n.include \"lower.inc\"\nk = 1");
+            assert_eq!(keys(&v), ["s"]);
+        }
+    }
+
+    #[test]
+    fn end_of_unit_check_and_first_key_share() {
+        // Oracle runs (QUESTIONS.md #41, #42).
+        let files = [
+            ("/c/left_open.inc", "x \"y{\" z\n"),
+            ("/c/braced.inc", "{ a = 1 }\n"),
+            ("/c/lo_in_b.inc", "b {\n.include \"left_open.inc\"\n"),
+            ("/c/lost_brace.inc", "x { .include {braced.inc}\n"),
+            ("/c/arr.inc", "a = [ {\n.include \"left_open.inc\"\n"),
+            ("/c/first.inc", "{\nx \"y{\" z\n"),
+            ("/c/first_closed.inc", "{ x \"y{\" z\n}\n"),
+            ("/c/first_closed2.inc", "{ x \"y{\" z\n}\n}\n"),
+            ("/c/first_two_names.inc", "{ a b \"y{\" z\n}\n"),
+            (
+                "/c/first_after_macro.inc",
+                "{\n.priority 1\nx \"y{\" z\n}\n",
+            ),
+            ("/c/second.inc", "{ a = 1\nx \"y{\" z\n"),
+            ("/c/first_run.inc", "{ \"s\".priority {3}\n}\n"),
+            ("/c/brace_gone.inc", "{}x \"y{\" z\n"),
+        ];
+        let ok = |input: &str| run(&files, input).unwrap();
+        let err = |input: &str| assert!(run(&files, input).is_err(), "{input:?}");
+        // The check stops at the first container another unit opened, whatever it is.
+        let v = ok("a {\n.include \"lo_in_b.inc\"\nm {}");
+        assert_eq!(keys(&obj(&obj(&obj(&v)["a"])["b"])["x"]), ["y{", "m"]);
+        let v = ok("a {\n.include \"lost_brace.inc\"\nk = 1");
+        assert_eq!(keys(&obj(&obj(&v)["a"])["x"]), ["a", "k"]);
+        let v = ok(".include \"arr.inc\"\nm { n = 1 }\n}");
+        assert_eq!(keys(&v), ["a"]);
+        // The first key after a file's leading `{`: its first name shares the brace.
+        for input in [
+            ".include \"first.inc\"",
+            ".include \"first.inc\"\nq = 1\n}",
+            "a {\n.include \"first.inc\"\nk = 1",
+            ".include \"first_closed.inc\"\nq = 1",
+            ".include \"first_closed2.inc\"\nq = 1\n}",
+            ".include \"first_two_names.inc\"\nq = 1\n}",
+            ".include \"first_after_macro.inc\"\nq = 1",
+            ".include \"first_run.inc\"\nq = 1",
+            ".include \"second.inc\"\nq = 1\n}",
+        ] {
+            err(input);
+        }
+        assert_eq!(
+            keys(&ok(".include \"first_closed.inc\"\nq = 1\n}")),
+            ["x", "q"]
+        );
+        assert_eq!(
+            keys(&ok(".include \"first_closed2.inc\"\nq = 1")),
+            ["x", "q"]
+        );
+        assert_eq!(
+            keys(&ok(".include \"first_after_macro.inc\"\nq = 1\n}")),
+            ["x", "q"]
+        );
+        assert_eq!(
+            keys(&ok(".include \"first_run.inc\"\nq = 1\n}")),
+            ["s", "q"]
+        );
+        assert_eq!(
+            keys(&ok(".include(key=\"k\") \"first_closed.inc\"\nq = 1")),
+            ["k", "q"]
+        );
+        let v = ok(".include \"second.inc\"\nq = 1");
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "q"]);
+        // Not once the `}` has removed that brace.
+        let v = ok(".include \"brace_gone.inc\"\nq = 1");
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "q"]);
+    }
+
+    #[test]
+    fn empty_files_and_merged_nulls() {
+        // Oracle runs (QUESTIONS.md #43, #44).
+        let files = [
+            ("/c/empty.txt", ""),
+            ("/c/ws.inc", "\n"),
+            ("/c/kv.inc", "k =\n# c\n"),
+        ];
+        let p = |flags| parser(&files, flags | ParserFlags::SAVE_COMMENTS);
+        let placements = |p: &Parser| -> Vec<(Vec<PathSegment>, CommentPlacement)> {
+            p.attached_comments()
+                .iter()
+                .map(|g| (g.path.clone(), g.placement))
+                .collect()
+        };
+        let key = |k: &str| PathSegment::Key {
+            key: k.into(),
+            index: 0,
+        };
+        // Comments pending before a file of no bytes stay pending.
+        let mut parser = p(ParserFlags::DEFAULT);
+        parser
+            .parse(b"a = 1\n# c\n.include \"empty.txt\"\nb = 1")
+            .unwrap();
+        assert_eq!(
+            placements(&parser),
+            [(vec![key("b")], CommentPlacement::Before)]
+        );
+        let mut parser = p(ParserFlags::DEFAULT);
+        parser
+            .parse(b"a = 1\n# c\n.include \"ws.inc\"\nb = 1")
+            .unwrap();
+        assert_eq!(
+            placements(&parser),
+            [(vec![key("a")], CommentPlacement::After)]
+        );
+        let mut parser = p(ParserFlags::DEFAULT);
+        parser
+            .parse(b"# c\n.include(key=\"k\") \"empty.txt\"\nb = 1")
+            .unwrap();
+        assert_eq!(
+            placements(&parser),
+            [(vec![key("b")], CommentPlacement::Before)]
+        );
+        // Under merge, the null that ends a unit goes into a container first value.
+        for (input, merged) in [
+            ("k { a = 1 }\n# c\nk =\n", true),
+            ("k = [1]\nk =\n", true),
+            ("k = 1\nk =\n", false),
+            ("k { a = 1 }\nk = null", false),
+        ] {
+            let mut parser = p(ParserFlags::DEFAULT);
+            parser.set_strategy(DuplicateStrategy::Merge);
+            let v = parser.parse(input.as_bytes()).unwrap();
+            let k = obj(&v).entry("k").unwrap();
+            assert_eq!(k.first().is_null(), !merged && k.len() == 1, "{input:?}");
+            assert_eq!(
+                k.first().is_object() || k.first().is_array(),
+                merged,
+                "{input:?}"
+            );
+        }
+        let mut parser = p(ParserFlags::DEFAULT);
+        parser.set_strategy(DuplicateStrategy::Merge);
+        parser.parse(b"k { a = 1 }\n# c\nk =\n").unwrap();
+        assert_eq!(
+            placements(&parser),
+            [(vec![key("k")], CommentPlacement::Before)]
+        );
+        let v = run(
+            &files,
+            "k { a = 1 }\n.include(duplicate=\"merge\") \"kv.inc\"\nm = 1",
+        )
+        .unwrap();
+        assert_eq!(keys(&obj(&v)["k"]), ["a"]);
+    }
+
+    #[test]
+    fn root_closed_by_included_file_and_names_before_end() {
+        // Oracle runs (QUESTIONS.md #46, #47).
+        let files = [
+            ("/c/close.inc", "a = 1 }\n"),
+            ("/c/close_more.inc", "a = 1 }\nb = 2\n"),
+            ("/c/mid.inc", ".include \"close.inc\"\nz = 1\n"),
+        ];
+        let ok = |input: &str| keys(&run(&files, input).unwrap());
+        for input in [
+            "{\n.include \"close.inc\"\n",
+            "{\n.include \"close.inc\";;\n\n",
+            "{\n.include \"close_more.inc\"",
+        ] {
+            assert_eq!(ok(input), ["a"], "{input:?}");
+        }
+        for input in [
+            "{\n.include \"close.inc\"\nk = 1",
+            "{\n.include \"close.inc\"\n# c",
+            "{\n.include \"close.inc\"\n}",
+            "{\n.include \"mid.inc\"",
+        ] {
+            let e = run(&files, input).unwrap_err();
+            assert_eq!(e.kind(), &ErrorKind::AfterRootClosedByInclude, "{input:?}");
+        }
+        // The bracket of a name in a comment after a VT or FF: the next name may come on a
+        // later line, and the end of input keeps the objects.
+        assert_eq!(ok("a \x0c# {"), ["a"]);
+        assert_eq!(ok("a b \x0c/* { */\n\nc {}"), ["a"]);
+        let v = run(&files, "a \x0c# {\n\nb {}").unwrap();
+        assert_eq!(keys(&obj(&v)["a"]), ["b"]);
+        for input in ["a \x0c# {\n #", "a \x0c/* { */ #", "\"a\" \x0c# {\nb = 1"] {
+            assert!(run(&files, input).is_err(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn comments_follow_a_value_moved_into_a_key_array() {
+        // Oracle runs: `target="array"` moves K's first value into a new array.
+        let mut p = parser(&[A], ParserFlags::SAVE_COMMENTS);
+        p.parse(b"# c1\nk = 1\n# c2\nk = 2\n.include(key=\"k\", target=\"array\") \"files/a.inc\"")
+            .unwrap();
+        let paths: Vec<_> = p
+            .attached_comments()
+            .iter()
+            .map(|g| g.path.clone())
+            .collect();
+        let k = PathSegment::Key {
+            key: "k".into(),
+            index: 0,
+        };
+        assert_eq!(paths, [vec![k, PathSegment::Index(0)]]);
+    }
+
+    fn files_with_close2<'a>(files: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+        let mut all = files.to_vec();
+        all.push(("/c/close2.inc", "a = 1 } }\n"));
+        all
     }
 
     #[test]
@@ -854,6 +1214,40 @@ mod tests {
         let e = run(&files, "k = 1\n.include(glob=true) \"g/none*\"\nm = 1").unwrap_err();
         assert!(e.is_stopped());
         assert_eq!(ok(".try_include(glob=true) \"g/none*\"\nm = 1"), ["m"]);
+        // A match that is the including file: an error for .include, skipped by .try_include,
+        // with try=false too unless no other match is included (spec §9.4, *Globs*).
+        let files = [
+            (
+                "/c/t/main.inc",
+                ".try_include(glob=true, try=false) \"t/*.inc\"\nafter = 1\n",
+            ),
+            ("/c/t/other.inc", "other = 1\n"),
+            (
+                "/c/t2/only.inc",
+                ".try_include(glob=true, try=false) \"t2/*.inc\"\n",
+            ),
+            (
+                "/c/t3/only.inc",
+                ".include(glob=true, try=true) \"t3/*.inc\"\n",
+            ),
+        ];
+        let v = run(&files, ".include \"t/main.inc\"\nk = 1").unwrap();
+        assert_eq!(keys(&v), ["other", "after", "k"]);
+        for input in [".include \"t2/only.inc\"", ".include \"t3/only.inc\""] {
+            let e = run(&files, input).unwrap_err();
+            assert!(
+                matches!(e.kind(), ErrorKind::IncludeSelf { .. }),
+                "{input:?}: {e}"
+            );
+        }
+        let files = [
+            ("/c/g/b.inc", "gb = 1\n"),
+            ("/c/g/a.inc", "ga = 1\n"),
+            ("/c/p1/pa.inc", "pa = 1\n"),
+            ("/c/p2/pa.inc", "pb = 1\n"),
+            ("/c/p2/pc.inc", "pc = 1\n"),
+        ];
+        let ok = |input: &str| keys(&run(&files, input).unwrap());
         // Search paths: the first directory decides for .include; .try_include searches.
         assert_eq!(ok(".include(path=[\"p1\", \"p2\"]) \"pa.inc\""), ["pa"]);
         assert!(run(&files, ".include(path=[\"p1\", \"p2\"]) \"pc.inc\"").is_err());
@@ -883,14 +1277,47 @@ mod tests {
         // Project decisions: URLs are never fetched, signatures never verified.
         for input in [
             ".include(url=true) \"http://example.invalid/x.inc\"",
-            ".include(url=true, try=true) \"http://example.invalid/x.inc\"",
-            ".try_include(url=true) \"http://example.invalid/x.inc\"",
+            ".try_include(url=true, try=false) \"http://example.invalid/x.inc\"",
+            ".include(url=true, glob=true, key=\"k\") \"http://example.invalid/*\"",
         ] {
             let e = run(&[A], input).unwrap_err();
             assert!(
                 matches!(e.kind(), ErrorKind::UrlNotSupported { .. }),
                 "{input:?}"
             );
+        }
+        // With `try`, and for .try_include, it is skipped without a stop, before globs, keys and
+        // the search path (spec §9.4); its own `path` list still takes effect (oracle runs).
+        let files = [
+            A,
+            ("/c/p1/pa.inc", "pa = 1\n"),
+            ("/c/p2/pc.inc", "pc = 1\n"),
+        ];
+        for (input, expected) in [
+            (
+                "a = 1\n.include(url=true, try=true) \"http://example.invalid/x.inc\"\nb = 2",
+                &["a", "b"][..],
+            ),
+            (
+                "a = 1\n.try_include(url=true) \"http://example.invalid/x.inc\"\nb = 2",
+                &["a", "b"],
+            ),
+            (
+                ".include(url=true, try=true, key=\"k\") \"http://example.invalid/x.inc\"\nb = 2",
+                &["b"],
+            ),
+            (
+                ".include(path=[\"p1\"]) \"pa.inc\"\n\
+                 .include(url=true, try=true) \"http://example.invalid/x.inc\"\nb = 2",
+                &["pa", "b"],
+            ),
+            (
+                ".include(url=true, try=true, path=[\"p2\"]) \"http://x.invalid/y\"\n\
+                 .include \"pc.inc\"",
+                &["pc"],
+            ),
+        ] {
+            assert_eq!(keys(&run(&files, input).unwrap()), expected, "{input:?}");
         }
         assert_eq!(
             keys(&run(&[A], ".include(url=true) \"files/a.inc\"").unwrap()),

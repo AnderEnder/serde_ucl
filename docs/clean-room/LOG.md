@@ -545,3 +545,102 @@
   parser fails 91. Cases that crash the oracle are not committed. Both runners green at every
   commit. Commits: `71c7dd4`, `8c9eb8e`, `e2abbea`. The spec contains behaviour only: no libucl
   code, internal names, or procedures.
+- 2026-09-23 — **Implementation team, C3c (the new parser core brought up to `spec-v5`).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `WORKLIST.md` (C3 decisions, decision 2 as amended),
+      `LOG.md` (the C3b and `spec-v5` entries), `QUESTIONS.md` (#23–#33 in full);
+    - spec `spec-v5`, read from the working tree after checking that
+      `git diff --stat spec-v5 HEAD -- docs/spec/` is empty: `git diff spec-v4 spec-v5 --
+      docs/spec/` in full; §9.1, §9.4 (all subsections), §3.4, §12.5, §8.4; single lines of §1.1,
+      §1.6 and §3.1 found with `grep`;
+    - `tests/conformance/xfail-new.txt`, the header of `tests/conformance.rs`; the inputs and
+      golden files of the 11 `spec-v5` entries, of `cases/spec/03-keys/section_path_left_open_*`
+      and of `cases/spec/09-macros/comments_include_key_*`, `comments_end_of_included_file`,
+      `comments_carry_into_included_file`; the helper files under `cases/spec/09-macros/files/`
+      (copied to `target/c3c/p/files/`) and the first byte of the helper files there and under
+      `libucl/basic/`;
+    - the crate's own code: `src/parse/core.rs`, `macros.rs`, `include.rs`, `comments.rs`,
+      `error.rs`, parts of `mod.rs` and `src/value.rs`; my C3b scratch differential tool, copied
+      to `target/c3c/difftool/` and changed (the skip of macros after a name removed, oracle
+      crashes counted apart and not compared, a two-unit mode in which part of the input becomes
+      an included file, generators for name runs and for two-unit include inputs), a runner
+      `target/c3c/run.sh` and a bucketing script `target/c3c/triage.py` (implementation-team
+      code, not committed);
+    - black-box runs of `target/libucl-oracle/ucl-dump`, stderr discarded: about 300 probes on
+      scratch inputs and on 85 helper files of my own under `target/c3c/p/files/c3c/`, options
+      `-c`, `-l`, `-I`, `-s`, `-v FILE=f`; differential runs (below);
+    - general Rust documentation (general knowledge); `cargo build`, `cargo test`,
+      `cargo clippy`, `rustfmt` output.
+  - Seen without opening the files:
+    - the worktree's `CLAUDE.md` was loaded into the session automatically; its text is the
+      clean version embedded in the agent definition. The session's git status listed
+      `PLAN.md`, `REVIEW.md` and `.claude/` as untracked and `CLAUDE.md` as modified in the main
+      checkout, by name;
+    - the header of `tests/conformance.rs` names `PLAN.md` P0.5; not followed;
+    - `cargo clippy` printed two code lines of a pre-existing file outside `src/parse/`
+      (`if self.nesting_depth == 0 {`, `return Err(LexError::UnexpectedCharacter {`, so
+      `src/lexer.rs`); the file was not opened and nothing from it was used;
+    - the harness writes background-command output under `/private/tmp`; those files were not
+      opened (the runs write their own summaries under `target/c3c/runs/`).
+  - Not consulted: libucl source; anything under `target/libucl-oracle/` other than running
+    `ucl-dump`; `scripts/regen-golden.sh` (neither read nor run); `REVIEW.md`, `PLAN.md`,
+    `PROGRESS.md`; `quarantine/*`; history of `src/` before `ef8007e`; history of `CLAUDE.md`;
+    `src/lexer.rs`, `src/parser.rs`; `/tmp`, `/private/tmp` and the session scratchpad.
+    `docs/spec/` and golden files were not edited.
+  - Changes (spec-v5):
+    - `include.rs`: a `url=true` include with `://` is decided before the search path, globs
+      and key nesting: skipped with `try` (and for `.try_include`, not a silent stop), an error
+      without; its `path` list still takes effect (#37). `.try_include(glob=true, try=false)`
+      skips a match that is the including file and fails when it included no match (#33).
+    - `core.rs`: the object a key-nested file goes into shares a brace taken over by the object
+      where the macro stands (#39). A macro directly after a name starts a name run: the next key
+      read in the unit counts as a word after a name, a name when a separator follows (§9.1,
+      #38). At the end of a unit where whitespace and at least one comment followed the run's
+      last macro, the value created most recently is reopened as a left-open object of that
+      unit (#34–#36); for this the core keeps the value created most recently, by path, while a
+      name run is in effect, also without `save-comments`. The block-comment scanner is shared
+      by the skipper and that check. #27 (key spelling) needed no change.
+  - Changes (differences found by the differential runs): the end-of-unit check stops at the
+    first container any other unit opened, as §9.4 says (#41); a section object whose brace a
+    file took over closes with a bracketed container opened in it (#40); the first key of a file
+    whose leading `{` took over a brace still held gives its first name's object a share (#42);
+    a file of zero bytes attaches no pending comments at its end (#43); under `merge` the `null`
+    that ends a unit merges into a container first value (#44); a name whose bracket is in a
+    comment after VT or FF lets the next name come on a later line, and the end of input keeps
+    the objects (#46); after a macro whose file closed the braced root only whitespace and `;`
+    may follow (#47, new `ErrorKind::AfterRootClosedByInclude`); saved comments follow a value
+    that `target="array"` moves into a new array (§12.5). Unit tests for all of these.
+  - Choices where the spec leaves the behaviour Uncertain or it crashes the oracle: the
+    comment-to-end quirk leaves a value that is not an object alone (§9.1); a container of an
+    ended unit counts as opened by a later unit at the same include depth (§9.4, unchanged); an
+    included file starting with `[` is an error at the `[` (#45); a key-nested file's `}` under
+    an object with only its own bracket is an error (§9.4, unchanged); an array element closed
+    by an included file leaves the array open for the including unit (#48).
+  - Differential runs: 83 runs, flags none, `-c`, `-l`, `-I`, `-s merge|rewrite|error`, `-F`,
+    `-S`, `-l -I -c`; generators for name runs, single unit and two units (a name directly before
+    `.priority`, `.inherit`, `.include` with and without `try`, `glob`, `key`, `prefix`,
+    `target="array"` and URLs, `.try_include` of missing files, with `try=false` and with URLs,
+    `.load` and `.foo`), two-unit includes, and the C3a/C3b generators (the include generator
+    with bare names added), the C3b flag matrix for includes included. Each run as last made:
+    476,713 inputs generated (runs that share a seed and generator but differ in flags reuse
+    the same inputs); 707 crashed the oracle and were not compared; 476,006 compared, with no
+    macro-after-name skip (as in C3b, an input whose oracle result holds non-UTF-8 bytes, or that
+    the crate rejects as unsupported, counts as no difference). 32 differences, all bucketed by
+    hand: 25 an included file starting with `[` that holds an object (#45; the same files crash
+    the oracle at the top level), 6 comments of a value replaced by a higher priority
+    reappearing on a later value (§12.5, Uncertain), 1 a VT before a block comment between array
+    elements (#49, §1.5, not a macro behaviour, left unchanged). One earlier run also showed 2
+    differences of the §9.4 Uncertain unit case, which the oracle did not reproduce under a
+    different file name. The first campaign, before the changes above that came from it, found
+    141 differences; the extended generators then found the lost comments of a value that
+    `target="array"` moves (fixed, below), and the `-c` runs were made again after that fix.
+  - Questions: `QUESTIONS.md` #34–#49.
+  - Result: `xfail-new.txt` has 4 entries: 2 `divergence:signature`, 1
+    `divergence:argument-depth`, 1 `non-utf8`; the 11 `spec-v5` entries are removed. New core:
+    1254 cases, 1250 pass. Existing parser: 470 pass, 784 expected failures; `xfail.txt` is
+    unchanged. `cargo test`: 481 tests pass. `cargo build --examples --benches`,
+    `cargo check --no-default-features` and `cargo check --features load` succeed.
+  - Commits: the `C3c:` commits `a028700`, `e7fe4cc`, `5acdf73`, `05ed763`, and those that add
+    and amend this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

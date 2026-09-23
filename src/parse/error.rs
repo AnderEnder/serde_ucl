@@ -180,6 +180,10 @@ pub enum ErrorKind {
     IncludeTooDeep { limit: usize },
     /// An included file starts with `[` where a bracketed root would start (spec §9.4).
     IncludeArrayRoot,
+    /// Input after a macro whose included file closed the braced root of the document: only
+    /// whitespace and `;` may follow there, up to the end of the unit (oracle runs,
+    /// QUESTIONS.md #47).
+    AfterRootClosedByInclude,
     /// Nesting an included file under key `key` (`key`, `prefix`), whose first value is not an
     /// object, without `target="array"` (spec §9.4).
     IncludeTargetNotObject { key: String },
@@ -278,6 +282,9 @@ impl fmt::Display for ErrorKind {
                 write!(f, "more than {limit} files are included inside one another")
             }
             ErrorKind::IncludeArrayRoot => f.write_str("an included file cannot start with '['"),
+            ErrorKind::AfterRootClosedByInclude => {
+                f.write_str("an included file closed the root object; nothing may follow the macro")
+            }
             ErrorKind::IncludeTargetNotObject { key } => write!(
                 f,
                 "cannot include into key '{key}': its value is not an object"

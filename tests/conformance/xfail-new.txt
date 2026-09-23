@@ -23,18 +23,7 @@
 # The list may only shrink. The runner fails when a listed case passes: delete its line.
 # New cases may be added here only together with the case itself.
 
-cases/spec/09-macros/include_key_close_brace_under_taken_over_brace spec-v5  # §9.4
 cases/spec/09-macros/include_sign_param_no_effect divergence:signature  # sign=true is rejected
-cases/spec/09-macros/include_url_before_search_path spec-v5  # §9.4
-cases/spec/09-macros/include_url_key_not_created spec-v5  # §9.4
-cases/spec/09-macros/include_url_try_skipped spec-v5  # §9.4
 cases/spec/09-macros/includes_like_include divergence:signature  # .includes is rejected
-cases/spec/09-macros/macro_after_name_comment_to_end_after_bracket_closed spec-v5  # §9.1
-cases/spec/09-macros/macro_after_name_next_line_separator_key_error spec-v5  # §9.1
-cases/spec/09-macros/macro_after_name_priority_then_separator_key_error spec-v5  # §9.1
-cases/spec/09-macros/macro_after_name_separator_keys_chain spec-v5  # §9.1
-cases/spec/09-macros/macro_after_name_then_separator_key_is_name_error spec-v5  # §9.1
 cases/spec/09-macros/macro_args_nested_100_levels divergence:argument-depth  # argument documents nest at most 64 deep (§9.2)
-cases/spec/09-macros/try_include_glob_try_false_skips_self spec-v5  # §9.4
-cases/spec/09-macros/try_include_url_skipped spec-v5  # §9.4
 libucl/basic/22 non-utf8  # the key is the single byte 0xFF
