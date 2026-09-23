@@ -26,7 +26,8 @@
 //!
 //! The default formats do not always read back as the same value; spec §10.8 lists where they
 //! differ. Floats, for instance, keep at most six decimals. The serde functions of
-//! [`crate::ser`] use the same layouts with forms that read back exactly.
+//! [`crate::ser`] use the same layouts with forms that read back exactly, except that their JSON
+//! output, which is valid JSON, writes a time as its seconds, which read back as a float.
 
 mod config;
 mod json;
@@ -60,7 +61,9 @@ pub(crate) enum Mode {
     /// As libucl writes them (spec §10.2–§10.7), quirks included.
     Libucl,
     /// In forms that read back as exactly the value written (spec §10.8), for serde
-    /// serialization ([`crate::ser`]). Output facts and saved comments are not used.
+    /// serialization ([`crate::ser`]). Output facts and saved comments are not used. JSON and
+    /// compact JSON are valid JSON (RFC 8259): a time is written as its number of seconds, and a
+    /// NaN or infinite float or time has no form there (WORKLIST.md C4, decision 2).
     RoundTrip,
 }
 
@@ -86,7 +89,8 @@ impl<'a> Emitter<'a> {
 
     /// The emitter in round-trip mode: every value is written in a form that libucl and
     /// [`crate::parse`] read back as exactly that value (spec §10.8), in the layouts of the
-    /// emitter's format. Use [`Emitter::try_emit`]; see [`crate::ser`] for the forms and for the
+    /// emitter's format; in JSON and compact JSON a time is written as its seconds and reads back
+    /// as a float. Use [`Emitter::try_emit`]; see [`crate::ser`] for the forms and for the
     /// values that have none.
     pub(crate) fn round_trip(mut self) -> Self {
         self.mode = Mode::RoundTrip;
@@ -151,6 +155,7 @@ impl<'a> Emitter<'a> {
             comments,
             path: Vec::new(),
             mode: self.mode,
+            json: exact && matches!(self.format, Format::Json | Format::JsonCompact),
             error: None,
         };
         if exact && !matches!(value, UclValue::Object(_) | UclValue::Array(_)) {
@@ -247,6 +252,8 @@ struct Writer<'a> {
     track: bool,
     path: Vec<PathSegment>,
     mode: Mode,
+    /// Round-trip mode in JSON or compact JSON: numbers are JSON numbers.
+    json: bool,
     /// In round-trip mode, the first value that has no exact form.
     error: Option<String>,
 }
@@ -335,7 +342,9 @@ impl<'a> Writer<'a> {
     }
 
     /// Round-trip mode: a scalar in a form that reads back exactly (spec §10.8). Strings of the
-    /// config format may use single quotes (`config`); the other formats use double quotes.
+    /// config format may use single quotes (`config`); the other formats use double quotes. In
+    /// JSON, a float and a time are JSON numbers, the time as its seconds, which read back as a
+    /// float.
     fn exact_scalar(&mut self, value: &UclValue, config: bool) {
         let result = match value {
             UclValue::Integer(i) => {
@@ -343,6 +352,10 @@ impl<'a> Writer<'a> {
                 let _ = write!(self.out, "{i}");
                 Ok(())
             }
+            UclValue::Float(f) if self.json => {
+                number::write_json_number(&mut self.out, *f, "float")
+            }
+            UclValue::Time(t) if self.json => number::write_json_number(&mut self.out, *t, "time"),
             UclValue::Float(f) => number::write_exact_float(&mut self.out, *f),
             UclValue::Time(t) => number::write_exact_time(&mut self.out, *t),
             UclValue::String(s) if config => text::write_exact_config_string(&mut self.out, s),

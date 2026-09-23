@@ -214,9 +214,10 @@ pub(crate) fn write_exact_config_string(out: &mut String, s: &str) -> Result<(),
 /// Whether `s`, written in single quotes with each `'` as `\'`, reads back as `s` (spec §6.2).
 ///
 /// A reader takes a backslash together with the byte after it: `\'` is a quote, a backslash with
-/// LF, CR LF or (in libucl) CR is removed as a line continuation, and any other pair stays as
-/// written. So every backslash of `s`, paired from the left, must be followed by a byte other than
-/// `'`, LF or CR.
+/// LF, CR LF or a lone CR is removed as a line continuation, and any other pair stays as written.
+/// So every backslash of `s`, paired from the left, must be followed by a byte other than `'`, LF
+/// or CR. This is the condition of spec §10.8: every run of backslashes directly before a `'`, an
+/// LF, a CR or the end of the string has even length.
 pub(crate) fn single_quotes_hold(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut i = 0;

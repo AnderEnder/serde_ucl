@@ -156,8 +156,9 @@
 //! [`to_string`] writes any `Serialize` value in the UCL config format; [`to_json_string`],
 //! [`to_json_string_compact`] and [`to_yaml_string`] write the other output formats, and
 //! [`to_writer`] writes the config format to an `io::Write`. The output reads back, in libucl and
-//! in the new parser core ([`parse`]), as exactly the value written, floats included; see [`ser`]
-//! for the forms used and the values that have none. [`to_value`] and [`from_value`] convert
+//! in the new parser core ([`parse`]), as exactly the value written, floats included; the JSON
+//! output is valid JSON, in which a time is its number of seconds and reads back as a float. See
+//! [`ser`] for the forms used and the values that have none. [`to_value`] and [`from_value`] convert
 //! between Rust values and the [`UclValue`] tree.
 //!
 //! ```rust

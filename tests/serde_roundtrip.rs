@@ -17,6 +17,14 @@
 //!   `UCL_SERDE_REGEN=1 cargo test --test serde_roundtrip corpus` rewrites the corpus with the
 //!   oracle; it refuses to write a dump that differs from the value serialized.
 //!
+//! - `json_output_is_json`: what `to_json_string` and `to_json_string_compact` write for the
+//!   generated values is JSON that `serde_json` reads as the value, times as their seconds
+//!   (WORKLIST.md C4, decision 2).
+//!
+//! JSON has no form for NaN and infinite floats and times, and writes a time as its number of
+//! seconds, which reads back as a float: in JSON and compact JSON, a value is compared with its
+//! reading in which every time is a float ([`expected_reading`]).
+//!
 //! Reader variables: libucl's oracle and `read_core` define `FILENAME` and `CURDIR` and register
 //! `ABI`. The config format reads back exactly whatever is registered. In JSON, compact JSON and
 //! YAML a string that refers to `FILENAME` or `CURDIR` must be an error, and one that refers to
@@ -72,6 +80,11 @@ impl Fmt {
     /// Whether strings are written double-quoted, and so expand variable references.
     fn expands(self) -> bool {
         self != Fmt::Config
+    }
+
+    /// JSON or compact JSON, which are valid JSON (WORKLIST.md C4, decision 2).
+    fn is_json(self) -> bool {
+        matches!(self, Fmt::Json | Fmt::Compact)
     }
 }
 
@@ -194,21 +207,77 @@ fn any_string(value: &UclValue, test: &dyn Fn(&str) -> bool) -> bool {
 
 /// Whether `value` has no form in `fmt` (see `ucl_lexer::ser`), so that serializing it must fail
 /// with `SerdeError::Unrepresentable`: in the config format a string that single quotes cannot
-/// hold, in the others a string that refers to a file variable.
+/// hold, in the others a string that refers to a file variable; and a float or time of
+/// [`number_unwritable`].
 fn expect_error(value: &UclValue, fmt: Fmt) -> bool {
-    if fmt == Fmt::Config {
+    let strings = if fmt == Fmt::Config {
         any_string(value, &config_unwritable)
     } else {
         any_string(value, &|s| {
             refers_to(s, "FILENAME") || refers_to(s, "CURDIR")
         })
-    }
+    };
+    strings || any_number(value, &|v, time| number_unwritable(v, time, fmt))
 }
 
 /// Whether the output of `value` in `fmt` expands when read by `read_core` or the oracle, which
 /// register `ABI`: a reader precondition (see `ucl_lexer::ser`), so such values are not compared.
 fn reader_dependent(value: &UclValue, fmt: Fmt) -> bool {
     fmt.expands() && any_string(value, &|s| refers_to(s, "ABI"))
+}
+
+/// The smallest positive time with a form: the smallest normal float followed by `ms`
+/// (spec §10.8).
+const SMALLEST_MS_TIME: f64 = f64::MIN_POSITIVE / 1000.0;
+
+/// Whether any float or time of `value` satisfies `test`, which is told whether it is a time.
+fn any_number(value: &UclValue, test: &dyn Fn(f64, bool) -> bool) -> bool {
+    match value {
+        UclValue::Float(f) => test(*f, false),
+        UclValue::Time(t) => test(*t, true),
+        UclValue::Object(obj) => obj
+            .iter()
+            .any(|(_, e)| e.values().any(|v| any_number(v, test))),
+        UclValue::Array(items) => items.iter().any(|v| any_number(v, test)),
+        _ => false,
+    }
+}
+
+/// Whether a float or time has no form in `fmt` (see `ucl_lexer::ser`, spec §10.8): a subnormal
+/// float, a NaN time and a time closer to zero than [`SMALLEST_MS_TIME`] in every format, and in
+/// JSON also NaN, the infinities and every subnormal value.
+fn number_unwritable(v: f64, time: bool, fmt: Fmt) -> bool {
+    if fmt.is_json() {
+        !v.is_finite() || v.is_subnormal()
+    } else if time {
+        v.is_nan() || (v.is_subnormal() && v.abs() < SMALLEST_MS_TIME)
+    } else {
+        v.is_subnormal()
+    }
+}
+
+/// The value that reading the output of `value` in `fmt` gives: `value` itself, except that in
+/// JSON and compact JSON every time is written as its seconds and so reads back as a float.
+fn expected_reading(value: &UclValue, fmt: Fmt) -> UclValue {
+    if !fmt.is_json() {
+        return value.clone();
+    }
+    match value {
+        UclValue::Time(t) => UclValue::Float(*t),
+        UclValue::Object(obj) => {
+            let mut out = UclObject::new();
+            for (k, e) in obj.iter() {
+                for v in e.values() {
+                    out.append(k.clone(), expected_reading(v, fmt));
+                }
+            }
+            UclValue::Object(out)
+        }
+        UclValue::Array(items) => {
+            UclValue::Array(items.iter().map(|v| expected_reading(v, fmt)).collect())
+        }
+        other => other.clone(),
+    }
 }
 
 /// Whether a string has no config form (see `ucl_lexer::ser`): it contains `$`, and a
@@ -260,7 +329,7 @@ fn check_core(value: &UclValue, fmt: Fmt) -> Result<Checked, String> {
         return Ok(Checked::Skipped);
     }
     let back = read_core(text.as_bytes()).map_err(|e| format!("{fmt:?}: {e}\n{text}"))?;
-    match find_diff(&dump(value), &dump(&back), "$") {
+    match find_diff(&dump(&expected_reading(value, fmt)), &dump(&back), "$") {
         None => Ok(Checked::Exact),
         Some(d) => Err(format!("{fmt:?}: {d}\n--- text:\n{text}")),
     }
@@ -292,6 +361,9 @@ struct Rng {
     state: u64,
     /// Whether generated strings may refer to reader variables (see [`REFERENCE_PIECES`]).
     references: bool,
+    /// Whether generated floats and times may be values that JSON cannot write: NaN, the
+    /// infinities and subnormal times.
+    non_json: bool,
 }
 
 impl Rng {
@@ -303,6 +375,7 @@ impl Rng {
         Rng {
             state: seed,
             references: true,
+            non_json: true,
         }
     }
 
@@ -447,25 +520,50 @@ const SPECIAL_FLOATS: &[f64] = &[
     f64::NEG_INFINITY,
 ];
 
-/// A float with a form (spec §10.8): any finite non-subnormal value, NaN and the infinities.
+/// A float with a form in the config and YAML formats (spec §10.8): any finite non-subnormal
+/// value, NaN and the infinities; without `non_json`, finite values only.
 fn gen_float(rng: &mut Rng) -> f64 {
-    match rng.below(5) {
-        0 => *rng.pick(SPECIAL_FLOATS),
-        1 => f64::NAN,
-        2 => {
-            let digits = (rng.next() % 2_000_001) as f64 - 1_000_000.0;
-            digits / 10f64.powi(rng.below(12) as i32)
-        }
-        _ => loop {
-            let v = f64::from_bits(rng.next());
-            if !v.is_subnormal() {
-                break v;
+    loop {
+        let v = match rng.below(5) {
+            0 => *rng.pick(SPECIAL_FLOATS),
+            1 => f64::NAN,
+            2 => {
+                let digits = (rng.next() % 2_000_001) as f64 - 1_000_000.0;
+                digits / 10f64.powi(rng.below(12) as i32)
             }
-        },
+            _ => f64::from_bits(rng.next()),
+        };
+        if !v.is_subnormal() && (rng.non_json || v.is_finite()) {
+            return v;
+        }
     }
 }
 
+/// Subnormal times at the edges of the range that `ms` gives (spec §10.8): the smallest one,
+/// the times just below it, which have no form, and the largest subnormal value.
+/// (`2.2250738585065e-311` is the value just below the smallest one.)
+const SUBNORMAL_TIMES: &[f64] = &[
+    SMALLEST_MS_TIME,
+    -SMALLEST_MS_TIME,
+    2.2250738585065e-311,
+    5e-324,
+    -1e-315,
+    2.225073858507201e-308,
+    1e-310,
+];
+
+/// A time: a float of [`gen_float`] other than NaN, or with `non_json` sometimes a subnormal
+/// time, most of which have a form through `ms`.
 fn gen_time(rng: &mut Rng) -> f64 {
+    if rng.non_json && rng.chance(10) {
+        return match rng.below(2) {
+            0 => *rng.pick(SUBNORMAL_TIMES),
+            _ => {
+                let v = f64::from_bits(rng.next() % (1 << 52));
+                if rng.chance(50) { -v } else { v }
+            }
+        };
+    }
     loop {
         let v = gen_float(rng);
         if !v.is_nan() {
@@ -642,18 +740,24 @@ const CHARS: &[char] = &[
     'a', 'Z', '0', ' ', '\0', '\n', '\t', '"', '\'', '\\', '$', '{', 'é', '😀', '\u{7f}',
 ];
 
+/// Without `non_json`, finite values only.
 fn gen_f32(rng: &mut Rng) -> f32 {
-    match rng.below(4) {
-        0 => *rng.pick(&[
-            0.1f32,
-            -0.0,
-            f32::MAX,
-            f32::MIN_POSITIVE,
-            f32::NAN,
-            f32::INFINITY,
-            1e-45,
-        ]),
-        _ => f32::from_bits(rng.next() as u32),
+    loop {
+        let v = match rng.below(4) {
+            0 => *rng.pick(&[
+                0.1f32,
+                -0.0,
+                f32::MAX,
+                f32::MIN_POSITIVE,
+                f32::NAN,
+                f32::INFINITY,
+                1e-45,
+            ]),
+            _ => f32::from_bits(rng.next() as u32),
+        };
+        if rng.non_json || v.is_finite() {
+            return v;
+        }
     }
 }
 
@@ -770,7 +874,10 @@ fn check_typed<T: Serialize + DeserializeOwned>(original: &T, fmt: Fmt) -> Resul
     let text = fmt.write(original).map_err(|e| e.to_string())?;
     let back = read_core(text.as_bytes())?;
     let again = typed_back::<T>(back).map_err(|e| format!("{fmt:?}: from_value: {e}\n{text}"))?;
-    match find_diff(&dump(&tree), &dump(&again), "$") {
+    // In JSON a `Duration` comes back as itself through `ucl_lexer::time`, and a time in a
+    // `UclValue` field as a float; both sides are compared as JSON reads them.
+    let expected = expected_reading(&tree, fmt);
+    match find_diff(&dump(&expected), &dump(&expected_reading(&again, fmt)), "$") {
         None => Ok(Checked::Exact),
         Some(d) => Err(format!("{fmt:?}: typed: {d}\n--- text:\n{text}")),
     }
@@ -785,6 +892,8 @@ fn generated_values_round_trip_through_the_core() {
     let mut tally = Tally::default();
     let mut failures = Vec::new();
     for n in 0..3000 {
+        // Every other value has no float or time that JSON cannot write.
+        rng.non_json = n % 2 == 0;
         let value = gen_root(&mut rng);
         for (i, fmt) in FORMATS.into_iter().enumerate() {
             match check_core(&value, fmt) {
@@ -817,8 +926,9 @@ fn generated_typed_values_round_trip_through_the_core() {
     let mut failures = Vec::new();
     for n in 0..600 {
         // Every other sample has no reference to a variable, so that the formats with double
-        // quotes can write it and compare it.
+        // quotes can write it and compare it, and no float or time that JSON cannot write.
         rng.references = n % 2 == 0;
+        rng.non_json = n % 2 == 0;
         let sample = gen_sample(&mut rng);
         for (i, fmt) in FORMATS.into_iter().enumerate() {
             match check_typed(&sample, fmt) {
@@ -838,6 +948,172 @@ fn generated_typed_values_round_trip_through_the_core() {
         tally.exact[0] > 500 && tally.exact[1..].iter().all(|&c| c > 300),
         "{tally:?}"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// JSON output is JSON (WORKLIST.md C4, decision 2)
+
+/// A JSON text as `serde_json` reads it: every member of every object in order, repeated names
+/// included, integers as integers and other numbers by the bits of the `f64` serde_json gives.
+#[derive(Debug, PartialEq)]
+enum JsonTree {
+    Null,
+    Bool(bool),
+    Int(i128),
+    Float(u64),
+    Str(String),
+    Array(Vec<JsonTree>),
+    Object(Vec<(String, JsonTree)>),
+}
+
+impl<'de> Deserialize<'de> for JsonTree {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = JsonTree;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON value")
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<JsonTree, E> {
+                Ok(JsonTree::Null)
+            }
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<JsonTree, E> {
+                Ok(JsonTree::Bool(v))
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<JsonTree, E> {
+                Ok(JsonTree::Int(v.into()))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<JsonTree, E> {
+                Ok(JsonTree::Int(v.into()))
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<JsonTree, E> {
+                Ok(JsonTree::Float(v.to_bits()))
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<JsonTree, E> {
+                Ok(JsonTree::Str(v.to_owned()))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<JsonTree, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(JsonTree::Array(items))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<JsonTree, A::Error> {
+                let mut members = Vec::new();
+                while let Some(member) = map.next_entry()? {
+                    members.push(member);
+                }
+                Ok(JsonTree::Object(members))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// What the JSON output of `value` must read as: one member per value of an entry, times as
+/// their seconds.
+fn json_tree(value: &UclValue) -> JsonTree {
+    match value {
+        UclValue::Object(obj) => JsonTree::Object(
+            obj.iter()
+                .flat_map(|(k, e)| e.values().map(move |v| (k.clone(), json_tree(v))))
+                .collect(),
+        ),
+        UclValue::Array(items) => JsonTree::Array(items.iter().map(json_tree).collect()),
+        UclValue::Integer(i) => JsonTree::Int((*i).into()),
+        UclValue::Float(f) | UclValue::Time(f) => JsonTree::Float(f.to_bits()),
+        UclValue::String(s) => JsonTree::Str(s.clone()),
+        UclValue::Boolean(b) => JsonTree::Bool(*b),
+        UclValue::Null => JsonTree::Null,
+    }
+}
+
+/// Serializes `value` (whose tree is `tree`) in `fmt` and reads the text with `serde_json`.
+/// Returns whether it was written; a value without a JSON form must fail as `expect_error` says.
+fn check_json<T: ?Sized + Serialize>(value: &T, tree: &UclValue, fmt: Fmt) -> Result<bool, String> {
+    let expected_error = expect_error(tree, fmt);
+    let text = match fmt.write(value) {
+        Ok(text) if expected_error => {
+            return Err(format!("{fmt:?}: expected an error, wrote {text:?}"));
+        }
+        Ok(text) => text,
+        Err(UclError::Serde(SerdeError::Unrepresentable(_))) if expected_error => {
+            return Ok(false);
+        }
+        Err(e) => return Err(format!("{fmt:?}: serialization failed: {e}")),
+    };
+    let read: JsonTree =
+        serde_json::from_str(&text).map_err(|e| format!("{fmt:?}: not JSON ({e}):\n{text}"))?;
+    if read != json_tree(tree) {
+        return Err(format!(
+            "{fmt:?}: serde_json reads another value from\n{text}"
+        ));
+    }
+    Ok(true)
+}
+
+#[test]
+fn json_output_is_json() {
+    // serde_json keeps the sign of zero and reads the shortest digits exactly.
+    let read = |text: &str| serde_json::from_str::<JsonTree>(text).unwrap();
+    assert_eq!(read("-0.0"), JsonTree::Float((-0.0f64).to_bits()));
+    assert_eq!(
+        read("2.2250738585072014e-308"),
+        JsonTree::Float(f64::MIN_POSITIVE.to_bits())
+    );
+    let mut failures = Vec::new();
+    let mut written = [0usize; 2];
+    let mut errors = [0usize; 2];
+    let formats = [Fmt::Json, Fmt::Compact];
+    // The values of `generated_values_round_trip_through_the_core`.
+    let mut rng = Rng::new();
+    for n in 0..3000 {
+        rng.non_json = n % 2 == 0;
+        let value = gen_root(&mut rng);
+        for (i, fmt) in formats.into_iter().enumerate() {
+            match check_json(&value, &value, fmt) {
+                Ok(true) => written[i] += 1,
+                Ok(false) => errors[i] += 1,
+                Err(e) => failures.push(format!("value {n}: {e}")),
+            }
+        }
+    }
+    // The typed values of `generated_typed_values_round_trip_through_the_core`.
+    let mut rng = Rng::new();
+    let mut typed_written = [0usize; 2];
+    for n in 0..600 {
+        rng.references = n % 2 == 0;
+        rng.non_json = n % 2 == 0;
+        let sample = gen_sample(&mut rng);
+        let tree = to_value(&sample).unwrap();
+        for (i, fmt) in formats.into_iter().enumerate() {
+            match check_json(&sample, &tree, fmt) {
+                Ok(true) => typed_written[i] += 1,
+                Ok(false) => errors[i] += 1,
+                Err(e) => failures.push(format!("sample {n}: {e}")),
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures[..failures.len().min(5)].join("\n\n")
+    );
+    eprintln!(
+        "JSON read by serde_json (json, compact): values {written:?}, typed values \
+         {typed_written:?}, errors {errors:?}"
+    );
+    assert!(written.iter().all(|&c| c > 2000), "{written:?}");
+    assert!(typed_written.iter().all(|&c| c > 300), "{typed_written:?}");
+    assert!(errors.iter().all(|&c| c > 0), "{errors:?}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -885,7 +1161,7 @@ fn check_oracle_batch(binary: &Path, name: &str, batch: &UclValue, fmt: Fmt) -> 
     let path = scratch(&format!("{name}.{}", fmt.extension()));
     fs::write(&path, &text).unwrap();
     let dump_oracle = read_oracle(binary, &path);
-    match find_diff(&dump(batch), &dump_oracle, "$") {
+    match find_diff(&dump(&expected_reading(batch, fmt)), &dump_oracle, "$") {
         None => Ok(()),
         Some(d) => Err(format!("{name} {fmt:?}: libucl reads {d}")),
     }
@@ -928,7 +1204,12 @@ fn oracle_reads_generated_values_back() {
         return;
     };
     let mut rng = Rng::new();
-    let values: Vec<UclValue> = (0..400).map(|_| gen_value(&mut rng, 3)).collect();
+    let values: Vec<UclValue> = (0..400)
+        .map(|n| {
+            rng.non_json = n % 2 == 0;
+            gen_value(&mut rng, 3)
+        })
+        .collect();
     let mut failures = Vec::new();
     for fmt in FORMATS {
         let batches = oracle_batches(values.clone(), fmt);
@@ -956,6 +1237,7 @@ fn oracle_reads_generated_typed_values_back() {
     let trees: Vec<UclValue> = (0..200)
         .map(|n| {
             rng.references = n % 2 == 0;
+            rng.non_json = n % 2 == 0;
             to_value(&gen_sample(&mut rng)).unwrap()
         })
         .collect();
@@ -982,27 +1264,52 @@ fn oracle_reads_generated_typed_values_back() {
 const CORPUS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/serde_corpus");
 
 /// A corpus entry: a name, the value tree serialized, the formats it is written in, and, for a
-/// typed value, how to deserialize the tree read back and serialize it again.
+/// typed value, how to deserialize the tree read back and serialize it again. An entry whose
+/// value has floats or times that JSON cannot write has a second tree without them for JSON and
+/// compact JSON (WORKLIST.md C4, decision 2).
 struct CorpusEntry {
     name: &'static str,
     tree: UclValue,
+    json_tree: Option<UclValue>,
     formats: &'static [Fmt],
     typed: Option<fn(UclValue) -> Result<UclValue, UclError>>,
+}
+
+impl CorpusEntry {
+    /// The tree written in `fmt`.
+    fn tree(&self, fmt: Fmt) -> &UclValue {
+        match &self.json_tree {
+            Some(tree) if fmt.is_json() => tree,
+            _ => &self.tree,
+        }
+    }
+
+    fn with_json_tree(mut self, tree: UclValue) -> Self {
+        self.json_tree = Some(tree);
+        self
+    }
 }
 
 fn entry(name: &'static str, tree: UclValue, formats: &'static [Fmt]) -> CorpusEntry {
     CorpusEntry {
         name,
         tree,
+        json_tree: None,
         formats,
         typed: None,
     }
 }
 
-fn typed_entry<T: Serialize + DeserializeOwned>(name: &'static str, value: &T) -> CorpusEntry {
+/// A typed value, and for JSON `json`, the same type without the floats JSON cannot write.
+fn typed_entry<T: Serialize + DeserializeOwned>(
+    name: &'static str,
+    value: &T,
+    json: Option<&T>,
+) -> CorpusEntry {
     CorpusEntry {
         name,
         tree: to_value(value).unwrap(),
+        json_tree: json.map(|v| to_value(v).unwrap()),
         formats: &FORMATS,
         typed: Some(typed_back::<T>),
     }
@@ -1142,46 +1449,70 @@ fn corpus() -> Vec<CorpusEntry> {
         .enumerate()
         .map(|(i, k)| (*k, UclValue::Integer(i as i64)))
         .collect();
+    let finite: Vec<f64> = SPECIAL_FLOATS
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .collect();
+    let float_digits = [0.1f32 as f64, 1e-10, 1.5e-10, 12345.678, -98765.4321e-200];
+    let time_digits = [0.001, 1.5, -2.5, 86400.0, 90.0, 1e-3];
+    let shapes = |circle: f64| {
+        vec![
+            Shape::Point,
+            Shape::Circle(circle),
+            Shape::Rect(0, 0),
+            Shape::Poly {
+                sides: 0,
+                name: "$5".into(),
+            },
+        ]
+    };
+    let mut json_sample = fixed_sample();
+    json_sample.nested[1].weight = -0.0;
     vec![
-        typed_entry("typed_sample", &fixed_sample()),
+        typed_entry("typed_sample", &fixed_sample(), Some(&json_sample)),
         typed_entry(
             "typed_enums",
-            &vec![
-                Shape::Point,
-                Shape::Circle(f64::NEG_INFINITY),
-                Shape::Rect(0, 0),
-                Shape::Poly {
-                    sides: 0,
-                    name: "$5".into(),
-                },
-            ],
+            &shapes(f64::NEG_INFINITY),
+            Some(&shapes(f64::MIN)),
         ),
         entry(
             "floats",
             obj([
                 ("specials", floats(SPECIAL_FLOATS, false)),
                 ("nan", UclValue::Float(f64::NAN)),
-                (
-                    "digits",
-                    floats(
-                        &[0.1f32 as f64, 1e-10, 1.5e-10, 12345.678, -98765.4321e-200],
-                        false,
-                    ),
-                ),
+                ("digits", floats(&float_digits, false)),
             ]),
             &FORMATS,
-        ),
+        )
+        .with_json_tree(obj([
+            ("specials", floats(&finite, false)),
+            ("digits", floats(&float_digits, false)),
+        ])),
         entry(
             "times",
             obj([
                 ("specials", floats(SPECIAL_FLOATS, true)),
+                ("digits", floats(&time_digits, true)),
                 (
-                    "digits",
-                    floats(&[0.001, 1.5, -2.5, 86400.0, 90.0, 1e-3], true),
+                    "subnormal",
+                    floats(
+                        &[
+                            SMALLEST_MS_TIME,
+                            -SMALLEST_MS_TIME,
+                            1e-310,
+                            f64::MIN_POSITIVE - 5e-324,
+                        ],
+                        true,
+                    ),
                 ),
             ]),
             &FORMATS,
-        ),
+        )
+        .with_json_tree(obj([
+            ("specials", floats(&finite, true)),
+            ("digits", floats(&time_digits, true)),
+        ])),
         entry(
             "integers",
             obj([(
@@ -1314,13 +1645,14 @@ fn regenerate_corpus(binary: &Path) {
     fs::create_dir_all(CORPUS_DIR).unwrap();
     for e in corpus() {
         for &fmt in e.formats {
+            let tree = e.tree(fmt);
             let text = fmt
-                .write(&e.tree)
+                .write(tree)
                 .unwrap_or_else(|err| panic!("{} {fmt:?}: {err}", e.name));
             let path = corpus_path(e.name, fmt);
             fs::write(&path, &text).unwrap();
             let dump_oracle = read_oracle(binary, &path);
-            if let Some(d) = find_diff(&dump(&e.tree), &dump_oracle, "$") {
+            if let Some(d) = find_diff(&dump(&expected_reading(tree, fmt)), &dump_oracle, "$") {
                 panic!(
                     "{}: libucl does not read the value back: {d}",
                     path.display()
@@ -1350,14 +1682,15 @@ fn corpus_reads_back() {
     let mut failures = Vec::new();
     let mut files = 0;
     for e in corpus() {
-        let expected = dump(&e.tree);
         for &fmt in e.formats {
+            let tree = e.tree(fmt);
+            let expected = dump(&expected_reading(tree, fmt));
             let path = corpus_path(e.name, fmt);
             let id = path.file_name().unwrap().to_string_lossy().into_owned();
             files += 1;
             // The serializer still writes the committed bytes.
             let committed = fs::read(&path).unwrap_or_else(|_| panic!("{id} is missing"));
-            match fmt.write(&e.tree) {
+            match fmt.write(tree) {
                 Ok(text) if text.as_bytes() == committed => {}
                 Ok(text) => failures.push(format!("{id}: the serializer now writes\n{text}")),
                 Err(err) => failures.push(format!("{id}: {err}")),
@@ -1376,6 +1709,7 @@ fn corpus_reads_back() {
                     if let Some(typed) = e.typed {
                         match typed(back) {
                             Ok(again) => {
+                                let again = expected_reading(&again, fmt);
                                 if let Some(d) = find_diff(&expected, &dump(&again), "$") {
                                     failures.push(format!("{id}: typed: {d}"));
                                 }
@@ -1425,7 +1759,13 @@ fn values_without_a_form_are_errors() {
             },
             fmt
         ));
-        assert!(unrepresentable(&obj([("t", UclValue::Time(1e-310))]), fmt));
+        // Subnormal times closer to zero than the smallest one `ms` gives (spec §10.8).
+        for t in [5e-324, 2.2250738585065e-311, -1e-315] {
+            assert!(
+                unrepresentable(&obj([("t", UclValue::Time(t))]), fmt),
+                "{t:e}"
+            );
+        }
         assert!(unrepresentable(
             &obj([("t", UclValue::Time(f64::NAN))]),
             fmt
@@ -1442,6 +1782,33 @@ fn values_without_a_form_are_errors() {
         assert!(fmt.write(&Id(1)).is_err());
         assert!(fmt.write(&Shape::Circle(1.0)).is_ok());
     }
+    // JSON has no form for NaN and infinite floats and times, nor for subnormal times, which the
+    // other formats write through `ms` (WORKLIST.md C4, decision 2; spec §10.8).
+    for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for (tree, time) in [
+            (obj([("f", UclValue::Float(v))]), false),
+            (obj([("t", UclValue::Time(v))]), true),
+        ] {
+            assert!(unrepresentable(&tree, Fmt::Json), "{tree:?}");
+            assert!(unrepresentable(&tree, Fmt::Compact), "{tree:?}");
+            // In the config and YAML formats only a NaN time has no form.
+            let nan_time = time && v.is_nan();
+            assert_eq!(unrepresentable(&tree, Fmt::Config), nan_time, "{tree:?}");
+            assert_eq!(unrepresentable(&tree, Fmt::Yaml), nan_time, "{tree:?}");
+        }
+    }
+    let subnormal = obj([("t", UclValue::Time(1e-310))]);
+    assert!(unrepresentable(&subnormal, Fmt::Json));
+    assert!(unrepresentable(&subnormal, Fmt::Compact));
+    assert_eq!(ucl_lexer::to_string(&subnormal).unwrap(), "t = 1e-307ms;\n");
+    assert_eq!(
+        ucl_lexer::to_yaml_string(&subnormal).unwrap(),
+        "t: 1e-307ms"
+    );
+    let smallest = obj([("t", UclValue::Time(-SMALLEST_MS_TIME))]);
+    let text = ucl_lexer::to_string(&smallest).unwrap();
+    assert_eq!(text, "t = -2.2250738585072014e-308ms;\n");
+    assert_eq!(dump(&read_core(text.as_bytes()).unwrap()), dump(&smallest));
     // to_value rejects integers it cannot hold, but takes any other value.
     assert!(matches!(
         to_value(&u64::MAX),
@@ -1525,17 +1892,26 @@ fn forms_of_each_format() {
         "f = 0.1;\nt = 1.5s;\nm = 1;\nm = -1e308k;\ns = '$ABI it\\'s';\n\"a b\" [\n    null,\n]\n"
     );
     assert_eq!(
+        ucl_lexer::to_yaml_string(&value).unwrap(),
+        "f: 0.1\nt: 1.5s\nm: 1\nm: -1e308k\ns: \"$ABI it's\"\n\"a b\": [\n    null\n]"
+    );
+    // JSON has no form for −∞ (WORKLIST.md C4, decision 2) ...
+    assert!(unrepresentable(&value, Fmt::Json));
+    assert!(unrepresentable(&value, Fmt::Compact));
+    // ... and writes a time as its number of seconds.
+    let mut value = value.as_object().unwrap().clone();
+    value.remove("m");
+    value.append("m", UclValue::Integer(1));
+    value.append("m", UclValue::Float(-1e308));
+    let value = UclValue::Object(value);
+    assert_eq!(
         ucl_lexer::to_json_string(&value).unwrap(),
-        "{\n    \"f\": 0.1,\n    \"t\": 1.5s,\n    \"m\": 1,\n    \"m\": -1e308k,\n    \
-         \"s\": \"$ABI it's\",\n    \"a b\": [\n        null\n    ]\n}"
+        "{\n    \"f\": 0.1,\n    \"t\": 1.5,\n    \"s\": \"$ABI it's\",\n    \
+         \"a b\": [\n        null\n    ],\n    \"m\": 1,\n    \"m\": -1e308\n}"
     );
     assert_eq!(
         ucl_lexer::to_json_string_compact(&value).unwrap(),
-        r#"{"f":0.1,"t":1.5s,"m":1,"m":-1e308k,"s":"$ABI it's","a b":[null]}"#
-    );
-    assert_eq!(
-        ucl_lexer::to_yaml_string(&value).unwrap(),
-        "f: 0.1\nt: 1.5s\nm: 1\nm: -1e308k\ns: \"$ABI it's\"\n\"a b\": [\n    null\n]"
+        r#"{"f":0.1,"t":1.5,"s":"$ABI it's","a b":[null],"m":1,"m":-1e308}"#
     );
 }
 

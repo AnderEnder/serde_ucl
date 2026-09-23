@@ -376,13 +376,24 @@ struct Key {
     quoted: bool,
 }
 
-/// Where a string value came from, for the output formats (spec §10.1, facts 1 and 2).
+/// Where a scalar value came from, for the output formats (spec §10.1, facts 1 and 2; §10.7).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Origin {
     /// Written in single quotes (§6.2).
     single_quoted: bool,
     /// A heredoc (§6.3).
     multiline: bool,
+    /// An unquoted keyword of §4.5 (`true`, `null`, `nan`, `inf`, …), not a number written with
+    /// digits. It is not recorded as a fact: it only decides the layout of a value that takes a
+    /// container's place under `merge` (§10.7, *Quirk*).
+    keyword: bool,
+}
+
+impl Origin {
+    /// Whether fact 1 or 2 of §10.1 holds for the string, so that it is recorded.
+    fn has_string_facts(self) -> bool {
+        self.single_quoted || self.multiline
+    }
 }
 
 /// The facts of a value that [`Core::insert`] placed, besides its key.
@@ -776,21 +787,24 @@ impl Core<'_, '_, '_, '_> {
         let (existed, in_place) = object
             .entry(&key.name)
             .map_or((false, false), |e| (true, replaces_in_place(e)));
-        // A number, time or boolean that takes the place of a non-empty container keeps the
-        // normal layout of a multi-value entry (QUESTIONS.md #50).
+        // A number written with digits, a time or a boolean that takes the place of a
+        // non-empty container keeps the normal layout of a multi-value entry; the keywords `nan`
+        // and `inf` follow their own kind, as strings and `null` do (spec §10.7, *Quirk*).
+        let counts_as_container = match value {
+            UclValue::Integer(_) | UclValue::Time(_) | UclValue::Boolean(_) => true,
+            UclValue::Float(_) => !origin.keyword,
+            _ => false,
+        };
         let normal_layout = in_place
-            && matches!(
-                value,
-                UclValue::Integer(_)
-                    | UclValue::Float(_)
-                    | UclValue::Time(_)
-                    | UclValue::Boolean(_)
-            )
+            && counts_as_container
             && object.entry(&key.name).is_some_and(|e| match e.first() {
                 UclValue::Object(o) => !o.is_empty(),
                 UclValue::Array(a) => !a.is_empty(),
                 _ => false,
             });
+        let was_collected = object
+            .entry(&key.name)
+            .is_some_and(|e| e.slots()[0].is_collected());
         let before = track
             .then(|| {
                 object.entry(&key.name).map(|e| Before {
@@ -816,6 +830,9 @@ impl Core<'_, '_, '_, '_> {
         })?;
         if track {
             self.values_moved(&key.name, before, placement, after);
+        }
+        if matches!(placement, Placement::Collected(_)) && !was_collected {
+            self.collection_key(&key.name);
         }
         if let Some(written) = &written
             && existed
@@ -872,7 +889,7 @@ impl Core<'_, '_, '_, '_> {
             ),
             Placement::Merged | Placement::Dropped => return,
         };
-        let has_value_facts = placed.origin != Origin::default() || placed.normal_layout;
+        let has_value_facts = placed.origin.has_string_facts() || placed.normal_layout;
         let has_key_facts = keyed && (key_spelling.is_some() || key_quoted.is_some());
         let stale = placed.in_place && self.facts.as_ref().is_some_and(|f| !f.is_empty());
         if !has_value_facts && !has_key_facts && !stale {
@@ -895,6 +912,24 @@ impl Core<'_, '_, '_, '_> {
                 f.key_quoted = key_quoted;
             }
         });
+    }
+
+    /// Entry `key` of the current object has just become a `NO_IMPLICIT_ARRAYS` collection
+    /// (§8.5). The array's key never needs quoting, whatever the keys of its values were, and is
+    /// spelled as the entry's key, that of its first value (spec §10.1, *Quirk*).
+    fn collection_key(&mut self, key: &str) {
+        if self.facts.is_none() || !key_needs_quoting(key) {
+            return;
+        }
+        let Some(mut path) = self.top_path() else {
+            return;
+        };
+        path.push(PathSegment::Key {
+            key: key.to_owned(),
+            index: 0,
+        });
+        let facts = self.facts.as_mut().expect("checked above");
+        facts.update(&path, |f| f.key_quoted = Some(false));
     }
 
     /// Values of entry `key` of the object at `object` were replaced: value `slot`, or all.
@@ -1611,7 +1646,7 @@ impl Core<'_, '_, '_, '_> {
             _ => {
                 let (value, quoted, origin) = self.scalar()?;
                 let index = self.push_element(value);
-                if origin != Origin::default()
+                if origin.has_string_facts()
                     && self.facts.is_some()
                     && let Some(mut path) = self.top_path()
                 {
@@ -1983,7 +2018,7 @@ impl Core<'_, '_, '_, '_> {
                 self.pos = end;
                 let origin = Origin {
                     single_quoted: true,
-                    multiline: false,
+                    ..Origin::default()
                 };
                 Ok((UclValue::String(self.text(bytes, at)?), true, origin))
             }
@@ -1992,24 +2027,32 @@ impl Core<'_, '_, '_, '_> {
                 self.pos = end;
                 let bytes = self.expander.expand(bytes);
                 let origin = Origin {
-                    single_quoted: false,
                     multiline: true,
+                    ..Origin::default()
                 };
                 Ok((UclValue::String(self.text(bytes, at)?), true, origin))
             }
-            _ => Ok((self.unquoted()?, false, Origin::default())),
+            _ => {
+                let (value, keyword) = self.unquoted()?;
+                let origin = Origin {
+                    keyword,
+                    ..Origin::default()
+                };
+                Ok((value, false, origin))
+            }
         }
     }
 
-    /// An unquoted value (§4): a number, a keyword or a string.
-    fn unquoted(&mut self) -> Result<UclValue, Error> {
+    /// An unquoted value (§4): a number, a keyword or a string. Returns it, and whether it is a
+    /// keyword (§4.5).
+    fn unquoted(&mut self) -> Result<(UclValue, bool), Error> {
         let start = self.pos;
         if matches!(self.peek(), Some(b'0'..=b'9' | b'-')) {
             let no_time = self.settings.flags.contains(ParserFlags::NO_TIME);
             match number::scan(self.src, start, no_time) {
                 Number::Value(value, end) => {
                     self.pos = end;
-                    return Ok(value);
+                    return Ok((value, false));
                 }
                 Number::OutOfRange => return Err(self.error(ErrorKind::NumberOutOfRange, start)),
                 Number::NotNumber => {}
@@ -2026,7 +2069,7 @@ impl Core<'_, '_, '_, '_> {
             return Err(self.error(ErrorKind::MissingValue, start));
         }
         if let Some(value) = keyword(raw) {
-            return Ok(value);
+            return Ok((value, true));
         }
         // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*).
         let (bytes, expand) = string::decode_unquoted(raw);
@@ -2035,7 +2078,7 @@ impl Core<'_, '_, '_, '_> {
         } else {
             bytes
         };
-        Ok(UclValue::String(self.text(bytes, start)?))
+        Ok((UclValue::String(self.text(bytes, start)?), false))
     }
 
     /// The end of the unquoted value starting at `start` (§4.1, §4.2): the first line break,

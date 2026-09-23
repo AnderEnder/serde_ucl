@@ -93,6 +93,13 @@ So the lists can only shrink; remove an entry as soon as its case passes.
 only). Next to each file, `<file>.golden.json` is libucl's typed dump of reading that file back,
 in the format of the conformance golden files.
 
+The JSON files are valid JSON (`docs/clean-room/WORKLIST.md`, C4 decision 2): a time is written as
+its number of seconds, so their dumps read it as a float, and NaN and infinite floats and times
+have no JSON form. For `floats`, `times`, `typed_sample` and `typed_enums`, the `.json` and
+`.compact.json` files therefore hold the value without those: the finite floats and times, a
+finite `weight` in `typed_sample` and a finite `Circle` in `typed_enums`. The subnormal times of
+`times`, written with `ms` (spec §10.8), are in its config and YAML files only.
+
 - Without the oracle binary (`target/libucl-oracle/ucl-dump`), the test `corpus_reads_back` checks
   that the serializer still writes the same bytes, and that both the new core's reading and the
   stored libucl reading give the value that was serialized.

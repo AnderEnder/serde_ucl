@@ -21,8 +21,10 @@
 //! `tests/basic/2.res`), so a stricter rule could not read libucl's own output. Negative,
 //! non-finite and out-of-range values are errors.
 //!
-//! A `Duration` is written as a UCL time, its seconds followed by `s` ([`crate::ser`]); other
-//! serializers see the number of seconds as an `f64`.
+//! A `Duration` is written as a UCL time, its seconds followed by `s` ([`crate::ser`]), except in
+//! the crate's JSON output, which is valid JSON and writes the number of seconds alone; it reads
+//! back as the same `Duration` either way. Other serializers see the number of seconds as an
+//! `f64`.
 
 use serde::de::{self, Deserializer, Visitor};
 use serde::ser::{self as ser, Serializer};
@@ -30,8 +32,8 @@ use std::fmt;
 use std::time::Duration;
 
 /// Serializes a [`Duration`] as a UCL time: its number of seconds as an `f64`, which the crate's
-/// serializer writes with the suffix `s` (spec §5.4, §10.8) and other serializers as a plain
-/// number.
+/// serializer writes with the suffix `s` (spec §5.4, §10.8), in JSON as a plain number, and other
+/// serializers as a plain number too.
 ///
 /// UCL times are 64-bit floats, which cannot hold every `Duration` to the nanosecond, for
 /// example `Duration::new(1_000_000_000, 1)`. Such a duration is an error rather than a value
@@ -124,6 +126,14 @@ mod tests {
             .unwrap(),
             "t = 1.5s;\n"
         );
+        // The crate's JSON output writes the seconds alone, and they read back as the duration.
+        let config = Config {
+            t: Duration::new(4_000_000, 123_456_789),
+        };
+        let json = crate::to_json_string_compact(&config).unwrap();
+        assert_eq!(json, r#"{"t":4000000.123456789}"#);
+        let value = crate::parse::parse(json.as_bytes()).unwrap();
+        assert_eq!(crate::from_value::<Config>(value).unwrap(), config);
         let value = crate::to_value(&Config {
             t: Duration::from_secs(2),
         })

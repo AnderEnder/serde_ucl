@@ -29,8 +29,9 @@ pub struct ValueFacts {
     pub key_quoted: Option<bool>,
     /// A multi-value entry whose first value this is uses the normal layout in JSON and YAML
     /// rather than the inline one that the value's kind gives (spec §10.7). The parser sets it on
-    /// a number, time or boolean that took the place of a non-empty object or array under the
-    /// `merge` strategy (spec §8.4, *Quirk*), as libucl lays such an entry out (QUESTIONS.md #50).
+    /// a number written with digits (not the keywords `nan` and `inf`), a time or a boolean that
+    /// took the place of a non-empty object or array under the `merge` strategy (spec §8.4 and
+    /// §10.7, *Quirk*; QUESTIONS.md #50).
     pub normal_layout: bool,
 }
 

@@ -826,3 +826,72 @@
   #51 a) and `multi_value_merge_quirk_layout_nan_inf` (§10.7, #50). Both runners and full
   `cargo test` green at every commit. Commits: `f4c8fac`, `6a8b1d9`. The spec contains behaviour
   only: no libucl code, internal names, or procedures.
+- 2026-09-23 — Role: implementation team. Item: C4c, the core, emitters and serde serializer
+  brought up to `spec-v7` and to WORKLIST C4 decision 2 (serde JSON output is valid JSON).
+  - Inputs consulted: `docs/spec/` at `spec-v7` (checked identical to the tag; `git diff spec-v6
+    spec-v7 -- docs/spec/` in full, and §10 in full); `docs/clean-room/` (PROTOCOL, WORKLIST with
+    the C4 decisions, QUESTIONS #50–#54 and their answers, LOG); `tests/conformance/README.md`,
+    `tests/conformance/pending/` and its README, the xfail lists and their headers; the crate's
+    own code (`src/emit/`, `src/ser/`, `src/time.rs`, `src/lib.rs`, `src/parse/core.rs`,
+    `src/parse/string.rs`, `src/parse/facts.rs`, `src/parse/number.rs`, `src/value.rs`,
+    `tests/serde_roundtrip.rs`); black-box runs of `target/libucl-oracle/ucl-dump` (typed dump,
+    `-e config|json|yaml`, `-I`, `-s merge`) on probe inputs under `target/c4c/`, and through
+    `UCL_SERDE_REGEN=1` and the oracle tests; Rust standard library, serde and serde_json
+    documentation. The source of `scripts/regen-golden.sh` and of `tools/ucl-dump` was not opened;
+    nothing under `/tmp` or `/private/tmp` was used; `src/lexer.rs` and `src/parser.rs` were not
+    read.
+  - Core (`src/parse/`):
+    1. §6.2 (#53): in single quotes, a backslash before a CR that no LF follows is removed with
+       the CR, and a further CR stays (`string::single_quoted`).
+    2. §10.1 (#51): when repeated keys make a `no-implicit-arrays` collection, its key is
+       recorded as never needing quoting (`Core::collection_key`), also when no other facts
+       exist; a scalar that replaces the collection under `merge` keeps that key (oracle:
+       `"x y" = 1⏎"x y" = 2⏎"x y" = 3` with `-I -s merge` → `x y = 3;`, and `"a=b" = [1]⏎"a=b" = 2`
+       → `"a=b" = 2;`).
+    3. §10.7 (#50): a value's origin records whether it is a keyword (§4.5); under the §8.4 merge
+       quirk `nan` and `inf` follow their own kind (inline), while a float written with digits,
+       also `1e308k`, keeps the replaced container's layout. The flag is not a recorded fact.
+  - Serializer (`src/emit/number.rs`, `src/emit/mod.rs`, `src/ser/`):
+    1. §5.4, §10.8 (#54): time ±∞ stays `1e308ks`/`-1e308ks`, a NaN time an error. A subnormal
+       time is written as a normal float followed by `ms` whose quotient by 1000 is the time: the
+       time's shortest digits with the exponent raised by 3 when they give it (`1e-307ms`),
+       otherwise time × 1000, or the smallest normal float for ±`MIN_POSITIVE / 1000`
+       (`2.2250738585072014e-308ms`); a time closer to zero than `2.2250738585069563e-311` is an
+       error. libucl reads the committed forms back exactly (corpus `times.ucl`, `times.yaml`) and
+       the generated ones in the oracle tests.
+    2. Decision 2: in JSON and compact JSON a float is a JSON number, a time its seconds as a JSON
+       number, and a NaN or infinite float or time an error; a subnormal time is an error there,
+       like a subnormal float. YAML and config keep the C4b forms. Repeated member names for a
+       multi-value entry are unchanged (RFC 8259 grammar allows them).
+  - Tests: `tests/serde_roundtrip.rs` compares JSON readings with times as floats
+    (`expected_reading`); generators give subnormal times (writable and not) and, for every other
+    value or sample, no value that JSON cannot write; new test `json_output_is_json` parses the
+    JSON and compact JSON of the 3000 generated values and 600 typed values with `serde_json`
+    (dev-dependency feature `float_roundtrip`) into an order-preserving tree that keeps repeated
+    members, and compares it with the value. Unit tests for the three core rules and the forms.
+  - Corpus: `UCL_SERDE_REGEN=1`; changed only `*.json`, `*.compact.json` and their dumps (times as
+    seconds; `floats`, `times`, `typed_sample`, `typed_enums` without NaN and infinities in the
+    JSON files), and `times.ucl`, `times.yaml` with their dumps (new `subnormal` entry). Still 49
+    files. Documented in `tests/conformance/README.md`, `src/ser/mod.rs`, `src/time.rs`,
+    `src/lib.rs`.
+  - Pending cases: `sq_line_continuation_lone_cr`, `no_implicit_arrays_collection_key_bare` and
+    `multi_value_merge_quirk_layout_nan_inf` moved unchanged to `cases/spec/06-strings/` and
+    `cases/spec/10-output/`; `pending/` deleted. The existing parser fails all three, so they were
+    added to `xfail.txt` with the cases (reasons `parser`, `flags`, `flags`), as its header allows
+    for new cases; `xfail-new.txt` and `xfail-emit.txt` unchanged. spec README *Known gaps* still
+    says these rules have no committed case (spec team).
+  - Result: `cargo test` 519 tests pass. Conformance: new core 1389 of 1393 (4 listed
+    divergences), emitters 1037 of 1041 cases with output (config, JSON, compact JSON, YAML 1037
+    of 1037 each, config-comments 53 of 53, `.res` 24 of 24), existing parser 505 of 1393.
+    Round trips through the core, generated values (config, JSON, compact, YAML): exact
+    2961/2351/2351/2515, errors as required 39/541/541/357, not compared 0/108/108/128; typed:
+    exact 568/325/325/387, errors 32/263/263/167, not compared 0/12/12/46. serde_json reads 2459
+    values and 337 typed values in each JSON format as written. Oracle: config 396, JSON 349,
+    YAML 361 values plus a root array of 100 each, typed 187/109/128 plus 100; all read back
+    exactly. `cargo build --examples --benches`, `cargo check --no-default-features` and
+    `cargo check --features load` succeed.
+  - Questions: none.
+  - Commits: `8282ffd`, `3336006` (JSON error messages for NaN and subnormal times, docs), and
+    the `C4c:` commit after them, which records these commits here.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

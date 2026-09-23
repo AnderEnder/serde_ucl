@@ -44,7 +44,7 @@
         },
         {
             "name": "",
-            "weight": nan,
+            "weight": -0.0,
             "tags": []
         }
     ],
@@ -110,11 +110,11 @@
             }
         }
     ],
-    "timeout": 1.5s,
+    "timeout": 1.5,
     "empty_list": [],
     "empty_map": {},
     "tree": {
-        "t": 0.25s,
+        "t": 0.25,
         "n": null
     }
 }

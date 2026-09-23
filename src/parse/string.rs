@@ -109,9 +109,11 @@ pub(crate) fn single_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize)
                     out.push(b'\'');
                     i += 2;
                 }
-                // Line continuation: the backslash and the line break are removed.
+                // Line continuation: the backslash and the line break (LF, CR LF, or a CR that
+                // no LF follows) are removed.
                 Some(b'\n') => i += 2,
                 Some(b'\r') if src.get(i + 2) == Some(&b'\n') => i += 3,
+                Some(b'\r') => i += 2,
                 Some(&other) => {
                     out.push(b'\\');
                     out.push(other);
@@ -283,6 +285,14 @@ mod tests {
         assert_eq!(sq(r"'it\'s'").unwrap(), "it's");
         assert_eq!(sq("'one\\\ntwo'").unwrap(), "onetwo");
         assert_eq!(sq("'one\\\r\ntwo'").unwrap(), "onetwo");
+        // A lone CR after a backslash is a line break too (spec-v7 §6.2); a CR after it stays.
+        assert_eq!(sq("'x\\\ry'").unwrap(), "xy");
+        assert_eq!(sq("'x\\\r\ry'").unwrap(), "x\ry");
+        assert_eq!(sq("'x\\\r\r\ny'").unwrap(), "x\r\ny");
+        assert_eq!(sq("'x\\\r'").unwrap(), "x");
+        // Backslashes pair from the left.
+        assert_eq!(sq("'x\\\\\ry'").unwrap(), "x\\\\\ry");
+        assert_eq!(sq("'x\\\\\\\ry'").unwrap(), "x\\\\y");
         assert_eq!(sq(r"'x\ny\\z'").unwrap(), r"x\ny\\z");
         assert_eq!(sq("'x\ny'").unwrap(), "x\ny");
         assert_eq!(sq("'x"), Err(ErrorKind::UnterminatedString));

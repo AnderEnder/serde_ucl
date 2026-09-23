@@ -38,7 +38,9 @@
 //!
 //! The text has the layouts of libucl's output (spec §10.4–§10.6), but every value is written in
 //! a form that libucl and [`crate::parse`] read back as exactly the value written (spec §10.8),
-//! floats included, so deserializing the text gives back the same Rust value. The reader must use
+//! floats included, so deserializing the text gives back the same Rust value. The one exception
+//! is a time in JSON, which is written as its number of seconds and reads back as a float (see
+//! *JSON* below). The reader must use
 //! the default flags and the `append` strategy (spec §8, §12): `key-lowercase` lowercases keys,
 //! `no-time` reads times as strings, and `no-implicit-arrays` or another strategy changes
 //! repeated keys. In JSON, compact JSON and YAML it must also not register variables that the
@@ -47,8 +49,8 @@
 //! | Value | Written as |
 //! | --- | --- |
 //! | integer | decimal |
-//! | float | the fewest digits that identify the double, with a `.` or an exponent: `0.1`, `1.0`, `-0.0`, `1e16`, `2.2250738585072014e-308`. NaN is `nan` (its sign and payload are not kept), +∞ `inf`, −∞ `-1e308k` |
-//! | time | the digits of a float followed by `s`: `1.5s`, `0.001s`; +∞ and −∞ are `1e308ks` and `-1e308ks` |
+//! | float | the fewest digits that identify the double, with a `.` or an exponent: `0.1`, `1.0`, `-0.0`, `1e16`, `2.2250738585072014e-308`. NaN is `nan` (its sign and payload are not kept), +∞ `inf`, −∞ `-1e308k`; JSON has none of the three |
+//! | time | the digits of a float followed by `s`: `1.5s`, `0.001s`; +∞ and −∞ are `1e308ks` and `-1e308ks`; a subnormal time, which only `ms` gives, is a normal float followed by `ms`: `1e-307ms`, `2.2250738585072014e-308ms` (spec §5.4, §10.8). In JSON, the digits of its seconds alone: `1.5`, `0.001` |
 //! | string | double-quoted, with the escapes of spec §6.1 for `"`, `\`, control bytes and DEL; in the config format, a string that contains `$` is single-quoted, with `'` written `\'` |
 //! | key | bare where spec §3.1 allows it (config and YAML), otherwise double-quoted with those escapes; always double-quoted in JSON |
 //! | entry with several values ([`UclValue`] only) | one entry per value, all with the same key, in every format (libucl's JSON and YAML write an array instead, §10.7) |
@@ -69,19 +71,29 @@
 //!   expands too: the output reads back exactly only with a reader that registers none of the
 //!   variables its strings refer to.
 //!
-//! JSON. Times and non-finite floats have no JSON form; the UCL forms above, which libucl and
-//! [`crate::parse`] read, make the output of [`to_json_string`] and [`to_json_string_compact`]
-//! something other than JSON when the value holds one (libucl's own JSON output writes `nan` and
-//! `inf` too). Everything else is JSON; an entry with several values gives repeated member
-//! names, which JSON's grammar allows.
+//! JSON. [`to_json_string`] and [`to_json_string_compact`] always write valid JSON (RFC 8259),
+//! unlike libucl's own JSON output, which writes `nan` and `inf` (WORKLIST.md C4, decision 2):
+//!
+//! - a time is written as its number of seconds, a JSON number, and reads back as a float. A
+//!   Rust value whose deserializer takes a number of seconds still round-trips: a `Duration`
+//!   through [`crate::time`] does, while a time in a [`UclValue`] comes back as a float;
+//! - a NaN or infinite float or time has no JSON number and is an error, as is a subnormal time,
+//!   whose number of seconds no literal reads back as (spec §5.3). The config and YAML formats
+//!   write all three.
+//!
+//! An entry with several values gives repeated member names, which JSON's grammar allows (RFC
+//! 8259 advises unique names; readers such as `serde_json` keep the last value).
 //!
 //! # Errors
 //!
 //! [`SerdeError::Unrepresentable`] for a value that has no form that reads back as itself:
 //!
 //! - an integer outside the 64-bit signed range, which [`to_value`] rejects too (spec §5.3);
-//! - a subnormal float or time: every literal below the normal range is an error (§5.3);
-//! - a NaN time, which no literal gives;
+//! - a subnormal float: every literal below the normal range is an error (§5.3);
+//! - a subnormal time closer to zero than `2.2250738585069563e-311`, the smallest that `ms` gives
+//!   from a normal float (§10.8), and in JSON every subnormal time;
+//! - a NaN time, which no text gives (§5.4);
+//! - in JSON and compact JSON, a NaN or infinite float or time;
 //! - the empty key, which parsing rejects (§3.2);
 //! - a root that is not a map, a struct or a sequence: a UCL document is an object or an array
 //!   (§1.1);
@@ -146,12 +158,15 @@ pub fn to_string<T: ?Sized + Serialize>(value: &T) -> Result<String, UclError> {
     to_text(value, Format::Config)
 }
 
-/// Serializes `value` as pretty JSON (spec §10.4 layout), one member per line.
+/// Serializes `value` as pretty JSON (spec §10.4 layout), one member per line. The output is
+/// valid JSON (RFC 8259): times are numbers of seconds, and NaN and infinite floats and times are
+/// errors. See the [module documentation](self).
 pub fn to_json_string<T: ?Sized + Serialize>(value: &T) -> Result<String, UclError> {
     to_text(value, Format::Json)
 }
 
-/// Serializes `value` as JSON without whitespace (spec §10.4 layout).
+/// Serializes `value` as JSON without whitespace (spec §10.4 layout), valid JSON as
+/// [`to_json_string`] writes it.
 pub fn to_json_string_compact<T: ?Sized + Serialize>(value: &T) -> Result<String, UclError> {
     to_text(value, Format::JsonCompact)
 }

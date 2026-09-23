@@ -188,6 +188,53 @@ fn facts_follow_values_the_parser_moves() {
 }
 
 #[test]
+fn collection_keys_and_merge_quirk_layouts() {
+    // spec-v7 §10.1: the key of a `no-implicit-arrays` collection never needs quoting, whatever
+    // its values' keys were; a scalar that replaces the collection under `merge` keeps that key,
+    // and one that replaces an explicit array keeps the array's (oracle runs).
+    let input = "\"x y\" = 1\n\"x y\" = 2\n\"x y\" = 3\n\"a=b\" = [1]\n\"a=b\" = 2\n";
+    let (parser, value) = parse(input, ParserFlags::NO_IMPLICIT_ARRAYS);
+    assert_eq!(
+        parser.emitter(Format::Config).emit(&value),
+        "x y [\n    1,\n    2,\n    3,\n]\na=b [\n    [\n        1,\n    ]\n    2,\n]\n"
+    );
+    assert_eq!(
+        parser.emitter(Format::Yaml).emit(&value),
+        "x y: [\n    1,\n    2,\n    3\n]\na=b: [\n    [\n        1\n    ],\n    2\n]"
+    );
+    let mut parser = Parser::with_flags(ParserFlags::NO_IMPLICIT_ARRAYS);
+    parser.set_strategy(DuplicateStrategy::Merge);
+    let value = parser.parse(input.as_bytes()).unwrap();
+    assert_eq!(
+        parser.emitter(Format::Config).emit(&value),
+        "x y = 3;\n\"a=b\" = 2;\n"
+    );
+    assert_eq!(
+        parser.emitter(Format::Yaml).emit(&value),
+        "x y: 3\n\"a=b\": 2"
+    );
+    // spec-v7 §10.7: under the merge quirk, `nan` and `inf` follow their own kind (inline),
+    // while a number written with digits, also one that overflows to +∞, and a boolean keep
+    // the layout of the non-empty container they replaced.
+    let mut parser = Parser::new();
+    parser.set_strategy(DuplicateStrategy::Merge);
+    let value = parser
+        .parse(
+            b"b = [1]\nb = nan\nb = 6\nc = [1]\nc = 1e308k\nc = 6\nd { x = 1 }\nd = yes\nd = 6\n",
+        )
+        .unwrap();
+    assert_eq!(
+        parser.emitter(Format::Json).emit(&value),
+        "{\n    \"b\": [        nan,\n        6],\n    \"c\": [\n        inf,\n        6\n    ],\n    \
+         \"d\": [\n        true,\n        6\n    ]\n}"
+    );
+    assert_eq!(
+        parser.emitter(Format::Yaml).emit(&value),
+        "b: [    nan,\n    6],\nc: [\n    inf,\n    6\n],\nd: [\n    true,\n    6\n]"
+    );
+}
+
+#[test]
 fn keys_that_include_creates() {
     // spec §10.1, *Quirk*; the array made in place of existing values too (oracle runs).
     let mut loader = MemoryLoader::new();
