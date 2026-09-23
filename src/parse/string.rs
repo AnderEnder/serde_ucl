@@ -174,53 +174,61 @@ pub(crate) fn heredoc(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Erro
     }
 }
 
-/// Decodes the backslash escapes of an unquoted value (spec §4.7, §4.8, §7.6).
+/// Decodes the backslash escapes of an unquoted value (spec §4.7, §4.8).
 ///
 /// `raw` is the value as written, trailing whitespace already removed. Returns the decoded bytes
-/// and, for each of them, whether it came from an escape: a `$` from an escape never starts a
-/// variable reference.
+/// and whether the value as written has a `$` that is not written as `\$`: only then are
+/// variables expanded, in the decoded text as a whole (spec §7.6).
 ///
-/// `\u` in an unquoted value is never an error. With four characters after it, the escape covers
-/// them: all hex gives that code point, otherwise 16 × the value of the hex digits before the
-/// first non-hex character, or 0 if there are none. With fewer than four characters left, the
-/// spec leaves the result open (*Uncertain*); this implementation treats `\u` like any unknown
-/// escape: the backslash is dropped and the characters are kept (`x\u12` gives `xu12`).
-pub(crate) fn decode_unquoted(raw: &[u8]) -> (Vec<u8>, Vec<bool>) {
+/// `\u` in an unquoted value is never an error (spec §4.8). With four or more bytes after it,
+/// the escape covers four: all hex gives that code point, otherwise 16 × the value of the hex
+/// digits before the first non-hex byte, or 0 if there are none. With three, the same, the end
+/// of the value counting as a fourth, non-hex byte. With two or fewer (**quirk**), the backslash
+/// is dropped, the `u` is kept and the byte after it is dropped.
+///
+/// The same decoding applies to a quoted key under `KEY_LOWERCASE`, after the key has been
+/// lowercased as written (spec §12.1).
+pub(crate) fn decode_unquoted(raw: &[u8]) -> (Vec<u8>, bool) {
     let mut out = Vec::with_capacity(raw.len());
-    let mut protected = Vec::with_capacity(raw.len());
+    let mut escaped_dollars = 0;
     let mut i = 0;
     while i < raw.len() {
         let b = raw[i];
         if b != b'\\' {
             out.push(b);
-            protected.push(false);
             i += 1;
             continue;
         }
         let Some(&next) = raw.get(i + 1) else {
             // A backslash as the last byte of the value is kept.
             out.push(b'\\');
-            protected.push(false);
             break;
         };
-        if next == b'u' && raw.len() - (i + 2) >= 4 {
-            let digits = &raw[i + 2..i + 6];
-            let hex_prefix = digits.iter().take_while(|d| d.is_ascii_hexdigit()).count();
-            let value = digits[..hex_prefix]
-                .iter()
-                .fold(0u32, |acc, &d| acc * 16 + hex_value(d).unwrap_or(0));
-            let cp = if hex_prefix == 4 { value } else { value * 16 };
-            let before = out.len();
-            push_code_point(&mut out, cp);
-            protected.resize(protected.len() + (out.len() - before), true);
-            i += 6;
+        if next == b'u' {
+            let available = raw.len() - (i + 2);
+            if available >= 3 {
+                let digits = &raw[i + 2..i + 2 + available.min(4)];
+                let hex_prefix = digits.iter().take_while(|d| d.is_ascii_hexdigit()).count();
+                let value = digits[..hex_prefix]
+                    .iter()
+                    .fold(0u32, |acc, &d| acc * 16 + hex_value(d).unwrap_or(0));
+                let cp = if hex_prefix == 4 { value } else { value * 16 };
+                push_code_point(&mut out, cp);
+                i += 2 + digits.len();
+            } else {
+                out.push(b'u');
+                i += 2 + available.min(1);
+            }
         } else {
+            if next == b'$' {
+                escaped_dollars += 1;
+            }
             out.push(simple_escape(next));
-            protected.push(true);
             i += 2;
         }
     }
-    (out, protected)
+    let dollars = raw.iter().filter(|&&b| b == b'$').count();
+    (out, dollars > escaped_dollars)
 }
 
 #[cfg(test)]
@@ -334,13 +342,33 @@ mod tests {
         assert_eq!(unq(r"x\u1ZZZ"), "x\u{10}");
         assert_eq!(unq(r"x\u12ZZ"), "x\u{120}");
         assert_eq!(unq(r"x\u123Z"), "x\u{1230}");
-        assert_eq!(unq(r"x\u12"), "xu12");
     }
 
     #[test]
-    fn unquoted_escaped_dollar_is_protected() {
-        let (out, protected) = decode_unquoted(br"\$A$B");
-        assert_eq!(out, b"$A$B");
-        assert_eq!(protected, vec![true, false, false, false]);
+    fn unquoted_short_unicode_escapes() {
+        // spec §4.8: three bytes left form an escape; two or fewer drop the next byte.
+        assert_eq!(unq(r"x\u123"), "x\u{1230}");
+        assert_eq!(unq(r"x\u1Z2"), "x\u{10}");
+        assert_eq!(unq(r"x\u12\"), "x\u{120}");
+        assert_eq!(unq(r"x\u12"), "xu2");
+        assert_eq!(unq(r"x\u41"), "xu1");
+        assert_eq!(unq(r"x\u1"), "xu");
+        assert_eq!(unq(r"x\uZ"), "xu");
+        assert_eq!(unq(r"x\u"), "xu");
+        assert_eq!(unq(r"a\u\n"), "aun");
+        assert_eq!(unq(r"x\u1\"), "xu\\");
+    }
+
+    #[test]
+    fn unquoted_dollars_decide_expansion() {
+        // spec §7.6: expansion only if some `$` is not written as `\$`.
+        let expands = |s: &str| decode_unquoted(s.as_bytes()).1;
+        assert_eq!(decode_unquoted(br"\$A$B").0, b"$A$B");
+        assert!(expands(r"\$A$B"));
+        assert!(!expands(r"\$A\$B"));
+        assert!(!expands(r"\\\$ABI"));
+        assert!(expands(r"\\$ABI"));
+        assert!(expands(r"\$ABI\u$000"));
+        assert!(!expands("plain"));
     }
 }

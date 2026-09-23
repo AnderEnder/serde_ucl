@@ -70,15 +70,13 @@ enum Base {
 /// for what follows it (spec §5.5): with a suffix, the end of input, a terminator, `#`, `}` or
 /// `]` must follow at once; without one, spaces and tabs may come first.
 ///
-/// The order matters for out-of-range numbers and follows the oracle (QUESTIONS.md #15): an `e`,
-/// `E`, `x` or `X` right after a decimal number makes the value a string before the range is
-/// checked;
-/// any other trailing text, an unknown suffix included, makes it a string only after the range
-/// check. So `99999999999999999999x` is a string, while `99999999999999999999 x` and
-/// `1e400b` are errors.
+/// Before the range check, a malformed number text makes the value a string (spec §5.8): a second
+/// `.` or exponent, an `e` or `E` followed by neither a digit nor a sign, an `x` or `X` without a
+/// hex digit after it, or a `.` right after hex digits. Any other trailing text makes it a string
+/// only after the range check, so `99999999999999999999x` is a string while
+/// `99999999999999999999 x` and `1e400b` are errors.
 pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
     let at = |i: usize| src.get(i).copied();
-    let is_digit = |i: usize| at(i).is_some_and(|b| b.is_ascii_digit());
 
     let mut i = start;
     let negative = at(i) == Some(b'-');
@@ -86,106 +84,191 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
         i += 1;
     }
     let int_start = i;
-    while is_digit(i) {
+    while at(i).is_some_and(|b| b.is_ascii_digit()) {
         i += 1;
     }
     if i == int_start {
         return Number::NotNumber;
     }
 
-    let mut hex_digits = None;
-    let mut is_float = false;
     if matches!(at(i), Some(b'x' | b'X')) {
-        let hex_start = i + 1;
-        let mut j = hex_start;
-        while at(j).is_some_and(|b| b.is_ascii_hexdigit()) {
-            j += 1;
-        }
-        if j == hex_start || j - hex_start >= LENGTH_LIMIT {
+        let digits = i + 1;
+        let Some(end) = hex_run(src, digits) else {
             return Number::NotNumber;
-        }
-        hex_digits = Some(hex_start..j);
-        i = j;
-    } else {
-        if at(i) == Some(b'.') {
-            is_float = true;
-            i += 1;
-            while is_digit(i) {
+        };
+        return match hex_value(&src[digits..end], negative) {
+            Some(v) => finish(src, end, Base::Int(v), true, no_time),
+            None => Number::OutOfRange,
+        };
+    }
+
+    // The rest of the number text: at most one `.` and at most one exponent. A `.` may also come
+    // after the exponent; the value then ends before it (spec §5.8).
+    let mut dot = false;
+    let mut exponent = false;
+    loop {
+        match at(i) {
+            Some(b'0'..=b'9') => i += 1,
+            Some(b'.') if dot => return Number::NotNumber,
+            Some(b'.') => {
+                dot = true;
                 i += 1;
             }
-        }
-        if matches!(at(i), Some(b'e' | b'E')) {
-            let mut j = i + 1;
-            if matches!(at(j), Some(b'+' | b'-')) {
-                j += 1;
-            }
-            if is_digit(j) {
-                while is_digit(j) {
-                    j += 1;
+            Some(b'e' | b'E') => {
+                let signed = matches!(at(i + 1), Some(b'+' | b'-'));
+                if exponent || !(signed || at(i + 1).is_some_and(|b| b.is_ascii_digit())) {
+                    return Number::NotNumber;
                 }
-                is_float = true;
-                i = j;
+                exponent = true;
+                i += if signed { 2 } else { 1 };
             }
-            // Otherwise the `e` is left to be read as a suffix, which it is not.
-        }
-        if i - int_start >= LENGTH_LIMIT {
-            return Number::NotNumber;
+            _ => break,
         }
     }
-    let number_end = i;
-    let is_hex = hex_digits.is_some();
-    if !is_hex && matches!(at(i), Some(b'e' | b'E' | b'x' | b'X')) {
+    if i - int_start >= LENGTH_LIMIT {
         return Number::NotNumber;
     }
+    if matches!(at(i), Some(b'x' | b'X')) {
+        return decimal_after_x(src, i + 1, negative, no_time);
+    }
 
-    let base = if let Some(digits) = hex_digits {
-        match hex_value(&src[digits], negative) {
-            Some(v) => Base::Int(v),
-            None => return Number::OutOfRange,
+    if dot || exponent {
+        let end = float_text_end(src, int_start);
+        // The number's text is ASCII: sign, digits, `.`, exponent.
+        let text = std::str::from_utf8(&src[start..end]).expect("ASCII");
+        match float_value(text) {
+            Some(v) => finish(src, end, Base::Float(v), false, no_time),
+            None => Number::OutOfRange,
         }
     } else {
-        // The number's text is ASCII: sign, digits, `.`, exponent.
-        let text = std::str::from_utf8(&src[start..number_end]).expect("ASCII");
-        if is_float {
-            match float_value(text) {
-                Some(v) => Base::Float(v),
-                None => return Number::OutOfRange,
-            }
-        } else {
-            match text.parse::<i64>() {
-                Ok(v) => Base::Int(v),
-                Err(_) => return Number::OutOfRange,
-            }
+        let text = std::str::from_utf8(&src[start..i]).expect("ASCII");
+        match text.parse::<i64>() {
+            Ok(v) => finish(src, i, Base::Int(v), false, no_time),
+            Err(_) => Number::OutOfRange,
         }
-    };
-
-    while at(i).is_some_and(|b| b.is_ascii_alphabetic()) {
-        i += 1;
     }
-    let suffix = if i > number_end {
-        match Suffix::parse(&src[number_end..i], no_time) {
+}
+
+/// The end of the hex digits that start at `from`. `None` if there are none, if there are too
+/// many (spec §5.3), or if a `.` follows them, which makes the value a string before any range
+/// check (spec §5.2, §5.8).
+fn hex_run(src: &[u8], from: usize) -> Option<usize> {
+    let len = src[from..]
+        .iter()
+        .take_while(|b| b.is_ascii_hexdigit())
+        .count();
+    let end = from + len;
+    (len > 0 && len < LENGTH_LIMIT && src.get(end) != Some(&b'.')).then_some(end)
+}
+
+/// The end of the decimal float that starts at `from`: digits, an optional `.` and digits, an
+/// optional exponent with at least one digit.
+fn float_text_end(src: &[u8], from: usize) -> usize {
+    let digits = |i: usize| i + src[i..].iter().take_while(|b| b.is_ascii_digit()).count();
+    let mut i = digits(from);
+    if src.get(i) == Some(&b'.') {
+        i = digits(i + 1);
+    }
+    if matches!(src.get(i), Some(b'e' | b'E')) {
+        let sign = usize::from(matches!(src.get(i + 1), Some(b'+' | b'-')));
+        if src.get(i + 1 + sign).is_some_and(|b| b.is_ascii_digit()) {
+            i = digits(i + 1 + sign);
+        }
+    }
+    i
+}
+
+/// Reads the suffix after a number ending at `number_end`, checks what follows (spec §5.5), and
+/// builds the value.
+fn finish(src: &[u8], number_end: usize, base: Base, is_hex: bool, no_time: bool) -> Number {
+    let end = letters_end(src, number_end);
+    let suffix = if end > number_end {
+        match Suffix::parse(&src[number_end..end], no_time) {
             Some(s) => Some(s),
             None => return Number::NotNumber,
         }
     } else {
         None
     };
-
-    let end = i;
-    let mut follow = i;
-    if suffix.is_none() {
-        while matches!(at(follow), Some(b' ' | b'\t')) {
-            follow += 1;
-        }
-    }
-    if !matches!(
-        at(follow),
-        None | Some(b'\n' | b'\r' | 0 | b',' | b';' | b'#' | b'}' | b']')
-    ) {
+    if !followed_properly(src, end, suffix.is_some()) {
         return Number::NotNumber;
     }
-
     Number::Value(apply(base, suffix, is_hex), end)
+}
+
+fn letters_end(src: &[u8], from: usize) -> usize {
+    from + src[from..]
+        .iter()
+        .take_while(|b| b.is_ascii_alphabetic())
+        .count()
+}
+
+/// Whether a number ending at `end` is followed by what spec §5.5 allows.
+fn followed_properly(src: &[u8], mut end: usize, has_suffix: bool) -> bool {
+    if !has_suffix {
+        while matches!(src.get(end), Some(b' ' | b'\t')) {
+            end += 1;
+        }
+    }
+    matches!(
+        src.get(end),
+        None | Some(b'\n' | b'\r' | 0 | b',' | b';' | b'#' | b'}' | b']')
+    )
+}
+
+/// An `x` after a number with a `.` or an exponent (spec §5.2, *Quirk*): the hex digits after it,
+/// starting at `digits`, are read as a decimal number (digits, then an optional exponent), and
+/// the rest of them, with any letters after them, is that number's suffix.
+///
+/// The value is `int 0`, except with a binary multiplier: the decimal number, with the sign
+/// applied and truncated (saturating), times the multiplier, wrapping. A decimal number that
+/// overflows is an error (spec §5.8). Details beyond the spec's examples follow the oracle
+/// (QUESTIONS.md #19).
+fn decimal_after_x(src: &[u8], digits: usize, negative: bool, no_time: bool) -> Number {
+    let Some(run_end) = hex_run(src, digits) else {
+        return Number::NotNumber;
+    };
+    let run = &src[digits..run_end];
+    let mut len = run.iter().take_while(|b| b.is_ascii_digit()).count();
+    if len > 0
+        && matches!(run.get(len), Some(b'e' | b'E'))
+        && run.get(len + 1).is_some_and(|b| b.is_ascii_digit())
+    {
+        len += 1 + run[len + 1..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+    }
+    let decimal = if len == 0 {
+        0.0
+    } else {
+        let text = std::str::from_utf8(&run[..len]).expect("ASCII");
+        match text.parse::<f64>() {
+            Ok(v) if v.is_finite() => v,
+            _ => return Number::OutOfRange,
+        }
+    };
+    let end = letters_end(src, run_end);
+    let rest = &src[digits + len..end];
+    let suffix = if rest.is_empty() {
+        None
+    } else {
+        match Suffix::parse(rest, no_time) {
+            Some(s) => Some(s),
+            None => return Number::NotNumber,
+        }
+    };
+    if !followed_properly(src, end, suffix.is_some()) {
+        return Number::NotNumber;
+    }
+    let value = match suffix {
+        Some(Suffix::Binary(m)) => {
+            let signed = if negative { -decimal } else { decimal };
+            (signed as i64).wrapping_mul(m)
+        }
+        _ => 0,
+    };
+    Number::Value(UclValue::Integer(value), end)
 }
 
 /// The hex digits' value with the sign applied, if it fits in an `i64`.
@@ -313,6 +396,98 @@ mod tests {
         assert_eq!(
             value("2.2250738585072014e-308"),
             UclValue::Float(f64::MIN_POSITIVE)
+        );
+    }
+
+    #[test]
+    fn malformed_text_is_a_string_before_the_range_check() {
+        // spec §5.8; the `.` after hex digits follows the oracle (QUESTIONS.md #19).
+        for s in [
+            "1e999x",
+            "1e999e",
+            "99999999999999999999X",
+            "99999999999999999999e",
+            "99999999999999999999e+",
+            "1e999..",
+            "1.5e999.5",
+            "1e999.5.",
+            "1e999.x",
+            "0x8000000000000000.",
+            "12x8000000000000000.5",
+        ] {
+            assert_eq!(num(s), Number::NotNumber, "{s}");
+        }
+        for s in [
+            "1e999.5",
+            "1e999.",
+            "1e999.k",
+            "1e999-",
+            "1e999 .",
+            "99999999999999999999k5",
+            "0x8000000000000000-",
+        ] {
+            assert_eq!(num(s), Number::OutOfRange, "{s}");
+        }
+        assert_eq!(value("99999999999999999999."), UclValue::Float(1e20));
+        assert_eq!(value("99999999999999999999.5"), UclValue::Float(1e20));
+        assert_eq!(num("1e5.5"), Number::NotNumber);
+    }
+
+    #[test]
+    fn x_after_a_fraction_or_exponent() {
+        // spec §5.2, *Quirk*; details beyond the spec's examples follow the oracle
+        // (QUESTIONS.md #19).
+        for (s, v) in [
+            ("1.5x10", 0),
+            ("1e5x10", 0),
+            ("1.x5", 0),
+            ("1.5x1e5", 0),
+            ("1.5X10", 0),
+            ("1.5x10kb", 10240),
+            ("1.5x10KB", 10240),
+            ("1.5x1e5kb", 102_400_000),
+            ("-1.5x10kb", -10240),
+            ("1.5x10mb", 10 << 20),
+            ("1.5x10k", 0),
+            ("1.5x10s", 0),
+            ("1.5x10min", 0),
+            ("1.5x1d", 0),
+            ("1.5xd", 0),
+            ("1e999x5kb", 5120),
+            ("1.5x99999999999999999999kb", -1024),
+            ("-1.5x99999999999999999999kb", 0),
+        ] {
+            assert_eq!(value(s), UclValue::Integer(v), "{s}");
+        }
+        for s in [
+            "1.5x1f",
+            "1e5x",
+            "1.5x10.5",
+            "1.5x1.5kb",
+            "1.5x-10kb",
+            "1.5x10b",
+            "1.5x1dkb",
+            "1.5x10e",
+            "1.5x1e",
+            "1.5x1e+5",
+            "1.5x1e1e1",
+            "1.5x10x",
+            "1.5x10 x",
+            "1.5x10kb ",
+            "1.5x1d ",
+            "1.5x1e999.",
+        ] {
+            assert_eq!(num(s), Number::NotNumber, "{s}");
+        }
+        for s in ["1.5x1e999", "1.5x1e999kb", "1.5x1e999 x", "1.5x1e999e"] {
+            assert_eq!(num(s), Number::OutOfRange, "{s}");
+        }
+        assert_eq!(num("1.5x10 ;"), Number::Value(UclValue::Integer(0), 6));
+        assert_eq!(scan(b"1.5x10s", 0, true), Number::NotNumber);
+        assert_eq!(scan(b"1.5x1d", 0, true), Number::NotNumber);
+        assert_eq!(
+            scan(b"1.5x10ms", 0, true),
+            Number::Value(UclValue::Integer(0), 8)
         );
     }
 

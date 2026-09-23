@@ -16,18 +16,23 @@
 //!
 //! A case whose golden file is an error passes only if the parser rejects the input. For the new
 //! core, a rejection because the input uses something not supported yet (`Error::is_unsupported`,
-//! such as a macro before C3) does not count: the case fails with the reason `macro`.
+//! such as a known macro before C3) does not count: the case fails with the reason `macro`. Syntax
+//! errors in macros are real rejections.
+//!
+//! For cases with `dump-comments` in their `.flags`, the new core's dump also records the saved
+//! comments attached to each value, as the oracle's does (`tests/conformance/README.md`): `"c"` for
+//! comments attached before the value, `"ca"` for those attached after it.
 //!
 //! Set `UCL_CONFORMANCE_REPORT=1` (with `-- --nocapture`) to print every failing case with the
 //! first point where the two dumps differ, and a suggested xfail reason.
 
 use serde_json::{Value as J, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use ucl_lexer::parse::Parser as CoreParser;
+use ucl_lexer::parse::{CommentPlacement, Parser as CoreParser, PathSegment};
 use ucl_lexer::{DuplicateStrategy, MapVariableHandler, ParserFlags, UclParser, UclValue};
 
 const CONFORMANCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance");
@@ -99,27 +104,64 @@ fn collect(dir: &Path, ext: &str, recursive: bool, out: &mut Vec<PathBuf>) {
 /// entry, times as `"time"`, and `"pri"` on any entry value whose priority is non-zero. The model
 /// keeps priorities only on entry values, which is where libucl's dumps have them.
 fn dump(value: &UclValue) -> J {
-    dump_node(value, 0)
+    dump_node(value, 0, &mut Vec::new(), None)
 }
 
-fn dump_node(value: &UclValue, priority: u8) -> J {
-    let mut node = match value {
-        UclValue::Object(obj) => json!({
-            "t": "object",
-            "entries": obj
+/// Saved comments by value path: the dump key (`"c"` or `"ca"`) and the comment texts.
+type CommentMap = HashMap<Vec<PathSegment>, (&'static str, Vec<String>)>;
+
+/// The new core's attached comments of the last parse, keyed by value path.
+fn comment_map(parser: &CoreParser) -> CommentMap {
+    let comments = parser.comments();
+    parser
+        .attached_comments()
+        .iter()
+        .map(|group| {
+            let key = match group.placement {
+                CommentPlacement::Before => "c",
+                CommentPlacement::After => "ca",
+            };
+            let texts = group
+                .comments
                 .iter()
-                .map(|(k, entry)| {
-                    let values: Vec<J> = entry
-                        .slots()
-                        .iter()
-                        .map(|slot| dump_node(slot.value(), slot.priority()))
-                        .collect();
-                    json!({"k": k, "v": values})
-                })
-                .collect::<Vec<_>>(),
-        }),
+                .map(|&i| comments[i].text.clone())
+                .collect();
+            (group.path.clone(), (key, texts))
+        })
+        .collect()
+}
+
+fn dump_node(
+    value: &UclValue,
+    priority: u8,
+    path: &mut Vec<PathSegment>,
+    comments: Option<&CommentMap>,
+) -> J {
+    let mut node = match value {
+        UclValue::Object(obj) => {
+            let mut entries = Vec::new();
+            for (k, entry) in obj.iter() {
+                let mut values = Vec::new();
+                for (index, slot) in entry.slots().iter().enumerate() {
+                    path.push(PathSegment::Key {
+                        key: k.clone(),
+                        index,
+                    });
+                    values.push(dump_node(slot.value(), slot.priority(), path, comments));
+                    path.pop();
+                }
+                entries.push(json!({"k": k, "v": values}));
+            }
+            json!({"t": "object", "entries": entries})
+        }
         UclValue::Array(arr) => {
-            json!({"t": "array", "v": arr.iter().map(dump).collect::<Vec<_>>()})
+            let mut items = Vec::new();
+            for (index, item) in arr.iter().enumerate() {
+                path.push(PathSegment::Index(index));
+                items.push(dump_node(item, 0, path, comments));
+                path.pop();
+            }
+            json!({"t": "array", "v": items})
         }
         UclValue::Integer(i) => json!({"t": "int", "v": i.to_string()}),
         UclValue::Float(f) => json!({"t": "float", "v": format!("{f:?}")}),
@@ -130,6 +172,9 @@ fn dump_node(value: &UclValue, priority: u8) -> J {
     };
     if priority != 0 {
         node["pri"] = J::from(priority);
+    }
+    if let Some((key, texts)) = comments.and_then(|map| map.get(path.as_slice())) {
+        node[*key] = J::from(texts.clone());
     }
     node
 }
@@ -207,6 +252,7 @@ struct Setup {
     priority: Option<u8>,
     strategy: Option<DuplicateStrategy>,
     string_input: bool,
+    dump_comments: bool,
 }
 
 fn setup(case: &Case) -> Setup {
@@ -219,9 +265,12 @@ fn setup(case: &Case) -> Setup {
             "no-time" => Some(ParserFlags::NO_TIME),
             "no-implicit-arrays" => Some(ParserFlags::NO_IMPLICIT_ARRAYS),
             "save-comments" => Some(ParserFlags::SAVE_COMMENTS),
-            // Also asks the oracle to record the attached comments in the dump ("c"/"ca" keys,
-            // tests/conformance/README.md); the crate's dump has none yet, so such cases fail.
-            "dump-comments" => Some(ParserFlags::SAVE_COMMENTS),
+            // Also records the attached comments in the dump ("c"/"ca" keys,
+            // tests/conformance/README.md).
+            "dump-comments" => {
+                setup.dump_comments = true;
+                Some(ParserFlags::SAVE_COMMENTS)
+            }
             "disable-macro" => Some(ParserFlags::DISABLE_MACRO),
             "no-filevars" => Some(ParserFlags::NO_FILEVARS),
             _ => None,
@@ -285,7 +334,10 @@ fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
             parser.parse_file(&case.input)
         };
         match result {
-            Ok(v) => Parsed::Value(dump(&v)),
+            Ok(v) => {
+                let comments = setup.dump_comments.then(|| comment_map(&parser));
+                Parsed::Value(dump_node(&v, 0, &mut Vec::new(), comments.as_ref()))
+            }
             Err(e) if e.is_unsupported() => Parsed::Unsupported(e.to_string()),
             Err(e) => Parsed::Rejected(e.to_string()),
         }

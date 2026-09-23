@@ -5,13 +5,14 @@
 //! parent (by the duplicate rules of §8) when its opening bracket is read, and later entries go
 //! straight into it. Each stack frame records how to reach its container from the one below.
 
+use super::comments::{Notes, ValuePath};
 use super::error::position_at;
 use super::number::{self, Number};
 use super::string;
 use super::vars::Expander;
-use super::{Comment, Error, ErrorKind, MAX_NESTING};
+use super::{AttachedComments, Comment, Error, ErrorKind, MAX_NESTING, PathSegment};
 use crate::value::{
-    DuplicateKeyError, DuplicateStrategy, ParserFlags, Placement, Slot, UclObject, UclValue,
+    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclObject, UclValue,
 };
 
 /// The settings of one input unit.
@@ -22,25 +23,35 @@ pub(crate) struct Settings {
     pub(crate) strategy: DuplicateStrategy,
 }
 
+/// Where saved comments go (spec §12.5).
+pub(crate) struct CommentSink<'c> {
+    pub(crate) comments: &'c mut Vec<Comment>,
+    pub(crate) attached: &'c mut Vec<AttachedComments>,
+}
+
 /// Parses a whole document into its root value.
 pub(crate) fn parse_document(
     input: &[u8],
     settings: Settings,
     expander: &mut Expander<'_>,
-    comments: Option<&mut Vec<Comment>>,
+    sink: Option<CommentSink<'_>>,
 ) -> Result<UclValue, Error> {
     let mut core = Core {
         src: input,
         pos: 0,
         settings,
         expander,
-        comment_spans: comments.as_ref().map(|_| Vec::new()),
+        notes: sink.as_ref().map(|_| Notes::new()),
+        uppercase_keys: false,
         root: UclValue::Null,
         frames: Vec::new(),
     };
     let result = core.run();
-    if let (Some(out), Some(spans)) = (comments, core.comment_spans.take()) {
-        *out = comments_at(input, &spans);
+    if let (Some(sink), Some(notes)) = (sink, core.notes.take()) {
+        *sink.comments = comments_at(input, &notes.spans);
+        if result.is_ok() {
+            *sink.attached = notes.into_groups();
+        }
     }
     result.map(|()| core.root)
 }
@@ -92,10 +103,11 @@ enum Close {
     /// `]`.
     Bracket,
     /// An object created for a section name (§3.4). It closes together with the container
-    /// above it.
+    /// above it, or quietly at the end of input (after a macro ignored there, §9.2).
     Section,
     /// A section-name object whose path ended in an ordinary key (§3.4, *Quirk*). It has no
-    /// closing bracket; only the end of input closes it.
+    /// closing bracket. It closes when a container written with a bracket that was opened in it
+    /// closes, together with every such object below it, or at the end of input.
     LeftOpen,
 }
 
@@ -112,6 +124,23 @@ enum Step {
 }
 
 impl Step {
+    fn segments(&self) -> Vec<PathSegment> {
+        match self {
+            Step::Entry { key, slot } => vec![PathSegment::Key {
+                key: key.clone(),
+                index: *slot,
+            }],
+            Step::Collected { key, index } => vec![
+                PathSegment::Key {
+                    key: key.clone(),
+                    index: 0,
+                },
+                PathSegment::Index(*index),
+            ],
+            Step::Element(index) => vec![PathSegment::Index(*index)],
+        }
+    }
+
     fn enter<'v>(&self, value: &'v mut UclValue) -> &'v mut UclValue {
         let target = match self {
             Step::Entry { key, slot } => value
@@ -148,6 +177,9 @@ struct Frame {
     home: Home,
     /// No element or entry has been read into the container yet.
     fresh: bool,
+    /// The container's path from the root, kept only when comments are saved; `None` also for a
+    /// detached container.
+    path: Option<ValuePath>,
 }
 
 /// The container of the top frame.
@@ -169,6 +201,16 @@ fn resolve<'v>(root: &'v mut UclValue, frames: &'v mut [Frame]) -> &'v mut UclVa
         current = step.enter(current);
     }
     current
+}
+
+/// An entry as it was before an insertion, for keeping saved comments with their values.
+struct Before {
+    /// Its number of values.
+    len: usize,
+    /// Its value is a `NO_IMPLICIT_ARRAYS` collection.
+    collected: bool,
+    /// The insertion replaces its first value in place (the `merge` scalar quirk).
+    in_place: bool,
 }
 
 /// A key and where it starts.
@@ -224,8 +266,10 @@ struct Core<'s, 'e, 'v> {
     pos: usize,
     settings: Settings,
     expander: &'e mut Expander<'v>,
-    /// Byte ranges of skipped comments, when comments are saved (§12.5).
-    comment_spans: Option<Vec<(usize, usize)>>,
+    /// Saved comments and their attachment, when comments are saved (§12.5).
+    notes: Option<Notes>,
+    /// A key with an uppercase ASCII letter has been read under `KEY_LOWERCASE` (§12.1).
+    uppercase_keys: bool,
     root: UclValue,
     frames: Vec<Frame>,
 }
@@ -266,14 +310,17 @@ impl Core<'_, '_, '_> {
             .iter()
             .position(|&b| b == b'\n')
             .map_or(self.src.len(), |n| start + n);
-        if let Some(spans) = &mut self.comment_spans {
-            spans.push((start, end));
+        if let Some(notes) = &mut self.notes {
+            notes.save(start, end);
         }
         self.pos = (end + 1).min(self.src.len());
     }
 
-    /// Skips a `/* … */` comment. Comments nest, and a `*/` between double quotes does not end
-    /// one (§2.3).
+    /// Skips a `/* … */` comment (§2.3). Comments nest. A `"` that does not directly follow a
+    /// `\` begins or ends a quoted part, inside which `/*` and `*/` have no effect.
+    ///
+    /// The saved text includes the byte after `*/` when there is one (§12.5, *Quirk*). At the
+    /// end of input libucl's saved byte is undefined; nothing is added then.
     fn skip_block_comment(&mut self) -> Result<(), Error> {
         let start = self.pos;
         let src = self.src;
@@ -284,10 +331,11 @@ impl Core<'_, '_, '_> {
             match src.get(i) {
                 None => return Err(self.error(ErrorKind::UnterminatedComment, start)),
                 Some(b'"') => {
-                    in_quotes = !in_quotes;
+                    if src[i - 1] != b'\\' {
+                        in_quotes = !in_quotes;
+                    }
                     i += 1;
                 }
-                Some(b'\\') if in_quotes => i += 2,
                 Some(b'/') if !in_quotes && src.get(i + 1) == Some(&b'*') => {
                     depth += 1;
                     i += 2;
@@ -299,8 +347,8 @@ impl Core<'_, '_, '_> {
                 Some(_) => i += 1,
             }
         }
-        if let Some(spans) = &mut self.comment_spans {
-            spans.push((start, i));
+        if let Some(notes) = &mut self.notes {
+            notes.save(start, (i + 1).min(src.len()));
         }
         self.pos = i;
         Ok(())
@@ -309,13 +357,46 @@ impl Core<'_, '_, '_> {
     /// Skips whitespace, line breaks and comments: before an entry, an array element or the
     /// root value.
     fn skip_space(&mut self) -> Result<(), Error> {
+        let mut after_comment = false;
         loop {
             match self.peek() {
-                Some(b) if is_space(b) => self.pos += 1,
-                Some(b'#') => self.skip_line_comment(),
-                _ if self.at_block_comment() => self.skip_block_comment()?,
+                Some(b) if is_space(b) => {
+                    self.pos += 1;
+                    after_comment = false;
+                }
+                Some(b'#') => {
+                    self.skip_hash_comment(after_comment);
+                    after_comment = true;
+                }
+                _ if self.at_block_comment() => {
+                    self.skip_block_comment()?;
+                    after_comment = true;
+                }
                 _ => return Ok(()),
             }
+        }
+    }
+
+    /// Skips a `#` comment between entries or after a value. A `#` that is the last byte of the
+    /// input is not saved there unless it directly follows another comment (§12.5; QUESTIONS.md
+    /// #17).
+    fn skip_hash_comment(&mut self, after_comment: bool) {
+        if !after_comment && self.pos + 1 == self.src.len() {
+            self.pos += 1;
+        } else {
+            self.skip_line_comment();
+        }
+    }
+
+    /// Skips spaces, tabs, VT, FF and comments before a section name (§3.4): VT and FF, which
+    /// end a line before a value (§1.6), are ordinary whitespace between names.
+    fn skip_before_name(&mut self) -> Result<(), Error> {
+        loop {
+            self.skip_inline()?;
+            if !matches!(self.peek(), Some(0x0B | 0x0C)) {
+                return Ok(());
+            }
+            self.pos += 1;
         }
     }
 
@@ -357,7 +438,14 @@ impl Core<'_, '_, '_> {
         resolve(&mut self.root, &mut self.frames)
     }
 
-    fn push_frame(&mut self, kind: Kind, close: Close, home: Home, at: usize) -> Result<(), Error> {
+    fn push_frame(
+        &mut self,
+        kind: Kind,
+        close: Close,
+        home: Home,
+        path: Option<ValuePath>,
+        at: usize,
+    ) -> Result<(), Error> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
         }
@@ -366,6 +454,7 @@ impl Core<'_, '_, '_> {
             close,
             home,
             fresh: true,
+            path,
         });
         Ok(())
     }
@@ -377,35 +466,154 @@ impl Core<'_, '_, '_> {
         }
     }
 
+    /// The path of a value just placed in the current object under `key`, when comments are
+    /// saved and the value is part of the result.
+    fn placed_path(&self, key: &str, placement: Placement) -> Option<ValuePath> {
+        self.notes.as_ref()?;
+        let step = match placement {
+            Placement::Slot(slot) => Step::Entry {
+                key: key.to_owned(),
+                slot,
+            },
+            Placement::Collected(index) => Step::Collected {
+                key: key.to_owned(),
+                index,
+            },
+            Placement::Merged => Step::Entry {
+                key: key.to_owned(),
+                slot: 0,
+            },
+            Placement::Dropped => return None,
+        };
+        let mut path = self.top().path.clone()?;
+        path.extend(step.segments());
+        Some(path)
+    }
+
+    /// A value was created at `path`: pending comments attach to it (§12.5).
+    fn created(&mut self, path: Option<ValuePath>) {
+        if let Some(notes) = &mut self.notes {
+            notes.created(path);
+        }
+    }
+
     /// Inserts `value` under `key` in the current object, by the duplicate rules of §8.
-    fn insert(&mut self, key: &Key, value: UclValue) -> Result<Placement, Error> {
+    ///
+    /// Under `KEY_LOWERCASE`, `key` is first given the spelling of an existing key that differs
+    /// from it only in ASCII case (§12.1; QUESTIONS.md #20).
+    fn insert(&mut self, key: &mut Key, value: UclValue) -> Result<Placement, Error> {
+        self.match_key_case(key);
         let Settings {
-            flags,
+            mut flags,
             priority,
             strategy,
         } = self.settings;
+        // `read_key` has already lowercased the key where §12.1 asks for it.
+        flags.remove(ParserFlags::KEY_LOWERCASE);
+        let track = self.notes.is_some();
         let object = self
             .current()
             .as_object_mut()
             .expect("entries are parsed inside objects");
-        object
-            .insert_slot_placed(
-                key.name.as_str(),
-                Slot::new(value, priority),
-                strategy,
-                flags,
-            )
-            .map_err(|DuplicateKeyError { key: name }| {
-                self.error(ErrorKind::DuplicateKey { key: name }, key.at)
+        let is_container = |v: &UclValue| v.is_object() || v.is_array();
+        // Under `merge`, a scalar that follows a container takes its place in the entry (§8.4,
+        // *Quirk*); the oracle keeps the container's comments on it, as for one value.
+        let replaces_in_place = |e: &Entry| {
+            strategy == DuplicateStrategy::Merge && is_container(e.first()) && !is_container(&value)
+        };
+        let before = track
+            .then(|| {
+                object.entry(&key.name).map(|e| Before {
+                    len: e.len(),
+                    collected: e.slots()[0].is_collected(),
+                    in_place: replaces_in_place(e),
+                })
             })
+            .flatten();
+        let result = object.insert_slot_placed(
+            key.name.as_str(),
+            Slot::new(value, priority),
+            strategy,
+            flags,
+        );
+        let after = if track {
+            object.entry(&key.name).map_or(0, Entry::len)
+        } else {
+            0
+        };
+        let placement = result.map_err(|DuplicateKeyError { key: name }| {
+            self.error(ErrorKind::DuplicateKey { key: name }, key.at)
+        })?;
+        if track {
+            self.values_moved(&key.name, before, placement, after);
+        }
+        Ok(placement)
+    }
+
+    /// Under `KEY_LOWERCASE`, keys are compared without regard to ASCII case, and an entry keeps
+    /// the spelling of its first key. Keys are lowercased as they are read, so only escapes in
+    /// quoted keys can leave uppercase letters (§12.1); until one does, exact comparison is
+    /// enough.
+    fn match_key_case(&mut self, key: &mut Key) {
+        if !self.settings.flags.contains(ParserFlags::KEY_LOWERCASE) {
+            return;
+        }
+        if key.name.bytes().any(|b| b.is_ascii_uppercase()) {
+            self.uppercase_keys = true;
+        }
+        if !self.uppercase_keys {
+            return;
+        }
+        let object = self
+            .current()
+            .as_object()
+            .expect("entries are parsed inside objects");
+        if object.contains_key(&key.name) {
+            return;
+        }
+        if let Some(existing) = object.keys().find(|k| k.eq_ignore_ascii_case(&key.name)) {
+            key.name = existing.clone();
+        }
+    }
+
+    /// Keeps saved comments with their values when an insertion under `key` replaced or moved
+    /// values that were already there (QUESTIONS.md #17). `after` is the entry's length now.
+    fn values_moved(
+        &mut self,
+        key: &str,
+        before: Option<Before>,
+        placement: Placement,
+        after: usize,
+    ) {
+        let Some(Before {
+            len,
+            collected,
+            in_place,
+        }) = before
+        else {
+            return;
+        };
+        let Some(object) = self.top().path.clone() else {
+            return;
+        };
+        let notes = self.notes.as_mut().expect("tracking comments");
+        match placement {
+            Placement::Slot(slot) if slot == len && after == len + 1 => {}
+            Placement::Slot(_) if in_place => {}
+            Placement::Slot(_) if after == 1 => notes.replaced(&object, key, None),
+            Placement::Slot(slot) => notes.replaced(&object, key, Some(slot)),
+            Placement::Collected(_) if !collected => notes.collected(&object, key, len),
+            Placement::Collected(_) | Placement::Merged | Placement::Dropped => {}
+        }
     }
 
     /// Opens a new object or array under `key` in the current object.
-    fn open_in_object(&mut self, key: Key, kind: Kind, close: Close) -> Result<(), Error> {
+    fn open_in_object(&mut self, mut key: Key, kind: Kind, close: Close) -> Result<(), Error> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, self.pos));
         }
-        let placement = self.insert(&key, Self::empty(kind))?;
+        let placement = self.insert(&mut key, Self::empty(kind))?;
+        let path = self.placed_path(&key.name, placement);
         let home = match placement {
             Placement::Slot(slot) => Home::Attached(Step::Entry {
                 key: key.name,
@@ -422,7 +630,8 @@ impl Core<'_, '_, '_> {
             }),
             Placement::Dropped => Home::Detached(Self::empty(kind)),
         };
-        self.push_frame(kind, close, home, key.at)
+        self.created(path.clone());
+        self.push_frame(kind, close, home, path, key.at)
     }
 
     /// Opens a new object or array as the next element of the current array.
@@ -431,24 +640,56 @@ impl Core<'_, '_, '_> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
         }
+        let index = self.push_element(Self::empty(kind));
+        let path = self.element_path(index);
+        self.created(path.clone());
+        self.push_frame(kind, close, Home::Attached(Step::Element(index)), path, at)
+    }
+
+    /// Appends `value` to the current array and returns its index.
+    fn push_element(&mut self, value: UclValue) -> usize {
         let array = self
             .current()
             .as_array_mut()
             .expect("elements are parsed inside arrays");
-        array.push(Self::empty(kind));
-        let index = array.len() - 1;
-        self.push_frame(kind, close, Home::Attached(Step::Element(index)), at)
+        array.push(value);
+        array.len() - 1
     }
 
-    /// Closes the top container after its bracket, with the section objects around it.
+    fn element_path(&self, index: usize) -> Option<ValuePath> {
+        self.notes.as_ref()?;
+        let mut path = self.top().path.clone()?;
+        path.push(PathSegment::Index(index));
+        Some(path)
+    }
+
+    /// Closes the top container after its bracket, with the section objects around it (§3.4).
     fn close_container(&mut self) -> Result<(), Error> {
+        if let Some(notes) = &mut self.notes {
+            notes.trailing();
+        }
         self.frames.pop();
+        let mut outermost = None;
         while self
             .frames
             .last()
             .is_some_and(|f| f.close == Close::Section)
         {
-            self.frames.pop();
+            outermost = self.frames.pop();
+        }
+        // Objects left open by a section path close with the first bracketed container that
+        // closes in them, back to the nearest object written with a bracket, or the root.
+        while self
+            .frames
+            .last()
+            .is_some_and(|f| f.close == Close::LeftOpen)
+        {
+            outermost = self.frames.pop();
+        }
+        if let (Some(notes), Some(frame)) = (&mut self.notes, outermost) {
+            // The outermost of the objects that closed with the bracket counts as the value
+            // created most recently (§12.5).
+            notes.set_last(frame.path);
         }
         if self.frames.is_empty() {
             // The root's closing bracket: the rest of the input is ignored (§1.1, *Quirk*).
@@ -460,7 +701,16 @@ impl Core<'_, '_, '_> {
     // ----- document (§1) -------------------------------------------------------------------
 
     fn run(&mut self) -> Result<(), Error> {
-        self.skip_space()?;
+        // §1.1: a leading bracket starts the root only after whitespace alone, or directly after
+        // a group of comments at the very start of the input.
+        let mut after_space = false;
+        while self.peek().is_some_and(is_space) {
+            self.pos += 1;
+            after_space = true;
+        }
+        if !after_space {
+            self.comment_group()?;
+        }
         let (kind, close) = match self.peek() {
             Some(b'[') => (Kind::Array, Close::Bracket),
             Some(b'{') => (Kind::Object, Close::Brace),
@@ -470,12 +720,50 @@ impl Core<'_, '_, '_> {
             self.pos += 1;
         }
         self.root = Self::empty(kind);
-        self.push_frame(kind, close, Home::Root, self.pos)?;
+        let path = self.notes.as_ref().map(|_| Vec::new());
+        self.push_frame(kind, close, Home::Root, path, self.pos)?;
+        if close == Close::Eof {
+            // Where the first key of an unbraced root could start (§2.2, *Quirk*).
+            self.skip_space_checking_hash(after_space)?;
+        }
         while let Some(frame) = self.frames.last() {
             match frame.kind {
                 Kind::Object => self.object_step()?,
                 Kind::Array => self.array_step()?,
             }
+        }
+        Ok(())
+    }
+
+    /// Skips whitespace and comments. A `#` that is the last byte of the input is an error when
+    /// whitespace comes directly before it (§2.2, *Quirk*); `after_space` tells whether the byte
+    /// before the current position is such whitespace. This applies where the first key of an
+    /// unbraced root could start, and in the places of QUESTIONS.md #18 and #22.
+    fn skip_space_checking_hash(&mut self, mut after_space: bool) -> Result<(), Error> {
+        loop {
+            match self.peek() {
+                Some(b) if is_space(b) => {
+                    self.pos += 1;
+                    after_space = true;
+                }
+                Some(b'#') => {
+                    self.check_hash_at_end(after_space)?;
+                    self.skip_line_comment();
+                    after_space = false;
+                }
+                _ if self.at_block_comment() => {
+                    self.skip_block_comment()?;
+                    after_space = false;
+                }
+                _ => return Ok(()),
+            }
+        }
+    }
+
+    /// The error of §2.2's *Quirk* for a `#` at the current position.
+    fn check_hash_at_end(&self, after_space: bool) -> Result<(), Error> {
+        if after_space && self.peek() == Some(b'#') && self.pos + 1 == self.src.len() {
+            return Err(self.error(ErrorKind::HashAtEnd, self.pos));
         }
         Ok(())
     }
@@ -486,7 +774,10 @@ impl Core<'_, '_, '_> {
         let at = self.pos;
         match self.peek() {
             None => match self.top().close {
-                Close::Eof | Close::LeftOpen => {
+                Close::Eof | Close::LeftOpen | Close::Section => {
+                    if let Some(notes) = &mut self.notes {
+                        notes.trailing();
+                    }
                     self.frames.pop();
                     Ok(())
                 }
@@ -516,7 +807,7 @@ impl Core<'_, '_, '_> {
         let frame = self.frames.last_mut().expect("a container is open");
         if std::mem::replace(&mut frame.fresh, false) && self.leading_comments()? {
             // The first element starts right after a group of comments that follow each
-            // other directly, whitespace included (QUESTIONS.md #9).
+            // other directly, whitespace included (§1.5, *Quirk*).
             return match self.peek() {
                 None => Err(self.error(ErrorKind::UnterminatedArray, self.pos)),
                 Some(b']') => {
@@ -546,6 +837,12 @@ impl Core<'_, '_, '_> {
         while self.peek().is_some_and(is_space) {
             self.pos += 1;
         }
+        self.comment_group()
+    }
+
+    /// Skips comments that follow each other directly, with nothing between them; a line
+    /// comment includes its line break. Returns whether there was a comment.
+    fn comment_group(&mut self) -> Result<bool, Error> {
         let mut comment = false;
         loop {
             match self.peek() {
@@ -570,10 +867,9 @@ impl Core<'_, '_, '_> {
             }
             _ => {
                 let (value, quoted) = self.scalar()?;
-                self.current()
-                    .as_array_mut()
-                    .expect("elements are parsed inside arrays")
-                    .push(value);
+                let index = self.push_element(value);
+                let path = self.element_path(index);
+                self.created(path);
                 self.after_value(quoted)
             }
         }
@@ -598,12 +894,25 @@ impl Core<'_, '_, '_> {
                 }
             }
         }
+        let mut after_comment = false;
         loop {
-            self.skip_blanks();
+            if self.peek().is_some_and(|b| b == b' ' || b == b'\t') {
+                self.skip_blanks();
+                after_comment = false;
+            }
             match self.peek() {
-                Some(b'\n' | b'\r' | 0 | b',' | b';') => self.pos += 1,
-                Some(b'#') => self.skip_line_comment(),
-                _ if self.at_block_comment() => self.skip_block_comment()?,
+                Some(b'\n' | b'\r' | 0 | b',' | b';') => {
+                    self.pos += 1;
+                    after_comment = false;
+                }
+                Some(b'#') => {
+                    self.skip_hash_comment(after_comment);
+                    after_comment = true;
+                }
+                _ if self.at_block_comment() => {
+                    self.skip_block_comment()?;
+                    after_comment = true;
+                }
                 _ => return Ok(()),
             }
         }
@@ -613,6 +922,7 @@ impl Core<'_, '_, '_> {
 
     fn read_key(&mut self) -> Result<Key, Error> {
         let at = self.pos;
+        let lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
         let (bytes, quoted) = match self.peek() {
             Some(b'"') => {
                 let (bytes, end) = string::double_quoted(self.src, at)?;
@@ -620,7 +930,16 @@ impl Core<'_, '_, '_> {
                     return Err(self.error(ErrorKind::EmptyKey, at));
                 }
                 self.pos = end;
-                (bytes, true)
+                if lowercase {
+                    // §12.1, *Quirk*: the key is lowercased as written, then its escapes are
+                    // decoded. A `\U` that becomes `\u` is decoded like an unquoted value's
+                    // (§4.8), as the oracle does (QUESTIONS.md #20).
+                    let mut raw = self.src[at + 1..end - 1].to_vec();
+                    raw.make_ascii_lowercase();
+                    (string::decode_unquoted(&raw).0, true)
+                } else {
+                    (bytes, true)
+                }
             }
             Some(b'\'') => return Err(self.error(ErrorKind::SingleQuotedKey, at)),
             Some(b) if is_key_start(b) => {
@@ -649,7 +968,7 @@ impl Core<'_, '_, '_> {
             }
         }
         let mut name = self.text(bytes, at)?;
-        if self.settings.flags.contains(ParserFlags::KEY_LOWERCASE) {
+        if lowercase && !quoted {
             name.make_ascii_lowercase();
         }
         Ok(Key { name, at })
@@ -680,6 +999,7 @@ impl Core<'_, '_, '_> {
         let mut name = first;
         let mut opened = 0;
         let mut after_separator = false;
+        let mut after_break = false;
         loop {
             match self.peek() {
                 Some(b'{' | b'[') if after_separator => {
@@ -690,7 +1010,19 @@ impl Core<'_, '_, '_> {
             }
             self.open_in_object(name, Kind::Object, Close::Section)?;
             opened += 1;
+            if after_break {
+                // A line break after a separator that follows a name: the next name may come on
+                // any later line, and if the input ends first, the objects close quietly
+                // (QUESTIONS.md #22).
+                self.skip_space_checking_hash(false)?;
+                if self.peek().is_none() {
+                    return Ok(());
+                }
+            }
+            self.skip_before_name()?;
             let word = match self.peek() {
+                // A key position inside the new object, so `.` starts a macro (§9.1).
+                Some(b'.') => return self.macro_entry(),
                 Some(b'"' | b'\'') => self.read_key()?,
                 Some(b) if is_key_start(b) => self.read_key()?,
                 _ => {
@@ -704,12 +1036,18 @@ impl Core<'_, '_, '_> {
             self.skip_inline()?;
             // A separator after a word that follows a name is ignored, and the word is a name.
             after_separator = matches!(self.peek(), Some(b'=' | b':'));
+            after_break = false;
             if after_separator {
                 self.pos += 1;
                 self.skip_inline()?;
+                match self.peek() {
+                    None => return Err(self.error(ErrorKind::MissingValue, self.pos)),
+                    Some(b'\n' | b'\r' | 0x0B | 0x0C) => after_break = true,
+                    Some(_) => {}
+                }
             } else if !matches!(self.peek(), Some(b'{' | b'[')) && !self.line_has_bracket() {
                 // An ordinary key. The section objects have no closing bracket, so they stay
-                // open until the end of input (§3.4, *Quirk*).
+                // open (§3.4, *Quirk*; see `Close::LeftOpen`).
                 let n = self.frames.len();
                 for frame in &mut self.frames[n - opened..] {
                     frame.close = Close::LeftOpen;
@@ -735,16 +1073,22 @@ impl Core<'_, '_, '_> {
     /// A value on a following line (§1.6, *Quirk*). Blank lines and whitespace are skipped, then
     /// one group of comments that follow each other directly. The value starts right after the
     /// group; at the end of input it is `null`.
-    fn next_line_value(&mut self, key: Key) -> Result<(), Error> {
+    fn next_line_value(&mut self, mut key: Key) -> Result<(), Error> {
+        if let Some(notes) = &mut self.notes {
+            // The group's comments attach after the value is created (§12.5, QUESTIONS.md #17).
+            notes.hold();
+        }
         self.leading_comments()?;
         if self.peek().is_none() {
-            self.insert(&key, UclValue::Null)?;
+            let placement = self.insert(&mut key, UclValue::Null)?;
+            let path = self.placed_path(&key.name, placement);
+            self.created(path);
             return Ok(());
         }
         self.object_value(key)
     }
 
-    fn object_value(&mut self, key: Key) -> Result<(), Error> {
+    fn object_value(&mut self, mut key: Key) -> Result<(), Error> {
         match self.peek() {
             Some(b'{') => {
                 self.pos += 1;
@@ -756,7 +1100,9 @@ impl Core<'_, '_, '_> {
             }
             _ => {
                 let (value, quoted) = self.scalar()?;
-                self.insert(&key, value)?;
+                let placement = self.insert(&mut key, value)?;
+                let path = self.placed_path(&key.name, placement);
+                self.created(path);
                 self.after_value(quoted)
             }
         }
@@ -770,7 +1116,7 @@ impl Core<'_, '_, '_> {
             Some(b'"') => {
                 let (bytes, end) = string::double_quoted(self.src, at)?;
                 self.pos = end;
-                let bytes = self.expander.expand(bytes, None);
+                let bytes = self.expander.expand(bytes);
                 Ok((UclValue::String(self.text(bytes, at)?), true))
             }
             Some(b'\'') => {
@@ -781,7 +1127,7 @@ impl Core<'_, '_, '_> {
             Some(b'<') if string::heredoc_opener(self.src, at).is_some() => {
                 let (bytes, end) = string::heredoc(self.src, at)?;
                 self.pos = end;
-                let bytes = self.expander.expand(bytes, None);
+                let bytes = self.expander.expand(bytes);
                 Ok((UclValue::String(self.text(bytes, at)?), true))
             }
             _ => Ok((self.unquoted()?, false)),
@@ -815,8 +1161,13 @@ impl Core<'_, '_, '_> {
         if let Some(value) = keyword(raw) {
             return Ok(value);
         }
-        let (bytes, protected) = string::decode_unquoted(raw);
-        let bytes = self.expander.expand(bytes, Some(&protected));
+        // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*).
+        let (bytes, expand) = string::decode_unquoted(raw);
+        let bytes = if expand {
+            self.expander.expand(bytes)
+        } else {
+            bytes
+        };
         Ok(UclValue::String(self.text(bytes, start)?))
     }
 
@@ -848,29 +1199,86 @@ impl Core<'_, '_, '_> {
 
     // ----- macros (§9) ---------------------------------------------------------------------
 
-    /// A `.` where a key could start is a macro (§9.1). Its name is checked; known macros are
-    /// not supported until work item C3.
+    /// A `.` where a key could start is a macro (§9.1): `.NAME (ARGUMENTS)? VALUE` (§9.2).
+    ///
+    /// Until work item C3, the core checks the syntax that decides whether the document is
+    /// rejected and stops there: a known macro with a value is [`ErrorKind::Unsupported`].
+    ///
+    /// - A NAME that runs to the end of input is ignored, whatever it is.
+    /// - An unknown NAME is an error.
+    /// - A known NAME followed by whitespace, then a group of comments that follow each other
+    ///   directly, then the end of input, is ignored. A `#` that is the last byte of the input
+    ///   directly after that whitespace is an error, as in §2.2 (QUESTIONS.md #18).
+    /// - Unbalanced ARGUMENTS are an error, and so are ARGUMENTS followed by nothing but
+    ///   whitespace and comments.
     fn macro_entry(&mut self) -> Result<(), Error> {
         let at = self.pos;
         if self.settings.flags.contains(ParserFlags::DISABLE_MACRO) {
             return Err(self.error(ErrorKind::MacrosDisabled, at));
         }
         let name_start = at + 1;
-        let name_len = self.src[name_start..]
-            .iter()
-            .take_while(|&&b| !is_space(b) && b != b'(')
-            .count();
-        let name = &self.src[name_start..name_start + name_len];
-        let name_text = String::from_utf8_lossy(name).into_owned();
-        if MACROS.contains(&name) {
-            Err(self.error(
-                ErrorKind::Unsupported {
-                    feature: format!("the macro .{name_text}"),
-                },
-                at,
-            ))
-        } else {
-            Err(self.error(ErrorKind::UnknownMacro { name: name_text }, at))
+        let name_end = name_start
+            + self.src[name_start..]
+                .iter()
+                .take_while(|&&b| !is_space(b) && b != b'(')
+                .count();
+        if name_end == self.src.len() {
+            self.pos = name_end;
+            return Ok(());
         }
+        let name = &self.src[name_start..name_end];
+        let name_text = String::from_utf8_lossy(name).into_owned();
+        if !MACROS.contains(&name) {
+            return Err(self.error(ErrorKind::UnknownMacro { name: name_text }, at));
+        }
+        self.pos = name_end;
+        let mut after_space = false;
+        while self.peek().is_some_and(is_space) {
+            self.pos += 1;
+            after_space = true;
+        }
+        if self.peek() == Some(b'(') {
+            self.pos = self.macro_arguments_end(self.pos)?;
+            self.skip_space()?;
+            if self.peek().is_none() {
+                return Err(self.error(ErrorKind::MissingValue, self.pos));
+            }
+        } else {
+            self.check_hash_at_end(after_space)?;
+            self.comment_group()?;
+            if self.peek().is_none() {
+                return Ok(());
+            }
+        }
+        Err(self.error(
+            ErrorKind::Unsupported {
+                feature: format!("the macro .{name_text}"),
+            },
+            at,
+        ))
+    }
+
+    /// The offset after the `)` that matches the `(` at `open`. Parentheses between double
+    /// quotes do not count (§9.2); as in block comments (§2.3), a `"` directly after a `\` does
+    /// not begin or end a quoted part (QUESTIONS.md #18).
+    fn macro_arguments_end(&self, open: usize) -> Result<usize, Error> {
+        let mut depth = 0usize;
+        let mut in_quotes = false;
+        let mut i = open;
+        while let Some(&b) = self.src.get(i) {
+            match b {
+                b'"' if self.src[i - 1] != b'\\' => in_quotes = !in_quotes,
+                b'(' if !in_quotes => depth += 1,
+                b')' if !in_quotes => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(i + 1);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        Err(self.error(ErrorKind::UnterminatedArguments, open))
     }
 }

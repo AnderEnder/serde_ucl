@@ -334,6 +334,11 @@ impl Slot {
     pub fn is_inherited(&self) -> bool {
         self.inherited
     }
+
+    /// True for the explicit array that collects a key's repeats under `NO_IMPLICIT_ARRAYS`.
+    pub(crate) fn is_collected(&self) -> bool {
+        self.collected
+    }
 }
 
 /// The values of one key: always at least one. More than one is an implicit array.

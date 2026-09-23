@@ -63,6 +63,9 @@ pub enum ErrorKind {
     UnterminatedHeredoc,
     /// A block comment has no matching `*/`.
     UnterminatedComment,
+    /// A `#` that is the last byte of the input, directly after whitespace, where the first key of
+    /// an unbraced root or a macro's value could start (spec §2.2, *Quirk*).
+    HashAtEnd,
     /// A `}` or `]` that closes nothing, or the wrong kind of container.
     UnmatchedClose { found: char },
     /// A key could not start or continue here.
@@ -96,6 +99,8 @@ pub enum ErrorKind {
     UnknownMacro { name: String },
     /// A macro while macros are disabled (`ParserFlags::DISABLE_MACRO`).
     MacrosDisabled,
+    /// A macro's `(` has no matching `)` (spec §9.2).
+    UnterminatedArguments,
     /// Input the parser recognises but does not support.
     Unsupported { feature: String },
     /// The input file could not be read.
@@ -110,6 +115,9 @@ impl fmt::Display for ErrorKind {
             ErrorKind::UnterminatedString => f.write_str("string has no closing quote"),
             ErrorKind::UnterminatedHeredoc => f.write_str("heredoc has no terminator line"),
             ErrorKind::UnterminatedComment => f.write_str("block comment is not closed"),
+            ErrorKind::HashAtEnd => {
+                f.write_str("a '#' after whitespace cannot be the last byte of the input here")
+            }
             ErrorKind::UnmatchedClose { found } => {
                 write!(f, "'{found}' does not close an open container")
             }
@@ -146,6 +154,9 @@ impl fmt::Display for ErrorKind {
             }
             ErrorKind::UnknownMacro { name } => write!(f, "unknown macro '.{name}'"),
             ErrorKind::MacrosDisabled => f.write_str("macros are disabled"),
+            ErrorKind::UnterminatedArguments => {
+                f.write_str("macro arguments are not closed with ')'")
+            }
             ErrorKind::Unsupported { feature } => write!(f, "{feature} is not supported yet"),
             ErrorKind::Io { message } => write!(f, "cannot read input: {message}"),
         }

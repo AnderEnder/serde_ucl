@@ -25,22 +25,18 @@ impl<'a> Expander<'a> {
 
     /// Expands the references in `text`.
     ///
-    /// `protected[i]`, when given, marks a byte that came from a backslash escape in an unquoted
-    /// value; a protected `$` never starts a reference (spec §7.6).
-    ///
     /// If no reference is replaced, the text is returned exactly as written, `$$` included
     /// (spec §7.5). Otherwise `$$` stands for `$`.
-    pub(crate) fn expand(&mut self, text: Vec<u8>, protected: Option<&[bool]>) -> Vec<u8> {
+    pub(crate) fn expand(&mut self, text: Vec<u8>) -> Vec<u8> {
         if !self.enabled || !text.contains(&b'$') {
             return text;
         }
-        let is_protected = |i: usize| protected.is_some_and(|p| p.get(i).copied().unwrap_or(false));
         let mut out = Vec::with_capacity(text.len());
         let mut replaced = false;
         let mut i = 0;
         while i < text.len() {
             let byte = text[i];
-            if byte != b'$' || is_protected(i) {
+            if byte != b'$' {
                 out.push(byte);
                 i += 1;
                 continue;
@@ -73,7 +69,7 @@ impl<'a> Expander<'a> {
                         }
                     }
                 }
-                Some(b'$') if !is_protected(i + 1) => {
+                Some(b'$') => {
                     out.push(b'$');
                     i += 2;
                 }
@@ -126,7 +122,7 @@ mod tests {
 
     fn expand(variables: &[(String, String)], text: &str) -> String {
         let mut e = Expander::new(variables, None, true);
-        String::from_utf8(e.expand(text.as_bytes().to_vec(), None)).unwrap()
+        String::from_utf8(e.expand(text.as_bytes().to_vec())).unwrap()
     }
 
     #[test]
@@ -170,7 +166,7 @@ mod tests {
         let mut handler =
             |name: &str| -> Option<String> { name.starts_with("H_").then(|| "[h]".to_string()) };
         let mut e = Expander::new(&v, Some(&mut handler), true);
-        let mut run = |t: &str| String::from_utf8(e.expand(t.as_bytes().to_vec(), None)).unwrap();
+        let mut run = |t: &str| String::from_utf8(e.expand(t.as_bytes().to_vec())).unwrap();
         assert_eq!(run("${H_X}"), "[h]");
         assert_eq!(run("$H_X"), "$H_X");
         assert_eq!(run("${H_REG}"), "registered");
@@ -178,12 +174,9 @@ mod tests {
     }
 
     #[test]
-    fn protected_dollar_and_disabled_expansion() {
+    fn disabled_expansion() {
         let v = vars(&[("ABI", "unknown")]);
-        let mut e = Expander::new(&v, None, true);
-        let text = b"$ABI".to_vec();
-        assert_eq!(e.expand(text, Some(&[true, false, false, false])), b"$ABI");
         let mut off = Expander::new(&v, None, false);
-        assert_eq!(off.expand(b"$ABI".to_vec(), None), b"$ABI");
+        assert_eq!(off.expand(b"$ABI".to_vec()), b"$ABI");
     }
 }

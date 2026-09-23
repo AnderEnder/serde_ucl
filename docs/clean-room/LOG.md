@@ -247,3 +247,74 @@
   parser fails 56 of them (`xfail.txt`), the new core 37 (`xfail-new.txt`, reason `spec-v3`).
   Both runners green. Commits: `547a893`, `ebd0b04`. The spec contains behaviour only: no libucl
   code, internal names, or procedures.
+
+- 2026-09-23 — **Implementation team, C2.8 (new parser core to `spec-v3`).**
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `WORKLIST.md`, `LOG.md`, `QUESTIONS.md`;
+    - spec `spec-v3`, read from the working tree after checking that `git diff spec-v3 HEAD --
+      docs/spec/` is empty: the whole of `git diff spec-v2 spec-v3 -- docs/spec/` (§1, §2, §3,
+      §4, §5, §7, §9, §12, README); in full §5 and §9.1–§9.3; in part §1.1–§1.5, §2.1–§2.2,
+      §3.1–§3.4, §4.5–§4.9, §7.1–§7.6, §12.1–§12.4;
+    - `tests/conformance/README.md`, `xfail-new.txt`, `tests/conformance.rs`; the inputs, `.flags`
+      and golden files of the 37 `spec-v3` entries; the list of `.flags` files naming comments;
+      the inputs of the `cases/spec/09-macros/` cases whose golden file is an error;
+    - the crate's own code: `src/parse/*`, parts of `src/value.rs` (`Placement`, `Slot`, the
+      `Entry` insertion rules, `insert_slot_placed`), `Cargo.toml`;
+    - black-box runs of `target/libucl-oracle/ucl-dump`: its usage message; about 400 probes on
+      scratch inputs under `target/c28/` (options `-c`, `-l`, `-T`, `-I`, `-s merge|rewrite`);
+      differential runs of about 417,000 generated inputs through the oracle and the new core, with
+      a scratch tool under `target/c28/` that is not committed; in the last runs no difference was
+      left other than the §12.5 *Uncertain* byte. The findings that the spec does not
+      cover are in `QUESTIONS.md` #17–#22 with their inputs and results;
+    - the clean `CLAUDE.md` embedded in the agent definition; `cargo build`, `cargo test`,
+      `cargo clippy`, `rustfmt --check` output.
+  - Seen without opening the files:
+    - `ls target/libucl-oracle/` printed `build`, `build.log`, `libucl`, `ucl-dump`;
+    - the oracle's stderr message, libucl's wording, in one probe;
+    - `tests/conformance/README.md` names `tools/ucl-dump/ucl_dump.c`, `PLAN.md` and `REVIEW.md`,
+      and a doc comment in `tests/conformance.rs` names a `PLAN.md` item; none was followed;
+    - the session's git status listed `PLAN.md` and `REVIEW.md` in the main checkout by name;
+    - a grep over `src/` for uses of the `parse` module printed about ten lines of `src/lexer.rs`
+      that matched `.parse::<…>()` or `.comments()`, and two `clippy` runs printed two lines of
+      `src/parser.rs` (a test assertion on `parsing_hooks()`). Neither file was opened and nothing
+      from them was used;
+    - the harness captured the output of two background commands in files under the session
+      scratchpad in `/private/tmp/`; neither file was opened (the runs were repeated with their
+      output in `target/c28/`).
+  - Not consulted: libucl source; anything under `target/libucl-oracle/` other than running
+    `ucl-dump`; the oracle tool's sources; `scripts/regen-golden.sh` (neither read nor run);
+    `REVIEW.md`, `PLAN.md`, `PROGRESS.md`; `quarantine/*`; history of `src/` before `ef8007e`;
+    history of `CLAUDE.md`; `src/lexer.rs`, `src/parser.rs`; `docs/spec/` not edited, no golden
+    file edited.
+  - Changes:
+    - §1.1 root bracket and §2.2 last-byte `#`; §2.3 quotes in block comments; §3.4 left-open
+      section objects close with the next bracketed container that closes in them; §4.8 short
+      `\u` escapes (this replaces the C2 choice `x\u12` → `"xu12"` with the spec's `"xu2"`);
+      §5.2 `x` after a fraction or exponent and §5.8 malformed text before the range check; §7.6
+      `\$` blocks expansion only when every `$` is written `\$`; §9.1/§9.2 macros at the end of
+      input, macros after a section name, and the macro syntax (unbalanced arguments, arguments
+      then the end of input, with a `"` after `\` not ending a quoted part) checked before C3;
+      §12.1 quoted keys lowercased before their escapes are decoded, and keys compared without
+      ASCII case, an entry keeping its first spelling (the model no longer lowercases a second
+      time).
+    - §12.5: comments are attached to values (`Parser::attached_comments`, `AttachedComments`,
+      `PathSegment`, `CommentPlacement`), and a block comment's saved text includes the byte after
+      `*/`. *Uncertain* item: at the end of input no byte is added.
+    - The conformance runner dumps the new core's attached comments as `"c"`/`"ca"` for cases with
+      `dump-comments`, so those cases are compared.
+    - Where the oracle goes beyond the spec text, the core follows the oracle and the question is
+      open: `QUESTIONS.md` #17 (comment lists and §8), #18 (known macro name at the end of input),
+      #19 (§5.2/§5.8 details), #20 (`\U` under `key-lowercase`), #21 (§4.8 bytes, §7.6 `$`
+      count), #22 (VT, FF and line breaks between section names).
+  - Commits: `ea87ec3` (C2.8: the changes above, QUESTIONS.md #17–#22, this entry) and a
+    follow-up C2.8 commit (key comparison under `key-lowercase` and the quote rule in macro
+    arguments, found by probes after `ea87ec3`; #18 and #20 extended; header comments of
+    `xfail-new.txt` and `tests/conformance.rs` corrected).
+  - Result:
+    - `xfail-new.txt`: 129 entries, 128 `macro` (C3) and 1 `non-utf8` (`libucl/basic/22`). All 37
+      `spec-v3` entries are gone, and so is `cases/spec/09-macros/macro_unbalanced_args_error`,
+      now rejected for its unbalanced arguments. New core: 882 cases, 753 pass.
+    - `xfail.txt` is unchanged (old parser: 395 pass, 487 expected failures). `cargo test`: 440
+      tests pass. `cargo build --examples --benches` builds.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
