@@ -3,8 +3,9 @@
 Cases: `tests/conformance/cases/spec/09-macros/`. The files these cases include or load are in
 `cases/spec/09-macros/files/`.
 
-Project note: in the project, `.includes` is unsupported and `.load` sits behind a default-off
-feature (README, *Divergences*). This section describes libucl.
+Project note: in the project, `.includes` and `sign=true` are unsupported, `.load` sits behind a
+default-off feature, and macro argument documents nest at most 64 deep (README, *Divergences*).
+This section describes libucl.
 
 ## 9.1 Where macros are recognised
 
@@ -23,6 +24,42 @@ A key position includes the one after a section name (§3.4): `a .b {c = 1}` is 
 `.b` is an unknown macro inside the new object `a` (`macro_word_after_section_name_error`);
 `"a".51"x{y"z` → `{ a: {} }`, because `.51"x{y"z` is a macro whose name runs to the end of input
 (§9.2; `macro_word_after_section_name_ignored`).
+
+**A macro directly after a name.** A known macro there runs inside the name's object. That object
+has no bracket of its own, so it is left open like the objects of a section path that ends in an
+ordinary key (§3.4), and closes the same way: `"s".include "files/a.inc"k { z = 1 }⏎m = 1` →
+`{ s: { x: int 1, y: "inc", k: { z: int 1 } }, m: int 1 }`; `"s".priority {3}k { z = 1 } m = [1]`
+→ `{ s: { k: { z: int 1 @3 } @3 }, m: [int 1] @3 }` (`macro_after_name_then_key_without_separator`,
+`macro_after_name_then_bracketed_value_closes`).
+
+- **Quirk.** The macro does not end the run of names. The next key read after it in the same
+  unit counts as a word that follows a name (§3.4): with a `=` or `:` after it, it is a name too,
+  even on a later line. So `"s".include "files/a.inc"k = [1]`, `"s".priority {3}k = [1]` and
+  `"s".priority {3}⏎"k" = [1]` are errors, because the `[` stands where a name should start, and
+  `"s".priority {3}k = l = n { z = 1 }` →
+  `{ s: { k: { l: { n: { z: int 1 @3 } @3 } @3 } @3 } }`
+  (`macro_after_name_then_separator_key_is_name_error`,
+  `macro_after_name_priority_then_separator_key_error`,
+  `macro_after_name_next_line_separator_key_error`, `macro_after_name_separator_keys_chain`). Keys
+  in a file that the macro includes do not count. A key without a separator is tested as usual:
+  `"s".include "files/a.inc"x "y{" z⏎k = [1]` →
+  `{ s: { x: ⟨int 1 | { "y{": "z", k: [int 1] }⟩, y: "inc" } }`
+  (`macro_after_name_then_left_open_path`).
+- **Quirk.** When only comments and whitespace follow such a macro up to the end of its unit (the
+  input, or the included file that holds it), the value created most recently (§12.5) is opened
+  once more as a left-open object, if it is an object. For `.priority`, `.inherit` and an include
+  that added nothing, that is the name's object: `"s".priority {3}#[` and
+  `"s".include "files/v4/empty.txt" # [` → `{ s: {} }` (`macro_after_name_comment_to_end`,
+  `macro_after_name_include_of_empty_file_comment_to_end`). In an included file, the including
+  unit's later entries then go into it: a file holding `"s".priority {3}#[`, included by
+  `.include "…"⏎k = 1`, gives `{ s: { k: int 1 } }`
+  (`macro_after_name_comment_to_end_of_included_file`). When a bracket in an included file closed
+  `s` (§3.4), `s` is still the value created most recently: a file holding
+  `"s".include "files/v5/o_empty.inc" # [`, where `o_empty.inc` is `o {}`, included the same way,
+  gives `{ s: { o: {}, k: int 1 } }` (`macro_after_name_comment_to_end_after_bracket_closed`).
+  **Uncertain (undefined in libucl):** if the value created most recently is not an object, for
+  example the last value of a file the macro included, libucl crashes, reports an error or turns
+  that value into an object, depending on the value. The implementation may choose.
 
 Included files (§9.4) are parsed with the same flags, so macros work in them as in the main
 document.
@@ -96,7 +133,19 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
 - An unknown NAME followed by whitespace or `(` is an error even at the end: `.foo⏎`
   (`macro_unknown_name_then_newline_error`).
 - After ARGUMENTS, the end of input (after the skipping) is an error:
-  `.priority(priority=2)` (`macro_args_then_end_error`).
+  `.priority(priority=2)`, `a = 1⏎.try_include()⏎` (`macro_args_then_end_error`,
+  `macro_args_newline_then_end_error`). A `#` that is the last byte of the input there, directly
+  after `)` or after the skipping, does not start a comment either. It ends an empty VALUE, and the
+  macro runs: `a = 1⏎.try_include()#`, `a = 1⏎.try_include() #` and `a = 1⏎.try_include()⏎#` stop
+  silently with `{ a: int 1 }`, because the path is empty (§9.4)
+  (`macro_args_then_last_byte_hash_empty_value`,
+  `macro_args_space_then_last_byte_hash_empty_value`,
+  `macro_args_newline_then_last_byte_hash_empty_value`). The same `#` then stands after VALUE,
+  where a last-byte `#` is an error (*VALUE*, below), so the document fails unless the macro
+  stopped the parse: `.priority(priority=4)#` and `.priority(priority=4) /* c */#` are errors
+  (`macro_args_then_last_byte_hash_error`, `macro_args_comment_then_last_byte_hash_error`). The
+  same holds after NAME: `a = 1⏎.try_include⏎#` stops silently
+  (`macro_name_then_last_byte_hash_empty_value`).
 - Objects that a section path left without a closing bracket (§3.4) do not make an ignored macro
   an error: `a b .foo"{"` → `{ a: { b: {} } }`, `"a" .foo"{"` → `{ a: {} }`. An object opened
   with `{` still has to be closed: `a { .foo` is an error
@@ -124,6 +173,29 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   under `$FILENAME` with the flag (`macro_args_filename_is_undef`, `macro_args_filename_no_filevars`).
   A syntax error in the arguments is an error: `.include(x) "files/a.inc"`
   (`macro_args_parse_error`). `()` is allowed (`include_empty_args`).
+- Everything in this specification applies inside that document, macros included:
+  `.priority(.priority 3⏎priority = 2);⏎a = 1` → `a: int 1 @2`;
+  `.priority(d { priority = 3 }; .inherit "d");⏎a = 1` → `a: int 1 @3`; an unknown macro there
+  is an error (`macro_args_macros_inside`, `macro_args_inherit_inside`,
+  `macro_args_unknown_macro_inside_error`). A braced root ends the document and the rest of it is
+  ignored (§1.1): `.priority({priority=2} x=1);` → priority 2
+  (`macro_args_braced_root_rest_ignored`). Under `no-implicit-arrays`, a repeated name collects its
+  values into an array (§8.5), which then has the wrong type for an int parameter:
+  `.priority(priority=1, priority=2);` is an error with the flag
+  (`macro_args_no_implicit_arrays_repeated_name_error`). Registered variables are not available
+  (above): `.inherit "$V"` there names the key `$V` (`macro_args_registered_variables_unavailable_error`).
+  Files can be included, with relative paths resolved as in §9.3:
+  `.priority(.include "files/v5/pri3.inc");`, where the file holds `priority = 3`, sets priority 3
+  (`macro_args_include_inside`). A silent stop (§9.4) inside the document makes the macro an error:
+  `.priority(.try_include "missing"; priority = 3);` (`macro_args_stop_inside_error`). Comments in
+  the document are never saved (§12.5; `macro_args_comments_not_saved`).
+- **Nesting depth.** Since argument documents may hold macros with arguments, they can nest. libucl
+  sets no limit of its own: 60 and 100 levels parse (`macro_args_nested_60_levels`,
+  `macro_args_nested_100_levels`), and on the oracle machine 20,000 levels parse while 100,000
+  crash it. **Uncertain (undefined in libucl)** beyond the depth at which libucl crashes, which
+  depends on the platform. **Project divergence:** the project allows at most 64 documents nested in
+  one another, the document that holds the outermost macro included; deeper nesting is an error
+  (README, *Divergences*).
 - The parameters are the entries of that document's root object. Entries are separated as in any
   document: `,`, `;` or a line break. A braced root works: `.include({priority=2}) …` → priority 2
   (`macro_args_braced_root`). A root array gives no parameters (`macro_args_array_root_ignored`),
@@ -235,10 +307,17 @@ appears (`include_quoted`, `include_inside_object`, `libucl/basic/23`).
   `no-filevars` (§12.7). There, nothing is restored, because nothing was defined before: after the
   include, the including unit sees the included file's `FILENAME` and `CURDIR`
   (`no_filevars_include_defines_them`, `no_filevars_included_file_has_curdir`).
+- **Quirk.** An include also moves `FILENAME` and `CURDIR` to the end of the lookup order of §7.1,
+  `FILENAME` first, for the included file and for the rest of the whole parse, whether or not they
+  were defined before. This matters for unbraced references (§7.4): with `FILE` = `f` and
+  `CUR` = `c` registered, `$FILENAME` and `$CURDIR` in the included file, and in the including unit
+  after the include, give `fNAME` and `cDIR`, where before the include `$FILENAME` gave the path.
+  For a string document, `c = "$FILENAME"⏎.include "…"⏎d = "$FILENAME"` gives `c: "undef"`,
+  `d: "fNAME"` (`include_moves_filevars_last`, `include_moves_filevars_last_string_input`).
 - At most 16 input units may be open at once, the main document included. So 15 nested includes
   are fine and 16 are an error (`include_nesting_limit_ok`, `include_nesting_limit_error`). A cycle
-  of files including each other ends at this limit, with an error
-  (`include_cycle_nesting_limit_error`).
+  of files including each other ends at this limit, with an error, also for `.try_include`
+  (`include_cycle_nesting_limit_error`, `try_include_cycle_nesting_limit_error`).
 - Saved comments (§12.5) are collected across units: comments pending before the macro may attach
   to the first value of the included file, and the end of the included file attaches pending
   comments as the end of input does (`comments_carry_into_included_file`,
@@ -272,20 +351,56 @@ create an object. The entries still go into the object where the macro stands
   `x { .include "files/v4/open_brace.inc"⏎}⏎q = 1` → `{ x: { a: int 1, q: int 1 } }`
   (`include_unclosed_brace_error`, `include_unclosed_brace_closed_by_includer`,
   `include_unclosed_brace_inside_braces`). Here `open_brace.inc` is `{ a = 1`.
+- **Quirk.** That holds for the root and for objects written with braces. When the object whose
+  brace was taken over is a section object without a bracket of its own (left open by a section
+  path, §3.4, or the object of a name followed by the macro, §9.1), the `}` that removes the brace
+  closes it, together with the section objects around it, as a closing bracket closes left-open
+  objects in §3.4: `x "y{" z⏎.include "files/v4/braced.inc"⏎q = 1` →
+  `{ x: { "y{": "z", a: int 1 }, q: int 1 }`;
+  `x "y{" z⏎.include "files/v4/open_brace.inc"⏎q = 1⏎}⏎r = 2` →
+  `{ x: { "y{": "z", a: int 1, q: int 1 }, r: int 2 }`;
+  `"s".include "files/v4/braced.inc"x "y{" z⏎k = [1]` →
+  `{ s: { a: int 1 }, x: { "y{": "z", k: [int 1] } }` (`include_braced_file_closes_section_object`,
+  `include_open_brace_in_section_object_closed_by_includer`, `include_braced_file_after_name`).
 
-The same brace bookkeeping explains two more results:
-
-- A `}` in an included file may close an object that the including unit opened with `{`:
-  `x { .include "files/v4/close_brace.inc"⏎q = 1` with `close_brace.inc` = `a = 1 }` →
-  `{ x: { a: int 1 }, q: int 1 }`. At the top level of a document without braces, that `}` is an
-  error (`include_file_closes_including_object`, `include_file_closing_brace_at_top_level_error`).
-- At the end of each included file, every object opened with `{` in that file must be closed
-  (`include_unclosed_object_in_file_error`). Objects opened elsewhere are not checked there.
+The same brace bookkeeping explains why a `}` in an included file may close an object that the
+including unit opened with `{`: `x { .include "files/v4/close_brace.inc"⏎q = 1` with
+`close_brace.inc` = `a = 1 }` → `{ x: { a: int 1 }, q: int 1 }`. At the top level of a document
+without braces, that `}` is an error (`include_file_closes_including_object`,
+`include_file_closing_brace_at_top_level_error`).
 
 **Quirk.** Objects that a section path left open (§3.4) at the end of an included file stay open,
 and later entries of the including unit go into them: with `left_open.inc` = `x "y{" z`,
 `.include "files/v4/left_open.inc"⏎k = 1` → `{ x: { "y{": "z", k: int 1 } }`
-(`include_left_open_section_persists`).
+(`include_left_open_section_persists`). Left-open objects of different units close together, in
+whatever order the units opened them: `"s".include "files/v4/left_open.inc"x {a = 1}⏎k = [1]` →
+`{ s: { x: { "y{": "z", x: { a: int 1 } } }, k: [int 1] }`
+(`include_left_open_from_both_units_close_together`).
+
+**The check at the end of a unit.** At the end of each unit, the main document or an included
+file, the containers still open are checked from the innermost outward, and the check stops at the
+first container that another unit opened. Every container it reaches that holds a bracket, its
+own or a taken-over one (above), was not closed, and that is an error: an included file must close
+the objects it opened with `{` (`include_unclosed_object_in_file_error`). **Quirk.** Containers
+below one that another unit opened are therefore not checked:
+
+- `a {⏎.include "files/v4/left_open.inc"` → `{ a: { x: { "y{": "z" } } }` without an error,
+  although the brace of `a` is never closed, because the innermost open container `x` was opened by
+  the included file. Later entries go into `x` (`include_left_open_end_check_stops`,
+  `include_left_open_end_check_stops_then_entries`). The same happens at the end of an included
+  file: a file holding `a {⏎.include "files/v4/left_open.inc"⏎`, included by `.include "…"⏎k = 1`,
+  gives `{ a: { x: { "y{": "z", k: int 1 } } }`
+  (`include_left_open_end_check_stops_in_included_file`); and with objects left open after a
+  separator and a line break (§3.4), a file holding `c "x{" =⏎` inside `a {`
+  (`include_left_open_after_separator_and_newline`).
+- Once a bracketed container closes those objects (§3.4), the check reaches the containers below
+  again: `a {⏎.include "files/v4/left_open.inc"⏎m { n = 1 }` is an error
+  (`include_left_open_closed_then_checked_error`).
+- **Uncertain (undefined in libucl):** whether a container opened by a unit that has already ended
+  counts as opened by a later unit depends on memory reuse in libucl. In
+  `.include "files/v4/left_open.inc"⏎.include "files/v4/open_brace.inc"`, where the second file
+  takes over the brace of the object `x` that the first left open, the oracle checked `x` at the end
+  of the second file and reported its brace unclosed. No case pins this.
 
 ### Parameters
 
@@ -318,16 +433,30 @@ included that one, and the entries parsed so far are the result. libucl's parse 
 failure in this situation but records no error message and keeps the tree built so far; the golden
 files record that tree, and §11.1 counts it as a result, not an error.
 
-| The file | `.include` | `.include(try=true)` | `.try_include` |
-| --- | --- | --- | --- |
-| does not exist, including the empty path | error (`include_missing_error`) | skipped (`include_try_missing`, `include_empty_path_try`, `libucl/basic/14`) | stops silently (`try_include_missing_stops_parsing`, `try_include_empty_path_stops_parsing`) |
-| is a directory or another non-regular file | error (`include_directory_error`) | skipped (`include_directory_try`) | stops silently (`try_include_directory_stops_parsing`) |
-| is the file that holds the macro (resolved path, §9.3) | error (`include_self_error`, `include_main_document_itself_error`) | error (`include_self_with_try_error`) | stops silently (`try_include_self_stops_parsing`, `try_include_main_document_itself_stops`) |
-| exists and is readable | included (`try_include_present`) | included | included |
+| The file | `.include` | `.include(try=true)` | `.try_include` | `.try_include(try=false)` |
+| --- | --- | --- | --- | --- |
+| does not exist, including the empty path | error (`include_missing_error`) | skipped (`include_try_missing`, `include_empty_path_try`, `libucl/basic/14`) | stops silently (`try_include_missing_stops_parsing`, `try_include_empty_path_stops_parsing`) | stops silently (`try_include_try_false_missing_stops`) |
+| is a directory or another non-regular file | error (`include_directory_error`) | skipped (`include_directory_try`) | stops silently (`try_include_directory_stops_parsing`) | error (`try_include_try_false_directory_error`) |
+| is the file that holds the macro (resolved path, §9.3) | error (`include_self_error`, `include_main_document_itself_error`) | error (`include_self_with_try_error`) | stops silently (`try_include_self_stops_parsing`, `try_include_main_document_itself_stops`) | stops silently (`try_include_try_false_self_stops`) |
+| exists and is readable | included (`try_include_present`) | included | included | included |
 
-"Skipped" means nothing is included and parsing goes on after the macro. Only the file that holds
-the macro counts as itself; a cycle through other files ends at the nesting limit (above).
-`libucl/basic/9` ends with a `.try_include` of a missing file, so nothing is lost there.
+"Skipped" means nothing is included and parsing goes on after the macro. `.try_include(try=true)`
+behaves as `.try_include` (`try_include_try_true_directory_stops`). Only the file that holds the
+macro counts as itself; a cycle through other files ends at the nesting limit (above), for
+`.try_include` too. `libucl/basic/9` ends with a `.try_include` of a missing file, so nothing is
+lost there.
+
+A silent stop inside an included file ends the parse in every open unit, also when the file was a
+match of a glob pattern of `.include`, with or without `try=true`
+(`include_glob_stop_inside_match_ends_parse`, `include_glob_try_stop_inside_match_ends_parse`).
+**Uncertain (undefined in libucl):** when an included file fails, by an error or a silent stop,
+and libucl goes on with the same macro regardless, the oracle crashes. `.try_include` with a glob
+pattern goes on after a failing match, with the next match or, after the last, with the rest of
+the input: `.try_include(glob=true) "q/*.inc"` where a match holds `.try_include "missing"` or a
+syntax error. A search path (below) goes on with the next directory:
+`.include(path=["q", "q2"]) "x.inc"` where `q/x.inc` fails; a failure in the last directory is an
+error. **Project choice:** the failure counts as it does anywhere else: an error fails the
+document, and a silent stop ends the parse.
 
 ### Globs
 
@@ -336,11 +465,37 @@ written, even if it contains `[`: `files/v4/g/[ab].inc` is simply missing
 (`include_glob_bracket_needs_wildcard_error`, `include_pattern_without_glob_error` for a pattern
 without `glob=true`).
 
-- Patterns follow the POSIX shell rules: `*`, `?` and bracket expressions such as `[ab]`, with no
-  brace expansion (`{a,b}` is literal) and no `~` expansion. A `*` or `?` does not match a leading
-  `.` in a file name, so hidden files are left out (`include_glob`, `include_glob_question_mark`,
-  `include_glob_bracket_expression`, `include_glob_no_brace_expansion`,
-  `include_glob_skips_hidden_files`).
+- Patterns use `*`, `?` and bracket expressions such as `[ab]`, with no brace expansion (`{a,b}` is
+  literal) and no `~` expansion (`include_glob`, `include_glob_question_mark`,
+  `include_glob_bracket_expression`, `include_glob_no_brace_expansion`). In detail:
+  - Wildcards work in directory components too: `files/v4/?/a.inc`, `files/v4/*/pa.inc`.
+    Components `.` and `..` and a doubled `/` are allowed (`include_glob_in_directory_components`,
+    `include_glob_dot_components_and_double_slash`).
+  - A `.` at the start of a name is matched only by a `.` in the pattern, so `*` and `?` leave
+    hidden files out (`include_glob_skips_hidden_files`). A pattern `.*` also matches the entries
+    `.` and `..`, which are directories: `.include(glob=true) "files/v4/g/.*"` is an error, and with
+    `try=true` only the hidden file is included (`include_glob_dot_star_matches_dot_entries_error`,
+    `include_glob_dot_star_try`).
+  - A bracket expression matches one character of its set. Ranges such as `a-b` work, and a
+    reversed range matches nothing (`include_glob_range`,
+    `include_glob_reversed_range_matches_nothing`). Only `!` directly after `[` negates the set;
+    `^` is an ordinary member, so `[^a]*` matches `a.inc` (`include_glob_bang_negates`,
+    `include_glob_caret_is_not_negation`). A `]` directly after `[` or `[!` is a member
+    (`include_glob_close_bracket_first_is_member`,
+    `include_glob_bracket_negation_close_bracket_member`). There are no character classes:
+    `[[:alpha:]]*` is the set of `[`, `:`, `a`, `l`, `p` and `h`, then a literal `]`, and matches
+    `a]x.inc` (`include_glob_no_character_classes`). A `[` without a closing `]` is an ordinary
+    character: `[a*` matches `[ab.inc` (`include_glob_unclosed_bracket_is_literal`).
+  - A backslash makes the next character ordinary, inside brackets too: `\[a*` matches `[ab.inc`,
+    and `[\a]*` is the set of `a` (`include_glob_backslash_quotes_next_character`,
+    `include_glob_backslash_inside_brackets`). The cases write these patterns in braces.
+  - A pattern that ends in `/` matches directories only. `files/v4/g/*/` matches the directory
+    `sub`, so `.include` fails and `try=true` skips it; where no directory matches, `.include`
+    stops silently, as for no match below (`include_glob_trailing_slash_matches_directories_error`,
+    `include_glob_trailing_slash_try`, `include_glob_trailing_slash_no_directory_stops`).
+  - libucl leaves matching and sorting to the C library, and other C libraries differ, for example
+    in `[^…]` and character classes. The rules here are those of the oracle's C library, and the
+    cases follow them.
 - The matching files are included one by one, sorted by byte value: `10.inc`, `9.inc`, `B.inc`,
   `_u.inc`, `a.inc` (`include_glob_byte_order`).
 - A match that cannot be included behaves as in the table above, except that `.try_include` skips
@@ -353,6 +508,12 @@ without `glob=true`).
   With `try=true`, and for `.try_include`, nothing is included and parsing goes on
   (`include_glob_try_no_match`, `try_include_glob_no_match_continues`); `.try_include` with an
   explicit `try=false` stops silently (`try_include_glob_try_false_no_match_stops`).
+- `.try_include(try=false)` with matches: a matched directory is an error
+  (`try_include_glob_try_false_directory_error`). A match that is the including file is still
+  skipped, but when no match was included at all, that is an error: a file `main.inc` that holds
+  `.try_include(glob=true, try=false) "…/*.inc"` matching itself and `other.inc` includes
+  `other.inc`, and the same macro in a directory where it matches only itself is an error
+  (`try_include_glob_try_false_skips_self`, `try_include_glob_try_false_only_self_error`).
 
 ### Nesting under a key
 
@@ -372,6 +533,22 @@ object instead of directly into it (`include_prefix_key`, `include_key_without_p
 - An object or array created for K has the include's `priority`
   (`include_prefix_priority_applies_to_nesting_object`, `include_prefix_array_priority`).
 - An empty file still creates K, as an empty object (`include_prefix_empty_file_creates_object`).
+- The containers the file leaves open close when it ends, together with K's object, and later
+  entries of the including unit go where the macro stands:
+  `.include(key="k") "files/v4/left_open.inc"⏎q = 1` → `{ k: { x: { "y{": "z" } }, q: int 1 }`
+  (`include_key_file_containers_close_at_end`). A `{` at the start of the file takes over the brace
+  of K's object (above) and goes away with it:
+  `.include(key="k") "files/v4/open_brace.inc"⏎q = 1⏎}` is an error, because the `}` then has
+  nothing to close (`include_key_open_brace_then_close_error`).
+- A `}` in the file that would close K's object is an error when the object where the macro stands
+  holds no bracket: `.include(key="k") "files/v4/close_brace.inc"⏎q = 1`
+  (`include_key_close_brace_at_top_level_error`). When that object holds a brace taken over from an
+  earlier included file, the `}` uses up K's share of that brace and closes nothing:
+  `.include "files/v4/open_brace.inc"⏎.include(key="k") "files/v4/close_brace.inc"⏎q = 1⏎}` →
+  `{ a: int 1, k: { a: int 1 }, q: int 1 }`, the last `}` removing the taken-over brace of the root
+  (`include_key_close_brace_under_taken_over_brace`). **Uncertain (undefined in libucl):** when the
+  object holds only its own bracket, as in `x { .include(key="k") "files/v4/close_brace.inc"⏎q = 1`,
+  libucl crashes. The implementation may choose.
 
 What happens depends on `target` and on K's value. If K holds several values (§8), only the
 first decides and receives the contents:
@@ -399,18 +576,32 @@ array created because K was absent does not: `k = 1⏎.include(key="k", target="
 
 ### Signatures, URLs and search paths
 
-These parameters are outside the project's decided scope (README, *Known gaps*). libucl behaves as
-follows:
+What the project does with these parameters is decided in README, *Divergences decided by the
+project*. libucl behaves as follows:
 
 - `sign=true`, the default for `.includes`, asks for signature checking when libucl is built with
   it: the file `PATH.sig` must verify. The oracle build has none, so `sign` has no effect and
   `.includes` behaves exactly like `.include` (`includes_like_include`,
-  `include_sign_param_no_effect`). The project rejects `.includes`.
+  `include_sign_param_no_effect`). The project rejects `.includes`, and `sign=true` on any include
+  macro, with its "unsupported" error; `sign=false` is accepted.
 - `url=true` with `://` in the path fetches a URL when libucl is built with URL support. The
-  oracle build has none, so this is an error (`include_url_param_error`). Without `url=true`, a
-  path with `://` is an ordinary path (`include_url_like_path_is_a_path`).
+  oracle build has none, and the project never fetches URLs and behaves as that build. Such an
+  include is recognised before the search path and before globs and `key` or `prefix` are looked
+  at, and it includes nothing:
+  - for `.include` it is an error (`include_url_param_error`);
+  - with `try=true`, and for `.try_include`, it is skipped and parsing goes on; for `.try_include`
+    this is not a silent stop (`include_url_try_skipped`, `try_include_url_skipped`);
+  - `.try_include(try=false)` makes it an error again (`try_include_url_try_false_error`);
+  - with `key` or `prefix`, no key is created (`include_url_key_not_created`), and a search path
+    in effect is not used (`include_url_before_search_path`).
+
+  Without `url=true`, a path with `://` is an ordinary path (`include_url_like_path_is_a_path`).
 - `path=[…]` sets a list of search directories. Entries that are not strings are skipped; a
-  `path` that is not an array is ignored (`include_path_string_ignored`). **Quirks:**
+  `path` that is not an array is ignored (`include_path_string_ignored`). A later `path` replaces
+  the list: `path=["files/v4/p1"]` and then `path=["files/v4/p2"]` searches `p2` alone
+  (`include_path_later_list_replaces`). A list with no strings is empty: `path=[1]` makes every
+  include an error (`include_path_no_string_entries_error`). `.load` does not use the list (§9.6).
+  **Quirks:**
   - The list stays in effect for every later include of the whole parse, with or without `path`
     (`include_path_persists`).
   - While a list is in effect, each path is tried as `DIR/PATH`, absolute paths included, for
@@ -478,8 +669,16 @@ Parameters match as in §9.2, in the table's order within each type, so `t=true`
 `try`, and `tri=true` means `trim` (`load_param_prefix_t_is_try`, `load_param_prefix_tri_is_trim`).
 `escape=1` is not a bool and is ignored (`load_escape_must_be_boolean`).
 
-- The path is used as written (§9.3). An empty path is an error, even with `try=true`
+- The path is used as written (§9.3); a search path (§9.4) is never used
+  (`load_ignores_search_path`). An empty path is an error, even with `try=true`
   (`load_empty_path_error`).
+- The checks come in this order, and the first that fails decides: `key` missing or empty, an
+  error even with `try=true` (`load_without_key_error`, `load_missing_key_error_with_try`); an
+  empty path; a missing or unusable file, an error or with `try=true` nothing inserted; K already
+  present, an error (below). So `t = 1⏎.load(key="t", try=true) "missing"` → `{ t: int 1 }`, while
+  `t = 1⏎.load(key="t", target="float") "files/num.txt"` and
+  `t = 1⏎.load(key="t") "files/v4/empty.txt"` are errors (`load_try_missing_before_existing_key`,
+  `load_existing_key_before_target`, `load_existing_key_before_empty_file`).
 - The value's priority is the `priority` parameter only; `.priority` does not affect it
   (`load_ignores_priority_macro`).
 - If K already exists in the current object, it is an error (`load_existing_key_error`,
@@ -494,7 +693,8 @@ Parameters match as in §9.2, in the table's order within each type, so `t=true`
   (`load_string`, `load_multiline`, `load_string_keeps_nul`).
 - **Quirk.** An empty file inserts nothing (`load_empty_file_string_inserts_nothing`).
 - `trim=true` removes leading and trailing space, TAB, LF, CR, VT and FF (`load_trim`,
-  `load_trim_all_whitespace`).
+  `load_trim_all_whitespace`). A file of whitespace only then gives `""`; only an empty file
+  inserts nothing (`load_trim_whitespace_only_empty_string`).
 - `escape=true` then replaces bytes as follows, and leaves every other byte, space included,
   unchanged (`load_escape`, `load_escape_all_bytes`, `load_trim_then_escape`):
 
@@ -542,8 +742,12 @@ Cases: `libucl/basic/load`.
   nested object is then copied too, with the entries it has received so far:
   `o { x = 1; e { .inherit "o" } }` → `{ o: { x: int 1, e: { x: int 1, e: { x: int 1 } } } }`
   (`inherit_enclosing_object`).
-- Each entry of NAME whose key the current object does not yet have is copied, with all its values
-  (`inherit_basic`, `inherit_existing_keys_kept`). A second `.inherit` of the same object therefore
+- Each entry of NAME whose key the current object does not yet have is copied (`inherit_basic`,
+  `inherit_existing_keys_kept`). **Quirk.** If the entry's first value is an object or an array,
+  only that value is copied; otherwise all its values are: with
+  `d { a = [1]; a = 5; b { x = 1 }; b = 5; c = 5; c = [1]; c = 6 }`, `e { .inherit "d" }` gets
+  `a: [int 1]`, `b: { x: int 1 }` and `c: ⟨int 5 | [int 1] | int 6⟩`
+  (`inherit_container_first_value_only`). A second `.inherit` of the same object therefore
   copies nothing (`inherit_twice_no_change`). Copies are **inherited**: a later explicit value
   for the same key replaces them, all values at once, whatever the priorities (§8.3;
   `inherit_basic` → `b: int 3`, not two values; `inherit_replaced_whatever_priority`,
@@ -556,13 +760,31 @@ Cases: `libucl/basic/load`.
   (`cases/spec/10-output/inherit_copies_keep_output_facts`).
 - The copy is shallow at the entry level. A later explicit `a { … }` replaces an inherited `a`
   entirely (`inherit_is_shallow`).
-- **Quirk.** With `replace=true`, every entry is copied even when the key exists. The copy is then
-  added as another value, not a replacement (`inherit_replace_appends`). It is not marked
-  inherited, so a later explicit value is added to it rather than replacing it:
-  `e { .inherit(replace=true) "d"; a = 2 }` → `e.a: ⟨int 1 | int 2⟩`
-  (`inherit_replace_copies_not_inherited`). Each such `.inherit` adds another copy, and one of the
-  current object copies its entries onto themselves: `e { a = 1; .inherit(replace=true) "e" }` →
-  `e.a: ⟨int 1 | int 1⟩` (`inherit_replace_twice_duplicates`, `inherit_replace_own_object_duplicates`).
+- **Quirk.** With `replace=true`, every entry is copied even when the key exists. The copied values
+  are then added to the entry as further values, not as a replacement (`inherit_replace_appends`),
+  and §8 is not applied: priorities, the strategy and `no-implicit-arrays` play no part.
+  `d { a = 1 }⏎.priority 2⏎e { a = 0; .inherit(replace=true) "d" }` → `e.a: ⟨int 0 @2 | int 1⟩`;
+  the same inputs give `⟨int 0 | int 1⟩` without an error under `error`, a multi-value entry
+  rather than an array under `no-implicit-arrays`, and under `merge`, with objects,
+  `⟨{ y: int 1 } | { x: int 1 }⟩` (`inherit_replace_ignores_priority`,
+  `inherit_replace_ignores_strategy_error`, `inherit_replace_no_implicit_arrays_multivalue`,
+  `inherit_replace_ignores_strategy_merge`). Such copies are not marked inherited, so a later
+  explicit value is added to them rather than replacing them: `e { .inherit(replace=true) "d"; a = 2 }`
+  → `e.a: ⟨int 1 | int 2⟩` (`inherit_replace_copies_not_inherited`). But a copy keeps the marks of
+  the value it copies: a copy of an inherited value is inherited, and under `no-implicit-arrays` a
+  copy of a collected array (§8.5) collects later repeats:
+  `d { a = 1 }⏎e { .inherit "d" }⏎f { .inherit(replace=true) "e"; a = 5 }` → `f.a: int 5`;
+  with the flag, `d { a = 1; a = 2 }⏎e { .inherit(replace=true) "d"; a = 3 }` →
+  `e.a: [int 1, int 2, int 3]` (`inherit_replace_copy_of_inherited_stays_inherited`,
+  `inherit_replace_copy_keeps_collected_array`). Each such `.inherit` adds another copy, and one of
+  the current object copies its entries onto themselves: `e { a = 1; .inherit(replace=true) "e" }`
+  → `e.a: ⟨int 1 | int 1⟩`, and the first-value rule above applies:
+  `e { a = [1]; a = 5; .inherit(replace=true) "e" }` → `e.a: ⟨[int 1] | int 5 | [int 1]⟩`
+  (`inherit_replace_twice_duplicates`, `inherit_replace_own_object_duplicates`,
+  `inherit_replace_own_container_first_value_only`).
+- Copies carry no saved comments, and for §12.5 they are not values that were created: comments
+  pending before `.inherit` stay pending (`inherit_copies_have_no_comments`,
+  `inherit_copies_take_no_pending_comments`).
 - **Quirk.** `replace` is not matched like other parameters: only the exact name `replace` counts
   (lowercased first under `key-lowercase`), a repeated `replace` uses its first value, and the
   value must be a bool (`inherit_replace_no_prefix_match`, `inherit_replace_first_value`,

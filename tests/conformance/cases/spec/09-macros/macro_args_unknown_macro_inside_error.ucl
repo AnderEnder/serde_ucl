@@ -1,0 +1,2 @@
+.priority(priority=2, .foo 1);
+a = 1

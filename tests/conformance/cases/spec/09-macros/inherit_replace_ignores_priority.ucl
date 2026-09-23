@@ -1,0 +1,3 @@
+d { a = 1 }
+.priority 2
+e { a = 0; .inherit(replace=true) "d" }

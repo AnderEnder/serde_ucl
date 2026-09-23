@@ -1,0 +1,2 @@
+.include(glob=true) "files/v5/gs/*.inc"
+k = 1

@@ -1,0 +1,1 @@
+.load(key="k", trim=true) "files/v5/ws_only.txt"

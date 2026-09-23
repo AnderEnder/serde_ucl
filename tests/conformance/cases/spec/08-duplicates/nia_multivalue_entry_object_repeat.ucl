@@ -1,0 +1,3 @@
+d { a = 1; b = 2 }
+a = 6
+.inherit(replace=true) "d"; a { y = 2 }

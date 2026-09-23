@@ -1,0 +1,3 @@
+a = 1
+.include(url=true, try=true, key="k") "http://example.invalid/x.inc"
+b = 2

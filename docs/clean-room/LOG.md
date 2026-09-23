@@ -520,3 +520,28 @@
   - Commits: the `C3b:` commits `2d339c3`, `f18d87c` and the one that adds this entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — Role: spec team. Item: C0, release `spec-v5` (tag on `e2abbea`). Answers implementer
+  questions #23–#33 from C3a and C3b, and specifies URL includes in every mode (WORKLIST C3,
+  decision 2). Inputs consulted: libucl source at the pinned commit (macro value and argument
+  parsing, the include, load and inherit handlers, object copying, element insertion and implicit
+  arrays, key parsing and the section-name lookahead, container opening and closing, the end-of-input
+  check, variable registration, URL fetching without URL support), black-box oracle runs, the
+  conformance corpus, and `spec-v4`. Confirmed and written down: #23 (§9.2), #24 (§9.7, §12.5), #25
+  (§8.5), #28 (§9.4, §7.1), #29 (§9.4 *Globs*, the oracle C library's rules), #32 (§9.4), #33
+  (§9.4, §9.6, §12.5; one correction: under `try=false` a glob match that is the including file is
+  still skipped, and only an include of no match at all is an error). Corrected: #27 (§12.1, a
+  replacing value gives the entry its spelling). Specified: #31 (§9.1, a key with a separator after
+  such a macro is a name; comments to the end reopen the value created most recently). Marked
+  **Uncertain** (undefined in libucl), with the project's choice where the implementer made one:
+  argument documents nested until libucl crashes (#26; the 64-document limit is a project
+  divergence), any failure inside an included file after which libucl goes on with the same macro
+  (#30; crash; an error fails, a stop ends the parse), a non-object value reopened after a macro
+  following a name (#31), a `}` in a key-nested file under an object with its own bracket (#32,
+  crash), and which unit a container of an ended unit belongs to at the end-of-unit check (#32,
+  memory reuse). README: *Known gaps* no longer lists open decisions; *Divergences decided by the
+  project* records the WORKLIST C3 decisions; the Uncertain list and the coverage table (1254
+  cases) are updated. 111 new cases with golden files from the oracle; no existing golden file
+  changed. The new core fails 12 of them (11 `spec-v5`, 1 `divergence:argument-depth`); the old
+  parser fails 91. Cases that crash the oracle are not committed. Both runners green at every
+  commit. Commits: `71c7dd4`, `8c9eb8e`, `e2abbea`. The spec contains behaviour only: no libucl
+  code, internal names, or procedures.

@@ -1,0 +1,3 @@
+a = 1
+.include(glob=true) "files/v4/p1/*/"
+k = 1

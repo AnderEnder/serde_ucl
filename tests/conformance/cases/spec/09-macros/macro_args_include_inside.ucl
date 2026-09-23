@@ -1,0 +1,2 @@
+.priority(.include "files/v5/pri3.inc");
+a = 1

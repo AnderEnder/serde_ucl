@@ -1,0 +1,2 @@
+"s".include "files/a.inc"k { z = 1 }
+m = 1

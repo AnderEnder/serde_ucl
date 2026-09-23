@@ -1,0 +1,4 @@
+.priority 3
+a = 1
+.priority 1
+"\u0041" = 2

@@ -113,7 +113,9 @@ it, so a bracket in them counts:
     `c "x{y" z⏎d { e { f = 1 } g = 2 }⏎h = 1` →
     `{ c: { "x{y": "z", d: { e: { f: int 1 }, g: int 2 } }, h: int 1 }`
     (`section_path_left_open_inner_container`).
-  - The input ends. The end of an included file does not close them (§9.4).
+  - The input ends. The end of an included file does not close them, and they affect what is
+    checked at the end of a unit (§9.4). A macro directly after a name leaves the name's object
+    open in the same way (§9.1).
   A `}` that arrives while they are open is an error (`section_path_left_open_inside_braces_error`,
   `section_path_left_open_extra_close_error`).
 - **Quirk.** A `=` or `:` after a word that follows a name is ignored, and that word is a name too:

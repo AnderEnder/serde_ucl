@@ -1,0 +1,3 @@
+a = 1
+.include(key="k") "files/v4/empty.txt"
+# t

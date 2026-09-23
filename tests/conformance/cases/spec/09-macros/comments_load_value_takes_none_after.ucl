@@ -1,0 +1,3 @@
+a = 1
+.load(key="k") "files/num.txt"
+# t

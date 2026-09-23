@@ -1,0 +1,2 @@
+.priority(d { priority = 3 }; .inherit "d");
+a = 1

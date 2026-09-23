@@ -1,0 +1,3 @@
+.include(glob=true) "files/v4/?/a.inc"
+.include(glob=true) "files/v4/*/pa.inc"
+k = 1

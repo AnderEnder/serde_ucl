@@ -33,10 +33,27 @@ key, so they form multi-value entries (`key_lowercase_merges_case`, §8.6).
   (`key_lowercase_escapes_checked_as_written_error`). Without the flag, `"\UZZZZ"` is the key
   `UZZZZ` (`key_lowercase_upper_u_escape_without_flag`).
 - Escapes can produce uppercase letters, so the keys of one entry may differ in case. Keys are
-  compared ignoring ASCII case, and the entry keeps the spelling of its first key:
+  compared ignoring ASCII case. The entry keeps the spelling of its first key while values are
+  added to it, collected (§8.5), dropped for a lower priority, or merged into (§8.4):
   `"\u0041" = 1⏎a = 2` → `A: ⟨int 1 | int 2⟩`; `"\u0041\u0042" = 3⏎ab = 4⏎"aB" = 5` → `AB`
-  with three values; `A = 1⏎"\u0041" = 2` → `a: ⟨int 1 | int 2⟩`
-  (`key_lowercase_decoded_key_first_spelling_kept`, `key_lowercase_later_decoded_key_joins`).
+  with three values; `A = 1⏎"\u0041" = 2` → `a: ⟨int 1 | int 2⟩`;
+  `.priority 3⏎a = 1⏎.priority 1⏎"\u0041" = 2` → `a: int 1 @3`
+  (`key_lowercase_decoded_key_first_spelling_kept`, `key_lowercase_later_decoded_key_joins`,
+  `key_lowercase_lower_priority_keeps_spelling`, `key_lowercase_collected_keeps_spelling`,
+  `key_lowercase_merged_keeps_spelling`).
+- When a new value replaces all of the entry's values, the entry takes the new key's spelling and
+  keeps its place among the keys. That happens for a higher priority (§8.3), under `rewrite`, when
+  an inherited value is replaced (§9.7), and when a collected array is replaced (§8.5):
+  `x = 1⏎a { b = 1 }⏎.priority 3⏎"\u0041" { c = 1 }⏎y = 1` → keys `x`, `A`, `y`;
+  `"\u0041" = 1⏎.priority 3⏎a = 2` → `a`; with `rewrite`, `a = 1⏎"\u0041" = 2` → `A: int 2`;
+  `d { a = 1 }⏎e { .inherit "d"; "\u0041" = 2 }` → `e.A`
+  (`key_lowercase_replacement_takes_new_spelling`,
+  `key_lowercase_replacement_by_lowercase_spelling`, `key_lowercase_rewrite_takes_new_spelling`,
+  `key_lowercase_inherited_replaced_takes_new_spelling`,
+  `key_lowercase_collection_replaced_takes_new_spelling`,
+  `key_lowercase_merge_higher_priority_takes_new_spelling`). Under `merge`, the scalar that takes a
+  container's place (§8.4) does not count as such a replacement: `a { x = 1 }⏎"\u0041" = 2` →
+  `a: int 2` (`key_lowercase_merge_scalar_quirk_keeps_spelling`).
 - Keys created by macros keep their spelling and compare the same way (§9.4, §9.6, §9.7).
 
 ## 12.2 `zerocopy`
@@ -96,7 +113,20 @@ Where they attach:
   gets `c1` and `c2`, `b` gets `c3` and `c4`, and the element `2` gets `c5`
   (`comments_attach_to_next_value`); `a = 1⏎a = 2 # c⏎a = 3` → the third value of `a` gets `c`
   (`comments_repeated_key`). Macros create no value, so comments before them stay pending
-  (`comments_before_macro_go_to_next_value`).
+  (`comments_before_macro_go_to_next_value`). This includes the copies that `.inherit` makes and
+  the value that `.load` creates: they take no comments, and the value created most recently stays
+  what it was (`cases/spec/09-macros/inherit_copies_have_no_comments`,
+  `cases/spec/09-macros/inherit_copies_take_no_pending_comments`,
+  `cases/spec/09-macros/comments_load_value_takes_none_after`,
+  `cases/spec/09-macros/comments_load_value_takes_none_before`). The object, or the array and its
+  object, that `key` or `prefix` creates for an include (§9.4) takes no pending comments either,
+  which go to the first value of the file instead, but it is the value created most recently until
+  the file creates one: `a = 1⏎.include(key="k") "files/v4/empty.txt"⏎# t` → `k: {}` with
+  `"ca": ["# t"]`; with `target="array"`, the object inside `k` gets it
+  (`cases/spec/09-macros/comments_include_key_takes_no_pending`,
+  `cases/spec/09-macros/comments_include_key_object_most_recent`,
+  `cases/spec/09-macros/comments_include_key_array_object_most_recent`). Comments inside macro
+  argument documents (§9.2) are never saved (`cases/spec/09-macros/macro_args_comments_not_saved`).
 - A value on a following line (§1.6) was created with its key, before the comments in front of it
   were read. Those comments therefore go to the next value created, or to the value created most
   recently when a container closes or the input ends (below): `c =⏎#z⏎b⏎d = 1` → `d` gets `#z`;

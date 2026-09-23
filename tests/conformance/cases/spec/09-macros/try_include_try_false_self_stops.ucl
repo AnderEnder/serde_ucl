@@ -1,0 +1,3 @@
+a = 1
+.try_include(try=false) "try_include_try_false_self_stops.ucl"
+b = 2

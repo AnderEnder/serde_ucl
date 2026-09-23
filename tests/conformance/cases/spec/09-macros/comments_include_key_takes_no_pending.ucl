@@ -1,0 +1,3 @@
+# t
+.include(key="k") "files/a.inc"
+b = 1

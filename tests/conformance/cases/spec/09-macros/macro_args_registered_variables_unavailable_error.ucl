@@ -1,0 +1,2 @@
+.priority(v { priority = 3 }; .inherit "$V");
+a = 1

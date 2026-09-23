@@ -134,6 +134,13 @@ values, and later repeats are appended. Existing arrays are elements, not flatte
   (`no_implicit_arrays_with_arrays`)
 - `a { x = 1 }⏎a { y = 2 }` → `{ a: [{x: int 1}, {y: int 2}] }` (`no_implicit_arrays_objects`)
 
+**Quirk.** An entry can still hold several values under the flag, for example through
+`.inherit(replace=true)` (§9.7). The first repeat of its key then collects only the entry's first
+value with the new one, and the other values are dropped:
+`d { a = 1 }⏎e { a = 6; .inherit(replace=true) "d"; a = 7; a = 8 }` → `e.a: [int 6, int 7, int 8]`;
+`d { a = 1; b = 2 }⏎a = 6⏎.inherit(replace=true) "d"; a { y = 2 }` → `a: [int 6, { y: int 2 }]`
+(`nia_multivalue_entry_collects_first_value_only`, `nia_multivalue_entry_object_repeat`).
+
 Priorities are compared first, as in §8.3, and only a repeat that would be added is collected:
 `a = 1⏎.priority 3⏎a = 2⏎.priority 1⏎a = 3⏎.priority 3⏎a = 4` → `{ a: [int 2 @3, int 4 @3] }`
 (`nia_priorities_compared_first`).

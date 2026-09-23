@@ -16,7 +16,8 @@ None of them is written by hand.
 - `cases/spec/NN-topic/` holds the cases cited by the behaviour spec in `docs/spec/`, one directory
   per spec section. `cases/spec/09-macros/files/` and `cases/spec/08-duplicates/files/` hold files
   that those cases include or load (`*.inc` and others, among them an empty file, a directory and a
-  symbolic link under `files/v4/`); they are not cases themselves. Some `09-macros` cases include
+  symbolic link under `files/v4/`, and file names with `[` and `]` under `files/v5/g/`); they are
+  not cases themselves. Some `09-macros` cases include
   other cases, or themselves, by name, and two `10-output` cases use `../09-macros/files/`. Cases in `cases/spec/10-output/` also have libucl's own output
   in every text format: `<case>.config.golden`, `<case>.json.golden`, `<case>.json-compact.golden`
   and `<case>.yaml.golden` (exact bytes of `ucl_object_emit` for the parsed value).

@@ -98,15 +98,37 @@ those of array elements (§8.7). The conformance runner ignores them.
 ## Divergences decided by the project
 
 The project deliberately differs from libucl in these places. The spec still describes libucl's
-behaviour, and each place says so:
+behaviour, and each place says so. The decisions for §9 are recorded in
+`docs/clean-room/WORKLIST.md` (C3, *Project decisions*).
 
 - Non-UTF-8 bytes in keys and strings are an **error** in the project (libucl accepts them;
   `libucl/basic/22`). This also covers strings made invalid by `\u` escapes of surrogate code
   points (§6).
-- `.includes` returns an "unsupported" error in the project (§9).
-- `.load` is available only behind a default-off feature in the project (§9).
+- The project never verifies signatures: `.includes`, and `sign=true` on any include macro, return
+  an "unsupported" error; `sign=false` is accepted. libucl built without signature support, as the
+  oracle is, ignores `sign` (§9.4; `cases/spec/09-macros/includes_like_include`,
+  `cases/spec/09-macros/include_sign_param_no_effect`).
+- `.load` is available only behind a default-off feature in the project (§9.6).
+- Macro argument documents nest at most 64 deep in the project, the document holding the outermost
+  macro included; deeper nesting is an error. libucl sets no limit of its own (§9.2;
+  `cases/spec/09-macros/macro_args_nested_100_levels`).
 - A variable-handler result that shares its string with other text is substituted in place in the
   project. libucl's result there depends on memory contents (§7.7).
+- A failure inside an included file after which libucl goes on with the same macro, a glob of
+  `.try_include` or a search path with directories left (§9.4, *Missing and unusable files*),
+  crashes libucl; in the project an error there fails the document, and a silent stop ends the
+  parse.
+
+These are project decisions that match libucl's behaviour rather than differ from it:
+
+- The project never fetches URLs; a URL include behaves as in a libucl built without URL support,
+  which the oracle is (§9.4).
+- `path` search lists are implemented as §9.4 describes, quirks included.
+- Parsing a file by path defines `FILENAME` and `CURDIR` from that path whatever `no-filevars`
+  says, as libucl's function for parsing a file does; parsing bytes honours the flag (§12.7).
+- The API reports a silent stop (§9.4) as an error of its own kind, from which the partial result
+  can be retrieved. Where relative include paths resolve, and what `CURDIR` is for a document given
+  as bytes, are parser options; the conformance runner sets them to the case's directory.
 
 ## Uncertain behaviour (summary)
 
@@ -119,22 +141,28 @@ platform, is left uncertain:
 - Saved comments of a value that was replaced under §8, which can reappear on a later value
   (§12.5).
 - A float outside the 64-bit range truncated for `kb`, `mb` or `gb` (§5.4).
+- Macro argument documents nested so deep that libucl crashes (§9.2); the project's limit is
+  listed under *Divergences decided by the project*.
+- A failure inside an included file after which libucl goes on with the same macro: a glob of
+  `.try_include`, or a search path with directories left (§9.4); the project's choice is listed
+  under *Divergences decided by the project*.
+- A macro directly after a name, followed only by comments to the end of its unit, when the value
+  created most recently is not an object (§9.1).
+- A `}` in a file included under a key, when the object where the macro stands has only its own
+  bracket (§9.4, *Nesting under a key*).
+- Whether a container opened by an included file that has ended counts as opened by a later
+  included file, at the check at the end of that file (§9.4, *Where the entries go*).
 
 ## Known gaps
 
 All findings of the `spec-v1` review (`docs/clean-room/reviews/spec-v1.md`) are fixed. `spec-v2`
 answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, `spec-v3` answers
-#5–#16, and `spec-v4` answers #17–#22 and completes §9 for the macro work.
+#5–#16, `spec-v4` answers #17–#22 and completes §9 for the macro work, and `spec-v5` answers
+#23–#33.
 
-The project has not yet decided what it does in these places, where §9 describes libucl:
-
-- the include parameters `sign`, `url` and `path` (§9.4, *Signatures, URLs and search paths*);
-  `.includes` itself is decided (above);
-- how its API reports a silent stop (§9.4, *Missing and unusable files*): libucl's parse function
-  returns failure without an error message and keeps the partial tree, and the golden files record
-  that tree;
-- what parsing a file with `no-filevars` does (§12.7): libucl's file function defines `FILENAME`
-  and `CURDIR` anyway, while the cases follow the oracle, which does not.
+The places where §9 left the project's behaviour open (the include parameters `sign`, `url` and
+`path`, how the API reports a silent stop, and parsing a file under `no-filevars`) are decided;
+see *Divergences decided by the project*.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
@@ -145,7 +173,7 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1143 cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1254 cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - The mappings for `cases/review/`, `cases/additions/`, `cases/errors/` and `libucl/basic/` were
@@ -867,6 +895,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/08-duplicates/nia_merge_array_extends_collection` | §8 |
 | `cases/spec/08-duplicates/nia_merge_quirk_then_repeat_error` | §8 |
 | `cases/spec/08-duplicates/nia_merge_scalar_replaces_collection` | §8 |
+| `cases/spec/08-duplicates/nia_multivalue_entry_collects_first_value_only` | §8, §9 |
+| `cases/spec/08-duplicates/nia_multivalue_entry_object_repeat` | §8, §9 |
 | `cases/spec/08-duplicates/nia_priorities_compared_first` | §8 |
 | `cases/spec/08-duplicates/no_implicit_arrays_objects` | §8 |
 | `cases/spec/08-duplicates/no_implicit_arrays_scalars` | §8 |
@@ -900,9 +930,16 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/08-duplicates/strategy_rewrite` | §8 |
 | `cases/spec/09-macros/comments_carry_into_included_file` | §9, §12 |
 | `cases/spec/09-macros/comments_end_of_included_file` | §9, §12 |
+| `cases/spec/09-macros/comments_include_key_array_object_most_recent` | §9, §12 |
+| `cases/spec/09-macros/comments_include_key_object_most_recent` | §9, §12 |
+| `cases/spec/09-macros/comments_include_key_takes_no_pending` | §9, §12 |
+| `cases/spec/09-macros/comments_load_value_takes_none_after` | §9, §12 |
+| `cases/spec/09-macros/comments_load_value_takes_none_before` | §9, §12 |
 | `cases/spec/09-macros/include_array_root_error` | §9 |
 | `cases/spec/09-macros/include_bare` | §9 |
+| `cases/spec/09-macros/include_braced_file_after_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_at_braced_root_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_closes_section_object` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_inside_braces_error` | §9 |
 | `cases/spec/09-macros/include_braced_file_then_entries` | §9 |
 | `cases/spec/09-macros/include_braced_file_twice` | §9 |
@@ -929,22 +966,51 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/include_file_closes_including_object` | §9 |
 | `cases/spec/09-macros/include_file_closing_brace_at_top_level_error` | §9 |
 | `cases/spec/09-macros/include_glob` | §9 |
+| `cases/spec/09-macros/include_glob_backslash_inside_brackets` | §9 |
+| `cases/spec/09-macros/include_glob_backslash_quotes_next_character` | §9 |
+| `cases/spec/09-macros/include_glob_bang_negates` | §9 |
 | `cases/spec/09-macros/include_glob_bracket_expression` | §9 |
 | `cases/spec/09-macros/include_glob_bracket_needs_wildcard_error` | §9 |
+| `cases/spec/09-macros/include_glob_bracket_negation_close_bracket_member` | §9 |
 | `cases/spec/09-macros/include_glob_byte_order` | §9 |
+| `cases/spec/09-macros/include_glob_caret_is_not_negation` | §9 |
+| `cases/spec/09-macros/include_glob_close_bracket_first_is_member` | §9 |
 | `cases/spec/09-macros/include_glob_directory_match_error` | §9 |
+| `cases/spec/09-macros/include_glob_dot_components_and_double_slash` | §9 |
+| `cases/spec/09-macros/include_glob_dot_star_matches_dot_entries_error` | §9 |
+| `cases/spec/09-macros/include_glob_dot_star_try` | §9 |
+| `cases/spec/09-macros/include_glob_in_directory_components` | §9 |
 | `cases/spec/09-macros/include_glob_matches_including_file_error` | §9 |
 | `cases/spec/09-macros/include_glob_no_brace_expansion` | §9 |
+| `cases/spec/09-macros/include_glob_no_character_classes` | §9 |
 | `cases/spec/09-macros/include_glob_no_match_stops_parsing` | §9 |
 | `cases/spec/09-macros/include_glob_prefix_key_from_first_file` | §9 |
 | `cases/spec/09-macros/include_glob_question_mark` | §9 |
+| `cases/spec/09-macros/include_glob_range` | §9 |
+| `cases/spec/09-macros/include_glob_reversed_range_matches_nothing` | §9 |
 | `cases/spec/09-macros/include_glob_skips_hidden_files` | §9 |
+| `cases/spec/09-macros/include_glob_stop_inside_match_ends_parse` | §9 |
+| `cases/spec/09-macros/include_glob_trailing_slash_matches_directories_error` | §9 |
+| `cases/spec/09-macros/include_glob_trailing_slash_no_directory_stops` | §9 |
+| `cases/spec/09-macros/include_glob_trailing_slash_try` | §9 |
 | `cases/spec/09-macros/include_glob_try_no_match` | §9 |
 | `cases/spec/09-macros/include_glob_try_skips_directories` | §9 |
+| `cases/spec/09-macros/include_glob_try_stop_inside_match_ends_parse` | §9 |
+| `cases/spec/09-macros/include_glob_unclosed_bracket_is_literal` | §9 |
 | `cases/spec/09-macros/include_inside_object` | §9 |
+| `cases/spec/09-macros/include_key_close_brace_at_top_level_error` | §9 |
+| `cases/spec/09-macros/include_key_close_brace_under_taken_over_brace` | §9 |
 | `cases/spec/09-macros/include_key_empty_string` | §9 |
+| `cases/spec/09-macros/include_key_file_containers_close_at_end` | §9 |
 | `cases/spec/09-macros/include_key_not_lowercased_but_matched` | §9 |
+| `cases/spec/09-macros/include_key_open_brace_then_close_error` | §9 |
 | `cases/spec/09-macros/include_key_without_prefix` | §9 |
+| `cases/spec/09-macros/include_left_open_after_separator_and_newline` | §9, §3 |
+| `cases/spec/09-macros/include_left_open_closed_then_checked_error` | §9, §3 |
+| `cases/spec/09-macros/include_left_open_end_check_stops` | §9, §3 |
+| `cases/spec/09-macros/include_left_open_end_check_stops_in_included_file` | §9, §3 |
+| `cases/spec/09-macros/include_left_open_end_check_stops_then_entries` | §9, §3 |
+| `cases/spec/09-macros/include_left_open_from_both_units_close_together` | §9, §3 |
 | `cases/spec/09-macros/include_left_open_section_persists` | §9 |
 | `cases/spec/09-macros/include_lower_than_main_priority_dropped` | §9 |
 | `cases/spec/09-macros/include_main_document_itself_error` | §9 |
@@ -953,15 +1019,20 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/include_merge_scalar_higher_priority_replaces` | §9 |
 | `cases/spec/09-macros/include_merge_scalar_lower_priority_dropped` | §9 |
 | `cases/spec/09-macros/include_missing_error` | §9 |
+| `cases/spec/09-macros/include_moves_filevars_last` | §9, §7 |
+| `cases/spec/09-macros/include_moves_filevars_last_string_input` | §9, §7 |
 | `cases/spec/09-macros/include_nested` | §9 |
 | `cases/spec/09-macros/include_nesting_limit_error` | §9 |
 | `cases/spec/09-macros/include_nesting_limit_ok` | §9 |
+| `cases/spec/09-macros/include_open_brace_in_section_object_closed_by_includer` | §9, §3 |
 | `cases/spec/09-macros/include_param_prefix_names` | §9 |
 | `cases/spec/09-macros/include_path_empty_array_error` | §9 |
 | `cases/spec/09-macros/include_path_first_dir` | §9 |
 | `cases/spec/09-macros/include_path_glob_all_dirs` | §9 |
 | `cases/spec/09-macros/include_path_glob_last_dir_must_match_error` | §9 |
+| `cases/spec/09-macros/include_path_later_list_replaces` | §9 |
 | `cases/spec/09-macros/include_path_missing_in_first_dir_error` | §9 |
+| `cases/spec/09-macros/include_path_no_string_entries_error` | §9 |
 | `cases/spec/09-macros/include_path_persists` | §9 |
 | `cases/spec/09-macros/include_path_string_ignored` | §9 |
 | `cases/spec/09-macros/include_path_try_first_dir_only` | §9 |
@@ -1015,13 +1086,19 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/include_unclosed_brace_inside_braces` | §9 |
 | `cases/spec/09-macros/include_unclosed_object_in_file_error` | §9 |
 | `cases/spec/09-macros/include_unknown_param_ignored` | §9 |
+| `cases/spec/09-macros/include_url_before_search_path` | §9 |
+| `cases/spec/09-macros/include_url_key_not_created` | §9 |
 | `cases/spec/09-macros/include_url_like_path_is_a_path` | §9 |
 | `cases/spec/09-macros/include_url_param_error` | §9 |
+| `cases/spec/09-macros/include_url_try_skipped` | §9 |
 | `cases/spec/09-macros/includes_like_include` | §9 |
 | `cases/spec/09-macros/inherit_at_top_level` | §9 |
 | `cases/spec/09-macros/inherit_bare_value_trailing_space_error` | §9 |
 | `cases/spec/09-macros/inherit_basic` | §9 |
 | `cases/spec/09-macros/inherit_braces_value` | §9 |
+| `cases/spec/09-macros/inherit_container_first_value_only` | §9 |
+| `cases/spec/09-macros/inherit_copies_have_no_comments` | §9, §12 |
+| `cases/spec/09-macros/inherit_copies_take_no_pending_comments` | §9, §12 |
 | `cases/spec/09-macros/inherit_dotted_name_is_one_key` | §9 |
 | `cases/spec/09-macros/inherit_dotted_name_not_a_path_error` | §9 |
 | `cases/spec/09-macros/inherit_empty_name_error` | §9 |
@@ -1042,10 +1119,17 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/inherit_own_object` | §9 |
 | `cases/spec/09-macros/inherit_replace_appends` | §9 |
 | `cases/spec/09-macros/inherit_replace_copies_not_inherited` | §9 |
+| `cases/spec/09-macros/inherit_replace_copy_keeps_collected_array` | §9, §8 |
+| `cases/spec/09-macros/inherit_replace_copy_of_inherited_stays_inherited` | §9 |
 | `cases/spec/09-macros/inherit_replace_first_value` | §9 |
+| `cases/spec/09-macros/inherit_replace_ignores_priority` | §9, §8 |
+| `cases/spec/09-macros/inherit_replace_ignores_strategy_error` | §9, §8 |
+| `cases/spec/09-macros/inherit_replace_ignores_strategy_merge` | §9, §8 |
 | `cases/spec/09-macros/inherit_replace_keyword_yes` | §9 |
 | `cases/spec/09-macros/inherit_replace_must_be_boolean` | §9 |
+| `cases/spec/09-macros/inherit_replace_no_implicit_arrays_multivalue` | §9, §8 |
 | `cases/spec/09-macros/inherit_replace_no_prefix_match` | §9 |
+| `cases/spec/09-macros/inherit_replace_own_container_first_value_only` | §9 |
 | `cases/spec/09-macros/inherit_replace_own_object_duplicates` | §9 |
 | `cases/spec/09-macros/inherit_replace_twice_duplicates` | §9 |
 | `cases/spec/09-macros/inherit_replaced_whatever_priority` | §9 |
@@ -1063,8 +1147,11 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/load_escape` | §9 |
 | `cases/spec/09-macros/load_escape_all_bytes` | §9 |
 | `cases/spec/09-macros/load_escape_must_be_boolean` | §9 |
+| `cases/spec/09-macros/load_existing_key_before_empty_file` | §9 |
+| `cases/spec/09-macros/load_existing_key_before_target` | §9 |
 | `cases/spec/09-macros/load_existing_key_error` | §9 |
 | `cases/spec/09-macros/load_ignores_priority_macro` | §9 |
+| `cases/spec/09-macros/load_ignores_search_path` | §9 |
 | `cases/spec/09-macros/load_inside_object` | §9 |
 | `cases/spec/09-macros/load_int` | §9 |
 | `cases/spec/09-macros/load_int_clamps` | §9 |
@@ -1076,6 +1163,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/load_key_lowercase_existing_error` | §9 |
 | `cases/spec/09-macros/load_key_lowercase_kept_spelling` | §9 |
 | `cases/spec/09-macros/load_missing_error` | §9 |
+| `cases/spec/09-macros/load_missing_key_error_with_try` | §9 |
 | `cases/spec/09-macros/load_multiline` | §9 |
 | `cases/spec/09-macros/load_param_prefix_t_is_try` | §9 |
 | `cases/spec/09-macros/load_param_prefix_tri_is_trim` | §9 |
@@ -1088,31 +1176,61 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/load_trim` | §9 |
 | `cases/spec/09-macros/load_trim_all_whitespace` | §9 |
 | `cases/spec/09-macros/load_trim_then_escape` | §9 |
+| `cases/spec/09-macros/load_trim_whitespace_only_empty_string` | §9 |
 | `cases/spec/09-macros/load_try_missing` | §9 |
+| `cases/spec/09-macros/load_try_missing_before_existing_key` | §9 |
 | `cases/spec/09-macros/load_twice_same_key_error` | §9 |
 | `cases/spec/09-macros/load_unknown_target_inserts_nothing` | §9 |
 | `cases/spec/09-macros/load_without_key_error` | §9 |
 | `cases/spec/09-macros/macro_after_entry_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_after_name_comment_to_end` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_comment_to_end_after_bracket_closed` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_comment_to_end_of_included_file` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_include_of_empty_file_comment_to_end` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_next_line_separator_key_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_priority_then_separator_key_error` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_separator_keys_chain` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_then_bracketed_value_closes` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_then_key_without_separator` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_then_left_open_path` | §9, §3 |
+| `cases/spec/09-macros/macro_after_name_then_separator_key_is_name_error` | §9, §3 |
 | `cases/spec/09-macros/macro_args_after_comment_then_space_error` | §9 |
 | `cases/spec/09-macros/macro_args_array_root_ignored` | §9 |
 | `cases/spec/09-macros/macro_args_backslash_pair_quote_error` | §9 |
 | `cases/spec/09-macros/macro_args_boolean_keywords` | §9 |
 | `cases/spec/09-macros/macro_args_braced_root` | §9 |
+| `cases/spec/09-macros/macro_args_braced_root_rest_ignored` | §9 |
+| `cases/spec/09-macros/macro_args_comment_then_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_args_comments_not_saved` | §9, §12 |
 | `cases/spec/09-macros/macro_args_directly_after_comment` | §9 |
 | `cases/spec/09-macros/macro_args_escaped_quote_error` | §9 |
 | `cases/spec/09-macros/macro_args_filename_is_undef` | §9, §7 |
 | `cases/spec/09-macros/macro_args_filename_no_filevars` | §9, §7 |
+| `cases/spec/09-macros/macro_args_include_inside` | §9 |
+| `cases/spec/09-macros/macro_args_inherit_inside` | §9 |
 | `cases/spec/09-macros/macro_args_key_lowercase` | §9 |
+| `cases/spec/09-macros/macro_args_macros_inside` | §9 |
 | `cases/spec/09-macros/macro_args_names_case_sensitive` | §9 |
+| `cases/spec/09-macros/macro_args_nested_100_levels` | §9 |
+| `cases/spec/09-macros/macro_args_nested_60_levels` | §9 |
 | `cases/spec/09-macros/macro_args_nested_not_parameters` | §9 |
+| `cases/spec/09-macros/macro_args_newline_then_end_error` | §9 |
+| `cases/spec/09-macros/macro_args_newline_then_last_byte_hash_empty_value` | §9 |
+| `cases/spec/09-macros/macro_args_no_implicit_arrays_repeated_name_error` | §9, §8 |
 | `cases/spec/09-macros/macro_args_no_variables` | §9 |
 | `cases/spec/09-macros/macro_args_paren_in_quotes` | §9 |
 | `cases/spec/09-macros/macro_args_parse_error` | §9 |
+| `cases/spec/09-macros/macro_args_registered_variables_unavailable_error` | §9 |
 | `cases/spec/09-macros/macro_args_repeated_first_wins` | §9 |
 | `cases/spec/09-macros/macro_args_single_quotes_do_not_protect_error` | §9 |
+| `cases/spec/09-macros/macro_args_space_then_last_byte_hash_empty_value` | §9 |
+| `cases/spec/09-macros/macro_args_stop_inside_error` | §9 |
 | `cases/spec/09-macros/macro_args_then_comment_then_space_value_try` | §9 |
 | `cases/spec/09-macros/macro_args_then_end_error` | §9 |
+| `cases/spec/09-macros/macro_args_then_last_byte_hash_empty_value` | §9 |
+| `cases/spec/09-macros/macro_args_then_last_byte_hash_error` | §9 |
 | `cases/spec/09-macros/macro_args_two_prefixes_last_wins` | §9 |
+| `cases/spec/09-macros/macro_args_unknown_macro_inside_error` | §9 |
 | `cases/spec/09-macros/macro_bare_value` | §9 |
 | `cases/spec/09-macros/macro_bare_value_trailing_space_kept_error` | §9 |
 | `cases/spec/09-macros/macro_braces_value_leading_newline_skipped` | §9 |
@@ -1140,6 +1258,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/macro_name_case_sensitive_error` | §9 |
 | `cases/spec/09-macros/macro_name_includes_semicolon_error` | §9 |
 | `cases/spec/09-macros/macro_name_runs_to_whitespace_or_paren` | §9 |
+| `cases/spec/09-macros/macro_name_then_last_byte_hash_empty_value` | §9 |
 | `cases/spec/09-macros/macro_name_with_punctuation_at_end_ignored` | §9 |
 | `cases/spec/09-macros/macro_not_recognised_as_value` | §9 |
 | `cases/spec/09-macros/macro_not_recognised_in_arrays` | §9 |
@@ -1182,18 +1301,28 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/09-macros/priority_value_on_next_line_error` | §9 |
 | `cases/spec/09-macros/priority_value_range` | §9 |
 | `cases/spec/09-macros/priority_variable_in_value` | §9 |
+| `cases/spec/09-macros/try_include_cycle_nesting_limit_error` | §9 |
 | `cases/spec/09-macros/try_include_directory_stops_parsing` | §9 |
 | `cases/spec/09-macros/try_include_empty_path_stops_parsing` | §9 |
 | `cases/spec/09-macros/try_include_glob_no_match_continues` | §9 |
 | `cases/spec/09-macros/try_include_glob_skips_directories` | §9 |
 | `cases/spec/09-macros/try_include_glob_skips_including_file` | §9 |
+| `cases/spec/09-macros/try_include_glob_try_false_directory_error` | §9 |
 | `cases/spec/09-macros/try_include_glob_try_false_no_match_stops` | §9 |
+| `cases/spec/09-macros/try_include_glob_try_false_only_self_error` | §9 |
+| `cases/spec/09-macros/try_include_glob_try_false_skips_self` | §9 |
 | `cases/spec/09-macros/try_include_main_document_itself_stops` | §9 |
 | `cases/spec/09-macros/try_include_missing_stops_parsing` | §9 |
 | `cases/spec/09-macros/try_include_path_missing_error` | §9 |
 | `cases/spec/09-macros/try_include_path_searches_all_dirs` | §9 |
 | `cases/spec/09-macros/try_include_present` | §9 |
 | `cases/spec/09-macros/try_include_self_stops_parsing` | §9 |
+| `cases/spec/09-macros/try_include_try_false_directory_error` | §9 |
+| `cases/spec/09-macros/try_include_try_false_missing_stops` | §9 |
+| `cases/spec/09-macros/try_include_try_false_self_stops` | §9 |
+| `cases/spec/09-macros/try_include_try_true_directory_stops` | §9 |
+| `cases/spec/09-macros/try_include_url_skipped` | §9 |
+| `cases/spec/09-macros/try_include_url_try_false_error` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/empty_document` | §10 |
@@ -1264,11 +1393,21 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1143 case
 | `cases/spec/12-flags/disable_macro_rejects_macros` | §12 |
 | `cases/spec/12-flags/key_lowercase` | §12 |
 | `cases/spec/12-flags/key_lowercase_before_escapes` | §12, §3 |
+| `cases/spec/12-flags/key_lowercase_collected_keeps_spelling` | §12 |
+| `cases/spec/12-flags/key_lowercase_collection_replaced_takes_new_spelling` | §12 |
 | `cases/spec/12-flags/key_lowercase_decoded_key_first_spelling_kept` | §12 |
 | `cases/spec/12-flags/key_lowercase_escapes_checked_as_written_error` | §12 |
+| `cases/spec/12-flags/key_lowercase_inherited_replaced_takes_new_spelling` | §12, §9 |
 | `cases/spec/12-flags/key_lowercase_later_decoded_key_joins` | §12 |
+| `cases/spec/12-flags/key_lowercase_lower_priority_keeps_spelling` | §12 |
+| `cases/spec/12-flags/key_lowercase_merge_higher_priority_takes_new_spelling` | §12 |
+| `cases/spec/12-flags/key_lowercase_merge_scalar_quirk_keeps_spelling` | §12 |
+| `cases/spec/12-flags/key_lowercase_merged_keeps_spelling` | §12 |
 | `cases/spec/12-flags/key_lowercase_merges_case` | §12 |
 | `cases/spec/12-flags/key_lowercase_non_ascii` | §12 |
+| `cases/spec/12-flags/key_lowercase_replacement_by_lowercase_spelling` | §12 |
+| `cases/spec/12-flags/key_lowercase_replacement_takes_new_spelling` | §12 |
+| `cases/spec/12-flags/key_lowercase_rewrite_takes_new_spelling` | §12 |
 | `cases/spec/12-flags/key_lowercase_upper_u_escape_decoded_as_unquoted` | §12 |
 | `cases/spec/12-flags/key_lowercase_upper_u_escape_without_flag` | §12 |
 | `cases/spec/12-flags/no_filevars` | §12 |

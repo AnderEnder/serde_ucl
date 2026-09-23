@@ -6,7 +6,8 @@ Cases: `tests/conformance/cases/spec/07-variables/`.
 
 Each registered variable has a name and a value. Variables are ordered by when their name was
 first registered; registering a name again changes its value, not its place in that order
-(`reregister_keeps_position`). The order matters for unbraced references (§7.4).
+(`reregister_keeps_position`). The order matters for unbraced references (§7.4). **Quirk.** Including
+a file moves `FILENAME` and `CURDIR` to the end of the order (§9.4).
 
 The order in the conformance oracle is: the file variables `FILENAME` and `CURDIR` (unless
 `no-filevars`, §12.7), then `ABI` = `unknown`, then the `var:` entries of the case's `.flags` file

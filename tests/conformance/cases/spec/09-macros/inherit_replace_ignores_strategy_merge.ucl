@@ -1,0 +1,2 @@
+d { o { x = 1 } }
+e { o { y = 1 }; .inherit(replace=true) "d" }
