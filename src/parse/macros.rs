@@ -17,7 +17,7 @@ use super::core::{Core, Settings, is_space, parse_nested};
 use super::error::position_at;
 use super::string;
 use super::vars::Expander;
-use super::{Error, ErrorKind, MAX_ARGUMENT_DEPTH};
+use super::{Error, ErrorKind, MAX_ARGUMENT_DEPTH, PathSegment};
 use crate::value::{DuplicateStrategy, Entry, ParserFlags, Slot, UclObject, UclValue};
 
 /// The macros of §9.2.
@@ -534,6 +534,14 @@ impl Core<'_, '_, '_, '_> {
                 ));
             }
         };
+        let source_key = root
+            .get_index(source_index)
+            .map(|(key, _)| key.clone())
+            .expect("the source was just found");
+        let source = [PathSegment::Key {
+            key: source_key,
+            index: 0,
+        }];
         for i in 0..count {
             let Some((key, slots)) = self
                 .root
@@ -545,13 +553,28 @@ impl Core<'_, '_, '_, '_> {
             else {
                 break;
             };
-            self.copy_entry(key, slots, replace);
+            self.copy_entry(key, slots, replace, &source);
         }
         Ok(())
     }
 
-    /// Adds one entry copied by `.inherit` to the current object.
-    fn copy_entry(&mut self, key: String, slots: Vec<Slot>, replace: bool) {
+    /// Adds one entry copied by `.inherit` from the object at `source` to the current object.
+    /// The copies keep the output facts of the values they copy (spec §10.1).
+    fn copy_entry(&mut self, key: String, slots: Vec<Slot>, replace: bool, source: &[PathSegment]) {
+        // Taken before anything is copied: the source may contain the current object (§9.7).
+        let copied_facts: Option<Vec<_>> = self.facts.as_ref().map(|facts| {
+            (0..slots.len())
+                .map(|index| {
+                    let mut path = source.to_vec();
+                    path.push(PathSegment::Key {
+                        key: key.clone(),
+                        index,
+                    });
+                    facts.subtree(&path)
+                })
+                .collect()
+        });
+        let count = slots.len();
         let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
         if key_lowercase && key.bytes().any(|b| b.is_ascii_uppercase()) {
             self.uppercase_keys = true;
@@ -561,7 +584,7 @@ impl Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("macros are read inside objects");
-        match find_key(object, &key, ignore_case) {
+        let (target, first_index) = match find_key(object, &key, ignore_case) {
             None => {
                 let mut slots = slots
                     .into_iter()
@@ -569,15 +592,45 @@ impl Core<'_, '_, '_, '_> {
                 let first = slots.next().expect("an entry holds at least one value");
                 let mut entry = Entry::from_slot(first);
                 slots.for_each(|slot| entry.push_slot(slot));
-                object.insert_entry(key, entry);
+                object.insert_entry(key.clone(), entry);
+                (key.clone(), 0)
             }
             Some(index) if replace => {
-                let (_, entry) = object
+                let (name, entry) = object
                     .get_index_mut(index)
                     .expect("the index was just found");
+                let first_index = entry.len();
                 slots.into_iter().for_each(|slot| entry.push_slot(slot));
+                (name.clone(), first_index)
             }
-            Some(_) => {}
+            Some(_) => return,
+        };
+        let Some(copied_facts) = copied_facts else {
+            return;
+        };
+        if copied_facts.iter().all(Vec::is_empty) && target == key {
+            return;
+        }
+        let Some(object_path) = self.top_path() else {
+            return;
+        };
+        let facts = self.facts.as_mut().expect("facts are recorded");
+        for (offset, subtree) in copied_facts.into_iter().enumerate().take(count) {
+            let mut path = object_path.clone();
+            path.push(PathSegment::Key {
+                key: target.clone(),
+                index: first_index + offset,
+            });
+            // The copy's key is spelled as the copied value's key was.
+            let spelling = subtree
+                .iter()
+                .find(|(rest, _)| rest.is_empty())
+                .and_then(|(_, f)| f.key_spelling.clone())
+                .unwrap_or_else(|| key.clone());
+            facts.graft(&path, subtree);
+            facts.update(&path, |f| {
+                f.key_spelling = (spelling != target).then_some(spelling)
+            });
         }
     }
 }
@@ -585,7 +638,7 @@ impl Core<'_, '_, '_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{CommentPlacement, Parser, PathSegment, parse};
+    use crate::parse::{CommentPlacement, Parser, parse};
 
     fn arguments(text: &str) -> Arguments {
         Arguments::from_root(parse(text.as_bytes()).unwrap())

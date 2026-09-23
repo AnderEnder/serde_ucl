@@ -666,3 +666,64 @@
   golden file changed. The new core fails 4 of them (`spec-v6`, #49); the old parser fails 89.
   Both runners and full `cargo test` green at every commit. Commits: `1e2604a`, `c38da8e`. The spec
   contains behaviour only: no libucl code, internal names, or procedures.
+- 2026-09-23 — Role: implementation team. Item: C4a, the output emitters (spec-v6 §10) and the
+  parse-side fix of §1.5 (QUESTIONS.md #49).
+  - Inputs consulted: `docs/spec/` at `spec-v6` (§10 in full, §1.5, §8.4, §9.4 *Nesting under a
+    key*, §9.6, §12.5, the README) and `git diff spec-v5 spec-v6 -- docs/spec/`;
+    `docs/clean-room/` (PROTOCOL, WORKLIST with the C4 decisions, QUESTIONS #34–#49, LOG); the
+    conformance cases, their `.flags`, golden files and `.res` files, `tests/conformance/README.md`
+    and `tests/conformance.rs`; the crate's own code (`src/value.rs`, `src/parse/`); black-box
+    runs of `target/libucl-oracle/ucl-dump` (`-e config|json|json-compact|yaml|config-comments`
+    with `-l`, `-I`, `-C`, `-s`); Rust standard library documentation. The source of
+    `scripts/regen-golden.sh` and of `tools/ucl-dump` was not opened.
+  - `src/emit/` (new): `Format` (`Json`, `JsonCompact`, `Config`, `Yaml`), `Emitter` with
+    `with_facts` and `with_comments` (saved comments are written only when asked for, in the
+    config format, decision C4.1), `emit`, the free functions `to_json`, `to_json_compact`,
+    `to_config`, `to_yaml`, and `key_needs_quoting`. Floats follow §10.3 through Rust's exact
+    formatting (ties to even), `%.15g` built from the rounded exponent.
+  - `src/parse/facts.rs` (new): `OutputFacts` and `ValueFacts`, the output facts of §10.1 by value
+    path, recorded by the core for every parse (`Parser::output_facts`, `Parser::emitter`). Only
+    facts that differ from the emitter's defaults are stored. They follow values the way saved
+    comments do: replaced by priority or `rewrite`, collected under `no-implicit-arrays`, moved
+    by `.include(key, target="array")`, copied by `.inherit` (taken before the copy), the
+    `merge` scalar that takes a container's place, and included units; `.load` records
+    `multiline=true`.
+  - §1.5: after an element, a VT or FF makes the next element be read like the first. The 4
+    `spec-v6` entries of `xfail-new.txt` pass and are removed.
+  - Runner: `libucl_conformance_emitters` compares, for every case that parses, the four formats
+    with `<case>.<format>.golden`, config with comments with `<case>.config-comments.golden`
+    (cases with `save-comments` or `dump-comments`), and for the 25 upstream cases with a `.res`
+    the two passes of §10.9 (case 14 from another directory); it asserts that every non-error
+    case has its output golden files and no error case has any. Known failures in the new
+    `tests/conformance/xfail-emit.txt`: the 4 cases the core does not parse (2
+    `divergence:signature`, 1 `divergence:argument-depth`, 1 `divergence:non-utf8`, the last with
+    its `.res`).
+  - Behaviour chosen from oracle runs where §10 is silent: QUESTIONS.md #50 (layout and key of a
+    scalar that takes a container's place under `merge`; the golden files of two §8 cases show
+    it), #51 (keys of `no-implicit-arrays` collections and of arrays that
+    `.include(target="array")` builds), #52 (empty root array).
+  - Differential runs against the oracle, every format and config with comments: about 35
+    hand-written inputs on the places where facts move, then every case without a `.flags`
+    file (1212) under the flag sets `-C`, `-l`, `-I`, `-s merge`, `-C -I`, `-C -s merge`,
+    `-C -l`, `-s rewrite`, `-I -s merge` and `-C -I -l` (60,600 comparisons). Differences left:
+    the 4 divergence cases; 3 cases whose input ends with a block comment, after whose `*/`
+    libucl writes a NUL byte in config-comments output (§12.5 *Uncertain*: the core saves no
+    byte there); and under `rewrite`, comments of a replaced value reappearing on a later value
+    (7 cases; §12.5 says no case pins this; comment attachment, not output). One difference
+    found by the runs was fixed: the key of the array `.include(key, target="array")` builds.
+    The facts are kept in a map ordered by path, so that a value's facts are one range: with a
+    scan of every fact per replacement, 20,000 single-quoted keys overridden by `.priority` took
+    2.4 s, now 0.04 s. After that change the sweep was repeated under 8 of the flag sets (48,480
+    comparisons) with the same differences.
+  - Result: emitters 1023 cases with output, 1019 match in every format (config 1019/1019,
+    json 1019, json-compact 1019, yaml 1019, config-comments 53/53, `.res` 24/24 compared), 4
+    expected failures. New core: 1375 cases, 1371 pass, `xfail-new.txt` has 4 entries. Existing
+    parser: 502 pass, 873 expected failures, `xfail.txt` unchanged. `cargo test`: 499 tests pass.
+    `cargo build --examples --benches`, `cargo check --no-default-features` and
+    `cargo check --features load` succeed.
+  - Not done here: `tests/conformance/README.md` still says the runner does not compare the output
+    golden files; that file belongs to the spec team.
+  - Commits: `8dc679d` (emitters, facts, §1.5, runner, this entry) and the `C4a:` commit after
+    it, in which the runner accepts only cases the core does not parse in `xfail-emit.txt`.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

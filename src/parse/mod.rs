@@ -40,6 +40,7 @@
 mod comments;
 mod core;
 mod error;
+mod facts;
 mod glob;
 mod include;
 mod loader;
@@ -49,6 +50,7 @@ mod string;
 mod vars;
 
 pub use error::{Error, ErrorKind};
+pub use facts::{OutputFacts, ValueFacts};
 #[cfg(feature = "fs")]
 pub use loader::FsLoader;
 pub use loader::{FileKind, Loader, MemoryLoader};
@@ -85,7 +87,10 @@ pub struct Comment {
 }
 
 /// One step of the path from the root to a value.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Paths are ordered segment by segment, so the paths inside a value follow its own path
+/// directly.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PathSegment {
     /// Value `index` of the entry `key` of an object; an entry holds several values when a key
     /// repeats (spec §8.2).
@@ -136,6 +141,7 @@ pub struct Parser {
     base_dir: Option<PathBuf>,
     comments: Vec<Comment>,
     attached: Vec<AttachedComments>,
+    facts: OutputFacts,
 }
 
 impl Default for Parser {
@@ -177,6 +183,7 @@ impl Parser {
             base_dir: None,
             comments: Vec::new(),
             attached: Vec::new(),
+            facts: OutputFacts::new(),
         }
     }
 
@@ -266,6 +273,20 @@ impl Parser {
         &self.attached
     }
 
+    /// What the output formats need to know about the values of the last successful parse, or
+    /// of a parse that stopped silently, beyond the values themselves (spec §10.1): which strings
+    /// were single-quoted or heredocs, and how keys were written.
+    pub fn output_facts(&self) -> &OutputFacts {
+        &self.facts
+    }
+
+    /// An emitter for `format` that uses the output facts of the last parse, so that the value it
+    /// returned is written as libucl writes it (spec §10). Saved comments are written only when
+    /// asked for with [`crate::emit::Emitter::with_comments`].
+    pub fn emitter(&self, format: crate::emit::Format) -> crate::emit::Emitter<'_> {
+        crate::emit::Emitter::new(format).with_facts(&self.facts)
+    }
+
     /// The directory relative paths resolve against: the base directory, or the loader's
     /// current directory.
     fn base(&self) -> PathBuf {
@@ -342,6 +363,7 @@ impl Parser {
         }
         self.comments.clear();
         self.attached.clear();
+        self.facts.clear();
         let settings = core::Settings {
             flags: self.flags,
             priority: self.priority,
@@ -361,7 +383,14 @@ impl Parser {
                 comments: &mut self.comments,
                 attached: &mut self.attached,
             });
-        core::parse_document(input, settings, &mut expander, &mut includes, sink)
+        core::parse_document(
+            input,
+            settings,
+            &mut expander,
+            &mut includes,
+            sink,
+            Some(&mut self.facts),
+        )
     }
 }
 
@@ -539,6 +568,40 @@ mod tests {
         );
         assert_eq!(parse(b"[ /* c */]").unwrap(), UclValue::Array(Vec::new()));
         assert_eq!(kind(b"[ /* c */ ]"), ErrorKind::MissingValue);
+    }
+
+    #[test]
+    fn element_after_a_vt_or_ff_is_read_like_the_first() {
+        // spec §1.5, *Quirk* (QUESTIONS.md #49); expected results from oracle runs.
+        let s = |t: &str| UclValue::String(t.into());
+        let i = UclValue::Integer;
+        for (input, expected) in [
+            (&b"[1, \x0b# d\n 2]"[..], vec![i(1), s(" 2")]),
+            (b"[1, \x0b/* d */ 2]", vec![i(1), s(" 2")]),
+            (b"[1, \x0c/* d */2]", vec![i(1), i(2)]),
+            (b"[1, \x0b 2]", vec![i(1), i(2)]),
+            (b"[1,\x0b/* d */\x0b 2]", vec![i(1), s("\x0b 2")]),
+            (
+                b"[{x=1}\x0b/* d */ 2]",
+                vec![
+                    UclValue::Object([("x", i(1))].into_iter().collect()),
+                    s(" 2"),
+                ],
+            ),
+            (b"[1\n\x0b# d\n]", vec![i(1)]),
+            (b"[1\n\x0b]", vec![i(1)]),
+            (b"[1\n/* d */\n]", vec![i(1)]),
+        ] {
+            assert_eq!(
+                parse(input).unwrap(),
+                UclValue::Array(expected),
+                "{}",
+                String::from_utf8_lossy(input)
+            );
+        }
+        for bad in [&b"[1\n\x0b/* d */\n]"[..], b"[1\n\x0c/* d */\n]"] {
+            assert_eq!(kind(bad), ErrorKind::MissingValue, "{bad:?}");
+        }
     }
 
     #[test]

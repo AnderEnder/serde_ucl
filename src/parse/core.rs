@@ -13,12 +13,14 @@
 
 use super::comments::{Notes, ValuePath};
 use super::error::position_at;
+use super::facts::OutputFacts;
 use super::include::Includes;
 use super::macros::find_key;
 use super::number::{self, Number};
 use super::string;
 use super::vars::Expander;
 use super::{AttachedComments, Comment, Error, ErrorKind, MAX_NESTING, PathSegment};
+use crate::emit::key_needs_quoting;
 use crate::value::{
     DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclObject, UclValue,
 };
@@ -42,14 +44,18 @@ pub(crate) struct CommentSink<'c> {
 ///
 /// A silent stop (§9.4) is an [`ErrorKind::Stopped`] error that carries the root as parsed so
 /// far; the saved comments and their attachments are kept then too.
+///
+/// When `facts` is given, the output facts of the result (spec §10.1) are recorded there, also
+/// for a silent stop.
 pub(crate) fn parse_document(
     input: &[u8],
     settings: Settings,
     expander: &mut Expander<'_>,
     includes: &mut Includes<'_>,
     sink: Option<CommentSink<'_>>,
+    facts: Option<&mut OutputFacts>,
 ) -> Result<UclValue, Error> {
-    parse_unit(input, settings, expander, includes, sink, 0)
+    parse_unit(input, settings, expander, includes, sink, facts, 0)
 }
 
 /// Parses a macro's argument document (§9.2) that is `depth` argument documents deep. Its
@@ -61,7 +67,7 @@ pub(super) fn parse_nested(
     includes: &mut Includes<'_>,
     depth: usize,
 ) -> Result<UclValue, Error> {
-    parse_unit(input, settings, expander, includes, None, depth)
+    parse_unit(input, settings, expander, includes, None, None, depth)
 }
 
 fn parse_unit(
@@ -70,6 +76,7 @@ fn parse_unit(
     expander: &mut Expander<'_>,
     includes: &mut Includes<'_>,
     sink: Option<CommentSink<'_>>,
+    facts_sink: Option<&mut OutputFacts>,
     depth: usize,
 ) -> Result<UclValue, Error> {
     let mut core = Core {
@@ -79,6 +86,7 @@ fn parse_unit(
         expander,
         includes,
         notes: sink.as_ref().map(|_| Notes::new()),
+        facts: facts_sink.as_ref().map(|_| OutputFacts::new()),
         uppercase_keys: false,
         root: UclValue::Null,
         frames: Vec::new(),
@@ -93,6 +101,12 @@ fn parse_unit(
         section_shares: false,
     };
     let result = core.run();
+    let kept = result.as_ref().is_ok() || result.as_ref().is_err_and(Error::is_stopped);
+    if let (Some(sink), Some(facts)) = (facts_sink, core.facts.take())
+        && kept
+    {
+        *sink = facts;
+    }
     if let (Some(sink), Some(notes)) = (sink, core.notes.take()) {
         let (comments, groups) = notes.finish(input);
         *sink.comments = comments;
@@ -357,6 +371,27 @@ struct Before {
 struct Key {
     name: String,
     at: usize,
+    /// The key was written in double quotes and contains a backslash escape or a byte that makes
+    /// the output formats quote it (spec §10.1, fact 3).
+    quoted: bool,
+}
+
+/// Where a string value came from, for the output formats (spec §10.1, facts 1 and 2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Origin {
+    /// Written in single quotes (§6.2).
+    single_quoted: bool,
+    /// A heredoc (§6.3).
+    multiline: bool,
+}
+
+/// The facts of a value that [`Core::insert`] placed, besides its key.
+#[derive(Debug, Clone, Copy)]
+struct PlacedFacts {
+    origin: Origin,
+    /// The value took the place of a container under `merge` (§8.4, *Quirk*).
+    in_place: bool,
+    normal_layout: bool,
 }
 
 /// Bytes that may start a bare key (§3.1).
@@ -403,6 +438,8 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     pub(super) includes: &'e mut Includes<'l>,
     /// Saved comments and their attachment, when comments are saved (§12.5).
     notes: Option<Notes>,
+    /// The output facts of the values created (spec §10.1), except in macro argument documents.
+    pub(super) facts: Option<OutputFacts>,
     /// A key with an uppercase ASCII letter has been read under `KEY_LOWERCASE` (§12.1).
     pub(super) uppercase_keys: bool,
     pub(super) root: UclValue,
@@ -640,7 +677,7 @@ impl Core<'_, '_, '_, '_> {
     /// The path of the top container from the root, or `None` when it is not part of the
     /// result. Frames record their paths only when comments are saved; otherwise the path is
     /// built from the frames' steps.
-    fn top_path(&self) -> Option<ValuePath> {
+    pub(super) fn top_path(&self) -> Option<ValuePath> {
         if self.notes.is_some() {
             return self.top().path.clone();
         }
@@ -708,7 +745,15 @@ impl Core<'_, '_, '_, '_> {
     /// from it only in ASCII case (§12.1; QUESTIONS.md #20). If the new value then replaces all
     /// of the entry's values, the entry takes the spelling of `key` as written, in its place
     /// (QUESTIONS.md #27).
-    fn insert(&mut self, key: &mut Key, value: UclValue) -> Result<Placement, Error> {
+    ///
+    /// Then the value's output facts are recorded (spec §10.1): `origin`, and the key as written
+    /// for this value.
+    fn insert(
+        &mut self,
+        key: &mut Key,
+        value: UclValue,
+        origin: Origin,
+    ) -> Result<Placement, Error> {
         let written = self.match_key_case(key);
         let Settings {
             mut flags,
@@ -717,7 +762,7 @@ impl Core<'_, '_, '_, '_> {
         } = self.settings;
         // `read_key` has already lowercased the key where §12.1 asks for it.
         flags.remove(ParserFlags::KEY_LOWERCASE);
-        let track = self.notes.is_some();
+        let track = self.notes.is_some() || self.facts.as_ref().is_some_and(|f| !f.is_empty());
         let object = self
             .current()
             .as_object_mut()
@@ -731,6 +776,21 @@ impl Core<'_, '_, '_, '_> {
         let (existed, in_place) = object
             .entry(&key.name)
             .map_or((false, false), |e| (true, replaces_in_place(e)));
+        // A number, time or boolean that takes the place of a non-empty container keeps the
+        // normal layout of a multi-value entry (QUESTIONS.md #50).
+        let normal_layout = in_place
+            && matches!(
+                value,
+                UclValue::Integer(_)
+                    | UclValue::Float(_)
+                    | UclValue::Time(_)
+                    | UclValue::Boolean(_)
+            )
+            && object.entry(&key.name).is_some_and(|e| match e.first() {
+                UclValue::Object(o) => !o.is_empty(),
+                UclValue::Array(a) => !a.is_empty(),
+                _ => false,
+            });
         let before = track
             .then(|| {
                 object.entry(&key.name).map(|e| Before {
@@ -757,7 +817,7 @@ impl Core<'_, '_, '_, '_> {
         if track {
             self.values_moved(&key.name, before, placement, after);
         }
-        if let Some(written) = written
+        if let Some(written) = &written
             && existed
             && placement == Placement::Slot(0)
             && !in_place
@@ -767,10 +827,95 @@ impl Core<'_, '_, '_, '_> {
                 .as_object_mut()
                 .expect("entries are parsed inside objects");
             if object.rename_key(&key.name, written.as_str()) {
-                key.name = written;
+                key.name.clone_from(written);
             }
         }
+        if self.facts.is_some() {
+            let facts = PlacedFacts {
+                origin,
+                in_place,
+                normal_layout,
+            };
+            self.record_facts(key, written.as_deref(), placement, facts);
+        }
         Ok(placement)
+    }
+
+    /// Records the output facts of a value just placed under `key` (spec §10.1). `written` is
+    /// the key as written for the value when it differs from `key`, the entry's key.
+    fn record_facts(
+        &mut self,
+        key: &Key,
+        written: Option<&str>,
+        placement: Placement,
+        placed: PlacedFacts,
+    ) {
+        let spelling = written.unwrap_or(&key.name);
+        let key_spelling = (spelling != key.name).then(|| spelling.to_owned());
+        let key_quoted = (key.quoted != key_needs_quoting(spelling)).then_some(key.quoted);
+        let (step, keyed) = match placement {
+            // A scalar that took a container's place under `merge` keeps the container's key
+            // (oracle runs, QUESTIONS.md #50).
+            Placement::Slot(slot) => (
+                Step::Entry {
+                    key: key.name.clone(),
+                    slot,
+                },
+                !placed.in_place,
+            ),
+            Placement::Collected(index) => (
+                Step::Collected {
+                    key: key.name.clone(),
+                    index,
+                },
+                false,
+            ),
+            Placement::Merged | Placement::Dropped => return,
+        };
+        let has_value_facts = placed.origin != Origin::default() || placed.normal_layout;
+        let has_key_facts = keyed && (key_spelling.is_some() || key_quoted.is_some());
+        let stale = placed.in_place && self.facts.as_ref().is_some_and(|f| !f.is_empty());
+        if !has_value_facts && !has_key_facts && !stale {
+            return;
+        }
+        let Some(mut path) = self.top_path() else {
+            return;
+        };
+        path.extend(step.segments());
+        let facts = self.facts.as_mut().expect("facts are recorded");
+        if placed.in_place {
+            facts.clear_below(&path);
+        }
+        facts.update(&path, |f| {
+            f.single_quoted = placed.origin.single_quoted;
+            f.multiline = placed.origin.multiline;
+            f.normal_layout = placed.normal_layout;
+            if keyed {
+                f.key_spelling = key_spelling;
+                f.key_quoted = key_quoted;
+            }
+        });
+    }
+
+    /// Values of entry `key` of the object at `object` were replaced: value `slot`, or all.
+    fn replaced_values(&mut self, object: &[PathSegment], key: &str, slot: Option<usize>) {
+        if let Some(notes) = &mut self.notes {
+            notes.replaced(object, key, slot);
+        }
+        if let Some(facts) = &mut self.facts {
+            facts.replaced(object, key, slot);
+        }
+    }
+
+    /// Entry `key` of the object at `object` became a `NO_IMPLICIT_ARRAYS` collection of its
+    /// first `count` values.
+    fn collected_values(&mut self, object: &[PathSegment], key: &str, count: usize) {
+        if let Some(notes) = &mut self.notes {
+            notes.collected(object, key, count);
+        }
+        if let Some(facts) = &mut self.facts {
+            facts.collected(object, key, count);
+        }
     }
 
     /// Under `KEY_LOWERCASE`, keys are compared without regard to ASCII case, and an entry keeps
@@ -803,8 +948,9 @@ impl Core<'_, '_, '_, '_> {
         Some(std::mem::replace(&mut key.name, existing))
     }
 
-    /// Keeps saved comments with their values when an insertion under `key` replaced or moved
-    /// values that were already there (QUESTIONS.md #17). `after` is the entry's length now.
+    /// Keeps saved comments and output facts with their values when an insertion under `key`
+    /// replaced or moved values that were already there (QUESTIONS.md #17). `after` is the
+    /// entry's length now.
     fn values_moved(
         &mut self,
         key: &str,
@@ -820,21 +966,20 @@ impl Core<'_, '_, '_, '_> {
         else {
             return;
         };
-        let Some(object) = self.top().path.clone() else {
+        let Some(object) = self.top_path() else {
             return;
         };
-        let notes = self.notes.as_mut().expect("tracking comments");
         match placement {
             Placement::Slot(slot) if slot == len && after == len + 1 => {}
             Placement::Slot(_) if in_place => {}
-            Placement::Slot(_) if after == 1 => notes.replaced(&object, key, None),
-            Placement::Slot(slot) => notes.replaced(&object, key, Some(slot)),
+            Placement::Slot(_) if after == 1 => self.replaced_values(&object, key, None),
+            Placement::Slot(slot) => self.replaced_values(&object, key, Some(slot)),
             Placement::Collected(_) if !collected => {
                 // Only the first value goes into the collection (QUESTIONS.md #25).
                 for slot in 1..len {
-                    notes.replaced(&object, key, Some(slot));
+                    self.replaced_values(&object, key, Some(slot));
                 }
-                notes.collected(&object, key, 1);
+                self.collected_values(&object, key, 1);
             }
             Placement::Collected(_) | Placement::Merged | Placement::Dropped => {}
         }
@@ -845,7 +990,7 @@ impl Core<'_, '_, '_, '_> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, self.pos));
         }
-        let placement = self.insert(&mut key, Self::empty(kind))?;
+        let placement = self.insert(&mut key, Self::empty(kind), Origin::default())?;
         let path = self.placed_path(&key.name, placement);
         let home = match placement {
             Placement::Slot(slot) => Home::Attached(Step::Entry {
@@ -997,6 +1142,7 @@ impl Core<'_, '_, '_, '_> {
             expander: &mut *self.expander,
             includes: &mut *self.includes,
             notes: self.notes.take(),
+            facts: self.facts.take(),
             uppercase_keys: self.uppercase_keys,
             root: std::mem::replace(&mut self.root, UclValue::Null),
             frames: std::mem::take(&mut self.frames),
@@ -1015,6 +1161,7 @@ impl Core<'_, '_, '_, '_> {
         self.frames = inner.frames;
         self.uppercase_keys = inner.uppercase_keys;
         self.notes = inner.notes;
+        self.facts = inner.facts;
         self.recent = inner.recent;
         if let (Some(notes), Some(cursor)) = (&mut self.notes, cursor) {
             notes.resume(input, cursor);
@@ -1198,16 +1345,32 @@ impl Core<'_, '_, '_, '_> {
                 (name, element)
             }
         };
+        let tracked = self.notes.is_some() || self.facts.as_ref().is_some_and(|f| !f.is_empty());
         if let Some(len) = moved_from
-            && let Some(object_path) = self.top().path.clone()
-            && let Some(notes) = &mut self.notes
+            && tracked
+            && let Some(object_path) = self.top_path()
         {
-            // Saved comments go with the first value into the array, and those of the other
-            // values are lost with them (§12.5; oracle runs).
+            // Saved comments and output facts go with the first value into the array, and those
+            // of the other values are lost with them (§12.5; oracle runs).
             for slot in 1..len {
-                notes.replaced(&object_path, &key, Some(slot));
+                self.replaced_values(&object_path, &key, Some(slot));
             }
-            notes.collected(&object_path, &key, 1);
+            self.collected_values(&object_path, &key, 1);
+        }
+        if (found.is_none() || moved_from.is_some())
+            && self.facts.is_some()
+            && key_needs_quoting(&key)
+            && let Some(mut path) = self.top_path()
+        {
+            // A key that `.include` creates never needs quoting (spec §10.1, *Quirk*); nor does
+            // the key of an array it creates in place of the key's values (oracle runs,
+            // QUESTIONS.md #51).
+            path.push(PathSegment::Key {
+                key: key.clone(),
+                index: 0,
+            });
+            let facts = self.facts.as_mut().expect("checked above");
+            facts.update(&path, |f| f.key_quoted = Some(false));
         }
         let entry_path = self.placed_path(&key, Placement::Slot(0));
         let entry_step = Step::Entry { key, slot: 0 };
@@ -1379,9 +1542,13 @@ impl Core<'_, '_, '_, '_> {
     /// Parses the next element of the current array, or closes it.
     fn array_step(&mut self) -> Result<(), Error> {
         let frame = self.frames.last_mut().expect("a container is open");
-        if std::mem::replace(&mut frame.fresh, false) && self.leading_comments()? {
-            // The first element starts right after a group of comments that follow each
-            // other directly, whitespace included (§1.5, *Quirk*).
+        let fresh = std::mem::replace(&mut frame.fresh, false);
+        // After an element, a VT or FF stops the skipping of separators and comments, and the
+        // next element is read like the first one (§1.5, *Quirk*; QUESTIONS.md #49).
+        let after_vt_ff = !fresh && matches!(self.peek(), Some(0x0B | 0x0C));
+        if (fresh || after_vt_ff) && self.leading_comments()? {
+            // The element starts right after a group of comments that follow each other
+            // directly, whitespace included (§1.5, *Quirk*).
             return match self.peek() {
                 None if self.unit > 0 => self.end_included_unit(),
                 None => self.end_document(),
@@ -1442,8 +1609,19 @@ impl Core<'_, '_, '_, '_> {
                 self.open_in_array(Kind::Array, Close::Bracket)
             }
             _ => {
-                let (value, quoted) = self.scalar()?;
+                let (value, quoted, origin) = self.scalar()?;
                 let index = self.push_element(value);
+                if origin != Origin::default()
+                    && self.facts.is_some()
+                    && let Some(mut path) = self.top_path()
+                {
+                    path.push(PathSegment::Index(index));
+                    let facts = self.facts.as_mut().expect("checked above");
+                    facts.update(&path, |f| {
+                        f.single_quoted = origin.single_quoted;
+                        f.multiline = origin.multiline;
+                    });
+                }
                 let path = self.element_path(index);
                 self.created(path);
                 self.after_value(quoted)
@@ -1499,22 +1677,23 @@ impl Core<'_, '_, '_, '_> {
     fn read_key(&mut self) -> Result<Key, Error> {
         let at = self.pos;
         let lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
-        let (bytes, quoted) = match self.peek() {
+        let (bytes, quoted, escaped) = match self.peek() {
             Some(b'"') => {
                 let (bytes, end) = string::double_quoted(self.src, at)?;
                 if bytes.is_empty() {
                     return Err(self.error(ErrorKind::EmptyKey, at));
                 }
                 self.pos = end;
+                let escaped = self.src[at + 1..end - 1].contains(&b'\\');
                 if lowercase {
                     // §12.1, *Quirk*: the key is lowercased as written, then its escapes are
                     // decoded. A `\U` that becomes `\u` is decoded like an unquoted value's
                     // (§4.8), as the oracle does (QUESTIONS.md #20).
                     let mut raw = self.src[at + 1..end - 1].to_vec();
                     raw.make_ascii_lowercase();
-                    (string::decode_unquoted(&raw).0, true)
+                    (string::decode_unquoted(&raw).0, true, escaped)
                 } else {
-                    (bytes, true)
+                    (bytes, true, escaped)
                 }
             }
             Some(b'\'') => return Err(self.error(ErrorKind::SingleQuotedKey, at)),
@@ -1522,7 +1701,7 @@ impl Core<'_, '_, '_, '_> {
                 while self.peek().is_some_and(is_key_byte) {
                     self.pos += 1;
                 }
-                (self.src[at..self.pos].to_vec(), false)
+                (self.src[at..self.pos].to_vec(), false, false)
             }
             _ => {
                 return Err(self.error(
@@ -1547,7 +1726,9 @@ impl Core<'_, '_, '_, '_> {
         if lowercase && !quoted {
             name.make_ascii_lowercase();
         }
-        Ok(Key { name, at })
+        // Fact 3 of spec §10.1.
+        let quoted = quoted && (escaped || key_needs_quoting(&name));
+        Ok(Key { name, at, quoted })
     }
 
     /// Everything after a key: an optional separator, then the value, or section names (§1.2,
@@ -1740,7 +1921,7 @@ impl Core<'_, '_, '_, '_> {
                 self.created(path);
                 return Ok(());
             }
-            let placement = self.insert(&mut key, UclValue::Null)?;
+            let placement = self.insert(&mut key, UclValue::Null, Origin::default())?;
             let path = self.placed_path(&key.name, placement);
             self.created(path);
             return Ok(());
@@ -1773,8 +1954,8 @@ impl Core<'_, '_, '_, '_> {
                 self.open_in_object(key, Kind::Array, Close::Bracket)
             }
             _ => {
-                let (value, quoted) = self.scalar()?;
-                let placement = self.insert(&mut key, value)?;
+                let (value, quoted, origin) = self.scalar()?;
+                let placement = self.insert(&mut key, value, origin)?;
                 let path = self.placed_path(&key.name, placement);
                 self.created(path);
                 self.after_value(quoted)
@@ -1782,29 +1963,41 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
-    /// A value that is not a container. Returns it and whether it was quoted (a string in
-    /// double or single quotes, or a heredoc).
-    fn scalar(&mut self) -> Result<(UclValue, bool), Error> {
+    /// A value that is not a container. Returns it, whether it was quoted (a string in double or
+    /// single quotes, or a heredoc), and where a string came from.
+    fn scalar(&mut self) -> Result<(UclValue, bool, Origin), Error> {
         let at = self.pos;
         match self.peek() {
             Some(b'"') => {
                 let (bytes, end) = string::double_quoted(self.src, at)?;
                 self.pos = end;
                 let bytes = self.expander.expand(bytes);
-                Ok((UclValue::String(self.text(bytes, at)?), true))
+                Ok((
+                    UclValue::String(self.text(bytes, at)?),
+                    true,
+                    Origin::default(),
+                ))
             }
             Some(b'\'') => {
                 let (bytes, end) = string::single_quoted(self.src, at)?;
                 self.pos = end;
-                Ok((UclValue::String(self.text(bytes, at)?), true))
+                let origin = Origin {
+                    single_quoted: true,
+                    multiline: false,
+                };
+                Ok((UclValue::String(self.text(bytes, at)?), true, origin))
             }
             Some(b'<') if string::heredoc_opener(self.src, at).is_some() => {
                 let (bytes, end) = string::heredoc(self.src, at)?;
                 self.pos = end;
                 let bytes = self.expander.expand(bytes);
-                Ok((UclValue::String(self.text(bytes, at)?), true))
+                let origin = Origin {
+                    single_quoted: false,
+                    multiline: true,
+                };
+                Ok((UclValue::String(self.text(bytes, at)?), true, origin))
             }
-            _ => Ok((self.unquoted()?, false)),
+            _ => Ok((self.unquoted()?, false, Origin::default())),
         }
     }
 

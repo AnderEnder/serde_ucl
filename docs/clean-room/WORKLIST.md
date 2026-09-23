@@ -77,6 +77,15 @@ stays listed; C3 is done when no entry's reason is `macro`.
    floats included, even where the default emitter mode does not, and libucl must read it back to
    the same value (checked through the oracle).
 
+Split into two work items: C4a the emitters (item 1) and the runner's emitter comparison; C4b
+serde serialization (item 2).
+
+### Project decisions for C4 (settle spec-v6 README, *Known gaps*)
+
+1. **Saved comments in output (§10.10).** The crate writes saved comments in config output only
+   when the caller asks for it, through an emitter option; the default config output writes none.
+   With the option on, output is byte-identical to the `config-comments` golden files.
+
 ## C5 — Cut-over
 
 Switch the public API (`from_str`, `from_slice`, `from_reader`, `from_file`, the parser builder)

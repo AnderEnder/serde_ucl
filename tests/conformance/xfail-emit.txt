@@ -1,0 +1,18 @@
+# Conformance cases whose output (spec §10) the new core's emitters (src/emit/) do not write as
+# libucl does: the golden files `<case>.config.golden`, `<case>.json.golden`,
+# `<case>.json-compact.golden`, `<case>.yaml.golden` and `<case>.config-comments.golden`, and for
+# upstream cases the `.res` file, reproduced by the two passes of spec §10.9.
+#
+# Format: <case-id> <reason> [# note]
+#   <case-id>  path under tests/conformance without the extension
+#   <reason>   divergence:<topic>, a divergence the project decided on: the new core does not
+#              parse the case, as xfail-new.txt records with the same topic (non-utf8 there is
+#              divergence:non-utf8 here); such entries stay listed
+#
+# An entry covers every output of its case, and the case must also be listed in xfail-new.txt.
+# The list may only shrink: the runner fails when a listed case matches in every format.
+
+cases/spec/09-macros/include_sign_param_no_effect divergence:signature  # sign=true is rejected
+cases/spec/09-macros/includes_like_include divergence:signature  # .includes is rejected
+cases/spec/09-macros/macro_args_nested_100_levels divergence:argument-depth  # argument documents nest at most 64 deep (§9.2)
+libucl/basic/22 divergence:non-utf8  # the key is the single byte 0xFF; its .res too

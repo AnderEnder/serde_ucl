@@ -432,10 +432,21 @@ impl Core<'_, '_, '_, '_> {
         if key_lowercase && key.bytes().any(|b| b.is_ascii_uppercase()) {
             self.uppercase_keys = true;
         }
+        // The string counts as a heredoc for config output (§9.6, §10.5). The key follows the
+        // emitter's default rule for quoting (§10.1), so it needs no fact.
+        let multiline = value.is_string() && params.bool("multiline") == Some(true);
         self.current()
             .as_object_mut()
             .expect("macros are read inside objects")
-            .insert_entry(key, Entry::from_slot(Slot::new(value, priority)));
+            .insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
+        if multiline
+            && self.facts.is_some()
+            && let Some(mut path) = self.top_path()
+        {
+            path.push(crate::parse::PathSegment::Key { key, index: 0 });
+            let facts = self.facts.as_mut().expect("checked above");
+            facts.update(&path, |f| f.multiline = true);
+        }
         Ok(())
     }
 }

@@ -264,6 +264,7 @@
 //! - `number_parsing.rs`: Rich number format examples
 
 pub mod de;
+pub mod emit;
 pub mod error;
 pub mod lexer;
 pub mod parse;

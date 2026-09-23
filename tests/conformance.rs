@@ -29,8 +29,15 @@
 //! comments attached to each value, as the oracle's does (`tests/conformance/README.md`): `"c"` for
 //! comments attached before the value, `"ca"` for those attached after it.
 //!
+//! A third test (`libucl_conformance_emitters`) compares the new core's output formats (spec §10,
+//! `ucl_lexer::emit`) byte for byte with libucl's: for every case that parses, the config, JSON,
+//! compact JSON and YAML output with the golden files `<case>.<format>.golden`, the config output
+//! with saved comments with `<case>.config-comments.golden` for cases that save comments, and for
+//! upstream cases the config output of the two passes of spec §10.9 with the `.res` file. Its
+//! known failures are in `tests/conformance/xfail-emit.txt`, one entry per case.
+//!
 //! Set `UCL_CONFORMANCE_REPORT=1` (with `-- --nocapture`) to print every failing case with the
-//! first point where the two dumps differ, and a suggested xfail reason.
+//! first point where the two dumps, or the two outputs, differ, and a suggested xfail reason.
 
 use serde_json::{Value as J, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -38,6 +45,7 @@ use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use ucl_lexer::emit::Format;
 use ucl_lexer::parse::{CommentPlacement, Parser as CoreParser, PathSegment};
 use ucl_lexer::{DuplicateStrategy, MapVariableHandler, ParserFlags, UclParser, UclValue};
 
@@ -259,6 +267,8 @@ struct Setup {
     strategy: Option<DuplicateStrategy>,
     string_input: bool,
     dump_comments: bool,
+    /// `save-comments` or `dump-comments`: the case has config output with comments.
+    save_comments: bool,
 }
 
 fn setup(case: &Case) -> Setup {
@@ -270,11 +280,15 @@ fn setup(case: &Case) -> Setup {
             "zerocopy" => Some(ParserFlags::ZEROCOPY),
             "no-time" => Some(ParserFlags::NO_TIME),
             "no-implicit-arrays" => Some(ParserFlags::NO_IMPLICIT_ARRAYS),
-            "save-comments" => Some(ParserFlags::SAVE_COMMENTS),
+            "save-comments" => {
+                setup.save_comments = true;
+                Some(ParserFlags::SAVE_COMMENTS)
+            }
             // Also records the attached comments in the dump ("c"/"ca" keys,
             // tests/conformance/README.md).
             "dump-comments" => {
                 setup.dump_comments = true;
+                setup.save_comments = true;
                 Some(ParserFlags::SAVE_COMMENTS)
             }
             "disable-macro" => Some(ParserFlags::DISABLE_MACRO),
@@ -312,42 +326,50 @@ fn setup(case: &Case) -> Setup {
     setup
 }
 
-/// Parses a case with the new core, applying its `.flags` file as the oracle does
-/// (`docs/spec/README.md`, "How the conformance oracle runs every case").
+/// Runs the new core on a case, applying its `.flags` file as the oracle does
+/// (`docs/spec/README.md`, "How the conformance oracle runs every case"). A silent stop gives its
+/// partial result. Returns the parser, for its saved comments and output facts, and the result.
+fn run_new_core(
+    case: &Case,
+    setup: &Setup,
+) -> (CoreParser, Result<UclValue, ucl_lexer::parse::Error>) {
+    let mut parser = CoreParser::with_flags(setup.flags);
+    parser.set_base_dir(case.input.parent().expect("a case is in a directory"));
+    parser.register_variable("ABI", "unknown");
+    for (name, value) in &setup.vars {
+        parser.register_variable(name.as_str(), value.as_str());
+    }
+    if setup.handler {
+        parser.set_variable_handler(|name| name.starts_with("H_").then(|| "[handled]".to_string()));
+    }
+    if let Some(priority) = setup.priority {
+        parser.set_priority(priority);
+    }
+    if let Some(strategy) = setup.strategy {
+        parser.set_strategy(strategy);
+    }
+    // The oracle parses every case as a string, then defines FILENAME and CURDIR from the
+    // case's path unless the case has `no-filevars` (spec §12.7). The core defines them
+    // whenever it parses a file (project decision 5).
+    let no_filevars = setup.flags.contains(ParserFlags::NO_FILEVARS);
+    let result = if setup.string_input || no_filevars {
+        let bytes = fs::read(&case.input).unwrap();
+        parser.parse(&bytes)
+    } else {
+        parser.parse_file(&case.input)
+    };
+    let result = match result {
+        Err(e) if e.is_stopped() => Ok(e.into_partial().expect("a stop keeps its result")),
+        other => other,
+    };
+    (parser, result)
+}
+
+/// Parses a case with the new core and dumps the result.
 fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
     let setup = setup(case);
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        let mut parser = CoreParser::with_flags(setup.flags);
-        parser.set_base_dir(case.input.parent().expect("a case is in a directory"));
-        parser.register_variable("ABI", "unknown");
-        for (name, value) in &setup.vars {
-            parser.register_variable(name.as_str(), value.as_str());
-        }
-        if setup.handler {
-            parser.set_variable_handler(|name| {
-                name.starts_with("H_").then(|| "[handled]".to_string())
-            });
-        }
-        if let Some(priority) = setup.priority {
-            parser.set_priority(priority);
-        }
-        if let Some(strategy) = setup.strategy {
-            parser.set_strategy(strategy);
-        }
-        // The oracle parses every case as a string, then defines FILENAME and CURDIR from the
-        // case's path unless the case has `no-filevars` (spec §12.7). The core defines them
-        // whenever it parses a file (project decision 5).
-        let no_filevars = setup.flags.contains(ParserFlags::NO_FILEVARS);
-        let result = if setup.string_input || no_filevars {
-            let bytes = fs::read(&case.input).unwrap();
-            parser.parse(&bytes)
-        } else {
-            parser.parse_file(&case.input)
-        };
-        let result = match result {
-            Err(e) if e.is_stopped() => Ok(e.into_partial().expect("a stop keeps its result")),
-            other => other,
-        };
+        let (parser, result) = run_new_core(case, &setup);
         match result {
             Ok(v) => {
                 let comments = setup.dump_comments.then(|| comment_map(&parser));
@@ -613,6 +635,246 @@ fn run_suite(label: &str, xfail_file: &str, parse: fn(&Case) -> Result<Parsed, &
     assert!(
         problems.is_empty(),
         "conformance problems ({label}):\n{}",
+        problems.join("\n")
+    );
+}
+
+// ----- output formats (spec §10) ------------------------------------------------------------
+
+/// The output golden files of spec §10: the file suffix and the format.
+const OUTPUT_FORMATS: [(&str, Format); 4] = [
+    ("config", Format::Config),
+    ("json", Format::Json),
+    ("json-compact", Format::JsonCompact),
+    ("yaml", Format::Yaml),
+];
+
+/// The label of the comparison with an upstream `.res` file (spec §10.9).
+const RES: &str = "res";
+
+/// Every output comparison of one case: the label, and `None` if the bytes match or the first
+/// difference.
+type OutputOutcome = Result<Vec<(&'static str, Option<String>)>, String>;
+
+fn golden_path(case: &Case, suffix: &str) -> PathBuf {
+    let stem = case.input.file_stem().unwrap().to_string_lossy();
+    case.input.with_file_name(format!("{stem}.{suffix}.golden"))
+}
+
+/// Where two byte strings first differ, with some context from each.
+fn first_difference(golden: &[u8], actual: &[u8]) -> String {
+    let at = golden
+        .iter()
+        .zip(actual)
+        .position(|(g, a)| g != a)
+        .unwrap_or(golden.len().min(actual.len()));
+    let context = |bytes: &[u8]| {
+        let start = at.saturating_sub(40);
+        let end = (at + 40).min(bytes.len());
+        format!("{:?}", String::from_utf8_lossy(&bytes[start..end]))
+    };
+    format!(
+        "offset {at} (lengths libucl {} crate {}): libucl {} crate {}",
+        golden.len(),
+        actual.len(),
+        context(golden),
+        context(actual)
+    )
+}
+
+fn compare_bytes(golden: &[u8], actual: &[u8]) -> Option<String> {
+    (golden != actual).then(|| first_difference(golden, actual))
+}
+
+/// The upstream `.res` file of a case, if it has one.
+fn res_path(case: &Case) -> Option<PathBuf> {
+    let path = case.input.with_extension("res");
+    (case.input.extension().is_some_and(|e| e == "in") && path.exists()).then_some(path)
+}
+
+/// Repeats the two passes that produced an upstream `.res` file (spec §10.9) and returns the
+/// second pass's config output, with its extra final line break.
+fn two_pass_config(case: &Case) -> Result<String, String> {
+    let dir = case.input.parent().expect("a case is in a directory");
+    // `libucl/basic/14` includes `./1.in` with `try=true`; its `.res` was produced where that
+    // path does not exist (spec §10.9).
+    let base = if case.id == "libucl/basic/14" {
+        Path::new(CONFORMANCE_DIR).to_path_buf()
+    } else {
+        dir.to_path_buf()
+    };
+    assert!(
+        case.id != "libucl/basic/14" || !base.join("1.in").exists(),
+        "the directory for case 14 must not hold 1.in"
+    );
+    let mut first = CoreParser::with_flags(ParserFlags::KEY_LOWERCASE);
+    first.set_base_dir(&base);
+    first.register_variable("ABI", "unknown");
+    let value = match first.parse_file(&case.input) {
+        Err(e) if e.is_stopped() => e.into_partial().expect("a stop keeps its result"),
+        other => other.map_err(|e| format!("first pass: {e}"))?,
+    };
+    let text = first.emitter(Format::Config).emit(&value);
+    let mut second = CoreParser::with_flags(ParserFlags::KEY_LOWERCASE);
+    second.set_base_dir(&base);
+    let value = second
+        .parse(text.as_bytes())
+        .map_err(|e| format!("second pass: {e}"))?;
+    let mut out = second.emitter(Format::Config).emit(&value);
+    out.push('\n');
+    Ok(out)
+}
+
+/// Runs a case through the new core and compares its output in every format that has a golden
+/// file, and its `.res` file if it is an upstream case.
+fn evaluate_outputs(case: &Case) -> Option<OutputOutcome> {
+    let golden_text = fs::read_to_string(&case.golden).ok()?;
+    let golden: J = serde_json::from_str(&golden_text).expect("golden files are valid JSON");
+    let setup = setup(case);
+    let mut expected: Vec<(&'static str, PathBuf)> = OUTPUT_FORMATS
+        .iter()
+        .map(|(suffix, _)| (*suffix, golden_path(case, suffix)))
+        .collect();
+    if setup.save_comments {
+        expected.push(("config-comments", golden_path(case, "config-comments")));
+    }
+    if golden.get("error").is_some() {
+        for (_, path) in &expected {
+            assert!(
+                !path.exists(),
+                "{}: an error case has output golden file {}",
+                case.id,
+                path.display()
+            );
+        }
+        return None;
+    }
+    for (_, path) in &expected {
+        assert!(
+            path.exists(),
+            "{}: missing output golden file {}; run scripts/regen-golden.sh",
+            case.id,
+            path.display()
+        );
+    }
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> OutputOutcome {
+        let (parser, result) = run_new_core(case, &setup);
+        let value = result.map_err(|e| format!("crate error: {e}"))?;
+        let mut outcomes = Vec::new();
+        for (label, path) in &expected {
+            let golden = fs::read(path).unwrap();
+            let emitter = match *label {
+                "config-comments" => parser
+                    .emitter(Format::Config)
+                    .with_comments(parser.comments(), parser.attached_comments()),
+                _ => {
+                    let format = OUTPUT_FORMATS
+                        .iter()
+                        .find(|(suffix, _)| suffix == label)
+                        .expect("a known format")
+                        .1;
+                    parser.emitter(format)
+                }
+            };
+            let actual = emitter.emit(&value);
+            outcomes.push((*label, compare_bytes(&golden, actual.as_bytes())));
+        }
+        if let Some(res) = res_path(case) {
+            let golden = fs::read(res).unwrap();
+            let outcome = match two_pass_config(case) {
+                Ok(actual) => compare_bytes(&golden, actual.as_bytes()),
+                Err(e) => Some(e),
+            };
+            outcomes.push((RES, outcome));
+        }
+        Ok(outcomes)
+    }));
+    Some(result.unwrap_or_else(|_| Err("panic".to_string())))
+}
+
+/// Every case that parses has libucl's output in each format of spec §10 (`<case>.<format>.golden`,
+/// and `<case>.config-comments.golden` for cases that save comments). The new core's emitters must
+/// write the same bytes, and an upstream case's config output must reproduce its `.res` file by
+/// the two-pass procedure of spec §10.9. Known failures are in `tests/conformance/xfail-emit.txt`.
+#[test]
+fn libucl_conformance_emitters() {
+    let cases = discover();
+    let xfail = load_xfail("xfail-emit.txt");
+    let report = std::env::var_os("UCL_CONFORMANCE_REPORT").is_some();
+    let outcomes: Vec<(&Case, OutputOutcome)> = {
+        let _guard = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        let hook = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        let outcomes = cases
+            .iter()
+            .filter_map(|c| evaluate_outputs(c).map(|o| (c, o)))
+            .collect();
+        panic::set_hook(hook);
+        outcomes
+    };
+
+    let known: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
+    let parse_failures = load_xfail("xfail-new.txt");
+    let mut problems = Vec::new();
+    for id in xfail.keys() {
+        if !known.contains(id.as_str()) {
+            problems.push(format!("xfail-emit.txt lists unknown case '{id}'"));
+        }
+        // Only a case the core does not parse may be listed, so an emitter difference cannot
+        // hide behind a divergence label.
+        if !parse_failures.contains_key(id) {
+            problems.push(format!(
+                "xfail-emit.txt lists '{id}', which is not a known failure of the new core"
+            ));
+        }
+    }
+    let mut matched: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut passed = 0;
+    let mut xfailed = 0;
+    for (case, outcome) in &outcomes {
+        let failures: Vec<String> = match outcome {
+            Err(e) => vec![format!("all formats: {e}")],
+            Ok(results) => {
+                for (label, diff) in results {
+                    *compared.entry(label).or_default() += 1;
+                    if diff.is_none() {
+                        *matched.entry(label).or_default() += 1;
+                    }
+                }
+                results
+                    .iter()
+                    .filter_map(|(label, diff)| diff.as_ref().map(|d| format!("{label}: {d}")))
+                    .collect()
+            }
+        };
+        if report {
+            for failure in &failures {
+                println!("FAIL(emit) {}\n    {failure}", case.id);
+            }
+        }
+        match (failures.is_empty(), xfail.contains_key(&case.id)) {
+            (true, false) => passed += 1,
+            (true, true) => problems.push(format!(
+                "{} now matches libucl in every format: remove it from xfail-emit.txt",
+                case.id
+            )),
+            (false, false) => problems.push(format!(
+                "{} output differs and is not in xfail-emit.txt\n    {}",
+                case.id,
+                failures.join("\n    ")
+            )),
+            (false, true) => xfailed += 1,
+        }
+    }
+    println!(
+        "conformance (emitters): {} cases with output, {passed} match, {xfailed} expected \
+         failures; matching outputs per format {matched:?} of {compared:?}",
+        outcomes.len()
+    );
+    assert!(
+        problems.is_empty(),
+        "conformance problems (emitters):\n{}",
         problems.join("\n")
     );
 }
