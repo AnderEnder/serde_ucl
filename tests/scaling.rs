@@ -5,13 +5,32 @@
 //! size of the other (for nested documents, nested about eight times as deep), in the same test
 //! run, and compares the growth of the time with the growth of the size. Linear growth gives a
 //! time ratio near the size ratio, quadratic growth near its square; a check fails above three
-//! times the size ratio. There is no fixed time limit. Each time is the fastest of several
-//! samples, the two documents taking turns, so that a burst of load on the machine does not
-//! decide the result. For output in the indented formats, whose size grows with depth times
-//! lines, the size is the output's.
+//! times the size ratio. There is no fixed time limit, so a slow machine passes as long as it is
+//! slow for both documents. For output in the indented formats, whose size grows with depth
+//! times lines, the size is the output's.
+//!
+//! Shared CI runners are noisy: other jobs take CPU time at random moments. So that noise cannot
+//! decide a check:
+//!
+//! - each time is the fastest of `SAMPLES` samples, the two documents taking turns, and each
+//!   sample repeats the operation for at least `SAMPLE_TIME`, so a burst of load slows some
+//!   samples and the fastest one is kept;
+//! - a check that fails is measured again, and fails the test only if all `ATTEMPTS` fail. A
+//!   quadratic slowdown gives a ratio near 64 against a limit near 24 and fails every attempt;
+//!   noise rarely triples a ratio three times in a row;
+//! - the tests of this file run one at a time (`timed`), since `cargo test` runs the tests of a
+//!   binary in parallel and they would take CPU time from one another's samples. They share no
+//!   state and pass in any order.
+//!
+//! `timed` also runs each test on a thread with a large stack. The nested documents are nearly
+//! 1000 levels deep, serde's deserializer and serializer recurse once per level, and the 2 MiB
+//! stack of a test thread is too small for that with some toolchains (rust-version 1.88 among
+//! them). Stack use is not what this file measures.
 
 use std::fmt::Write;
 use std::hint::black_box;
+use std::sync::{Mutex, PoisonError};
+use std::thread;
 use std::time::{Duration, Instant};
 use ucl_lexer::emit::Format;
 use ucl_lexer::parse::Parser;
@@ -19,11 +38,36 @@ use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue};
 
 const SMALL: usize = 120;
 const LARGE: usize = 960;
-/// A time ratio above this many times the size ratio fails a check.
+/// A time ratio above this many times the size ratio fails an attempt.
 const MARGIN: f64 = 3.0;
+/// Samples per document and attempt; the fastest counts.
 const SAMPLES: usize = 7;
+/// The least time one sample repeats the operation for.
+const SAMPLE_TIME: Duration = Duration::from_millis(5);
+/// Attempts per check; the check fails only if every attempt does.
+const ATTEMPTS: usize = 3;
+/// The stack of the thread each test runs on.
+const STACK_SIZE: usize = 64 << 20;
 
-/// The time of one run of `f`: runs it until at least a millisecond has passed.
+/// Held by the test that is running, so that the tests of this file run one at a time.
+static RUNNING: Mutex<()> = Mutex::new(());
+
+/// Runs `test` while no other test of this file runs, on a thread with a `STACK_SIZE` stack.
+fn timed(test: impl FnOnce() + Send) {
+    // A test that failed leaves the lock poisoned; the others still run.
+    let _running = RUNNING.lock().unwrap_or_else(PoisonError::into_inner);
+    thread::scope(|scope| {
+        let handle = thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn_scoped(scope, test)
+            .unwrap();
+        if let Err(panic) = handle.join() {
+            std::panic::resume_unwind(panic);
+        }
+    });
+}
+
+/// The time of one run of `f`: runs it until at least `SAMPLE_TIME` has passed.
 fn sample(f: &mut dyn FnMut()) -> Duration {
     let start = Instant::now();
     let mut runs = 0u32;
@@ -31,27 +75,42 @@ fn sample(f: &mut dyn FnMut()) -> Duration {
         f();
         runs += 1;
         let elapsed = start.elapsed();
-        if elapsed >= Duration::from_millis(1) {
+        if elapsed >= SAMPLE_TIME {
             return elapsed / runs;
         }
     }
 }
 
-/// Fails if `large` takes more than `MARGIN` times `size_ratio` as long as `small`.
+/// The fastest samples of `small` and `large`, taken in turns.
+fn fastest(small: &mut dyn FnMut(), large: &mut dyn FnMut()) -> (Duration, Duration) {
+    let (mut best_small, mut best_large) = (Duration::MAX, Duration::MAX);
+    for _ in 0..SAMPLES {
+        best_small = best_small.min(sample(small));
+        best_large = best_large.min(sample(large));
+    }
+    (best_small, best_large)
+}
+
+/// Fails if, in every one of `ATTEMPTS` attempts, `large` takes more than `MARGIN` times
+/// `size_ratio` as long as `small`.
 fn check_growth(what: &str, size_ratio: f64, mut small: impl FnMut(), mut large: impl FnMut()) {
     // Warm up both.
     small();
     large();
-    let (mut best_small, mut best_large) = (Duration::MAX, Duration::MAX);
-    for _ in 0..SAMPLES {
-        best_small = best_small.min(sample(&mut small));
-        best_large = best_large.min(sample(&mut large));
+    let mut failed = Vec::new();
+    for _ in 0..ATTEMPTS {
+        let (best_small, best_large) = fastest(&mut small, &mut large);
+        let ratio = best_large.as_secs_f64() / best_small.as_secs_f64();
+        if ratio < MARGIN * size_ratio {
+            return;
+        }
+        failed.push(format!("{ratio:.1} ({best_small:?} and {best_large:?})"));
     }
-    let ratio = best_large.as_secs_f64() / best_small.as_secs_f64();
-    assert!(
-        ratio < MARGIN * size_ratio,
-        "{what}: {size_ratio:.1} times the size took {ratio:.1} times as long \
-         ({best_small:?} and {best_large:?})"
+    panic!(
+        "{what}: {size_ratio:.1} times the size took more than {:.1} times as long in each of \
+         {ATTEMPTS} attempts: {}",
+        MARGIN * size_ratio,
+        failed.join(", ")
     );
 }
 
@@ -115,33 +174,35 @@ fn check_parse_with(what: &str, parser: impl Fn() -> Parser, small: &str, large:
 
 #[test]
 fn parse_time_grows_linearly() {
-    let objects = (nested_objects(SMALL), nested_objects(LARGE));
-    check_parse(
-        "parse nested objects",
-        ParserFlags::empty(),
-        &objects.0,
-        &objects.1,
-    );
-    check_parse(
-        "parse nested objects, saving comments",
-        ParserFlags::SAVE_COMMENTS,
-        &objects.0,
-        &objects.1,
-    );
-    let arrays = (nested_arrays(SMALL), nested_arrays(LARGE));
-    check_parse(
-        "parse nested arrays",
-        ParserFlags::empty(),
-        &arrays.0,
-        &arrays.1,
-    );
-    let sections = (section_path(SMALL), section_path(LARGE));
-    check_parse(
-        "parse a section path",
-        ParserFlags::empty(),
-        &sections.0,
-        &sections.1,
-    );
+    timed(|| {
+        let objects = (nested_objects(SMALL), nested_objects(LARGE));
+        check_parse(
+            "parse nested objects",
+            ParserFlags::empty(),
+            &objects.0,
+            &objects.1,
+        );
+        check_parse(
+            "parse nested objects, saving comments",
+            ParserFlags::SAVE_COMMENTS,
+            &objects.0,
+            &objects.1,
+        );
+        let arrays = (nested_arrays(SMALL), nested_arrays(LARGE));
+        check_parse(
+            "parse nested arrays",
+            ParserFlags::empty(),
+            &arrays.0,
+            &arrays.1,
+        );
+        let sections = (section_path(SMALL), section_path(LARGE));
+        check_parse(
+            "parse a section path",
+            ParserFlags::empty(),
+            &sections.0,
+            &sections.1,
+        );
+    });
 }
 
 /// `keys` keys in one object, after a quoted key whose escape gives an uppercase letter, so that
@@ -178,137 +239,143 @@ fn commented_repeats(keys: usize) -> String {
 
 #[test]
 fn parse_time_grows_linearly_with_width() {
-    let (small, large) = (
-        keys_after_uppercase_escape(SMALL * 8),
-        keys_after_uppercase_escape(LARGE * 8),
-    );
-    check_parse(
-        "parse keys compared regardless of case",
-        ParserFlags::KEY_LOWERCASE,
-        &small,
-        &large,
-    );
-    // Each repeat replaces the value before it, and the comments of that value go with it.
-    let (small, large) = (commented_repeats(SMALL * 8), commented_repeats(LARGE * 8));
-    let parser = || {
-        let mut parser = Parser::with_flags(ParserFlags::SAVE_COMMENTS);
-        parser.set_strategy(DuplicateStrategy::Rewrite);
-        parser
-    };
-    check_parse_with(
-        "parse replaced values with saved comments",
-        parser,
-        &small,
-        &large,
-    );
-    let (small, large) = (many_values(SMALL * 8), many_values(LARGE * 8));
-    check_parse(
-        "parse many values of one key, saving comments",
-        ParserFlags::SAVE_COMMENTS,
-        &small,
-        &large,
-    );
-    let (p, v) = parse(ParserFlags::SAVE_COMMENTS, &small);
-    let (q, w) = parse(ParserFlags::SAVE_COMMENTS, &large);
-    let e = p
-        .emitter(Format::Config)
-        .with_comments(p.comments(), p.attached_comments());
-    let f = q
-        .emitter(Format::Config)
-        .with_comments(q.comments(), q.attached_comments());
-    check_growth(
-        "emit many values of one key with comments",
-        ratio(e.emit(&v).len(), f.emit(&w).len()),
-        || drop(black_box(e.emit(&v))),
-        || drop(black_box(f.emit(&w))),
-    );
+    timed(|| {
+        let (small, large) = (
+            keys_after_uppercase_escape(SMALL * 8),
+            keys_after_uppercase_escape(LARGE * 8),
+        );
+        check_parse(
+            "parse keys compared regardless of case",
+            ParserFlags::KEY_LOWERCASE,
+            &small,
+            &large,
+        );
+        // Each repeat replaces the value before it, and the comments of that value go with it.
+        let (small, large) = (commented_repeats(SMALL * 8), commented_repeats(LARGE * 8));
+        let parser = || {
+            let mut parser = Parser::with_flags(ParserFlags::SAVE_COMMENTS);
+            parser.set_strategy(DuplicateStrategy::Rewrite);
+            parser
+        };
+        check_parse_with(
+            "parse replaced values with saved comments",
+            parser,
+            &small,
+            &large,
+        );
+        let (small, large) = (many_values(SMALL * 8), many_values(LARGE * 8));
+        check_parse(
+            "parse many values of one key, saving comments",
+            ParserFlags::SAVE_COMMENTS,
+            &small,
+            &large,
+        );
+        let (p, v) = parse(ParserFlags::SAVE_COMMENTS, &small);
+        let (q, w) = parse(ParserFlags::SAVE_COMMENTS, &large);
+        let e = p
+            .emitter(Format::Config)
+            .with_comments(p.comments(), p.attached_comments());
+        let f = q
+            .emitter(Format::Config)
+            .with_comments(q.comments(), q.attached_comments());
+        check_growth(
+            "emit many values of one key with comments",
+            ratio(e.emit(&v).len(), f.emit(&w).len()),
+            || drop(black_box(e.emit(&v))),
+            || drop(black_box(f.emit(&w))),
+        );
+    });
 }
 
 #[test]
 fn emit_time_grows_linearly() {
-    let (small, large) = (nested_objects(SMALL), nested_objects(LARGE));
-    for flags in [ParserFlags::empty(), ParserFlags::SAVE_COMMENTS] {
-        let (p, v) = parse(flags, &small);
-        let (q, w) = parse(flags, &large);
-        for format in [
-            Format::JsonCompact,
-            Format::Json,
-            Format::Config,
-            Format::Yaml,
-        ] {
-            // With the output facts of the parse, and with its saved comments if any.
-            let (e, f) = (p.emitter(format), q.emitter(format));
-            let (e, f) = if flags.is_empty() {
-                (e, f)
-            } else {
-                (
-                    e.with_comments(p.comments(), p.attached_comments()),
-                    f.with_comments(q.comments(), q.attached_comments()),
-                )
-            };
-            let size_ratio = ratio(e.emit(&v).len(), f.emit(&w).len());
-            check_growth(
-                &format!("emit {format:?} ({flags:?})"),
-                size_ratio,
-                || drop(black_box(e.emit(&v))),
-                || drop(black_box(f.emit(&w))),
-            );
+    timed(|| {
+        let (small, large) = (nested_objects(SMALL), nested_objects(LARGE));
+        for flags in [ParserFlags::empty(), ParserFlags::SAVE_COMMENTS] {
+            let (p, v) = parse(flags, &small);
+            let (q, w) = parse(flags, &large);
+            for format in [
+                Format::JsonCompact,
+                Format::Json,
+                Format::Config,
+                Format::Yaml,
+            ] {
+                // With the output facts of the parse, and with its saved comments if any.
+                let (e, f) = (p.emitter(format), q.emitter(format));
+                let (e, f) = if flags.is_empty() {
+                    (e, f)
+                } else {
+                    (
+                        e.with_comments(p.comments(), p.attached_comments()),
+                        f.with_comments(q.comments(), q.attached_comments()),
+                    )
+                };
+                let size_ratio = ratio(e.emit(&v).len(), f.emit(&w).len());
+                check_growth(
+                    &format!("emit {format:?} ({flags:?})"),
+                    size_ratio,
+                    || drop(black_box(e.emit(&v))),
+                    || drop(black_box(f.emit(&w))),
+                );
+            }
         }
-    }
+    });
 }
 
 #[test]
 fn serde_time_grows_linearly() {
-    let (small, large) = (nested_objects(SMALL), nested_objects(LARGE));
-    let size_ratio = ratio(small.len(), large.len());
-    check_growth(
-        "from_str",
-        size_ratio,
-        || drop(black_box(ucl_lexer::from_str::<UclValue>(&small).unwrap())),
-        || drop(black_box(ucl_lexer::from_str::<UclValue>(&large).unwrap())),
-    );
-    let (v, w) = (
-        parse(ParserFlags::empty(), &small).1,
-        parse(ParserFlags::empty(), &large).1,
-    );
-    check_growth(
-        "from_value",
-        size_ratio,
-        || {
-            drop(black_box(
-                ucl_lexer::from_value::<UclValue>(v.clone()).unwrap(),
-            ))
-        },
-        || {
-            drop(black_box(
-                ucl_lexer::from_value::<UclValue>(w.clone()).unwrap(),
-            ))
-        },
-    );
-    check_growth(
-        "to_value",
-        size_ratio,
-        || drop(black_box(ucl_lexer::to_value(&v).unwrap())),
-        || drop(black_box(ucl_lexer::to_value(&w).unwrap())),
-    );
-    let compact = ratio(
-        ucl_lexer::to_json_string_compact(&v).unwrap().len(),
-        ucl_lexer::to_json_string_compact(&w).unwrap().len(),
-    );
-    check_growth(
-        "to_json_string_compact",
-        compact,
-        || drop(black_box(ucl_lexer::to_json_string_compact(&v).unwrap())),
-        || drop(black_box(ucl_lexer::to_json_string_compact(&w).unwrap())),
-    );
-    let config = ratio(
-        ucl_lexer::to_string(&v).unwrap().len(),
-        ucl_lexer::to_string(&w).unwrap().len(),
-    );
-    check_growth(
-        "to_string",
-        config,
-        || drop(black_box(ucl_lexer::to_string(&v).unwrap())),
-        || drop(black_box(ucl_lexer::to_string(&w).unwrap())),
-    );
+    timed(|| {
+        let (small, large) = (nested_objects(SMALL), nested_objects(LARGE));
+        let size_ratio = ratio(small.len(), large.len());
+        check_growth(
+            "from_str",
+            size_ratio,
+            || drop(black_box(ucl_lexer::from_str::<UclValue>(&small).unwrap())),
+            || drop(black_box(ucl_lexer::from_str::<UclValue>(&large).unwrap())),
+        );
+        let (v, w) = (
+            parse(ParserFlags::empty(), &small).1,
+            parse(ParserFlags::empty(), &large).1,
+        );
+        check_growth(
+            "from_value",
+            size_ratio,
+            || {
+                drop(black_box(
+                    ucl_lexer::from_value::<UclValue>(v.clone()).unwrap(),
+                ))
+            },
+            || {
+                drop(black_box(
+                    ucl_lexer::from_value::<UclValue>(w.clone()).unwrap(),
+                ))
+            },
+        );
+        check_growth(
+            "to_value",
+            size_ratio,
+            || drop(black_box(ucl_lexer::to_value(&v).unwrap())),
+            || drop(black_box(ucl_lexer::to_value(&w).unwrap())),
+        );
+        let compact = ratio(
+            ucl_lexer::to_json_string_compact(&v).unwrap().len(),
+            ucl_lexer::to_json_string_compact(&w).unwrap().len(),
+        );
+        check_growth(
+            "to_json_string_compact",
+            compact,
+            || drop(black_box(ucl_lexer::to_json_string_compact(&v).unwrap())),
+            || drop(black_box(ucl_lexer::to_json_string_compact(&w).unwrap())),
+        );
+        let config = ratio(
+            ucl_lexer::to_string(&v).unwrap().len(),
+            ucl_lexer::to_string(&w).unwrap().len(),
+        );
+        check_growth(
+            "to_string",
+            config,
+            || drop(black_box(ucl_lexer::to_string(&v).unwrap())),
+            || drop(black_box(ucl_lexer::to_string(&w).unwrap())),
+        );
+    });
 }

@@ -493,7 +493,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         config.observability.tracing.sample_rate * 100.0
     );
 
-    assert!(!format!("{:?}", config).is_empty());
+    assert!(!format!("{config:?}").is_empty());
     println!();
     Ok(())
 }
@@ -930,7 +930,7 @@ fn demo_cicd_config() -> Result<(), Box<dyn std::error::Error>> {
         config.notifications.email.recipients.len()
     );
 
-    assert!(!format!("{:?}", config).is_empty());
+    assert!(!format!("{config:?}").is_empty());
     println!();
     Ok(())
 }
@@ -1473,7 +1473,7 @@ fn demo_game_server_config() -> Result<(), Box<dyn std::error::Error>> {
         config.performance.server_metrics.tick_time_warning * 1000.0
     );
 
-    assert!(!format!("{:?}", config).is_empty());
+    assert!(!format!("{config:?}").is_empty());
     println!();
     Ok(())
 }
@@ -2046,7 +2046,7 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|(_, sensor)| sensor.enabled)
         .map(|(name, _)| name.as_str())
         .collect();
-    println!("  Enabled sensors: {:?}", enabled_sensors);
+    println!("  Enabled sensors: {enabled_sensors:?}");
 
     println!(
         "  WiFi: {} (auto-reconnect: {})",
@@ -2072,7 +2072,7 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
         config.monitoring.health.check_interval
     );
 
-    assert!(!format!("{:?}", config).is_empty());
+    assert!(!format!("{config:?}").is_empty());
     println!();
     Ok(())
 }

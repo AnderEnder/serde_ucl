@@ -193,15 +193,14 @@ fn generate_string_heavy_config(items: usize) -> String {
 
     for i in 0..items {
         config.push_str(&format!(
-            r#"string_{} {{
-    short_string = "value_{}"
-    medium_string = "This is a medium length string for item {} with some additional content to make it longer"
-    long_string = "This is a very long string for item {} that contains a lot of text and should test the string parsing performance of the UCL lexer. It includes various characters and should be representative of real-world string content that might appear in configuration files."
-    path_string = "/very/long/path/to/some/file/or/directory/structure/item_{}/config.json"
-    url_string = "https://api.example.com/v1/items/{}/details?param1=value1&param2=value2&param3=value3"
+            r#"string_{i} {{
+    short_string = "value_{i}"
+    medium_string = "This is a medium length string for item {i} with some additional content to make it longer"
+    long_string = "This is a very long string for item {i} that contains a lot of text and should test the string parsing performance of the UCL lexer. It includes various characters and should be representative of real-world string content that might appear in configuration files."
+    path_string = "/very/long/path/to/some/file/or/directory/structure/item_{i}/config.json"
+    url_string = "https://api.example.com/v1/items/{i}/details?param1=value1&param2=value2&param3=value3"
   }}
-"#,
-            i, i, i, i, i, i
+"#
         ));
     }
 

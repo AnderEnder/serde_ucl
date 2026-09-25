@@ -1,8 +1,12 @@
 //! # UCL for Rust
 //!
 //! A reader and writer for UCL (Universal Configuration Language), the configuration format of
-//! libucl, with serde integration. The target is compatibility with libucl, defined by behaviour:
-//! the conformance suite in `tests/conformance/` and the behaviour spec in `docs/spec/`.
+//! libucl, with serde integration. The crate reads and writes UCL as libucl does: the
+//! repository's conformance suite compares its results, and its output in every format, with
+//! libucl's own. [COMPATIBILITY.md] lists the places where the crate deliberately differs, and
+//! the `README.md` of the repository describes the crate at more length.
+//!
+//! [COMPATIBILITY.md]: https://github.com/AnderEnder/ucl-rust-lexer/blob/HEAD/docs/COMPATIBILITY.md
 //!
 //! ## Reading configuration
 //!
@@ -121,8 +125,8 @@
 //! ## Cargo features
 //!
 //! - `fs` (default): the filesystem loader [`parse::FsLoader`] and [`from_file`].
-//! - `load` (off by default): the `.load` macro (spec §9.6).
-//! - `std` (default), `save-comments` and `strict-unicode` have no effect.
+//! - `load` (off by default): the `.load` macro (spec §9.6). Without it, `.load` fails with an
+//!   "unsupported" error.
 
 pub mod de;
 pub mod emit;
@@ -134,6 +138,11 @@ pub mod value;
 
 #[cfg(test)]
 mod error_tests;
+
+// The code examples of README.md run as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 pub use de::{
     UclDeserializer, from_reader, from_slice, from_str, from_str_with_env, from_str_with_map,

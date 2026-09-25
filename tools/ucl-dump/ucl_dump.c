@@ -59,6 +59,9 @@
  *       (implies -C; ucl_object_emit_full with the parser's comments). A parse
  *       failure prints "error\n".
  */
+/* getopt/optarg/optind under -std=c99 on glibc. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

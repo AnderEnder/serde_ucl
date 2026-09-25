@@ -25,28 +25,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A UCL (Universal Configuration Language) parser for Rust with serde integration. The target is
-format compatibility with libucl, the reference implementation used by FreeBSD. Compatibility is
-defined by behaviour: the conformance suite in `tests/conformance/` and the behaviour spec in
-`docs/spec/`.
+UCL (Universal Configuration Language) for Rust with serde: package `ucl-rust-lexer`, library
+`ucl_lexer`, minimum Rust 1.88. The crate reads and writes UCL as libucl, the C library used by
+FreeBSD, does. Compatibility is defined by behaviour: the behaviour spec in `docs/spec/` and the
+conformance suite in `tests/conformance/`, whose golden files come from libucl.
+`docs/COMPATIBILITY.md` lists the deliberate differences and the libucl quirks the crate
+reproduces.
+
+- `src/parse/`: the parser (`Parser`, `ParserBuilder`, parser flags, variables, macros, loaders).
+- `src/emit/`: libucl's output formats (config, JSON, compact JSON, YAML).
+- `src/de.rs`, `src/de/`: serde deserialization; `src/ser/`: serde serialization.
+- `src/value.rs`: the value model; `src/error.rs`: `UclError` and `Position`; `src/time.rs`: the
+  `Duration` helper.
+- `tests/conformance.rs` and `tests/conformance/`: the conformance runners and cases;
+  `tests/serde_roundtrip.rs` and `tests/serde_corpus/`: serde round trips.
+- `scripts/ci.sh`: what CI runs; `scripts/regen-golden.sh` and `tools/ucl-dump/`: the oracle that
+  produces the golden files.
 
 ## Clean-Room Rules
 
 The implementation in `src/` must not be derived from libucl's source code. Tests may be.
-Two teams: the spec team reads libucl source and writes the behaviour spec in `docs/spec/`; the
-implementation team has never read libucl source and works only from released spec versions. The
-rules below bind the implementation team; the spec team never edits `src/`.
+Two teams: the spec team reads libucl source and writes the behaviour spec in `docs/spec/`, the
+conformance cases and the oracle tooling; the implementation team has never read libucl source and
+works only from released spec versions. The rules below bind the implementation team; the spec
+team never edits `src/`.
 
-- Do not read libucl source files (`*.c`, `*.h`) anywhere, including clones under
-  `target/libucl-oracle/` or temporary directories, or browse its source online.
-- Do not read branch `quarantine/*`, or use `REVIEW.md`, `PLAN.md` or `PROGRESS.md` as input for
-  implementation work.
-- Do not copy from `src/lexer.rs` or `src/parser.rs`; they are being replaced.
-- Allowed inputs for implementation: the released spec (`spec-vN` tag) in `docs/spec/`, `docs/clean-room/`, libucl's public format
-  documentation, the conformance cases and golden files, and running the oracle as a black box
-  (`scripts/regen-golden.sh`, `target/libucl-oracle/ucl-dump`).
-- Record provenance in `docs/clean-room/LOG.md`. The full protocol is in
-  `docs/clean-room/PROTOCOL.md`.
+- Do not read libucl source files (`*.c`, `*.h`, build files) anywhere, including the clone that
+  `scripts/regen-golden.sh` makes under `target/libucl-oracle/`, or browse its source online.
+- Do not read branches `quarantine/*`, or `REVIEW.md`, `PLAN.md` or `PROGRESS.md`.
+- The old `src/lexer.rs` and `src/parser.rs` were deleted at the cut-over (C5b). Their history
+  stays forbidden: no `git show`, `git log -p`, `git diff` or checkout of revisions that contain
+  them. The same holds for the history of `src/` before commit `ef8007e` and the history of
+  `CLAUDE.md`.
+- Allowed inputs for implementation: the released spec (latest `spec-vN` tag) in `docs/spec/`,
+  `docs/clean-room/`, libucl's public format documentation, the conformance cases and golden
+  files, and running the oracle as a black box (`scripts/regen-golden.sh`,
+  `target/libucl-oracle/ucl-dump`).
+- Questions about the spec go to `docs/clean-room/QUESTIONS.md`; answers come as a new spec
+  version.
+- Record provenance in `docs/clean-room/LOG.md`, and start commit messages with the work-item ID.
+  The full protocol is in `docs/clean-room/PROTOCOL.md`; the work items are in
+  `docs/clean-room/WORKLIST.md`.
 
 ## Common Commands
 
@@ -56,37 +75,55 @@ rules below bind the implementation team; the spec team never edits `src/`.
 # Build the project
 cargo build
 
-# Run all tests (unit + integration)
+# Run all tests: unit, integration, conformance, and doc tests (the README examples included)
 cargo test
 
-# Run specific test file
-cargo test --test integration_tests
+# Run the conformance suite, with per-case detail
+cargo test --test conformance
+UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture
 
-# Run specific test by name
+# Run one test file, or tests by name
+cargo test --test api_tests
 cargo test <test_name>
 
 # Run tests without capturing output
 cargo test -- --nocapture
 
-# Run benchmarks
+# Run benchmarks (see benches/README.md)
 cargo bench
+cargo bench --bench parse_benchmarks
+```
 
-# Run specific benchmark
-cargo bench <benchmark_name>
+### CI
+
+```bash
+# Everything CI runs on push and pull request
+scripts/ci.sh
+
+# The same with the minimum Rust version, as the CI matrix does
+RUSTUP_TOOLCHAIN=1.88 scripts/ci.sh
+
+# The nightly drift check: rebuild libucl, regenerate every golden file, fail on any change
+scripts/ci.sh golden
 ```
 
 ### Running Examples
 
 ```bash
-# List all examples
+# List all examples (examples/README.md describes them)
 ls examples/
 
-# Run specific example
+# Run an example; each checks its results with assertions
 cargo run --example basic_usage
-cargo run --example web_server_config
-cargo run --example advanced_features
-cargo run --example performance_comparison
+cargo run --example complete_ucl_syntax
 cargo run --example number_parsing
+cargo run --example web_server_config
+cargo run --example framework_integration
+cargo run --example nginx_style_framework_integration
+cargo run --example real_world_configurations
+cargo run --example configuration_management
+cargo run --example real_world_usage
+cargo run --example advanced_features
 ```
 
 ### Development
@@ -98,8 +135,9 @@ cargo check
 # Format code
 cargo fmt
 
-# Run clippy lints
-cargo clippy
+# Run clippy lints as CI does
+cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --lib --no-default-features -- -D warnings
 
 # Build documentation
 cargo doc --open
@@ -108,9 +146,21 @@ cargo doc --open
 
 ## Testing
 
-- Conformance: `cargo test --test conformance` compares every case in `tests/conformance/` with
-  golden files generated from libucl. Known failures are listed in `tests/conformance/xfail*.txt`
-  with a reason; the list may only shrink.
+- Conformance: `cargo test --test conformance` runs two tests. `libucl_conformance_new_core`
+  compares the parse of every case in `tests/conformance/` with its `<case>.golden.json`;
+  `libucl_conformance_emitters` compares the output of every parsed case in each format, byte for
+  byte, with libucl's. Known failures are listed in `tests/conformance/xfail-new.txt` and
+  `xfail-emit.txt` with a reason; they hold only justified divergences, may only shrink, and a
+  listed case that passes fails the run. `tests/conformance/README.md` describes the layout.
+- Golden files come only from libucl, through `scripts/regen-golden.sh` (git, CMake and a C
+  compiler; runs on macOS). Never edit them by hand. Cases and golden files belong to the spec
+  team.
+- serde: `cargo test --test serde_roundtrip` checks round trips and the corpus in
+  `tests/serde_corpus/`; `UCL_SERDE_REGEN=1` regenerates the corpus and needs the oracle binary
+  `target/libucl-oracle/ucl-dump`, which `scripts/regen-golden.sh` builds.
+- No wall-clock thresholds in tests. `tests/scaling.rs` checks that time grows linearly by
+  comparing time ratios within one run.
+- The README's code examples run as doctests (`ReadmeDoctests` in `src/lib.rs`).
 - Unit tests live inline under `#[cfg(test)]`; integration tests in `tests/`; benchmarks in `benches/`.
 
 ## Task-Specific Workflows
@@ -155,7 +205,15 @@ cargo doc --open
 
 ## Code Conventions
 
-- Public functions return `Result<T, UclError>`, with position information in errors.
+- Public functions return `Result<T, UclError>`. A parse error is a `parse::Error` with a
+  `parse::ErrorKind`, a `Position` and, inside an included file, that file.
+- Behaviour follows the released spec; doc comments cite the spec section a rule comes from
+  (for example §9.4).
+- Text input reads no files by default; only `from_file` and parsers given a file loader do
+  (WORKLIST C5, decision 1).
+- `cargo fmt`, and clippy clean with `-D warnings` on stable and on Rust 1.88.
+- Every Cargo feature (`fs`, `load`) is referenced by a `#[cfg]`.
+- User-visible changes are recorded in `CHANGELOG.md`.
 - Unit tests inline with `#[cfg(test)]`; integration tests in `tests/`.
 - Profile with `cargo bench` before optimizing.
 

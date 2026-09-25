@@ -1,455 +1,493 @@
-# UCL Rust Lexer
+# ucl-rust-lexer
 
-[![Crates.io](https://img.shields.io/crates/v/ucl-lexer.svg)](https://crates.io/crates/ucl-lexer)
-[![Documentation](https://docs.rs/ucl-lexer/badge.svg)](https://docs.rs/ucl-lexer)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Build Status](https://github.com/example/ucl-rust-lexer/workflows/CI/badge.svg)](https://github.com/example/ucl-rust-lexer/actions)
+[![CI](https://github.com/AnderEnder/ucl-rust-lexer/actions/workflows/ci.yml/badge.svg)](https://github.com/AnderEnder/ucl-rust-lexer/actions/workflows/ci.yml)
 
-A high-performance UCL (Universal Configuration Language) lexer and parser with seamless serde integration for Rust.
+UCL (Universal Configuration Language) for Rust, with serde. The crate reads and writes UCL as
+[libucl](https://github.com/vstakhov/libucl), the C library used by FreeBSD, does. That is
+checked, not assumed: the conformance suite parses more than 1,300 documents and compares each
+result, and each value written in each output format, with libucl's own output. The places where
+the crate deliberately differs from libucl, and the libucl quirks it reproduces, are listed in
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). The implementation is written independently of
+libucl's source code, from a behaviour specification and libucl's observable output.
 
-## Features
+- Deserialize UCL into any `serde::Deserialize` type, or into the `UclValue` tree.
+- Serialize any `serde::Serialize` value as UCL, JSON or YAML, in forms that read back as the same
+  value, floats included.
+- Parser settings: libucl's parser flags, duplicate-key strategies and priorities, variables and
+  a variable handler, macros (`.include`, `.try_include`, `.priority`, `.inherit`, `.load`) with
+  pluggable file loaders.
+- Emitters that write a parsed document byte for byte as libucl writes it.
 
-- **High Performance**: Zero-copy parsing with minimal allocations (1.2-2.1 GB/s)
-- **Serde Integration**: Full `#[derive(Deserialize)]` support with UCL files
-- **Rich Syntax**: Multiple string formats, comments, and human-readable numbers
-- **Variable Expansion**: Environment variables with `$VAR`, `${VAR}`, or `${VAR:-default}` syntax (handlers can supply defaults)
-- **Extensible**: Plugin system and custom parsing hooks
-- **Streaming**: Parse large files with constant memory usage
-- **Robust**: Comprehensive error handling with precise source locations
-- **Well Tested**: Tests are passing (see suite in repository) with extensive compatibility checks
+The package is `ucl-rust-lexer`; the library is `ucl_lexer`.
 
-## Quick Start
+## Installation
 
-Add to your `Cargo.toml`:
+The crate is not on crates.io yet. Depend on the repository:
 
 ```toml
 [dependencies]
-ucl-rust-lexer = "0.1.0"  # Package name
-serde = { version = "1.0", features = ["derive"] }
+ucl-rust-lexer = { git = "https://github.com/AnderEnder/ucl-rust-lexer" }
+serde = { version = "1", features = ["derive"] }
 ```
 
-Parse UCL configuration:
+The minimum supported Rust version is 1.88.
+
+## Reading configuration
+
+`from_str`, `from_slice` and `from_reader` parse a document given as text and deserialize it:
 
 ```rust
 use serde::Deserialize;
-use ucl_lexer::from_str;  // Library name is ucl_lexer
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 struct Config {
     name: String,
     port: u16,
-    debug: bool,
+    #[serde(with = "ucl_lexer::time")]
+    timeout: Duration,
+    max_body: u64,
+    upstream: Vec<String>,
+    tls: Tls,
 }
 
-let ucl = r#"
-    name = "my-app"
-    port = 8080
-    debug = true
+#[derive(Debug, Deserialize)]
+struct Tls {
+    enabled: bool,
+    cert: String,
+}
+
+fn main() -> Result<(), ucl_lexer::UclError> {
+    let text = r#"
+# A comment. /* Block comments */ work too.
+name = "my-server"
+port: 8080
+# A time: 1.5 minutes.
+timeout = 1.5min
+# A multiplier: 512 * 1024.
+max_body = 512kb
+# A repeated key holds every value.
+upstream = a.example.org
+upstream = b.example.org
+tls {
+    enabled = yes
+    cert = "/etc/ssl/server.pem"
+}
 "#;
-
-let config: Config = from_str(ucl)?;
-println!("{:?}", config);
+    let config: Config = ucl_lexer::from_str(text)?;
+    assert_eq!(config.name, "my-server");
+    assert_eq!(config.port, 8080);
+    assert_eq!(config.timeout, Duration::from_secs(90));
+    assert_eq!(config.max_body, 512 * 1024);
+    assert_eq!(config.upstream, ["a.example.org", "b.example.org"]);
+    assert!(config.tls.enabled);
+    assert_eq!(config.tls.cert, "/etc/ssl/server.pem");
+    Ok(())
+}
 ```
 
-## UCL Syntax Overview
+`from_file` (Cargo feature `fs`, on by default) reads a file and the files it includes. Relative
+include paths resolve against the directory of the file, also inside included files, and the
+variables `$FILENAME` and `$CURDIR` are the file's path and directory:
 
-UCL combines the best features of JSON, YAML, and configuration languages:
+```rust,no_run
+use serde::Deserialize;
 
-```ucl
-# Comments are supported (#, //, and /* */)
-app_name = "my-application"
-version = "1.0.0"
-debug = ${DEBUG:-false}  # Environment variables with default fallback
-
-# Human-readable numbers (fully supported)
-max_memory = 512mb       # Size suffixes: kb, mb, gb, tb
-timeout = 30s            # Time suffixes: ms, s, min, h, d, w, y
-cache_size = 2gb
-
-# Multiple string formats (fully supported)
-json_string = "Hello\nWorld"           # JSON-style with escapes
-raw_string = 'No\nescapes\there'       # Raw strings
-unicode_text = "Copyright \u00A9 2024" # Unicode escapes
-heredoc = <<EOF
-Multiline string
-with preserved formatting
-EOF
-
-# Nested objects (explicit syntax)
-server {
-    host = "localhost"
-    port = 8080
-    
-    ssl {
-        enabled = true
-        cert_path = "/etc/ssl/cert.pem"
-    }
+#[derive(Deserialize)]
+struct Config {
+    name: String,
 }
 
-# Arrays with mixed types
-features = ["auth", "logging", "metrics"]
-endpoints = [
-    "http://api.example.com/v1",
-    "http://api.example.com/v2"
-]
-
-# Complex nested structures
-database {
-    connections = [
-        {
-            name = "primary"
-            url = "postgresql://localhost:5432/app"
-            pool_size = 20
-        },
-        {
-            name = "cache"
-            url = "redis://localhost:6379"
-            timeout = 5s
-        }
-    ]
+fn main() -> Result<(), ucl_lexer::UclError> {
+    let config: Config = ucl_lexer::from_file("/etc/myapp/myapp.conf")?;
+    println!("{}", config.name);
+    Ok(())
 }
-
-# Boolean keywords and special values
-debug = true             # Also: yes, on
-maintenance = false      # Also: no, off
-cache_timeout = null
-max_value = inf
-error_rate = nan
 ```
 
-## Advanced Features
+How UCL values map onto serde types (a repeated key as a sequence, a time as seconds, and so on)
+is described in the documentation of the `de` module.
 
-### Environment Variables
+### Format notes
+
+UCL as libucl reads it differs from what some UCL guides describe. Among the differences
+(`docs/spec/` has the full rules):
+
+- Comments are `#` and `/* … */`, which nest. `//` does not start a comment.
+- An unquoted value runs to the end of the line, a `,`, a `;` or a comment, spaces included:
+  `k = 1 2 3` is the string `"1 2 3"`.
+- A number with a suffix is a number only when a line break, `;`, `,`, `}`, `]`, `#` or the end
+  of input follows directly: in `timeout = 30s # comment` the value is the string `"30s"`.
+- `key name { … }` nests: `server web { port = 80 }` is `server { web { port = 80 } }`.
+- A repeated key keeps every value. serde reads them as a sequence, so a field that is not a
+  sequence fails with "invalid type: sequence"; use a `Vec`, `DuplicateStrategy::Rewrite`, or
+  priorities to keep one value.
+- Variable expansion always produces a string; there is no `${NAME:-default}` form.
+
+## Writing
+
+`to_string` writes any `Serialize` value in the UCL config format, `to_json_string`,
+`to_json_string_compact` and `to_yaml_string` in the other output formats, and `to_writer` writes
+the config format to an `io::Write`. The output reads back, in this crate and in libucl, as
+exactly the value written, floats included. The JSON output is valid JSON: a time is written as
+its number of seconds, and a NaN or infinite float or time is an error.
 
 ```rust
-use ucl_lexer::{from_str_with_variables, EnvironmentVariableHandler};
+use serde::{Deserialize, Serialize};
 
-let ucl = r#"
-    database_url = "${DATABASE_URL}"
-    port = ${PORT:-8080}
-    debug = ${DEBUG:-false}
-"#;
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct Upstream {
+    name: String,
+    servers: Vec<String>,
+    weight: f64,
+}
 
-let config: Config = from_str_with_variables(
-    ucl,
-    Box::new(EnvironmentVariableHandler)
-)?;
+fn main() -> Result<(), ucl_lexer::UclError> {
+    let upstream = Upstream {
+        name: "backend".into(),
+        servers: vec!["10.0.0.1:80".into(), "10.0.0.2:80".into()],
+        weight: 0.1,
+    };
+
+    let text = ucl_lexer::to_string(&upstream)?;
+    assert_eq!(
+        text,
+        "name = \"backend\";\nservers [\n    \"10.0.0.1:80\",\n    \"10.0.0.2:80\",\n]\nweight = 0.1;\n"
+    );
+    let back: Upstream = ucl_lexer::from_str(&text)?;
+    assert_eq!(back, upstream);
+
+    assert_eq!(
+        ucl_lexer::to_json_string_compact(&upstream)?,
+        r#"{"name":"backend","servers":["10.0.0.1:80","10.0.0.2:80"],"weight":0.1}"#
+    );
+    Ok(())
+}
 ```
 
-`EnvironmentVariableHandler` recognizes `${VAR}`, `$VAR`, and `${VAR:-default}` expressions; fallback values are expanded according to the `${VAR:-default}` syntax so you can provide defaults inline or via custom handlers (see `MapVariableHandler` for more advanced strategies).
+`to_value` and `from_value` convert between Rust values and the `UclValue` tree.
 
-### Custom Variable Handlers
+## Parser settings
+
+The functions above parse with default settings. Everything else is a setting of
+`parse::Parser`, made with its setters or with `parse::ParserBuilder`. Parse to a `UclValue`,
+then deserialize it with `from_value`, or pass the parser to `UclDeserializer::from_parser`:
 
 ```rust
-use ucl_lexer::{MapVariableHandler, ChainedVariableHandler, EnvironmentVariableHandler};
+use serde::Deserialize;
+use ucl_lexer::parse::ParserBuilder;
+use ucl_lexer::{DuplicateStrategy, ParserFlags};
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    url: String,
+    workers: u32,
+    timeout: String,
+}
+
+fn main() -> Result<(), ucl_lexer::UclError> {
+    let mut parser = ParserBuilder::new()
+        .with_flags(ParserFlags::NO_TIME)
+        .with_strategy(DuplicateStrategy::Rewrite)
+        .with_variable("HOST", "example.org")
+        .build();
+    let value = parser.parse(b"url = \"https://$HOST/\"\nworkers = 2\nworkers = 8\ntimeout = 30s\n")?;
+    let config: Config = ucl_lexer::from_value(value)?;
+    assert_eq!(config.url, "https://example.org/");
+    // Rewrite: a repeated key replaces the value before it.
+    assert_eq!(config.workers, 8);
+    // NO_TIME: time suffixes are not read, so the value is a string.
+    assert_eq!(config.timeout, "30s");
+    Ok(())
+}
+```
+
+### Flags
+
+`ParserFlags` are libucl's parser flags, combined with `|`:
+
+| Flag | Effect |
+| --- | --- |
+| `KEY_LOWERCASE` | Keys are lowercased (ASCII letters only). |
+| `NO_TIME` | The suffixes `s`, `min`, `h`, `d`, `w` and `y` are not read: such values are strings. |
+| `NO_IMPLICIT_ARRAYS` | A repeated key collects its values into an explicit array. |
+| `SAVE_COMMENTS` | Comments are saved (`Parser::comments`) and attached to values (`Parser::attached_comments`). |
+| `DISABLE_MACRO` | Macros are syntax errors and variables are not expanded. |
+| `NO_FILEVARS` | `$FILENAME` and `$CURDIR` are not defined for text input. |
+| `ZEROCOPY` | No effect on the result; accepted for compatibility. |
+
+### Duplicate keys and priorities
+
+A repeated key is resolved by the duplicate strategy (`DuplicateStrategy`) of the input it is
+in. `Append`, the default, compares priorities: a value with the same priority as the key's first
+value is added to the key's values, a higher priority replaces them, and a lower one is dropped.
+`Merge` merges objects and appends to arrays, `Rewrite` keeps the last value, and `Error` rejects
+the document. Priorities run from 0 to 15 and come from `ParserBuilder::with_priority`, the
+`.priority` macro or an include's `priority` parameter; an include's `duplicate` parameter sets
+the strategy for the included file. `docs/spec/08-duplicates.md` has the details.
+
+### Variables
+
+`$NAME` and `${NAME}` in double-quoted strings, unquoted values and heredocs expand to registered
+variables; single-quoted strings and keys are never expanded. A variable handler is asked for
+braced references `${NAME}` whose name is not registered; if it returns `None`, or if there is no
+handler, the reference stays as written:
+
+```rust
 use std::collections::HashMap;
+use ucl_lexer::UclDeserializer;
+use ucl_lexer::parse::ParserBuilder;
+use serde::Deserialize;
 
-let mut custom_vars = HashMap::new();
-custom_vars.insert("APP_NAME".to_string(), "my-app".to_string());
-
-let handler = ChainedVariableHandler::new(vec![
-    Box::new(MapVariableHandler::new(custom_vars)),
-    Box::new(EnvironmentVariableHandler),
-]);
-
-let config = from_str_with_variables(ucl_text, Box::new(handler))?;
+fn main() -> Result<(), ucl_lexer::UclError> {
+    let text = br#"
+url = "https://${HOST}:$PORT/"
+literal = '$HOST'
+secret = "${SECRET_DB}"
+unbraced = "$SECRET_DB"
+other = "${OTHER}"
+"#;
+    let parser = ParserBuilder::new()
+        .with_variables([("HOST", "example.org"), ("PORT", "8443")])
+        .with_variable_handler(|name| name.strip_prefix("SECRET_").map(|key| format!("<{key}>")))
+        .build();
+    let config = HashMap::<String, String>::deserialize(UclDeserializer::from_parser(parser, text))?;
+    assert_eq!(config["url"], "https://example.org:8443/");
+    assert_eq!(config["literal"], "$HOST");
+    assert_eq!(config["secret"], "<DB>");
+    assert_eq!(config["unbraced"], "$SECRET_DB");
+    assert_eq!(config["other"], "${OTHER}");
+    Ok(())
+}
 ```
 
-### Zero-Copy Parsing
+Shortcuts: `from_str_with_variables` registers `(name, value)` pairs, `from_str_with_map` the
+entries of a `HashMap`, and `from_str_with_env` installs a handler that reads the process's
+environment for braced references.
+
+## Includes and loaders
+
+Text input reads no files. `from_str`, `from_slice`, `from_reader` and a parser with its default
+loader have no file access: an `.include` in such a document finds no file and fails, and a
+`.try_include` stops the parse. Only `from_file` reads the filesystem without being asked to.
+
+A parser reads the files its loader holds. `parse::MemoryLoader` serves files from memory;
+`parse::FsLoader` (feature `fs`) reads the filesystem. Relative paths resolve against the
+parser's base directory:
 
 ```rust
-use ucl_lexer::{UclLexer, LexerConfig};
+use ucl_lexer::parse::{ErrorKind, MemoryLoader, ParserBuilder};
+use ucl_lexer::{UclError, UclValue};
 
-let config = LexerConfig {
-    zero_copy: true,
-    ..Default::default()
-};
+fn main() -> Result<(), UclError> {
+    let text = b".include \"common.conf\"\nport = 80\n";
 
-let mut lexer = UclLexer::with_config(input, config);
-// Strings will reference the original input when possible
+    // Text input: the include finds no file.
+    let err = ucl_lexer::from_slice::<UclValue>(text).unwrap_err();
+    assert!(matches!(
+        err.parse_error().map(|e| e.kind()),
+        Some(ErrorKind::FileNotFound { .. })
+    ));
+
+    // A parser whose loader holds the file.
+    let mut loader = MemoryLoader::new();
+    loader.add_file("/etc/app/common.conf", "log_level = info\n");
+    let mut parser = ParserBuilder::new()
+        .with_loader(loader)
+        .with_base_dir("/etc/app")
+        .build();
+    let value = parser.parse(text)?;
+    let root = value.as_object().unwrap();
+    assert_eq!(root["log_level"].as_str(), Some("info"));
+    assert_eq!(root["port"].as_integer(), Some(80));
+    Ok(())
+}
 ```
 
-### Streaming for Large Files
+To let text input read files, give its parser an `FsLoader`, and preferably a base directory; the
+same parser also parses files by path with `Parser::parse_file`:
+
+```rust,no_run
+use ucl_lexer::parse::{FsLoader, ParserBuilder};
+
+fn main() -> Result<(), ucl_lexer::UclError> {
+    let text = std::fs::read("/etc/myapp/myapp.conf")?;
+    let mut parser = ParserBuilder::new()
+        .with_loader(FsLoader::new())
+        .with_base_dir("/etc/myapp")
+        .build();
+    let value = parser.parse(&text)?;
+    println!("{value:?}");
+    Ok(())
+}
+```
+
+Where libucl ends a parse without an error message, at a `.try_include` that finds no usable file
+or an `.include` of a glob pattern that matches nothing, the crate returns `UclError::Stopped`
+(for `Parser::parse`, an error for which `parse::Error::is_stopped` is true). The error holds what
+was parsed before the stop:
 
 ```rust
-use ucl_lexer::{streaming_lexer_from_file, Token};
+use ucl_lexer::{UclError, UclValue};
 
-let mut lexer = streaming_lexer_from_file("large_config.ucl")?;
+fn main() {
+    let err = ucl_lexer::from_str::<UclValue>("a = 1\n.try_include \"extra.conf\"\nb = 2\n")
+        .unwrap_err();
+    let UclError::Stopped(stop) = err else { panic!("{err}") };
+    let partial = stop.partial().unwrap().as_object().unwrap();
+    assert_eq!(partial["a"].as_integer(), Some(1));
+    assert!(partial.get("b").is_none());
+}
+```
 
-while let Ok(token) = lexer.next_token() {
-    // Process tokens with constant memory usage
-    if matches!(token, Token::Eof) {
-        break;
+`.load`, which reads a file into a value, is available only with the Cargo feature `load`; without
+it, `.load` fails with an "unsupported" error. The crate never fetches URLs and never checks
+signatures: `.includes`, and `sign=true` on an include, fail with an "unsupported" error.
+
+## Emitters
+
+The `emit` module writes a parsed `UclValue` in libucl's output formats, byte for byte as libucl
+writes them: `Format::Config`, `Format::Json`, `Format::JsonCompact` and `Format::Yaml`.
+`Parser::emitter` gives an emitter that also uses what the parser remembered about the
+document, such as which strings were single-quoted:
+
+```rust
+use ucl_lexer::emit::Format;
+use ucl_lexer::parse::Parser;
+
+fn main() -> Result<(), ucl_lexer::parse::Error> {
+    let mut parser = Parser::new();
+    let value = parser.parse(b"name = 'web'\nports = [80, 443]\ntimeout = 1.5")?;
+    assert_eq!(
+        parser.emitter(Format::Config).emit(&value),
+        "name = 'web';\nports [\n    80,\n    443,\n]\ntimeout = 1.500000;\n"
+    );
+    assert_eq!(
+        parser.emitter(Format::JsonCompact).emit(&value),
+        r#"{"name":"web","ports":[80,443],"timeout":1.500000}"#
+    );
+    Ok(())
+}
+```
+
+libucl's formats do not always read back as the same value (floats keep six decimals, for
+example); the serde functions above do. Comments saved under `SAVE_COMMENTS` are written in the
+config format only when asked for:
+
+```rust
+use ucl_lexer::ParserFlags;
+use ucl_lexer::emit::Format;
+use ucl_lexer::parse::Parser;
+
+fn main() -> Result<(), ucl_lexer::parse::Error> {
+    let mut parser = Parser::with_flags(ParserFlags::SAVE_COMMENTS);
+    let value = parser.parse(b"# the port\nport = 80\n")?;
+    let text = parser
+        .emitter(Format::Config)
+        .with_comments(parser.comments(), parser.attached_comments())
+        .emit(&value);
+    assert_eq!(text, "# the port\nport = 80;\n");
+    Ok(())
+}
+```
+
+## Errors
+
+Every function returns `UclError`. A document the parser rejects is `UclError::Syntax`, whose
+`parse::Error` has a kind (`parse::ErrorKind`), the position where the error was found (1-based
+line and column, 0-based byte offset) and, for an error inside an included file, that file. A
+document that parses but does not fit the target type is `UclError::Serde`, and a failure to
+read input is `UclError::Io`:
+
+```rust
+use serde::Deserialize;
+use ucl_lexer::UclError;
+use ucl_lexer::parse::ErrorKind;
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    port: u16,
+}
+
+fn main() {
+    match ucl_lexer::from_str::<Config>("port = 80\nname = \"open") {
+        Err(UclError::Syntax(e)) => {
+            assert_eq!(e.kind(), &ErrorKind::UnterminatedString);
+            assert_eq!((e.position().line, e.position().column), (2, 8));
+            eprintln!("{e}");
+        }
+        other => panic!("{other:?}"),
+    }
+
+    match ucl_lexer::from_str::<Config>("port = 70000") {
+        Err(UclError::Serde(e)) => eprintln!("{e}"),
+        other => panic!("{other:?}"),
     }
 }
 ```
 
-## Parser API
+## Limits
 
-- **Constructing a parser**: Call `UclParser::new(input)` to initialize the lexer, load the first token, and use `parse_value`, `parse_object`, `parse_array`, or `parse_document` depending on the top-level structure. For custom lexing behavior, start with `UclParser::with_lexer_config(input, config)`.
-- **Variable handlers & hooks**: Attach helpers before parsing via `with_variable_handler`, `with_parsing_hooks`, or the hook mutators (`add_number_suffix_handler`, `add_string_processor`, `add_validation_hook`) so you can resolve `${VAR}` syntax, custom suffixes, or validation rules without touching the core parser (`src/parser.rs:1340-1432`).
-- **Parsing entry points**:
-  ```rust
-  use ucl_lexer::{parser::UclParser, UclValue};
+- Containers nest at most 1024 deep (`parse::MAX_NESTING`), included files 16 deep
+  (`parse::MAX_INCLUDE_DEPTH`) and macro argument lists 64 deep (`parse::MAX_ARGUMENT_DEPTH`).
+- Parsing and the emitters handle documents nested to that limit on a 2 MiB thread stack. serde
+  deserialization and serialization recurse once per level of nesting: in a debug build, a
+  document nested a few hundred levels deep needs more than 2 MiB, the default stack of a spawned
+  thread.
+- Keys and strings must be valid UTF-8; libucl accepts other bytes.
 
-  let mut parser = UclParser::new(input);
-  let document: UclValue = parser.parse_document()?; // implicit object handling
+## Cargo features
 
-  let mut explicit = UclParser::new(input);
-  let object: UclValue = explicit.parse_object()?;      // expects '{'
-  let array: UclValue = explicit.parse_array()?;        // expects '['
-  let value: UclValue = explicit.parse_value()?;        // any UCL value
-  ```
-- **NGINX-style compatibility**: The parser automatically detects explicit, implicit, and NGINX nested syntax (see `SyntaxStyle` in `src/parser.rs:1327-1335`), so the same parser instance can handle `section { ... }`, `key value`, and `key identifier { ... }` forms.
-- **Idiomatic design**: `UclParser` owns the lexer, tracks only live tokens/positions, and exposes hook accessors (`parsing_hooks`, `parsing_hooks_mut`, `set_parsing_hooks`) so configuration is explicit, errors return `Result<UclValue, ParseError>`, and ownership stays clear for callers.
+| Feature | Default | Enables |
+| --- | --- | --- |
+| `fs` | yes | `parse::FsLoader` and `from_file` |
+| `load` | no | the `.load` macro |
 
 ## Examples
 
-The repository includes comprehensive examples:
+The [examples](examples/) are programs that check their results with assertions; see
+[examples/README.md](examples/README.md). Run one with `cargo run --example basic_usage`.
 
-- **[Basic Usage](examples/basic_usage.rs)**: Simple configuration parsing
-- **[Web Server Config](examples/web_server_config.rs)**: Real-world web server configuration
-- **[Framework Integration](examples/framework_integration.rs)**: Integration with Axum, Tokio, etc.
-- **[Advanced Features](examples/advanced_features.rs)**: Variable expansion, streaming, error handling
-- **[Configuration Management](examples/configuration_management.rs)**: Environment-specific configs, validation
-- **[Number Parsing](examples/number_parsing.rs)**: Rich number formats and suffixes
-- **[Real-World Usage](examples/real_world_usage.rs)**: Microservices, CI/CD, game servers, IoT
-- **[Performance Comparison](examples/performance_comparison.rs)**: Benchmarking and optimization
-- **[Extensibility Demo](examples/extensibility_demo.rs)**: Custom plugins and hooks
+| Example | Shows |
+| --- | --- |
+| `basic_usage` | `from_str` into structs, parse and serde errors |
+| `complete_ucl_syntax` | a tour of the format |
+| `number_parsing` | numbers, multipliers, time suffixes and `NO_TIME` |
+| `web_server_config` | `Duration` fields, layered files with `.include`, variables |
+| `framework_integration` | configuration structs for web services, writing configuration back |
+| `nginx_style_framework_integration` | nginx-style UCL mapped onto structs |
+| `real_world_configurations` | a configuration assembled from several files, priorities, `.inherit` |
+| `configuration_management` | layers, per-environment variables, validation |
+| `real_world_usage` | four larger configurations |
+| `advanced_features` | parser settings, loaders, comments, output formats, silent stops |
 
-Run examples:
+## Development
 
-```bash
-cargo run --example basic_usage
-cargo run --example web_server_config
-cargo run --example advanced_features
+`scripts/ci.sh` runs every check CI runs: `cargo fmt --check`, clippy with warnings denied, the
+tests, the examples, the benches' build and `cargo doc`. CI runs it on Linux and macOS with
+stable Rust and with Rust 1.88.
+
+```sh
+scripts/ci.sh
+cargo test                                          # all tests, the conformance suite included
+cargo test --test conformance                       # the conformance suite alone
+UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture   # per-case detail
+cargo bench                                         # benches/README.md
 ```
 
-## Documentation
-
-- The most up-to-date guidance lives right here in this README plus the `examples/` directory; the previous `docs/` folder has been retired.
-
-## UCL Language Features
-
-### Number Formats
-
-```ucl
-# Basic numbers
-integer = 42
-float = 3.14159
-negative = -123
-scientific = 1.23e-4
-hex = 0xFF00
-binary = 0b11010101
-octal = 0o755
-
-# Size suffixes (binary: 1024-based)
-memory = 512mb      # 512 * 1024 * 1024 bytes
-cache = 2gb         # 2 * 1024^3 bytes
-buffer = 64kb       # 64 * 1024 bytes
-
-# Size suffixes (decimal: 1000-based)  
-bandwidth = 100mbps # 100 * 1000 * 1000 bits/second
-storage = 1tb       # 1 * 1000^4 bytes
-
-# Time suffixes
-timeout = 30s       # 30 seconds
-delay = 500ms       # 0.5 seconds
-interval = 5min     # 300 seconds
-duration = 2h       # 7200 seconds
-period = 1d         # 86400 seconds
-
-# Special values
-infinity = inf
-not_a_number = nan
-```
-
-### String Formats
-
-```ucl
-# JSON-style strings (with escape sequences)
-json_string = "Hello\nWorld\t!"
-unicode = "Unicode: \u{1F600} \u{1F389}"
-escaped = "Path: C:\\Users\\Name"
-
-# Single-quoted strings (literal, no escapes)
-literal = 'Raw string with\nliteral\tbackslashes'
-regex = '^\d{3}-\d{2}-\d{4}$'
-
-# Heredoc strings (multiline)
-description = <<EOF
-This is a multiline string
-that preserves formatting
-and whitespace exactly.
-
-It can contain "quotes" and 'apostrophes'
-without escaping.
-EOF
-
-# Heredoc with custom delimiter
-sql_query = <<SQL
-SELECT users.name, profiles.bio
-FROM users
-JOIN profiles ON users.id = profiles.user_id
-WHERE users.active = true
-SQL
-```
-
-### Comments
-
-```ucl
-// Single-line comment
-# Single-line comment
-key = "value"  # End-of-line comment
-
-/*
- * Multi-line comment
- * with nesting support
- */
-server {
-    host = "localhost"
-    /* 
-     * Nested comments work too
-     * /* even deeply nested */
-     */
-    port = 8080
-}
-```
-
-### Variable Expansion
-
-```ucl
-# Environment variables
-database_url = "${DATABASE_URL}"
-api_key = "${API_KEY}"
-
-# Variables with defaults
-host = "${HOST:-localhost}"
-port = ${PORT:-8080}
-debug = ${DEBUG:-false}
-
-# Nested variable expansion
-log_file = "/var/log/${APP_NAME}/${ENVIRONMENT}.log"
-
-# Variable substitution in strings
-welcome_message = "Welcome to ${APP_NAME} version ${VERSION}!"
-```
-
-## Performance
-
-UCL Rust Lexer is optimized for high performance:
-
-- **Zero-copy parsing**: Strings reference original input when possible
-- **Streaming support**: Parse large files with constant memory usage
-- **Memory pooling**: String interning and buffer reuse
-- **Fast tokenization**: O(1) character classification with lookup tables
-
-Benchmark results (based on actual implementation):
-
-```
-Regular parsing:    ~1.2 GB/s
-Zero-copy parsing:  ~2.1 GB/s (1.75x faster)
-Streaming parsing:  ~1.0 GB/s (constant memory)
-Test coverage:      238/239 tests passing (99.6%)
-```
-
-## Error Handling
-
-Comprehensive error reporting with source locations:
-
-```rust
-use ucl_lexer::{from_str, UclError};
-
-match from_str::<Config>(&invalid_ucl) {
-    Err(UclError::Lex(lex_error)) => {
-        println!("Syntax error at line {}, column {}: {}",
-                 lex_error.position().line,
-                 lex_error.position().column,
-                 lex_error);
-    }
-    Err(UclError::Parse(parse_error)) => {
-        println!("Parse error: {}", parse_error);
-    }
-    Err(UclError::Serde(serde_error)) => {
-        println!("Deserialization error: {}", serde_error);
-    }
-    Ok(config) => {
-        // Use config...
-    }
-}
-```
-
-## Feature Flags
-
-```toml
-[dependencies]
-ucl-lexer = { version = "0.1", features = ["zero-copy", "save-comments"] }
-```
-
-Available features:
-
-- `std` (default): Standard library support
-- `zero-copy`: Zero-copy parsing optimizations
-- `save-comments`: Preserve comments during parsing
-- `strict-unicode`: Enforce strict Unicode validation
-
-## Comparison with Other Formats
-
-| Feature | UCL (This Impl) | JSON | YAML | TOML |
-|---------|-----------------|------|------|------|
-| Comments | ✅ (# and /* */) | ❌ | ✅ | ✅ |
-| Trailing commas | ✅ | ❌ | ✅ | ❌ |
-| Multiline strings | ✅ | ❌ | ✅ | ✅ |
-| Variable expansion | ✅ | ❌ | ❌ | ❌ |
-| Human-readable numbers | ✅ | ❌ | ❌ | ❌ |
-| Multiple string formats | ✅ | ❌ | ✅ | ❌ |
-| Nested comments | ✅ | ❌ | ❌ | ❌ |
-| Zero-copy parsing | ✅ | ✅ | ❌ | ❌ |
-| Serde integration | ✅ | ✅ | ✅ | ✅ |
-| Performance | High | High | Medium | Medium |
-
-## Use Cases
-
-UCL is ideal for:
-
-- **Application Configuration**: Web servers, microservices, desktop apps
-- **Infrastructure as Code**: Deployment configs, CI/CD pipelines
-- **Game Development**: Game server configs, asset definitions
-- **IoT Devices**: Sensor configurations, device management
-- **Development Tools**: Build systems, development environments
-
-## Current Limitations
-
-This implementation is production-ready, but a few edge cases remain:
-
-- **Bare words containing whitespace** still require quotes to avoid parsing ambiguity.
-
-For the latest status, consult the README and the accompanying examples/tests that exercise real-world UCL files.
+The conformance suite is in `tests/conformance/` (see its
+[README](tests/conformance/README.md)). Its golden files are libucl's results, committed so that
+running the tests needs no C toolchain. `scripts/regen-golden.sh` regenerates them: it clones
+libucl at a pinned commit under `target/`, builds it and the dump tool in `tools/ucl-dump/`, and
+runs every case. It needs git, CMake and a C compiler, and runs on macOS, where the committed files
+were generated. `scripts/ci.sh golden` runs it, regenerates the serde corpus in
+`tests/serde_corpus/` as well, and fails if any golden file changed; CI runs that every night.
 
 ## License
 
-This project is licensed under either of
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
-
-## Acknowledgments
-
-- [libucl](https://github.com/vstakhov/libucl) - Original UCL implementation
-- [serde](https://serde.rs/) - Serialization framework
-- [Rust community](https://www.rust-lang.org/community) - For excellent tooling and support
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for release history.
-
-## Roadmap
-
-- [ ] UCL schema validation
-- [ ] Configuration hot-reloading
-- [ ] WASM support
-- [ ] Additional built-in plugins
-- [ ] Performance optimizations
-- [ ] Language server protocol support
+The repository also holds files from libucl's test suite, under `tests/conformance/libucl/`;
+they are covered by libucl's BSD-2-Clause license, [LICENSE-libucl](LICENSE-libucl), and are not
+part of the published package.

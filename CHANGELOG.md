@@ -178,3 +178,13 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
 - Benches: `lexer_benchmarks`, `parser_benchmarks`, `zero_copy_benchmarks`,
   `memory_efficiency_benchmarks` and `ucl_compatibility_benchmarks`, replaced by
   `parse_benchmarks`, `emit_benchmarks` and `serde_benchmarks`.
+
+### Packaging
+
+- The minimum supported Rust version is 1.88 (`rust-version` in `Cargo.toml`).
+- The license files `LICENSE-MIT` and `LICENSE-APACHE` are added, for the crate's license
+  `MIT OR Apache-2.0`.
+- The package holds only the library sources, `Cargo.toml`, `README.md`, `CHANGELOG.md` and the
+  two license files. `LICENSE-libucl`, which covers libucl's test files in the repository's
+  conformance suite, is not in the package, and neither are the tests, examples, benches or
+  `docs/`.

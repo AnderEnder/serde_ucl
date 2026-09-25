@@ -1,0 +1,29 @@
+# Nightly drift check: builds libucl at the pinned commit with scripts/regen-golden.sh, as a
+# developer would, regenerates every golden file, and fails with the diff if any file changed
+# (scripts/ci.sh golden). It runs on macOS, where the committed golden files were generated.
+# On Linux, tools/ucl-dump/ucl_dump.c does not compile under the script's -std=c99 (getopt is
+# not declared), and with that fixed, three glob cases in tests/conformance/cases/spec/09-macros
+# give different results.
+name: Golden files
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  drift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: scripts/ci.sh golden
+        run: scripts/ci.sh golden

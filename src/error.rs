@@ -147,6 +147,6 @@ mod tests {
             column: 13,
             offset: 100,
         };
-        assert_eq!(format!("{}", pos), "42:13");
+        assert_eq!(format!("{pos}"), "42:13");
     }
 }

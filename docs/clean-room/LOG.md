@@ -1449,3 +1449,99 @@
     `C6a:` commit that records this version.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: implementation team. Item: C6b (README, crate docs, `CLAUDE.md`, Cargo
+  metadata, license files, CI).
+  - Inputs consulted: `docs/clean-room/` (PROTOCOL, WORKLIST C6 with its split and project
+    decisions, the C6a entry of this log); `docs/spec/` at `spec-v8` through `git show spec-v8:…`
+    (§7.1–7.2, §8.3–8.4, §12; at HEAD only the spec README differs from the tag);
+    `docs/COMPATIBILITY.md`; `tests/conformance/README.md`; the crate's own files (`src/`,
+    `tests/`, `examples/` and `benches/` with their READMEs); the root `README.md`, `CHANGELOG.md`,
+    `Cargo.toml` and the worktree's current `CLAUDE.md` (no history); `scripts/regen-golden.sh`,
+    the header of `scripts/create-cases.sh` and the old `.github/workflows/`. `tools/ucl-dump/`
+    was not opened; a Linux compiler error quoted three lines of `ucl_dump.c`. Outside the
+    repository: the Apache-2.0 text from apache.org and the MIT text from SPDX's
+    license-list-data, `cargo search` and `cargo info` (the crate is not on crates.io), and
+    `gh run list` for the repository (run status only). The tooling showed me the worktree's
+    current `CLAUDE.md` once, and the main checkout's initial git status listed the names
+    `PLAN.md` and `REVIEW.md`; neither was opened. Background command output that the tooling
+    wrote under `/private/tmp` was not opened; every log I read is under `target/c6b/`.
+  - Black-box oracle runs: about 30 runs of `target/libucl-oracle/ucl-dump` on scratch inputs in
+    `target/c6b/probe/`, one or more per README example (the documents, the config and compact
+    JSON output, saved comments, includes, the silent stop, the variable handler through `-H` with
+    an `H_` name), the format notes and the suffix rule. `scripts/regen-golden.sh`, through
+    `scripts/ci.sh golden`, in two scratch clones: on macOS it regenerated 5626 golden files and
+    the serde corpus with no change, and failed with the diff after one committed golden file was
+    tampered with; on Linux (Docker, `rust:1-bookworm`, aarch64) `ucl_dump.c` does not compile
+    under the script's `-std=c99` (`getopt`, `optarg`, `optind` undeclared), and with
+    `-D_POSIX_C_SOURCE=200809L` added to a scratch copy of the script (not committed) 15 golden
+    files of three cases differ: `include_glob_caret_is_not_negation`,
+    `include_glob_no_character_classes` and `include_glob_prefix_key_from_first_file` in
+    `cases/spec/09-macros/`. The libucl clones those runs made under `target/c6b/golden-*/` were
+    not opened, and were deleted afterwards.
+  - `rust-version = "1.88"`: 1.85.0 and 1.87.0 fail to build the library (9 × E0658, let chains);
+    1.88.0 builds it and every target. `scripts/ci.sh` passes with 1.88.0 and 1.98.1 on macOS,
+    and in Docker on Linux with `rust:1.88-bookworm` and `rust:1-bookworm` (1.98.1), at `5d24627`
+    plus the first version of this entry. `RUSTUP_TOOLCHAIN=1.88`, as documented, installs and
+    selects 1.88.0 with clippy and rustfmt. The packaged crate builds with 1.88.0 (`--locked`,
+    default features and `--no-default-features --features load`).
+  - Clippy 1.88 has `uninlined_format_args` on by default: 10 format strings inlined, in
+    `src/error.rs` (a test), two tests and one example.
+  - `tests/scaling.rs`: `serde_time_grows_linearly` overflowed its 2 MiB test-thread stack with
+    1.88.0 (serde recursion over the document nested 961 deep). The tests now run one at a time
+    and each on a 64 MiB thread; samples last at least 5 ms (was 1 ms); a check fails only if all
+    three attempts fail; the file header says why. It takes about 2.1 s. It passed 3 of 3 runs
+    with 16 busy loops and 5 of 5 with 28 busy loops on 14 cores, and fails against `5484bb5`
+    (×54.6–64.4 for ×8.4–9.4, every attempt). No other test in `src/`, `tests/`, `examples/` or
+    `benches/` reads the clock.
+  - Stack depth measured with a scratch binary (`target/c6b/stack/`, a 2 MiB thread, the
+    nested-objects document of `tests/scaling.rs`): parsing, dropping and the emitters (all four
+    formats, and config with saved comments) reach 1023 levels in debug and release builds with
+    1.88.0 and stable; `from_str::<UclValue>` and `from_value` reach 239 (stable) and 301
+    (1.88) in debug builds, 997 in a 1.88 release build; `to_value`, `to_string` and
+    `to_json_string_compact` 604 and 733 in debug. The README's *Limits* section says so in
+    general terms.
+  - CI: `scripts/ci.sh` runs `cargo fmt --all --check`; clippy with `-D warnings` for all targets
+    and features, and for the library without default features, with `fs` alone and with `load`
+    alone; `cargo test`; `cargo build --examples --benches`; every example; `cargo doc --no-deps`
+    with `RUSTDOCFLAGS='-D warnings'`. `scripts/ci.sh golden` refuses to start when
+    `tests/conformance/` or `tests/serde_corpus/` has changes, runs `scripts/regen-golden.sh`
+    and `UCL_SERDE_REGEN=1 cargo test --test serde_roundtrip`, and fails with `git status` and
+    `git diff` if either directory changed. `.github/workflows/ci.yml` runs `scripts/ci.sh` on
+    push, pull request and on demand, on `ubuntu-latest` and `macos-latest`, with stable and with
+    the `rust-version` read from `Cargo.toml`. `.github/workflows/golden.yml` runs
+    `scripts/ci.sh golden` nightly and on demand on `macos-latest` (Linux: see above). Removed:
+    `build.yml` and `clippy.yml` (replaced), `coverage.yml` (every run in `gh run list` failed),
+    `release.yml` (published on any `v*` tag without checks). `actionlint` 1.7.12 and
+    `shellcheck` report nothing.
+  - Package: `include` lists `/src/**`, `/Cargo.toml`, `/README.md`, `/CHANGELOG.md`,
+    `/LICENSE-MIT` and `/LICENSE-APACHE`; `cargo package --list` gives those files plus
+    `Cargo.lock`, `Cargo.toml.orig` and `.cargo_vcs_info.json`, which cargo adds. `cargo publish
+    --dry-run` on the committed tree at the end of the session succeeds; the packaged manifest
+    drops the self dev-dependency and the benches, and cargo warns that the tests, examples and
+    benches are not in the package. Not published. `LICENSE-MIT` is SPDX's text with
+    "Copyright (c) 2026 Andrii Radyk"; `LICENSE-APACHE` is apache.org's text unchanged.
+  - README: every Rust example runs as a doctest (`ReadmeDoctests` in `src/lib.rs`, 11 blocks,
+    two of them `no_run` because they read `/etc/myapp`), and every value and output it states
+    was checked with the oracle.
+  - For the spec team: `tools/ucl-dump/ucl_dump.c` does not build on Linux with glibc (above);
+    the three glob cases above give other results on Linux, so their golden files hold only for
+    macOS. `tests/conformance/README.md` already refers to `LICENSE-libucl`; no change needed.
+  - For the lead: `version` is still `0.1.0`, while the CHANGELOG says the release is not
+    compatible with 0.1.0 (never published); the README installs from git until a release, and
+    a git dependency without a branch resolves to the default branch, which still has the old
+    API, until this branch is merged; the crate docs link `COMPATIBILITY.md` at `blob/HEAD`,
+    which likewise resolves only after the merge. The four tests of `tests/scaling.rs` now wait
+    for one another (a mutex), a deliberate exception to "tests run in parallel" (WORKLIST C6
+    decision 2) so that they do not take CPU time from one another's samples; they stay
+    independent of order. serde (de)serialization recursion limits the depth of documents on
+    small stacks (above);
+    `parse::include::tests::load_needs_its_feature` never runs, because the self dev-dependency
+    turns `load` on for every test build. `CLAUDE.md` lists the history of `CLAUDE.md` as
+    forbidden, as my instructions do; PROTOCOL.md does not.
+  - Questions: none.
+  - Commits: `7fbc78c`, `4ec5612`, `55f2bd0`, `b3d5f91`, `c641506`, `d0a0be5`, `630deda`,
+    `5d24627`, and the `C6b:` commit that adds this entry. `scripts/ci.sh` passed at each commit
+    in a scratch worktree with stable (1.98.1), and from `55f2bd0`, which sets `rust-version`, with
+    1.88.0 as well; `5d24627` in this worktree with both.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

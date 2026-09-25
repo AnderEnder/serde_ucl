@@ -60,6 +60,7 @@ code or hints.
 - The old `src/lexer.rs` and `src/parser.rs`, deleted at the cut-over (C5b): their contents in
   git history (`git show`, `git log -p`, `git diff` or checkouts of any revision that has them).
   They predate the clean room and are not a source of design or code.
+- Git history of `CLAUDE.md`: earlier revisions contain notes on libucl internals.
 - Anything else an oracle-side participant writes, other than work-item goals in
   `docs/clean-room/WORKLIST.md` and conformance cases.
 

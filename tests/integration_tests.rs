@@ -1322,7 +1322,7 @@ fn test_deeply_nested_structures() {
 
     // Create a deeply nested structure (20 levels deep)
     for i in 0..20 {
-        config.push_str(&format!("level_{} = {{\n", i));
+        config.push_str(&format!("level_{i} = {{\n"));
     }
 
     config.push_str("value = \"deep_value\"\n");
@@ -1340,7 +1340,7 @@ fn test_deeply_nested_structures() {
     // Navigate to the deepest level
     let mut current = &parsed;
     for i in 0..20 {
-        let key = format!("level_{}", i);
+        let key = format!("level_{i}");
         current = &current[&key];
         assert!(current.is_object());
     }
@@ -1452,7 +1452,7 @@ fn test_large_array() {
 
     // Create a large array with 10,000 items
     for i in 0..10000 {
-        config.push_str(&format!("  \"item_{}\",\n", i));
+        config.push_str(&format!("  \"item_{i}\",\n"));
     }
 
     config.push_str("]\n");

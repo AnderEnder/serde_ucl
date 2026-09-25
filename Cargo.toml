@@ -2,13 +2,23 @@
 name = "ucl-rust-lexer"
 version = "0.1.0"
 edition = "2024"
-authors = ["UCL Rust Lexer Contributors"]
-description = "A high-performance UCL (Universal Configuration Language) lexer and parser with serde integration"
+# The lowest Rust version the crate builds with: let chains need 1.88.
+rust-version = "1.88"
+authors = ["Andrii Radyk"]
+description = "UCL (Universal Configuration Language) with serde: reads and writes UCL as libucl does"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/example/ucl-rust-lexer"
-keywords = ["ucl", "parser", "lexer", "serde", "configuration"]
-categories = ["parsing", "config"]
-include = ["/src/**/*", "/Cargo.toml", "/README.md", "/LICENSE*"]
+repository = "https://github.com/AnderEnder/ucl-rust-lexer"
+readme = "README.md"
+keywords = ["ucl", "libucl", "configuration", "serde", "parser"]
+categories = ["config", "parser-implementations", "encoding"]
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -36,34 +46,6 @@ load = []
 [lib]
 name = "ucl_lexer"
 path = "src/lib.rs"
-
-[[example]]
-name = "basic_usage"
-path = "examples/basic_usage.rs"
-
-[[example]]
-name = "web_server_config"
-path = "examples/web_server_config.rs"
-
-[[example]]
-name = "framework_integration"
-path = "examples/framework_integration.rs"
-
-[[example]]
-name = "advanced_features"
-path = "examples/advanced_features.rs"
-
-[[example]]
-name = "configuration_management"
-path = "examples/configuration_management.rs"
-
-[[example]]
-name = "number_parsing"
-path = "examples/number_parsing.rs"
-
-[[example]]
-name = "real_world_usage"
-path = "examples/real_world_usage.rs"
 
 [[bench]]
 name = "parse_benchmarks"
