@@ -1,0 +1,8 @@
+seen {
+    data = "v";
+    args {
+        o {
+            x = 1;
+        }
+    }
+}

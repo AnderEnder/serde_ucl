@@ -133,6 +133,12 @@ behaviour, and each place says so. The decisions for §9, §10 and the API are r
   crashes libucl; in the project an error there fails the document, and a silent stop ends the
   parse.
 
+- A registered macro handler (§13.2) can also fail with an error and a message of its own, which
+  libucl gives a handler no way to do; its silent failure stays a silent stop.
+- Without a configured base directory, an input given as a file (§13.1) resolves relative include
+  paths against its own directory, where libucl uses the working directory; with one, that
+  directory stands in for the working directory for every input.
+
 These are project decisions that match libucl's behaviour rather than differ from it:
 
 - The project never fetches URLs; a URL include behaves as in a libucl built without URL support,
@@ -145,6 +151,9 @@ These are project decisions that match libucl's behaviour rather than differ fro
   as bytes, are parser options; the conformance runner sets them to the case's directory.
 - Saved comments are written in config output only when the caller asks for it, as libucl writes
   them only when the application asks (§10.10); the default config output has none.
+- Several inputs (§13.1) keep libucl's quirks where inputs join: the limit of 16 inputs and the
+  include depth they share, the zero-byte first input, and the end of an input not being a
+  separator. Registered handlers can both add entries and have text parsed in place (§13.2).
 - serde serialization need not use the default formats (§10.8). Its JSON output is valid JSON
   (RFC 8259), unlike libucl's JSON output of NaN and infinities (§10.3): a time is written as its
   number of seconds, and a NaN or infinite float or time cannot be serialized to JSON. The config
@@ -187,20 +196,18 @@ answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, `sp
 #23–#33, `spec-v6` answers #34–#49 and completes §10 for the output work: every case that
 parses now has libucl's output in each format, §10.8 says what reads back exactly, and §10.10
 specifies the config output with saved comments. `spec-v7` answers #50–#54, `spec-v8`
-answers #55, `spec-v9` records the decision on #56, and `spec-v10` answers #57–#58 and adds
-§13 for several inputs and registered macros.
+answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58 and adds
+§13 for several inputs and registered macros, and `spec-v11` answers #59 (the rules where inputs
+join, §13.1).
 
 The places where §9 and §10 left the project's behaviour open (the include parameters `sign`,
 `url` and `path`, how the API reports a silent stop, parsing a file under `no-filevars`, whether
 saved comments are written, and serde's JSON forms) are decided; see *Divergences decided by the
 project*.
 
-The cases of §13 are held in `tests/conformance/pending/13-inputs/` until the crate supports
-several inputs and registered macros; the runners do not read that directory yet. They are listed
-below with the paths they will have, under `cases/spec/13-inputs/`. The project has not decided
-yet which parts of §13 its API follows: the limit of 16 inputs and the include depth they share,
-the zero-byte first input, how a registered handler reports failure (libucl allows only a silent
-stop), and whether handlers can add entries directly, have text parsed in place, or both.
+The places where §13 left the project's API open (which quirks of several inputs it keeps, how a
+registered handler reports failure, what handlers can do) are decided; see *Divergences decided by
+the project*.
 
 Two §13 rules have no case: a `{` after a zero-byte first input crashes libucl, and the file
 variables that an input given as a file sets would put the checkout path into the golden file.
@@ -214,8 +221,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1400 cases in `cases/` and
-`libucl/`, and 101 cases held in `pending/13-inputs/`, listed with the paths they will have.
+Every case in `tests/conformance/` and the section(s) that explain it: 1575 cases in `cases/` and
+`libucl/`.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1665,14 +1672,83 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1400 case
 | `cases/spec/13-inputs/inputs_value_then_space_at_end_error` | §13 |
 | `cases/spec/13-inputs/inputs_variables_in_every_input` | §13 |
 | `cases/spec/13-inputs/inputs_whitespace_first_then_entries` | §13 |
+| `cases/spec/13-inputs/joins_array_root_then_comma_rest_ignored` | §13, §1 |
+| `cases/spec/13-inputs/joins_array_root_then_line_break_rest_ignored` | §13, §1 |
+| `cases/spec/13-inputs/joins_bare_value_trailing_space_error` | §13 |
+| `cases/spec/13-inputs/joins_closed_root_then_brace_error` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_comment_brace_error` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_closed_root_then_comment_rest_ignored` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_closed_root_then_line_break_brace_error` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_line_break_rest_ignored` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_semicolon_bracket_error` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_semicolon_rest_ignored` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_space_entry_error` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_spaces_only` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_vertical_tab_after_line_break` | §13, §1 |
+| `cases/spec/13-inputs/joins_closed_root_then_vertical_tab_error` | §13, §1 |
+| `cases/spec/13-inputs/joins_comment_input_attaches_to_earlier_value` | §13, §12 |
+| `cases/spec/13-inputs/joins_comment_then_hash_last_byte` | §13, §2, §12 |
+| `cases/spec/13-inputs/joins_comments_at_stop_attach_in_next_input` | §13, §9, §12 |
+| `cases/spec/13-inputs/joins_comments_at_stop_then_empty_input` | §13, §9, §12 |
+| `cases/spec/13-inputs/joins_comments_at_stop_then_whitespace_input` | §13, §9, §12 |
+| `cases/spec/13-inputs/joins_empty_first_then_hash_attaches_to_root` | §13, §2 |
+| `cases/spec/13-inputs/joins_empty_first_then_semicolon_error` | §13 |
+| `cases/spec/13-inputs/joins_file_input_file_variables_after_registered` | §13, §7 |
+| `cases/spec/13-inputs/joins_hash_last_byte_of_later_input_error` | §13, §2 |
+| `cases/spec/13-inputs/joins_key_waiting_comment_after_key` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_key_waiting_comment_in_value_input` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_key_waiting_comments_before_key` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_key_waiting_then_comment_input` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_key_waiting_then_hash_input_error` | §13, §1, §2 |
+| `cases/spec/13-inputs/joins_key_waiting_then_hash_line_value` | §13, §1, §2 |
+| `cases/spec/13-inputs/joins_key_waiting_then_space_hash` | §13, §1, §2 |
+| `cases/spec/13-inputs/joins_key_waiting_two_comment_groups` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_line_break_hash_last_byte_error` | §13, §2 |
+| `cases/spec/13-inputs/joins_line_break_input_needs_separator_error` | §13 |
+| `cases/spec/13-inputs/joins_quoted_value_trailing_space` | §13 |
+| `cases/spec/13-inputs/joins_same_file_from_two_text_inputs` | §13 |
+| `cases/spec/13-inputs/joins_section_names_then_comment_input` | §13, §3, §12 |
+| `cases/spec/13-inputs/joins_section_names_then_entry_error` | §13, §3 |
+| `cases/spec/13-inputs/joins_section_names_then_semicolon_input` | §13, §3 |
+| `cases/spec/13-inputs/joins_section_names_then_whitespace_input` | §13, §3 |
+| `cases/spec/13-inputs/joins_single_quoted_value_trailing_tab` | §13 |
+| `cases/spec/13-inputs/joins_space_hash_last_byte_error` | §13, §2 |
+| `cases/spec/13-inputs/joins_stopped_include_again_is_self_inclusion_error` | §13, §9 |
+| `cases/spec/13-inputs/joins_stopped_include_next_input_read` | §13, §9 |
+| `cases/spec/13-inputs/joins_stopped_include_stays_open_fifteen_inputs_error` | §13, §9 |
+| `cases/spec/13-inputs/joins_stopped_include_stays_open_fourteen_inputs` | §13, §9 |
+| `cases/spec/13-inputs/joins_text_input_continues_file_input_self_include_error` | §13, §9 |
+| `cases/spec/13-inputs/joins_time_value_trailing_space_error` | §13 |
+| `cases/spec/13-inputs/joins_two_whitespace_inputs_cancel` | §13 |
+| `cases/spec/13-inputs/joins_value_after_empty_and_comment_inputs` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_value_at_end_empty_input_error` | §13 |
+| `cases/spec/13-inputs/joins_value_at_end_then_closing_brace` | §13 |
+| `cases/spec/13-inputs/joins_value_at_end_then_form_feed_error` | §13 |
+| `cases/spec/13-inputs/joins_value_at_end_then_hash` | §13, §2 |
+| `cases/spec/13-inputs/joins_value_at_end_then_nul` | §13 |
+| `cases/spec/13-inputs/joins_value_at_end_then_vertical_tab_error` | §13 |
+| `cases/spec/13-inputs/joins_value_at_end_then_whitespace_input` | §13 |
+| `cases/spec/13-inputs/joins_value_at_end_two_whitespace_inputs_error` | §13 |
+| `cases/spec/13-inputs/joins_value_in_next_input` | §13, §1 |
+| `cases/spec/13-inputs/joins_value_in_next_input_comments_wait` | §13, §1, §12 |
+| `cases/spec/13-inputs/joins_value_in_next_input_key_priority` | §13, §1 |
+| `cases/spec/13-inputs/joins_value_in_next_input_key_strategy` | §13, §1 |
+| `cases/spec/13-inputs/joins_value_in_next_input_whole_line` | §13, §1 |
+| `cases/spec/13-inputs/joins_whitespace_first_input_not_counted` | §13 |
+| `cases/spec/13-inputs/joins_whitespace_first_then_whitespace_error` | §13 |
+| `cases/spec/13-inputs/joins_whitespace_input_needs_separator_error` | §13 |
+| `cases/spec/13-inputs/joins_whitespace_input_then_semicolon` | §13 |
+| `cases/spec/13-inputs/macro_registered_added_values_take_no_comments` | §13, §9, §12 |
 | `cases/spec/13-inputs/macro_registered_after_section_name_error` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_arguments` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_arguments_key_lowercase` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_array_arguments` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_at_end_ignored` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_bare_value` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_braced_value` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_context_in_included_file` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_context_is_root` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_ctx_copies_first_container_value` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_disable_macro_error` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_empty_values` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_entries_skip_duplicate_rules` | §13, §9 |
@@ -1687,6 +1763,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1400 case
 | `cases/spec/13-inputs/macro_registered_not_in_argument_document_error` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_overrides_builtin` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_quoted_value` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_seen_copies_first_container_value` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_seen_keeps_scalar_values` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_array_error` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_braced_in_object_error` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_braced_takes_root_brace` | §13, §9 |
@@ -1696,8 +1774,11 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1400 case
 | `cases/spec/13-inputs/macro_registered_text_empty` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_holds_macro` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_in_place` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_text_in_place_includes_other_file` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_text_in_place_self_include_error` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_include_differs` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_incomplete_error` | §13, §9 |
+| `cases/spec/13-inputs/macro_registered_text_stop_does_not_stay_open` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_stop_stops_all` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_takes_input_priority` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_text_takes_input_strategy` | §13, §9 |

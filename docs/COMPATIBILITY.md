@@ -19,7 +19,7 @@ example `key-lowercase` is `ParserFlags::KEY_LOWERCASE` and `no-filevars` is
 | `.includes`, and `sign=true` on any include macro (§9.4) | checks a signature when built with support for it; the reference build ignores `sign` | "unsupported" error; `sign=false` is accepted | a configuration that asks for a signature check must not be accepted without one | `cases/spec/09-macros/includes_like_include`, `cases/spec/09-macros/include_sign_param_no_effect` |
 | `.load` (§9.6) | always available | only with the Cargo feature `load`, off by default | it reads arbitrary files into values | `cases/spec/09-macros/load_*` (run with the feature) |
 | Documents given as text: `from_str`, `from_slice`, `from_reader` and a parser without a file loader | `.include`, `.try_include` and `.load` read files relative to the working directory | no file is found, so they behave as for a missing file (§9.4, §9.6); file access is opt-in through `ParserBuilder` | parsing untrusted text must not read local files | `tests/api_tests.rs`: `text_input_reads_no_files`, `text_input_loads_no_files` |
-| The working directory | relative include paths and `CURDIR` in macro argument lists (§9.2) use it | never used: for a document parsed from a file, that file's directory stands in for it, in included files too; for text, a configured base directory | results must not depend on where the program runs | `tests/api_tests.rs`: `from_file_resolves_includes_against_the_file_directory` |
+| The working directory | relative include paths and `CURDIR` in macro argument lists (§9.2) use it, in every input of a parser (§13.1) | never used: a configured base directory stands in for it; without one, a document parsed from a file, or an input given as a file, uses that file's directory, in included files too | results must not depend on where the program runs | `tests/api_tests.rs`: `from_file_resolves_includes_against_the_file_directory`; `tests/inputs_and_macros.rs`: `file_inputs_read_through_the_loader_and_set_the_file_variables` |
 | Macro argument lists nested inside argument lists (§9.2) | no limit of its own; very deep nesting crashes | at most 64 levels (`parse::MAX_ARGUMENT_DEPTH`), then an error | bounded stack use | `cases/spec/09-macros/macro_args_nested_100_levels` |
 | Values that `.inherit` copies (§9.7, §11.2) | no limit: copies of copies can nest a value tens of thousands of levels deep | a copy that would nest a value more than 1024 containers deep, the root included, is an error (`parse::ErrorKind::NestingTooDeep`), the same limit as for containers open at once | bounded stack use: no parsed value is nested deeper than 1024 | `tests/stack_depth.rs`; no conformance case, because the golden file would be too deep for the runner |
 | A variable handler's result in a string that also holds other text (§7.7) | depends on memory contents | the result is substituted in place | libucl's result is undefined | none (undefined in libucl) |
@@ -27,6 +27,8 @@ example `key-lowercase` is `ParserFlags::KEY_LOWERCASE` and `no-filevars` is
 | An included file that starts with `[` (§9.4) | reads on and may stop or crash | error at the `[` | libucl's behaviour is undefined | none (undefined in libucl) |
 | A `}` in an included file that closes an object that is an array element of the including document (§9.4) | reads keys into the array and crashes | parsing goes on inside the array | libucl's behaviour is a crash | none (libucl crashes) |
 | A silent stop (§9.4, *Missing and unusable files*): `.try_include` of a missing file and similar | reports failure with no message and keeps the partial result | `UclError::Stopped` / `parse::ErrorKind::Stopped`, with the partial result available from the error | an application must be able to tell a stop from success | `cases/spec/09-macros/try_include_missing_stops_parsing` (partial result compared) |
+| A registered macro handler that fails (§13.2) | a handler can only succeed or fail; a failure is a silent stop with no message | a handler can stop silently (`MacroError::stop()`, reported as a stop) or fail with its own message (`MacroError::new`, `parse::ErrorKind::MacroFailed`) | an application must be able to say why its macro failed | `tests/inputs_and_macros.rs`: `handlers_fail_with_a_stop_or_a_message` |
+| A later input that starts with `{` after a zero-byte first input (§13.1) | crashes | error, as for any later input with content there | libucl's behaviour is a crash | `tests/inputs_and_macros.rs`: `only_the_first_input_sets_up_the_root` |
 | serde JSON output (`to_json_string`, `to_json_string_compact`) | writes `nan`, `inf` and times with a suffix, which is not JSON | valid JSON (RFC 8259): a time is its number of seconds; NaN and infinite floats and times are a serialization error | output of a JSON function must be JSON | `tests/serde_roundtrip.rs` |
 
 These choices match libucl rather than differ from it:
@@ -39,6 +41,12 @@ These choices match libucl rather than differ from it:
   file parsing does; parsing text honours the flag (§12.7).
 - Saved comments are written in config output only when the caller asks for them, as in libucl
   (§10.10).
+- Registered macro handlers can do what libucl's can: add entries where the macro stands, and
+  have text parsed in place of the macro (§13.2).
+
+A limit of this crate's API, with no libucl counterpart: a deserialization error from a document
+whose parse ran a registered macro carries no position, because positions are found by parsing
+again and a handler is not run a second time.
 
 ## libucl quirks the crate reproduces
 
@@ -78,6 +86,36 @@ configurations written for libucl rely on it. The spec marks each as **Quirk**; 
 | Under `no-time`, `ms`, `ks` and `gs` still give times | §12.3 | `cases/spec/12-flags/no_time` |
 | A saved block comment includes the byte after its `*/` | §12.5 | `cases/spec/12-flags/comments_block_comment_saved_with_next_byte` |
 | `no-filevars` still lets an include define `FILENAME` and `CURDIR` | §12.7 | `cases/spec/09-macros/no_filevars_include_defines_them` |
+
+### Several inputs into one parser (§13.1)
+
+A parser that reads several inputs in turn keeps libucl's behaviour where they join:
+
+- A parser takes at most 16 inputs. Each counts towards the include nesting limit for the rest of
+  the parse, so later inputs may nest includes less deeply (`cases/spec/13-inputs/inputs_seventeen_inputs_error`,
+  `cases/spec/13-inputs/inputs_include_depth_shared_error`).
+- A zero-byte first input gives an empty root that later inputs cannot add to
+  (`cases/spec/13-inputs/inputs_empty_first_then_entries_error`).
+- The end of an input is not a separator.
+  - An input that ends right after a value such as `x = 1`, or after an unquoted value and
+    spaces, must be followed by one that starts with a line break, `;`, `,` or a comment
+    (`cases/spec/13-inputs/inputs_value_at_end_then_entry_error`,
+    `cases/spec/13-inputs/joins_bare_value_trailing_space_error`).
+  - Spaces after a quoted value do separate
+    (`cases/spec/13-inputs/joins_quoted_value_trailing_space`).
+- A later input of whitespace alone makes the next input need a separator; a second one undoes
+  that (`cases/spec/13-inputs/joins_whitespace_input_needs_separator_error`,
+  `cases/spec/13-inputs/joins_two_whitespace_inputs_cancel`).
+- A key followed by its separator and a line break at the end of an input takes its value from
+  the next input (`cases/spec/13-inputs/joins_value_in_next_input`).
+- After a closed root, a later input must start with a line break, `;`, `,` or a comment, and
+  the rest of it is then ignored (`cases/spec/13-inputs/joins_closed_root_then_line_break_rest_ignored`,
+  `cases/spec/13-inputs/joins_closed_root_then_space_entry_error`).
+- An included file in which the parse stopped silently stays open for the rest of the parse. It
+  keeps its `FILENAME` and counts towards the limits, and including it again is self-inclusion
+  (`cases/spec/13-inputs/joins_stopped_include_again_is_self_inclusion_error`).
+- A text input goes on in the file of the input before it, so after a file input it cannot
+  include that file (`cases/spec/13-inputs/joins_text_input_continues_file_input_self_include_error`).
 
 ## Not supported
 

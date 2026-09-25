@@ -1852,3 +1852,32 @@
     that adds this entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: spec team. Item: C0, `spec-v11`.
+  - Answered QUESTIONS #59 (a)–(n): every part checked against libucl's source and confirmed with
+    the oracle (`ucl-dump -i`, `-R`, `-c`, `-F`, `-v`), then written into §13.1 and §13.2.
+    - Corrections to spec-v10: after a closed root, a later input may begin with a separator or a
+      comment, and its rest is ignored; pending comments attach to the most recent value of any
+      earlier input; ARGUMENTS may be an array.
+    - New rules: whitespace-only inputs alternate; quoted and unquoted values differ at the end
+      of an input; a value may come from a later input; a `#` as the last byte of a later input;
+      comments at a stop or a waiting key; the file-variable order after a file input; a stopped
+      included file stays open; a text input continues the previous input's file for
+      self-inclusion; the test macros copy as `.inherit` does.
+  - Found while checking (m): a quoted VALUE reaches a handler with its escapes undecoded, so
+    `.emit ".include \"f\""` includes a path with backslashes. The case uses a braced VALUE.
+  - Cases: 74 new in `tests/conformance/cases/spec/13-inputs/` (`joins_*`, seven
+    `macro_registered_*`), with fixtures `files/joins_*.inc`. Every error case was checked to
+    fail for the intended reason (oracle message), and the self-inclusion cases have passing
+    controls. All golden files were regenerated with `scripts/regen-golden.sh`; no existing
+    golden file changed. The crate passes all 74 (new core 1571 of 1575 with the 4 listed
+    divergences; emitters 1158 of 1162), so nothing is held in `pending/`.
+  - Spec README: history, the §13 decisions under *Divergences decided by the project*, and a
+    coverage table of all 1575 cases. §13 now names `cases/spec/13-inputs/`. `docs/COMPATIBILITY.md`
+    gains the handler-failure and zero-byte-then-`{` rows, the working-directory row for file
+    inputs, the API note on positions, and a section on the join quirks.
+  - Commits: `a93e759` (cases), `0755ce8` (spec, QUESTIONS, COMPATIBILITY; tagged `spec-v11`).
+    `scripts/ci.sh` passes at both.
+  - Note on history: commit `6c37b7c` was a lead's WORKLIST commit that swept in the
+    implementer's staged move of the §13 cases, leaving CI red at that one commit. History is
+    left unchanged.
+  - The spec contains behaviour only.

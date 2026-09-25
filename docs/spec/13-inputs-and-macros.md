@@ -4,8 +4,8 @@ The sections before this one describe one document read by a parser. libucl's pa
 application give it several inputs in turn, building one result (§13.1), and register macros of its
 own (§13.2). This section describes both as libucl behaves.
 
-The cases are in `tests/conformance/pending/13-inputs/`, where the runners do not read them yet; a
-bare case name here means that directory. A case's `.ucl` file is its first input; a `.inputs` file
+The cases are in `tests/conformance/cases/spec/13-inputs/`; a bare case name here means that
+directory. A case's `.ucl` file is its first input; a `.inputs` file
 lists the further inputs, and the flags `registered-macros` and `registered-priority-override`
 register the oracle's test macros (§13.2, *The test macros*). `tests/conformance/README.md`
 describes the format.
@@ -39,20 +39,46 @@ values that earlier inputs added are not treated again.
   (`inputs_variables_in_every_input`), and so do registered macros (§13.2;
   `inputs_registered_macro_in_later_input`). `.inherit` finds objects that earlier inputs added
   (§9.7; `inputs_inherit_from_earlier_input`).
-- Saved comments (§12.5) do not cross from one input to the next. Comments still pending at the
-  end of an input attach there, as at the end of a document, to the value created most recently,
-  or as comments after the root when the input created no value; comments at the start of an
-  input attach to its first value (`inputs_comments_stay_in_their_input`,
-  `inputs_comment_only_input_attaches_to_root`).
+- Saved comments (§12.5) attach as in one document, with the inputs read as one text, except at
+  the end of an input:
+  - Comments still pending at the end of an input attach there, as at the end of a document, to
+    the value created most recently, in that input or an earlier one. Only when no value has been
+    created at all do they attach after the root. Comments at the start of an input attach to its
+    first value (`inputs_comments_stay_in_their_input`,
+    `inputs_comment_only_input_attaches_to_root`, `joins_comment_input_attaches_to_earlier_value`,
+    `joins_empty_first_then_hash_attaches_to_root`).
+  - Comments pending at a silent stop (below) are not attached at the stop: they attach to the next
+    value, which the next input creates, or at the end of the next input that has content. A
+    zero-byte input does not count (`joins_comments_at_stop_attach_in_next_input`,
+    `joins_comments_at_stop_then_whitespace_input`, `joins_comments_at_stop_then_empty_input`).
+  - Comments pending while a key waits for its value in a later input (below) wait with it. The
+    group before the key attaches before the value, and the group held back after the key
+    (§12.5) attaches after it, as in one document. Comments in the input that holds the value
+    are treated as in one document (`joins_value_in_next_input_comments_wait`,
+    `joins_key_waiting_comments_before_key`, `joins_key_waiting_comment_after_key`,
+    `joins_key_waiting_two_comment_groups`, `joins_key_waiting_comment_in_value_input`).
 
 ### The root
 
 Only the first input sets up the root (§1.1). Later inputs add entries to an object root; they
 cannot start a root of their own.
 
-- After a braced root has closed, and after an array root, a later input with content is an error
-  (`inputs_braced_root_then_entries_error`, `inputs_braced_root_then_braced_root_error`,
-  `inputs_array_root_then_array_error`, `inputs_array_root_then_entries_error`).
+- **Quirk.** After a braced root has closed, and after an array root, a later input is read as the
+  rest of a document after its root (§1.1).
+  - After optional spaces and TABs, it must begin with a line break, `;`, `,` or a comment, or
+    end. Anything else is an error: an entry, a bracket, VT, FF, or a space before an entry
+    (`inputs_braced_root_then_entries_error`, `inputs_braced_root_then_braced_root_error`,
+    `inputs_array_root_then_array_error`, `inputs_array_root_then_entries_error`,
+    `joins_closed_root_then_space_entry_error`, `joins_closed_root_then_vertical_tab_error`,
+    `joins_closed_root_then_brace_error`).
+  - After such a beginning, and any further mix of these, the rest of the input is ignored,
+    whatever it holds (`joins_closed_root_then_line_break_rest_ignored`,
+    `joins_closed_root_then_semicolon_rest_ignored`, `joins_closed_root_then_comment_rest_ignored`,
+    `joins_closed_root_then_vertical_tab_after_line_break`, `joins_closed_root_then_spaces_only`,
+    `joins_array_root_then_line_break_rest_ignored`, `joins_array_root_then_comma_rest_ignored`).
+  - The exception is a `}` or `]` that follows them, which is an error
+    (`joins_closed_root_then_line_break_brace_error`,
+    `joins_closed_root_then_semicolon_bracket_error`, `joins_closed_root_then_comment_brace_error`).
 - After an object root without braces, a later input that starts with `{` or `[` is an error: the
   bracket stands where a key must (`inputs_entries_then_braced_root_error`,
   `inputs_entries_then_array_root_error`).
@@ -65,23 +91,58 @@ cannot start a root of their own.
   to: a later input with content is an error (`inputs_empty_first_then_entries_error`,
   `inputs_empty_first_then_array_error`). A later input is accepted only when nothing is left of
   it after a group of comments at its very start (§1.1) and then whitespace: `# c⏎` and whitespace
-  alone are fine, whitespace followed by a comment is an error
+  alone are fine, whitespace followed by a comment is an error, and so is `;`
   (`inputs_empty_first_then_comment_only`, `inputs_empty_first_then_whitespace`,
-  `inputs_empty_first_then_comment_error`). **Uncertain (crashes libucl):** a later input that
+  `inputs_empty_first_then_comment_error`, `joins_empty_first_then_semicolon_error`). **Uncertain (crashes libucl):** a later input that
   starts with `{` after a zero-byte first input.
 
 ### Where one input ends and the next begins
 
-**Quirk.** The end of an input is not a separator (§1.3).
+**Quirk.** The end of an input is not a separator (§1.3). The rules below say where a later input
+needs one; the `joins_*` cases show each of them.
 
-- A value that ends at the very end of its input, or is followed there only by spaces or tabs,
-  must be separated from the next input's first entry: that input must begin with a line break,
-  `;`, `,` or a comment, or its first entry is an error. This holds for numbers, quoted strings and
-  other scalars: `x = 1`, `x = 1 ` and `x = "s"` followed by `k = 1;` are errors, while `x = 1`
-  followed by `⏎k = 1;`, `;k = 1;` or `# c⏎k = 1;` is fine (`inputs_value_at_end_then_entry_error`,
-  `inputs_value_then_space_at_end_error`, `inputs_quoted_value_at_end_error`,
-  `inputs_value_at_end_then_line_break`, `inputs_value_at_end_then_semicolon`,
-  `inputs_value_at_end_then_comment`).
+- **A value at the end of its input.** A value that ends at the very end of its input must be
+  separated from the next input's first entry. So must an unquoted value followed there only by
+  spaces or TABs, since those spaces belong to the value's scan.
+  - The next input must begin with a line break, `;`, `,`, a comment or a NUL byte. It may also
+    begin with the `}` or `]` that closes the value's container. Otherwise its first entry is an
+    error, and so is a VT or FF there: `x = 1`, `x = 1 `, `x = true `, `x = 1s ` and `x = "s"`
+    followed by `k = 1;` are errors, while `x = 1` followed by `⏎k = 1;`, `;k = 1;` or `# c⏎k = 1;`
+    is fine (`inputs_value_at_end_then_entry_error`, `inputs_value_then_space_at_end_error`,
+    `inputs_quoted_value_at_end_error`, `inputs_value_at_end_then_line_break`,
+    `inputs_value_at_end_then_semicolon`, `inputs_value_at_end_then_comment`,
+    `joins_bare_value_trailing_space_error`, `joins_time_value_trailing_space_error`,
+    `joins_value_at_end_then_nul`, `joins_value_at_end_then_closing_brace`,
+    `joins_value_at_end_then_form_feed_error`, `joins_value_at_end_then_vertical_tab_error`).
+  - A quoted value ends at its closing quote, so spaces or TABs after it at the end of its input
+    are a separator: `x = "s" ` and `x = 'a'⇥` followed by `k = 1` are fine
+    (`joins_quoted_value_trailing_space`, `joins_single_quoted_value_trailing_tab`).
+  - A later input of spaces, TABs or line breaks alone also separates. A second such input
+    undoes that, and a third separates again; a zero-byte input changes nothing
+    (`joins_value_at_end_then_whitespace_input`, `joins_value_at_end_two_whitespace_inputs_error`,
+    `joins_value_at_end_empty_input_error`).
+  - A `#` that is the last byte of the next input is a comment (`joins_value_at_end_then_hash`).
+- **An input of whitespace alone where an entry could start.** A later input of whitespace alone
+  (space, TAB, LF, CR, VT or FF), read where an entry could start, makes the next input with
+  entries need a separator first, as after a value. A second such input undoes that, and so on
+  alternately.
+  - Examples: `a = 1;⏎` followed by ` ` or `⏎`, and then `k = 1`, is an error; with two inputs of
+    spaces in between it is fine; `;k = 1` or a comment first is fine.
+  - The first input is not counted: `  ` then `k = 1` is fine, while `  `, `  ` and `k = 1` is an
+    error.
+  - The same holds after section names that end their input with a separator and a line break
+    (§3.4): `c "x{" =⏎` followed by `d {}` is an error, while a comment, an input of spaces or `;`
+    in between makes it `{ c: { "x{": { d: {} } } }`.
+  - Cases: `joins_whitespace_input_needs_separator_error`, `joins_two_whitespace_inputs_cancel`,
+    `joins_line_break_input_needs_separator_error`, `joins_whitespace_input_then_semicolon`,
+    `joins_whitespace_first_input_not_counted`, `joins_whitespace_first_then_whitespace_error`,
+    `joins_section_names_then_entry_error`, `joins_section_names_then_comment_input`,
+    `joins_section_names_then_whitespace_input`, `joins_section_names_then_semicolon_input`.
+- **A `#` as the last byte of a later input.** Where an entry could start, such a `#` is an error
+  when it comes after whitespace, as §2.2 describes, and the start of a later input counts as
+  after whitespace. `a = 1;⏎` followed by `#`, ` #` or `⏎#` is an error; followed by `# c⏎#` it is
+  fine (`joins_hash_last_byte_of_later_input_error`, `joins_space_hash_last_byte_error`,
+  `joins_line_break_hash_last_byte_error`, `joins_comment_then_hash_last_byte`).
 - A value followed in its own input by `;`, `,`, a line break or a comment needs nothing more, and
   neither does an object or array value or a heredoc (`inputs_value_then_semicolon_at_end`,
   `inputs_value_then_comma_at_end`, `inputs_value_then_comment_at_end`, `inputs_container_at_end`,
@@ -89,6 +150,22 @@ cannot start a root of their own.
 - An entry cannot be split across inputs: an input that ends after a key, or after its `=`, is an
   error, whatever follows, and so is a last input that does (`inputs_key_split_across_inputs_error`,
   `inputs_entry_split_across_inputs_error`, `inputs_incomplete_entry_in_last_input_error`).
+- **A value on a following line** (§1.6) may come from a later input: an input that ends with a key,
+  its separator and a line break leaves the key waiting, and the next input with content gives its
+  value.
+  - `x =⏎` followed by `v` gives `{ x: "v" }`, followed by `k = 1⏎` gives `{ x: "k = 1" }`, and
+    zero-byte inputs and comment-only inputs in between are skipped. A key still waiting after
+    the last input is `null`, as at the end of a document.
+  - The value takes the priority and duplicate strategy of the key's input, `.priority` included:
+    `.priority 3⏎x =⏎` followed by `{ a = 1 }` at priority 5 gives `x` at 3 and `a` at 5.
+    `x = 1;⏎x =⏎` followed by `v` in an input under `error` gives `{ x: [1, "v"] }`.
+  - While a key waits, a later input that is a single `#` is an error, as a `#` directly after
+    whitespace is where a value is expected. ` #`, `# c` and `#⏎v` are not errors.
+  - Cases: `joins_value_in_next_input`, `joins_value_in_next_input_whole_line`,
+    `joins_value_after_empty_and_comment_inputs`, `joins_value_in_next_input_key_priority`,
+    `joins_value_in_next_input_key_strategy`, `joins_key_waiting_then_hash_input_error`,
+    `joins_key_waiting_then_space_hash`, `joins_key_waiting_then_comment_input`,
+    `joins_key_waiting_then_hash_line_value`.
 
 ### Brackets
 
@@ -107,7 +184,7 @@ cannot start a root of their own.
   (`inputs_error_in_first_input`, `inputs_error_in_later_input`).
 - A silent stop (§9.4, *Missing and unusable files*; a failing registered macro, §13.2) ends the
   input that holds the macro, with every file it was including, and nothing else: the next input
-  is read, and goes on where the stopped one left off (`inputs_stop_then_later_inputs`,
+  is read, and goes on where the stopped one left off (`joins_stopped_include_next_input_read`) (`inputs_stop_then_later_inputs`,
   `inputs_stop_in_later_input`, `inputs_stop_in_included_file_then_later_input`). Objects the
   stopped input left open stay open: the next input's entries go into them, and it may close
   them; the check at the end of that later input stops before them, but still covers the
@@ -118,7 +195,20 @@ cannot start a root of their own.
 
 - An input given as text leaves `FILENAME` and `CURDIR` as they are. An input given as a file sets
   them from its path, also under `no-filevars` (§12.7), and they keep those values for later
-  inputs given as text. No case: the golden file would contain the checkout path.
+  inputs given as text. No case for the values themselves: the golden file would contain the
+  checkout path.
+- Where they stand in the lookup order (§7.1): an input given as a file changes the values of
+  `FILENAME` and `CURDIR` where they already stand. When they are not defined, as under
+  `no-filevars`, it defines them after the variables registered so far. So a registered `FILE`
+  still matches `$FILENAME` first (`joins_file_input_file_variables_after_registered`, with
+  `FILE` = `f`: `"fNAME"` in both inputs).
+- **Quirk.** An input given as text goes on in the file of the input before it, for the
+  self-inclusion check of §9.4. After an input given as the file `s.inc`, a text input that
+  includes `s.inc` includes it from itself, an error
+  (`joins_text_input_continues_file_input_self_include_error`; compare
+  `joins_same_file_from_two_text_inputs`). Text a registered macro has parsed in place is in the
+  file that holds the macro (`macro_registered_text_in_place_self_include_error`, compare
+  `macro_registered_text_in_place_includes_other_file`).
 - Relative include paths resolve against the working directory in every input (§9.3), not against
   the directory of an input given as a file (`inputs_include_resolves_from_working_directory`).
 
@@ -129,6 +219,15 @@ So a parser takes at most 16 inputs, and the 17th is an error (`inputs_sixteen_i
 `inputs_seventeen_inputs_error`). In the Nth input, includes may nest at most 16 − N deep: in the
 15th input one level of include works, in the 16th none does (`inputs_include_depth_shared_ok`,
 `inputs_include_depth_shared_error`).
+
+**Quirk.** An included file in which the parse stopped silently (§9.4, a `.try_include` of a
+missing file or a failing registered macro in it) stays open for the rest of the parse. It counts
+as an open unit, so with one such file only 14 further inputs are accepted, not 15, and its
+`FILENAME` and `CURDIR` stay in effect. A later include of the same file includes it from itself,
+an error (`joins_stopped_include_stays_open_fourteen_inputs`,
+`joins_stopped_include_stays_open_fifteen_inputs_error`,
+`joins_stopped_include_again_is_self_inclusion_error`). Text that a registered macro parsed in
+place does not stay open after a stop in it (`macro_registered_text_stop_does_not_stay_open`).
 
 ## 13.2 Registered macros
 
@@ -163,7 +262,9 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   expanded (§7), with `$$` as §7.5 says. An empty value is empty text
   (`macro_registered_quoted_value`, `macro_registered_braced_value`, `macro_registered_bare_value`,
   `macro_registered_value_variables`, `macro_registered_empty_values`).
-- **The ARGUMENTS as an object**, the argument document parsed as §9.2 describes: repeated names
+- **The ARGUMENTS as the argument document's root**, parsed as §9.2 describes. That is an object,
+  or an array when the argument document is one (`.seen([1, 2]) "v"`;
+  `macro_registered_array_arguments`). For an object: repeated names
   give multi-value entries, built-in macros work in it, and `key-lowercase` lowercases the names
   but not the values. `()` gives an empty object; without parentheses there is no object at all.
   No parameter table applies: the handler sees every name as written
@@ -180,7 +281,9 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   the entries around it. §8 does not apply to them: they take priority 0 and join an existing key
   as a further value, whatever the input's priority and strategy and `no-implicit-arrays`
   (`macro_registered_in_object`, `macro_registered_empty_values`,
-  `macro_registered_entries_skip_duplicate_rules`).
+  `macro_registered_entries_skip_duplicate_rules`). Values a handler adds do not count as created
+  values for saved comments (§12.5), as with built-in macros: comments before the macro attach to
+  the next value the input creates (`macro_registered_added_values_take_no_comments`).
 - **Have text parsed in place of the macro.** The text is read as the content of an included file
   is (§9.4, *Where the entries go* and *The check at the end of a unit*): a leading `{` takes over
   the brace of the object the entries go into, the text must close the brackets it opens, an
@@ -210,9 +313,18 @@ The oracle registers these, each with access to the parser, under the flag `regi
 | Macro | Kind | What it does |
 | --- | --- | --- |
 | `.emit` | plain | has its VALUE text parsed in place, and fails if that fails or stops |
-| `.seen` | plain | adds to the innermost open object the key `seen` with the object `{ data: <VALUE text as a string>, args: <a copy of the ARGUMENTS object, or null> }`; fails if the innermost open container is not an object |
+| `.seen` | plain | adds to the innermost open object the key `seen` with the object `{ data: <VALUE text as a string>, args: <a copy of the ARGUMENTS, or null> }`; fails if the innermost open container is not an object |
 | `.fail` | plain | fails and does nothing else |
 | `.ctx` | context | adds to the innermost open object the key `ctx` with a copy of the root it received; fails like `.seen` |
+
+The copies that `.seen` and `.ctx` make are made the way `.inherit` copies (§9.7, #24): an entry
+whose first value is an object or an array is copied as that value only, while an entry of
+several scalar values keeps them all. `.seen(o = {x = 1}, o = {y = 2}) "v"` gives
+`args: { o: { x: 1 } }`, and `.seen(n = 1, n = 2) "v"` keeps both values of `n`
+(`macro_registered_seen_copies_first_container_value`,
+`macro_registered_ctx_copies_first_container_value`, `macro_registered_seen_keeps_scalar_values`).
+This is a property of the test macros, not of what a handler receives: a handler receives the
+ARGUMENTS and the root complete.
 
 Under `registered-priority-override` the oracle also registers the handler of `.seen` under the
 name `priority`, after the built-in macros. The conformance runner needs the same four macros,
