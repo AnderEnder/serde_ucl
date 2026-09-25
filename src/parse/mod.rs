@@ -29,6 +29,12 @@
 //! [`ErrorKind::Stopped`], from which [`Error::partial`] gives the entries parsed before the
 //! stop.
 //!
+//! A parser can also take several inputs in turn, bytes or files, each with its own priority and
+//! duplicate strategy, and build one result from them (§13.1): [`Parser::inputs`] starts such a
+//! parse, [`Inputs`] describes it. An application can register macros of its own
+//! ([`Parser::register_macro`], [`Parser::register_context_macro`]), whose handlers add entries
+//! or have text parsed in place of the macro (§13.2; [`MacroCall`]).
+//!
 //! The crate's serde entry points ([`crate::from_str`], [`crate::from_slice`],
 //! [`crate::from_reader`], [`crate::from_file`]) parse with a default [`Parser`]. Build one with
 //! other settings through its setters or [`ParserBuilder`], parse to a [`UclValue`], and
@@ -52,9 +58,11 @@ mod error;
 pub(crate) mod facts;
 mod glob;
 mod include;
+mod inputs;
 mod loader;
 mod macros;
 mod number;
+mod registered;
 mod string;
 pub(crate) mod tree;
 mod vars;
@@ -62,9 +70,11 @@ mod vars;
 pub use builder::ParserBuilder;
 pub use error::{Error, ErrorKind};
 pub use facts::{OutputFacts, ValueFacts};
+pub use inputs::{Input, Inputs};
 #[cfg(feature = "fs")]
 pub use loader::FsLoader;
 pub use loader::{FileKind, Loader, MemoryLoader};
+pub use registered::{MacroCall, MacroError, MacroHandler};
 
 use crate::error::Position;
 use crate::value::{DuplicateStrategy, ParserFlags, UclValue};
@@ -160,6 +170,8 @@ pub struct Parser {
     facts: OutputFacts,
     /// The variable handler's answers in the last parse, in the order it was asked.
     handler_answers: Vec<Option<String>>,
+    /// The macros the application registered (spec §13.2).
+    macros: registered::MacroTable,
 }
 
 impl Default for Parser {
@@ -181,6 +193,7 @@ impl fmt::Debug for Parser {
             .field("max_input_bytes", &self.max_input_bytes)
             .field("comments", &self.comments.len())
             .field("attached", &self.attached.len())
+            .field("macros", &self.macros.names())
             .finish()
     }
 }
@@ -207,6 +220,7 @@ impl Parser {
             attached_paths: OnceCell::new(),
             facts: OutputFacts::new(),
             handler_answers: Vec::new(),
+            macros: registered::MacroTable::default(),
         }
     }
 
@@ -263,6 +277,50 @@ impl Parser {
         handler: impl FnMut(&str) -> Option<String> + 'static,
     ) -> &mut Self {
         self.handler = Some(Box::new(handler));
+        self
+    }
+
+    /// Registers a macro under `name` (spec §13.2): `.NAME (ARGUMENTS)? VALUE` then runs
+    /// `handler`, which gets a [`MacroCall`] and returns `Ok(())` or a [`MacroError`].
+    ///
+    /// The macro is recognised where a built-in macro is (§9.1, §9.2), in every input and in
+    /// included files, but not in macro argument documents, which know only the built-in macros.
+    /// `name` matches exactly and case-sensitively, `KEY_LOWERCASE` notwithstanding; a name
+    /// that is empty or holds whitespace or `(` never matches. A name that is neither built in
+    /// nor registered is still [`ErrorKind::UnknownMacro`]. Registering a built-in name
+    /// (`include`, `priority`, …) replaces that macro; registering a name again replaces its
+    /// handler. Under [`ParserFlags::DISABLE_MACRO`] a registered macro is an error like every
+    /// macro (§12.6).
+    pub fn register_macro(
+        &mut self,
+        name: impl Into<String>,
+        handler: impl Fn(&mut MacroCall<'_>) -> Result<(), MacroError> + 'static,
+    ) -> &mut Self {
+        self.macros.insert(
+            name.into(),
+            registered::Registered {
+                handler: std::rc::Rc::new(handler),
+                context: false,
+            },
+        );
+        self
+    }
+
+    /// Registers a context macro under `name`: as [`Parser::register_macro`], and its handler
+    /// also gets a copy of the root as built so far, [`MacroCall::root`] (spec §13.2). `.inherit`
+    /// (§9.7) is the built-in context macro.
+    pub fn register_context_macro(
+        &mut self,
+        name: impl Into<String>,
+        handler: impl Fn(&mut MacroCall<'_>) -> Result<(), MacroError> + 'static,
+    ) -> &mut Self {
+        self.macros.insert(
+            name.into(),
+            registered::Registered {
+                handler: std::rc::Rc::new(handler),
+                context: true,
+            },
+        );
         self
     }
 
@@ -411,13 +469,69 @@ impl Parser {
     /// to [`Parser::parse_file`], resolve against: the base directory, or the loader's current
     /// directory.
     fn base(&self) -> PathBuf {
-        match &self.base_dir {
-            Some(dir) => dir.clone(),
-            None => self
-                .loader
-                .current_dir()
-                .unwrap_or_else(|_| PathBuf::from(".")),
-        }
+        inputs::input_base(self.base_dir.as_deref(), &*self.loader, None)
+    }
+
+    /// Starts a parse of several inputs into one result (spec §13.1): give it each input with
+    /// [`Inputs::add`], then take the result from [`Inputs::finish`]. The parser's settings
+    /// apply to every input; [`Input`] sets each input's priority and duplicate strategy.
+    ///
+    /// ```
+    /// use ucl_lexer::parse::{Input, Parser};
+    ///
+    /// let mut parser = Parser::new();
+    /// let mut inputs = parser.inputs();
+    /// inputs.add(Input::bytes("a = 1; b = 2;"))?;
+    /// inputs.add(Input::bytes("a = 3; c = 4;").with_priority(5))?;
+    /// let value = inputs.finish()?;
+    /// let root = value.as_object().unwrap();
+    /// assert_eq!(root["a"].as_integer(), Some(3));
+    /// assert_eq!(root.keys().collect::<Vec<_>>(), ["a", "b", "c"]);
+    /// # Ok::<(), ucl_lexer::parse::Error>(())
+    /// ```
+    pub fn inputs(&mut self) -> Inputs<'_> {
+        let Parser {
+            flags,
+            priority,
+            strategy,
+            variables,
+            handler,
+            loader,
+            base_dir,
+            search_path,
+            max_input_bytes,
+            comments,
+            attached,
+            attached_paths,
+            facts,
+            handler_answers,
+            macros,
+        } = self;
+        handler_answers.clear();
+        *attached_paths = OnceCell::new();
+        // The handler's answers are recorded, so that `Parser::locate` can give them again.
+        let recording = handler.as_deref_mut().map(|handler| {
+            Box::new(move |name: &str| {
+                let answer = handler(name);
+                handler_answers.push(answer.clone());
+                answer
+            }) as Box<vars::Handler<'_>>
+        });
+        Inputs::new(inputs::Parts {
+            flags: *flags,
+            priority: *priority,
+            strategy: *strategy,
+            variables,
+            handler: recording,
+            loader: &**loader,
+            base_dir: base_dir.as_deref(),
+            search_path: search_path.clone(),
+            max_input_bytes: *max_input_bytes,
+            macros,
+            comments,
+            attached,
+            facts,
+        })
     }
 
     /// Parses a document given as bytes rather than read from a file.
@@ -427,20 +541,21 @@ impl Parser {
     /// ([`Parser::set_base_dir`]), or without one the loader's current directory, which is `/`
     /// for the default loader. Registered variables of the same names override them.
     pub fn parse(&mut self, input: &[u8]) -> Result<UclValue, Error> {
-        let unit = self.bytes_unit();
-        self.run(input, unit)
+        self.parse_one(Input::bytes(input))
     }
 
-    /// How a document given as bytes is parsed: against the base directory, with its file
-    /// variables unless `NO_FILEVARS` is set.
-    fn bytes_unit(&self) -> Unit {
-        let base = self.base();
-        let filevars = (!self.flags.contains(ParserFlags::NO_FILEVARS))
-            .then(|| ("undef".to_string(), base.to_string_lossy().into_owned()));
-        Unit {
-            base,
-            filevars,
-            main: None,
+    /// A parse of the single input `input`: a silent stop is an error that holds the result.
+    fn parse_one(&mut self, input: Input<'_>) -> Result<UclValue, Error> {
+        let mut inputs = self.inputs();
+        let stopped = match inputs.read(input) {
+            Ok(()) => None,
+            Err(e) if e.is_stopped() => Some(e),
+            Err(e) => return Err(e),
+        };
+        let value = inputs.finish()?;
+        match stopped {
+            Some(stop) => Err(stop.with_partial(value)),
+            None => Ok(value),
         }
     }
 
@@ -496,46 +611,7 @@ impl Parser {
         canonical: PathBuf,
         input: &[u8],
     ) -> Result<UclValue, Error> {
-        let unit = self.file_unit(canonical);
-        self.run(input, unit)
-    }
-
-    /// How the file whose canonical path is `canonical` is parsed: against the base directory or
-    /// the file's directory, with the file variables of the file.
-    fn file_unit(&self, canonical: PathBuf) -> Unit {
-        let dir = canonical
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        let base = self.base_dir.clone().unwrap_or_else(|| dir.clone());
-        let filevars = Some((
-            canonical.to_string_lossy().into_owned(),
-            dir.to_string_lossy().into_owned(),
-        ));
-        Unit {
-            base,
-            filevars,
-            main: Some(canonical),
-        }
-    }
-
-    /// The variables of a parse of `unit`, in lookup order (spec §7.1): the file variables
-    /// first, then the registered ones.
-    fn variables(&self, unit: &Unit) -> Vec<(String, String)> {
-        let from_file = unit.main.is_some();
-        let mut variables: IndexMap<String, String> = IndexMap::new();
-        if let Some((filename, curdir)) = &unit.filevars {
-            variables.insert("FILENAME".to_string(), filename.clone());
-            variables.insert("CURDIR".to_string(), curdir.clone());
-        }
-        for (name, value) in &self.variables {
-            let is_filevar = name == "FILENAME" || name == "CURDIR";
-            if from_file && is_filevar && variables.contains_key(name) {
-                continue;
-            }
-            variables.insert(name.clone(), value.clone());
-        }
-        variables.into_iter().collect()
+        self.parse_one(Input::read_file(canonical, input))
     }
 
     fn settings(&self) -> core::Settings {
@@ -546,115 +622,55 @@ impl Parser {
         }
     }
 
-    /// Parses `input` as `unit`. The variable handler's answers are recorded, so that
-    /// [`Parser::locate`] can give them again.
-    fn run(&mut self, input: &[u8], unit: Unit) -> Result<UclValue, Error> {
-        if let Some(limit) = self.max_input_bytes
-            && input.len() as u64 > limit
-        {
-            let kind = ErrorKind::InputTooLarge { limit, path: None };
-            return Err(Error::new(kind, Position::new()));
-        }
-        let variables = self.variables(&unit);
-        self.comments.clear();
-        self.attached = comments::CommentGroups::default();
-        self.attached_paths = OnceCell::new();
-        self.facts.clear();
-        self.handler_answers.clear();
-        let settings = self.settings();
-        let answers = &mut self.handler_answers;
-        let mut recording = self.handler.as_deref_mut().map(|handler| {
-            move |name: &str| {
-                let answer = handler(name);
-                answers.push(answer.clone());
-                answer
-            }
-        });
-        let mut expander = vars::Expander::new(
-            variables,
-            recording.as_mut().map(|h| h as &mut vars::Handler<'_>),
-            !self.flags.contains(ParserFlags::DISABLE_MACRO),
-        );
-        let budget = include::Budget::new(self.max_input_bytes, input.len());
-        let mut includes = include::Includes::new(
-            &*self.loader,
-            unit.base,
-            unit.main,
-            self.search_path.clone(),
-            budget,
-        );
-        let sink = self
-            .flags
-            .contains(ParserFlags::SAVE_COMMENTS)
-            .then_some(core::CommentSink {
-                comments: &mut self.comments,
-                attached: &mut self.attached,
-            });
-        core::parse_document(
-            input,
-            settings,
-            &mut expander,
-            &mut includes,
-            sink,
-            Some(&mut self.facts),
-        )
-    }
-
     /// Parses `source`, the input of the last parse, again with the same settings, recording
     /// where each value was written: the result, and the locations, which
-    /// [`OutputFacts::position_of`] reads. `None` if the document no longer parses.
+    /// [`OutputFacts::position_of`] reads. `None` if the document no longer parses, and for a
+    /// document whose last parse ran a registered macro, whose handler is not run again.
     ///
     /// The locations follow values as the duplicate rules of spec §8 move, merge and replace them
     /// and `.inherit` copies them (§9.7). The loader is asked for the included files again. The
     /// variable handler is not called: its answers from the last parse are given again, in the
     /// same order. Saved comments and output facts of the last parse are kept.
     pub(crate) fn parse_located(&mut self, source: &Source<'_>) -> Option<(UclValue, OutputFacts)> {
-        let (input, unit) = match source {
-            Source::Bytes(input) => (*input, self.bytes_unit()),
+        if self.macros.ran.get() {
+            return None;
+        }
+        let (input, file) = match source {
+            Source::Bytes(input) => (*input, None),
             #[cfg(feature = "fs")]
-            Source::File { canonical, input } => (*input, self.file_unit(canonical.clone())),
+            Source::File { canonical, input } => (*input, Some(canonical.clone())),
         };
-        let variables = self.variables(&unit);
+        let base = inputs::input_base(self.base_dir.as_deref(), &*self.loader, file.as_deref());
+        let variables =
+            inputs::first_variables(self.flags, &self.variables, file.as_deref(), &base);
         let mut answers = self.handler_answers.iter();
-        let mut replay = move |_: &str| answers.next().cloned().flatten();
+        let replay = move |_: &str| answers.next().cloned().flatten();
         let mut expander = vars::Expander::new(
             variables,
             self.handler
                 .is_some()
-                .then_some(&mut replay as &mut vars::Handler<'_>),
+                .then(|| Box::new(replay) as Box<vars::Handler<'_>>),
             !self.flags.contains(ParserFlags::DISABLE_MACRO),
         );
-        let budget = include::Budget::new(self.max_input_bytes, input.len());
+        let budget = include::Budget::new(self.max_input_bytes);
+        budget.take(input.len());
         let mut includes = include::Includes::new(
             &*self.loader,
-            unit.base,
-            unit.main,
+            base,
             self.search_path.clone(),
             budget,
+            (!self.macros.is_empty()).then_some(&self.macros),
         );
-        let mut facts = OutputFacts::locating();
-        let result = core::parse_document(
-            input,
-            self.settings(),
-            &mut expander,
-            &mut includes,
-            None,
-            Some(&mut facts),
-        );
-        match result {
-            Ok(value) => Some((value, facts)),
-            Err(e) if e.is_stopped() => Some((e.into_partial()?, facts)),
-            Err(_) => None,
+        includes.files.push(file);
+        let mut document = core::Document::new(false, Some(OutputFacts::locating()), 0);
+        match document.read(input, self.settings(), &mut expander, &mut includes) {
+            Ok(()) => {}
+            Err(e) if e.is_stopped() => {}
+            Err(_) => return None,
         }
+        let finished = document.finish().ok()?;
+        Some((finished.root, finished.facts?))
     }
-}
-
-/// How one document is parsed: the directory relative paths resolve against, `FILENAME` and
-/// `CURDIR` if defined, and for a document read from a file its canonical path.
-struct Unit {
-    base: PathBuf,
-    filevars: Option<(String, String)>,
-    main: Option<PathBuf>,
 }
 
 /// The input of a parse, for [`Parser::parse_located`].

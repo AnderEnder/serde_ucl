@@ -16,6 +16,8 @@ libucl's source code, from a behaviour specification and libucl's observable out
 - Parser settings: libucl's parser flags, duplicate-key strategies and priorities, variables and
   a variable handler, macros (`.include`, `.try_include`, `.priority`, `.inherit`, `.load`) with
   pluggable file loaders.
+- Several inputs into one result, each with its own priority and strategy, such as defaults
+  under a user's file; and macros of the application's own.
 - Emitters that write a parsed document byte for byte as libucl writes it.
 
 The package is `ucl-rust-lexer`; the library is `ucl_lexer`.
@@ -349,6 +351,100 @@ fn main() {
 `.load`, which reads a file into a value, is available only with the Cargo feature `load`; without
 it, `.load` fails with an "unsupported" error. The crate never fetches URLs and never checks
 signatures: `.includes`, and `sign=true` on an include, fail with an "unsupported" error.
+
+## Several inputs
+
+A parser can read several inputs into one result, as libucl's parser does: `Parser::inputs`
+starts the parse, `Inputs::add` gives it each input, bytes or a file, and `Inputs::finish`
+returns the result. Each input has its own priority and duplicate strategy (`Input::with_priority`,
+`Input::with_strategy`; by default the parser's). So a user's file can be layered over the
+defaults: at a higher priority its values replace those of the defaults, and with the `merge`
+strategy its objects merge into theirs:
+
+```rust
+use ucl_lexer::parse::{Input, MemoryLoader, ParserBuilder};
+use ucl_lexer::{DuplicateStrategy, UclError};
+
+fn main() -> Result<(), UclError> {
+    let mut files = MemoryLoader::new();
+    files.add_file(
+        "/usr/share/app/app.conf",
+        "workers = 4\nlog { level = info; file = /var/log/app.log }\n",
+    );
+    files.add_file("/etc/app/app.conf", "workers = 16\nlog { level = debug }\n");
+    // With the filesystem, use FsLoader instead.
+    let mut parser = ParserBuilder::new().with_loader(files).build();
+
+    let mut inputs = parser.inputs();
+    inputs.add(Input::file("/usr/share/app/app.conf"))?;
+    inputs.add(
+        Input::file("/etc/app/app.conf")
+            .with_priority(1)
+            .with_strategy(DuplicateStrategy::Merge),
+    )?;
+    let value = inputs.finish()?;
+
+    let root = value.as_object().unwrap();
+    assert_eq!(root["workers"].as_integer(), Some(16));
+    let log = root["log"].as_object().unwrap();
+    assert_eq!(log["level"].as_str(), Some("debug"));
+    assert_eq!(log["file"].as_str(), Some("/var/log/app.log"));
+    Ok(())
+}
+```
+
+Each input goes on where the one before it ended, and the crate keeps libucl's quirks at the
+joins (spec §13.1): a parser takes at most 16 inputs, which count towards the include nesting
+limit; a zero-byte first input gives an empty root that later inputs cannot add to; and the end
+of an input is not a separator, so an input that ends right after a value, as `x = 1` does,
+must be followed by one that starts with a line break, `;`, `,` or a comment. A silent stop
+ends only its own input: `Inputs::add` reports it, and the next input goes on. Any other error
+fails the whole parse.
+
+## Custom macros
+
+An application can register macros of its own (spec §13.2). A handler gets the macro's value and
+arguments, and can add entries where the macro stands, have text parsed in place of the macro,
+stop the parse silently as libucl's failing handlers do, or fail with a message of its own:
+
+```rust
+use std::collections::HashMap;
+use ucl_lexer::parse::{ErrorKind, MacroError, ParserBuilder};
+use ucl_lexer::UclValue;
+
+fn main() {
+    let secrets = HashMap::from([("db", "hunter2")]);
+    let mut parser = ParserBuilder::new()
+        // `.secret NAME`: adds `NAME = <secret>` where the macro stands.
+        .with_macro("secret", move |call| {
+            let name = call.value_str().unwrap_or_default().to_string();
+            let secret = secrets
+                .get(name.as_str())
+                .ok_or_else(|| MacroError::new(format!("no secret {name:?}")))?;
+            call.add(name, UclValue::String(secret.to_string()))
+        })
+        // `.defaults {}`: text parsed in place of the macro.
+        .with_macro("defaults", |call| call.parse("port = 5432; pool { size = 4 }"))
+        .build();
+
+    let value = parser
+        .parse(b"database {\n  .defaults {}\n  .secret db\n  port = 6432\n}")
+        .unwrap();
+    let db = value.as_object().unwrap()["database"].as_object().unwrap();
+    assert_eq!(db["db"].as_str(), Some("hunter2"));
+    // Entries after the macro follow the duplicate rules as usual.
+    let ports: Vec<i64> = db.get_all("port").filter_map(UclValue::as_integer).collect();
+    assert_eq!(ports, [5432, 6432]);
+
+    let err = parser.parse(b".secret api").unwrap_err();
+    assert!(matches!(err.kind(), ErrorKind::MacroFailed { name, .. } if name == "secret"));
+}
+```
+
+A registered name replaces a built-in macro of the same name. Names that are neither built in nor
+registered stay errors, and `ParserFlags::DISABLE_MACRO` disables registered macros too.
+`ParserBuilder::with_context_macro` registers a macro whose handler also gets a copy of the root
+built so far.
 
 ## Emitters
 

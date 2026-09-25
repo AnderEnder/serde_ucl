@@ -24,6 +24,7 @@ use super::string;
 use super::vars::Expander;
 use super::{Comment, Error, ErrorKind, MAX_NESTING, PathSegment};
 use crate::emit::key_needs_quoting;
+use crate::error::Position;
 use crate::value::{
     DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclObject, UclValue,
 };
@@ -39,28 +40,243 @@ pub(crate) struct Settings {
     pub(crate) strategy: DuplicateStrategy,
 }
 
-/// Where saved comments go (spec §12.5).
-pub(crate) struct CommentSink<'c> {
-    pub(crate) comments: &'c mut Vec<Comment>,
-    pub(crate) attached: &'c mut CommentGroups,
+/// What the next input starts with, from where the input before it ended (spec §13.1).
+#[derive(Debug)]
+pub(crate) enum Boundary {
+    /// No input has been read: the next one sets up the root (§1.1).
+    Start,
+    /// An entry may start.
+    Entry,
+    /// A value, or section names after a separator and a line break (§3.4), ended the input
+    /// with no separator after it, or a later input held only whitespace while an entry could
+    /// start (oracle runs, QUESTIONS.md #59): a line break, `;`, `,` or a comment must come
+    /// before the next entry (§13.1, *Quirk*).
+    Separator,
+    /// A key and its separator ended the input before a line break, so the value comes from a
+    /// following line (§1.6), also in a later input (oracle runs, QUESTIONS.md #59).
+    Value(Box<PendingValue>),
+    /// The root has closed: its brace, or an array root. Later inputs may hold only
+    /// whitespace, `;`, `,` and comments (oracle runs, QUESTIONS.md #59).
+    Closed,
+    /// The first input had no bytes: the root is an empty object that later inputs cannot add
+    /// to (§13.1, *Quirk*).
+    Empty,
 }
 
-/// Parses a whole document into its root value.
-///
-/// A silent stop (§9.4) is an [`ErrorKind::Stopped`] error that carries the root as parsed so
-/// far; the saved comments and their attachments are kept then too.
-///
-/// When `facts` is given, the output facts of the result (spec §10.1) are recorded there, also
-/// for a silent stop.
-pub(crate) fn parse_document(
-    input: &[u8],
+/// A key whose value comes from a following line, in a later input ([`Boundary::Value`]).
+#[derive(Debug)]
+pub(crate) struct PendingValue {
+    key: Key,
+    /// The settings of the input the key is in: the value is inserted with them (oracle runs).
     settings: Settings,
-    expander: &mut Expander<'_>,
-    includes: &mut Includes<'_>,
-    sink: Option<CommentSink<'_>>,
-    facts: Option<&mut OutputFacts>,
-) -> Result<UclValue, Error> {
-    parse_unit(input, settings, expander, includes, sink, facts, 0)
+}
+
+/// The state of a parse from one input to the next (spec §13.1): the tree, the open containers,
+/// the saved comments and the output facts.
+pub(crate) struct Document {
+    root: UclValue,
+    frames: Vec<Frame>,
+    notes: Option<Notes>,
+    facts: Option<OutputFacts>,
+    uppercase_keys: bool,
+    boundary: Boundary,
+    /// How many macro argument documents this document is inside (§9.2): 0 for the parse of
+    /// the parser's inputs.
+    depth: usize,
+}
+
+/// A finished parse ([`Document::finish`]).
+pub(crate) struct Finished {
+    pub(crate) root: UclValue,
+    /// The saved comments and the values they are attached to, when comments are saved.
+    pub(crate) comments: Option<(Vec<Comment>, CommentGroups)>,
+    pub(crate) facts: Option<OutputFacts>,
+}
+
+impl Document {
+    /// A parse with no input read yet. With `save_comments`, comments are saved (§12.5); with
+    /// `facts`, output facts are recorded there (§10.1), which may be set to record locations
+    /// ([`OutputFacts::locating`]).
+    pub(crate) fn new(save_comments: bool, facts: Option<OutputFacts>, depth: usize) -> Self {
+        Self {
+            root: UclValue::Object(UclObject::new()),
+            frames: Vec::new(),
+            notes: save_comments.then(Notes::new),
+            facts,
+            uppercase_keys: false,
+            boundary: Boundary::Start,
+            depth,
+        }
+    }
+
+    /// Reads one input, `src`, with `settings` (§13.1). It goes on where the input before it
+    /// ended: its entries go into the containers left open, the first input setting up the
+    /// root. A zero-byte input after the first changes nothing.
+    ///
+    /// A silent stop (§9.4, §13.2) ends this input only: it is returned as an error, and the
+    /// next input goes on with the containers the stopped one left open. Any other error leaves
+    /// the document unusable.
+    pub(crate) fn read(
+        &mut self,
+        src: &[u8],
+        settings: Settings,
+        expander: &mut Expander<'_>,
+        includes: &mut Includes<'_>,
+    ) -> Result<(), Error> {
+        if src.is_empty() && !matches!(self.boundary, Boundary::Start) {
+            return Ok(());
+        }
+        let boundary = std::mem::replace(&mut self.boundary, Boundary::Entry);
+        let unit = includes.new_unit();
+        let mut core = Core {
+            src,
+            pos: 0,
+            settings,
+            expander,
+            includes,
+            notes: self.notes.take(),
+            facts: self.facts.take(),
+            uppercase_keys: self.uppercase_keys,
+            root: std::mem::replace(&mut self.root, UclValue::Null),
+            frames: std::mem::take(&mut self.frames),
+            depth: self.depth,
+            unit,
+            role: Role::Input,
+            unit_done: false,
+            name_run: false,
+            run_macro_end: None,
+            outer_run: false,
+            recent: None,
+            first_key_shares: false,
+            section_shares: false,
+            bracket_scan: (usize::MAX, 0),
+            pending: None,
+            unseparated: false,
+            ends: None,
+        };
+        let result = core.read_input(boundary);
+        self.boundary = match &result {
+            Ok(()) => core.boundary_at_end(),
+            Err(_) => Boundary::Entry,
+        };
+        self.root = core.root;
+        self.frames = core.frames;
+        self.uppercase_keys = core.uppercase_keys;
+        self.facts = core.facts;
+        self.notes = core.notes;
+        if let Some(notes) = &mut self.notes {
+            // The next input's comments are counted from its own start.
+            notes.suspend(src);
+        }
+        result
+    }
+
+    /// A copy of the root as parsed so far, with the containers that are still open and what
+    /// they hold: the partial result of a silent stop in one of several inputs.
+    pub(crate) fn snapshot(&self) -> UclValue {
+        let mut root = self.root.clone();
+        let mut containers: Vec<Option<UclValue>> = self
+            .frames
+            .iter()
+            .map(|frame| match &frame.home {
+                Home::Root => None,
+                Home::Attached(_, value) | Home::Detached(value) => Some(value.clone()),
+            })
+            .collect();
+        for index in (1..self.frames.len()).rev() {
+            let Home::Attached(step, _) = &self.frames[index].home else {
+                continue;
+            };
+            let value = containers[index]
+                .take()
+                .expect("an attached frame holds its container");
+            let below = match containers[index - 1].as_mut() {
+                Some(below) => below,
+                None => &mut root,
+            };
+            if let Some(place) = step.try_enter(below) {
+                *place = value;
+            }
+        }
+        root
+    }
+
+    /// The comments saved so far, for a parse that failed.
+    pub(crate) fn into_comments(self) -> Vec<Comment> {
+        self.notes
+            .map(|notes| notes.finish(b"").0)
+            .unwrap_or_default()
+    }
+
+    /// Ends the parse after its last input: a key still waiting for its value on a following
+    /// line gets `null` (§1.6), then every container closes. Pending comments attach as at the
+    /// end of input (§12.5). An error there, such as a repeated key under the `error` strategy,
+    /// is returned with the saved comments.
+    pub(crate) fn finish(mut self) -> Result<Finished, Box<(Error, Vec<Comment>)>> {
+        if let Boundary::Value(pending) = std::mem::replace(&mut self.boundary, Boundary::Entry) {
+            let mut expander = Expander::new(Vec::new(), None, false);
+            let loader = super::MemoryLoader::new();
+            let mut includes = Includes::new(
+                &loader,
+                std::path::PathBuf::new(),
+                None,
+                super::include::Budget::new(None),
+                None,
+            );
+            let mut core = Core {
+                src: b"",
+                pos: 0,
+                settings: pending.settings,
+                expander: &mut expander,
+                includes: &mut includes,
+                notes: self.notes.take(),
+                facts: self.facts.take(),
+                uppercase_keys: self.uppercase_keys,
+                root: std::mem::replace(&mut self.root, UclValue::Null),
+                frames: std::mem::take(&mut self.frames),
+                depth: self.depth,
+                unit: 0,
+                role: Role::Input,
+                unit_done: false,
+                name_run: false,
+                run_macro_end: None,
+                outer_run: false,
+                recent: None,
+                first_key_shares: false,
+                section_shares: false,
+                bracket_scan: (usize::MAX, 0),
+                pending: None,
+                unseparated: false,
+                ends: None,
+            };
+            let result = core.null_value(pending.key);
+            if let Some(notes) = &mut core.notes {
+                notes.trailing();
+            }
+            self.root = core.root;
+            self.frames = core.frames;
+            self.facts = core.facts;
+            self.notes = core.notes;
+            if let Err(e) = result {
+                return Err(Box::new((e, self.into_comments())));
+            }
+        }
+        let mut core_frames = std::mem::take(&mut self.frames);
+        while let Some(frame) = core_frames.pop() {
+            if let Home::Attached(step, value) = frame.home {
+                let below = match core_frames.last_mut().map(|f| &mut f.home) {
+                    Some(Home::Attached(_, below) | Home::Detached(below)) => below,
+                    Some(Home::Root) | None => &mut self.root,
+                };
+                *step.enter(below) = value;
+            }
+        }
+        Ok(Finished {
+            root: self.root,
+            comments: self.notes.map(|notes| notes.finish(b"")),
+            facts: self.facts,
+        })
+    }
 }
 
 /// Parses a macro's argument document (§9.2) that is `depth` argument documents deep. Its
@@ -72,64 +288,12 @@ pub(super) fn parse_nested(
     includes: &mut Includes<'_>,
     depth: usize,
 ) -> Result<UclValue, Error> {
-    parse_unit(input, settings, expander, includes, None, None, depth)
-}
-
-fn parse_unit(
-    input: &[u8],
-    settings: Settings,
-    expander: &mut Expander<'_>,
-    includes: &mut Includes<'_>,
-    sink: Option<CommentSink<'_>>,
-    mut facts_sink: Option<&mut OutputFacts>,
-    depth: usize,
-) -> Result<UclValue, Error> {
-    let mut core = Core {
-        src: input,
-        pos: 0,
-        settings,
-        expander,
-        includes,
-        notes: sink.as_ref().map(|_| Notes::new()),
-        // The sink starts empty; it may be set to record locations (`OutputFacts::locating`).
-        facts: facts_sink.as_deref_mut().map(std::mem::take),
-        uppercase_keys: false,
-        root: UclValue::Null,
-        frames: Vec::new(),
-        depth,
-        unit: 0,
-        unit_done: false,
-        name_run: false,
-        run_macro_end: None,
-        outer_run: false,
-        recent: None,
-        first_key_shares: false,
-        section_shares: false,
-        bracket_scan: (usize::MAX, 0),
-    };
-    let result = core.run();
-    let kept = result.as_ref().is_ok() || result.as_ref().is_err_and(Error::is_stopped);
-    if kept {
-        // After a silent stop, the containers still open go back into the partial tree.
-        core.close_all_frames();
-    }
-    if let (Some(sink), Some(facts)) = (facts_sink, core.facts.take())
-        && kept
-    {
-        *sink = facts;
-    }
-    if let (Some(sink), Some(notes)) = (sink, core.notes.take()) {
-        let (comments, groups) = notes.finish(input);
-        *sink.comments = comments;
-        if result.as_ref().is_ok() || result.as_ref().is_err_and(Error::is_stopped) {
-            *sink.attached = groups;
-        }
-    }
-    match result {
-        Ok(()) => Ok(core.root),
-        Err(e) if e.is_stopped() => Err(e.with_partial(core.root)),
-        Err(e) => Err(e),
-    }
+    let mut document = Document::new(false, None, depth);
+    document.read(input, settings, expander, includes)?;
+    document
+        .finish()
+        .map(|finished| finished.root)
+        .map_err(|failed| failed.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,12 +553,16 @@ struct Before {
 }
 
 /// A key and where it starts.
+#[derive(Debug)]
 struct Key {
     name: String,
     at: usize,
     /// The key was written in double quotes and contains a backslash escape or a byte that makes
     /// the output formats quote it (spec §10.1, fact 3).
     quoted: bool,
+    /// For a key read in an earlier input ([`Boundary::Value`]), its position there: errors about
+    /// the key are reported there.
+    origin: Option<Position>,
 }
 
 /// Where a scalar value came from, for the output formats (spec §10.1, facts 1 and 2; §10.7).
@@ -478,9 +646,11 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     frames: Vec<Frame>,
     /// How many macro argument documents this document is inside (§9.2): 0 for the main one.
     pub(super) depth: usize,
-    /// This input unit: 0 for the main document, `n` for a file included `n` levels deep.
+    /// This input unit's identity, which the frames it opens record.
     unit: usize,
-    /// The input of this included unit has ended.
+    /// Whether this unit is an input or an included file (or text parsed in place).
+    role: Role,
+    /// The input of this unit has ended.
     unit_done: bool,
     /// A name run (§9.1, *A macro directly after a name*): a macro ran directly after a name in
     /// this unit, and no key has been read in it since. The next key read counts as a word
@@ -501,6 +671,22 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     /// The last scan of [`Core::line_has_bracket`]: from the first offset, the first LF, CR,
     /// `,`, `;`, `{` or `[` is at the second (the input's length if there is none).
     bracket_scan: (usize, usize),
+    /// The input ended while a key waited for its value on a following line (§13.1).
+    pending: Option<PendingValue>,
+    /// The input ended right after a value, or after section names, with no separator
+    /// ([`Boundary::Separator`]).
+    unseparated: bool,
+    /// How this input ends when that does not follow from the state at its end.
+    ends: Option<Boundary>,
+}
+
+/// What kind of input unit a [`Core`] parses (§9.4, §13.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// An input given to the parser: the document, or one of several.
+    Input,
+    /// An included file, or text a registered macro parses in place (§13.2).
+    Included,
 }
 
 /// The container an included file's contents go into when it is nested under a key (§9.4,
@@ -529,6 +715,15 @@ impl Core<'_, '_, '_, '_> {
 
     pub(super) fn error(&self, kind: ErrorKind, at: usize) -> Error {
         Error::new(kind, position_at(self.src, at))
+    }
+
+    /// An error about `key`: where it starts, in this input or, for a key read in an earlier
+    /// input, in that one.
+    fn key_error(&self, key: &Key, kind: ErrorKind) -> Error {
+        match key.origin {
+            Some(position) => Error::new(kind, position),
+            None => self.error(kind, key.at),
+        }
     }
 
     fn found(&self, at: usize) -> Option<char> {
@@ -751,13 +946,6 @@ impl Core<'_, '_, '_, '_> {
                 "only the top frame's container changes"
             );
             *place = value;
-        }
-    }
-
-    /// Pops every frame: the end of the document, or a silent stop (§9.4).
-    fn close_all_frames(&mut self) {
-        while !self.frames.is_empty() {
-            self.pop_frame();
         }
     }
 
@@ -1091,7 +1279,7 @@ impl Core<'_, '_, '_, '_> {
             0
         };
         let placement = result.map_err(|DuplicateKeyError { key: name }| {
-            self.error(ErrorKind::DuplicateKey { key: name }, key.at)
+            self.key_error(key, ErrorKind::DuplicateKey { key: name })
         })?;
         if track {
             self.values_moved(&key.name, before, placement, after);
@@ -1448,6 +1636,145 @@ impl Core<'_, '_, '_, '_> {
 
     // ----- document (§1) -------------------------------------------------------------------
 
+    /// Reads this input, which goes on where the input before it ended (spec §13.1).
+    fn read_input(&mut self, boundary: Boundary) -> Result<(), Error> {
+        match boundary {
+            Boundary::Start if self.src.is_empty() => {
+                // §13.1, *Quirk*: a zero-byte first input gives an empty object root that later
+                // inputs cannot add to.
+                self.root = Self::empty(Kind::Object);
+                if let Some(facts) = &mut self.facts {
+                    facts.locate(facts::ROOT, 0, None);
+                }
+                self.ends = Some(Boundary::Empty);
+                return Ok(());
+            }
+            Boundary::Start => return self.run(),
+            Boundary::Empty => return self.after_empty_first_input(),
+            Boundary::Closed => return self.after_closed_root(),
+            Boundary::Entry if self.src.iter().all(|&b| is_space(b)) => {
+                // A later input of whitespace alone, where an entry could start, makes the next
+                // one need a separator first (oracle runs, QUESTIONS.md #59). Its end attaches
+                // pending comments as the end of any input does.
+                self.pos = self.src.len();
+                self.ends = Some(Boundary::Separator);
+                if let Some(notes) = &mut self.notes {
+                    notes.trailing();
+                }
+                return Ok(());
+            }
+            // As at the start of a document, a `#` that is the last byte after whitespace is an
+            // error (§2.2); the end of the input before counts as whitespace (oracle runs).
+            Boundary::Entry => self.skip_space_checking_hash(true)?,
+            Boundary::Separator => self.after_previous_value()?,
+            Boundary::Value(pending) => self.resume_value(*pending)?,
+        }
+        self.steps()
+    }
+
+    /// How this input ended, for the next one.
+    fn boundary_at_end(&mut self) -> Boundary {
+        if let Some(ends) = self.ends.take() {
+            return ends;
+        }
+        if self.frames.is_empty() {
+            Boundary::Closed
+        } else if let Some(pending) = self.pending.take() {
+            Boundary::Value(Box::new(pending))
+        } else if self.unseparated {
+            Boundary::Separator
+        } else {
+            Boundary::Entry
+        }
+    }
+
+    /// Parses entries and elements until the input ends or the root closes.
+    fn steps(&mut self) -> Result<(), Error> {
+        while !self.unit_done
+            && let Some(frame) = self.frames.last()
+        {
+            match frame.kind {
+                Kind::Object => self.object_step()?,
+                Kind::Array => self.array_step()?,
+            }
+        }
+        Ok(())
+    }
+
+    /// A later input after a zero-byte first input (§13.1, *Quirk*): only a group of comments
+    /// at its very start (§1.1), then whitespace, may be in it.
+    fn after_empty_first_input(&mut self) -> Result<(), Error> {
+        self.comment_group()?;
+        while self.peek().is_some_and(is_space) {
+            self.pos += 1;
+        }
+        self.ends = Some(Boundary::Empty);
+        if self.pos < self.src.len() {
+            return Err(self.error(ErrorKind::AfterRoot, self.pos));
+        }
+        // Its comments attach after the root, as at the end of input (§12.5; oracle runs).
+        if let Some(notes) = &mut self.notes {
+            notes.trailing();
+        }
+        Ok(())
+    }
+
+    /// A later input after the root has closed (§13.1, *The root*; the details are from oracle
+    /// runs, QUESTIONS.md #59). After spaces and tabs it must hold nothing, or begin with a line
+    /// break, `;`, `,` or a comment: then, after any mix of these, the rest of the input is
+    /// ignored, as after the root's closing bracket (§1.1), unless it begins with `}` or `]`.
+    fn after_closed_root(&mut self) -> Result<(), Error> {
+        self.ends = Some(Boundary::Closed);
+        self.skip_blanks();
+        match self.peek() {
+            None => return Ok(()),
+            Some(b'\n' | b'\r' | 0 | b',' | b';' | b'#') => {}
+            _ if self.at_block_comment() => {}
+            Some(_) => return Err(self.error(ErrorKind::AfterRoot, self.pos)),
+        }
+        self.after_value(false)?;
+        if let Some(c @ (b'}' | b']')) = self.peek() {
+            let found = char::from(c);
+            return Err(self.error(ErrorKind::UnmatchedClose { found }, self.pos));
+        }
+        self.pos = self.src.len();
+        Ok(())
+    }
+
+    /// The start of an input after one that a value ended without a separator (§13.1,
+    /// *Quirk*): a line break, `;`, `,`, a comment or a closing bracket must come first, after
+    /// spaces and tabs, as after a quoted value (§1.3).
+    fn after_previous_value(&mut self) -> Result<(), Error> {
+        self.skip_blanks();
+        match self.peek() {
+            None | Some(b'\n' | b'\r' | 0 | b',' | b';' | b'#' | b'}' | b']') => {}
+            _ if self.at_block_comment() => {}
+            Some(c) => {
+                let found = char::from(c);
+                return Err(self.error(ErrorKind::UnseparatedInput { found }, self.pos));
+            }
+        }
+        self.after_value(false)
+    }
+
+    /// The value of a key that ended the input before, on a following line of this one (§1.6;
+    /// oracle runs, QUESTIONS.md #59). It is inserted with the settings of the key's input; what
+    /// an object or array value holds gets this input's.
+    fn resume_value(&mut self, pending: PendingValue) -> Result<(), Error> {
+        // An input that is a single `#` is an error there (oracle runs).
+        self.check_hash_at_end(true)?;
+        self.leading_comments()?;
+        if self.peek().is_none() {
+            self.pending = Some(pending);
+            return Ok(());
+        }
+        let settings = std::mem::replace(&mut self.settings, pending.settings);
+        let result = self.object_value(pending.key);
+        self.settings = settings;
+        result
+    }
+
+    /// The first input: the root (§1.1), then its entries or elements.
     fn run(&mut self) -> Result<(), Error> {
         // §1.1: a leading bracket starts the root only after whitespace alone, or directly after
         // a group of comments at the very start of the input.
@@ -1477,29 +1804,28 @@ impl Core<'_, '_, '_, '_> {
             // Where the first key of an unbraced root could start (§2.2, *Quirk*).
             self.skip_space_checking_hash(after_space)?;
         }
-        while let Some(frame) = self.frames.last() {
-            match frame.kind {
-                Kind::Object => self.object_step()?,
-                Kind::Array => self.array_step()?,
-            }
-        }
-        Ok(())
+        self.steps()
     }
 
     // ----- included units (§9.4) ------------------------------------------------------------
 
-    /// Parses `input`, an included file whose canonical path is `file`, as a new input unit with
-    /// `settings`. Its entries go into the current container, and it continues with the
-    /// container stack the file leaves behind.
+    /// Parses `input`, an included file whose canonical path is `file`, or text a registered
+    /// macro parses in place (`file` is `None`), as a new input unit with `settings`. Its
+    /// entries go into the current container, and it continues with the container stack the
+    /// unit leaves behind.
     pub(super) fn parse_included(
         &mut self,
         input: &[u8],
         settings: Settings,
-        file: &Path,
+        file: Option<&Path>,
     ) -> Result<(), Error> {
         let cursor = self.notes.as_mut().map(|n| n.suspend(self.src));
         let outer_run = self.tracking();
-        let outer_unit = self.facts.as_mut().map(|f| f.enter_unit(file, input));
+        let outer_unit = match (&mut self.facts, file) {
+            (Some(facts), Some(file)) => Some(facts.enter_unit(file, input)),
+            _ => None,
+        };
+        let unit = self.includes.new_unit();
         let mut inner = Core {
             src: input,
             pos: 0,
@@ -1512,7 +1838,8 @@ impl Core<'_, '_, '_, '_> {
             root: std::mem::replace(&mut self.root, UclValue::Null),
             frames: std::mem::take(&mut self.frames),
             depth: self.depth,
-            unit: self.unit + 1,
+            unit,
+            role: Role::Included,
             unit_done: false,
             name_run: false,
             run_macro_end: None,
@@ -1521,6 +1848,9 @@ impl Core<'_, '_, '_, '_> {
             first_key_shares: false,
             section_shares: false,
             bracket_scan: (usize::MAX, 0),
+            pending: None,
+            unseparated: false,
+            ends: None,
         };
         let result = inner.run_included();
         self.root = inner.root;
@@ -1535,7 +1865,10 @@ impl Core<'_, '_, '_, '_> {
         if let (Some(notes), Some(cursor)) = (&mut self.notes, cursor) {
             notes.resume(input, cursor);
         }
-        result.map_err(|e| e.in_file(file))
+        match file {
+            Some(file) => result.map_err(|e| e.in_file(file)),
+            None => result,
+        }
     }
 
     /// The start of an included unit follows §1.1, except that a `[` there is an error and a
@@ -1563,15 +1896,7 @@ impl Core<'_, '_, '_, '_> {
             }
             _ => self.skip_space_checking_hash(after_space)?,
         }
-        while !self.unit_done
-            && let Some(frame) = self.frames.last()
-        {
-            match frame.kind {
-                Kind::Object => self.object_step()?,
-                Kind::Array => self.array_step()?,
-            }
-        }
-        Ok(())
+        self.steps()
     }
 
     /// The input of an included unit has ended: the check at the end of a unit, after which the
@@ -1589,14 +1914,21 @@ impl Core<'_, '_, '_, '_> {
         Ok(())
     }
 
-    /// The input of the main document has ended: the check at the end of a unit, then every
-    /// container closes. Pending comments attach to the value created most recently (§12.5).
-    fn end_document(&mut self) -> Result<(), Error> {
+    /// An input has ended: the check at the end of a unit (§9.4), for the containers it opened
+    /// (§13.1, *Brackets*). The containers stay open for a later input; after the last one,
+    /// [`Document::finish`] closes them. Pending comments attach to the value created most
+    /// recently (§12.5), unless a key waits for its value on a following line: then they wait
+    /// with it.
+    fn end_input(&mut self) -> Result<(), Error> {
         self.unit_end_check()?;
         if let Some(notes) = &mut self.notes {
-            notes.trailing();
+            if self.pending.is_some() {
+                notes.wait_for_value();
+            } else {
+                notes.trailing();
+            }
         }
-        self.close_all_frames();
+        self.unit_done = true;
         Ok(())
     }
 
@@ -1824,8 +2156,8 @@ impl Core<'_, '_, '_, '_> {
             {
                 self.reopen_recent()
             }
-            None if self.unit > 0 => self.end_included_unit(),
-            None => self.end_document(),
+            None if self.role == Role::Included => self.end_included_unit(),
+            None => self.end_input(),
             Some(b'}') if self.top().close == Close::Brace => {
                 self.pos += 1;
                 self.close_container()
@@ -1921,8 +2253,8 @@ impl Core<'_, '_, '_, '_> {
             // The element starts right after a group of comments that follow each other
             // directly, whitespace included (§1.5, *Quirk*).
             return match self.peek() {
-                None if self.unit > 0 => self.end_included_unit(),
-                None => self.end_document(),
+                None if self.role == Role::Included => self.end_included_unit(),
+                None => self.end_input(),
                 Some(b']') => {
                     self.pos += 1;
                     self.close_container()
@@ -1933,8 +2265,8 @@ impl Core<'_, '_, '_, '_> {
         self.skip_space()?;
         let at = self.pos;
         match self.peek() {
-            None if self.unit > 0 => self.end_included_unit(),
-            None => self.end_document(),
+            None if self.role == Role::Included => self.end_included_unit(),
+            None => self.end_input(),
             Some(b']') => {
                 self.pos += 1;
                 self.close_container()
@@ -2090,7 +2422,12 @@ impl Core<'_, '_, '_, '_> {
         }
         // Fact 3 of spec §10.1.
         let quoted = quoted && (escaped || key_needs_quoting(&name));
-        Ok(Key { name, at, quoted })
+        Ok(Key {
+            name,
+            at,
+            quoted,
+            origin: None,
+        })
     }
 
     /// Everything after a key: an optional separator, then the value, or section names (§1.2,
@@ -2206,6 +2543,8 @@ impl Core<'_, '_, '_, '_> {
                 // (QUESTIONS.md #22).
                 self.skip_space_checking_hash(false)?;
                 if self.peek().is_none() {
+                    // A later input needs a separator first (oracle runs, QUESTIONS.md #59).
+                    self.unseparated = true;
                     return Ok(());
                 }
             }
@@ -2217,6 +2556,7 @@ impl Core<'_, '_, '_, '_> {
                 // QUESTIONS.md #46).
                 self.skip_space_checking_hash(false)?;
                 if self.peek().is_none() {
+                    self.unseparated = true;
                     return Ok(());
                 }
             }
@@ -2269,6 +2609,10 @@ impl Core<'_, '_, '_, '_> {
     /// A value on a following line (§1.6, *Quirk*). Blank lines and whitespace are skipped, then
     /// one group of comments that follow each other directly. The value starts right after the
     /// group; at the end of input it is `null`.
+    ///
+    /// At the end of an input given to the parser, the value may still come from a later input
+    /// (oracle runs, QUESTIONS.md #59): the key waits for it, and [`Document::finish`] gives it
+    /// `null` if none does.
     fn next_line_value(&mut self, mut key: Key) -> Result<(), Error> {
         if let Some(notes) = &mut self.notes {
             // The group's comments attach after the value is created (§12.5, QUESTIONS.md #17).
@@ -2276,21 +2620,36 @@ impl Core<'_, '_, '_, '_> {
         }
         self.leading_comments()?;
         if self.peek().is_none() {
-            if let Some(existing) = self.null_merges_into(&key) {
-                // Under `merge`, the `null` that ends the input goes into an object or array
-                // that is the entry's first value, adding nothing, instead of taking its place
-                // as a scalar does (§8.4; oracle runs, QUESTIONS.md #44).
-                let path = self.placed_path(&existing, Placement::Merged);
-                self.created(path);
+            if self.role == Role::Input {
+                if key.origin.is_none() {
+                    key.origin = Some(position_at(self.src, key.at));
+                }
+                self.pending = Some(PendingValue {
+                    key,
+                    settings: self.settings,
+                });
                 return Ok(());
             }
-            let at = key.at;
-            let placement = self.insert(&mut key, UclValue::Null, Origin::default(), at)?;
-            let path = self.placed_path(&key.name, placement);
+            return self.null_value(key);
+        }
+        self.object_value(key)
+    }
+
+    /// `null` for `key`, whose value on a following line did not come before the end of input.
+    fn null_value(&mut self, mut key: Key) -> Result<(), Error> {
+        if let Some(existing) = self.null_merges_into(&key) {
+            // Under `merge`, the `null` that ends the input goes into an object or array that
+            // is the entry's first value, adding nothing, instead of taking its place as a
+            // scalar does (§8.4; oracle runs, QUESTIONS.md #44).
+            let path = self.placed_path(&existing, Placement::Merged);
             self.created(path);
             return Ok(());
         }
-        self.object_value(key)
+        let at = key.at;
+        let placement = self.insert(&mut key, UclValue::Null, Origin::default(), at)?;
+        let path = self.placed_path(&key.name, placement);
+        self.created(path);
+        Ok(())
     }
 
     /// Under `merge`, the spelling of the entry `key` names when its first value is an object or
@@ -2319,10 +2678,24 @@ impl Core<'_, '_, '_, '_> {
             _ => {
                 let at = self.pos;
                 let (value, quoted, origin) = self.scalar()?;
+                // A value whose text reaches the end of the input, an unquoted one with any
+                // spaces and tabs after it, needs a separator at the start of the next input;
+                // a quoted one ends at its closing quote (§13.1, *Quirk*; oracle runs,
+                // QUESTIONS.md #59).
+                let rest = &self.src[self.pos..];
+                let unseparated = if quoted {
+                    rest.is_empty()
+                } else {
+                    rest.iter().all(|&b| matches!(b, b' ' | b'\t'))
+                };
                 let placement = self.insert(&mut key, value, origin, at)?;
                 let path = self.placed_path(&key.name, placement);
                 self.created(path);
-                self.after_value(quoted)
+                self.after_value(quoted)?;
+                if unseparated {
+                    self.unseparated = true;
+                }
+                Ok(())
             }
         }
     }

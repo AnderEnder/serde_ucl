@@ -150,6 +150,24 @@ Added:
   `Loader::read`, lets a loader stop reading a file once it is over the limit; `FsLoader` and
   `MemoryLoader` do.
 - Cargo features `fs` (default) and `load`.
+- Several inputs into one parser (spec §13.1): `Parser::inputs` starts a parse that takes inputs
+  in turn, `Inputs::add` reads each `Input` (`Input::bytes`, `Input::file`, with
+  `Input::with_priority` and `Input::with_strategy`), and `Inputs::finish` returns the result. A
+  silent stop ends only its own input; any other error fails the parse. libucl's quirks at the
+  joins are kept: at most 16 inputs (`ErrorKind::TooManyInputs`), which count towards the include
+  nesting limit; nothing can follow a closed root or a zero-byte first input
+  (`ErrorKind::AfterRoot`); and the end of an input is not a separator
+  (`ErrorKind::UnseparatedInput`). `Parser::parse` and `Parser::parse_file` are parses of one
+  input.
+- Registered macros (spec §13.2): `Parser::register_macro`, `Parser::register_context_macro`,
+  `ParserBuilder::with_macro` and `ParserBuilder::with_context_macro` register a handler
+  (`MacroHandler`) by name. It gets a `MacroCall`, with the macro's value, arguments and, for a
+  context macro, the root built so far; it can add entries (`MacroCall::add`), have text parsed
+  in place (`MacroCall::parse`), stop the parse silently (`MacroError::stop`, reported as
+  `ErrorKind::MacroStopped`, a silent stop) or fail with a message (`MacroError::new`,
+  `ErrorKind::MacroFailed`; libucl has no such error). A registered name replaces a built-in
+  macro of the same name. A deserialization error of a document whose parse ran a registered
+  macro has no position, since the document is not parsed again.
 
 ### Behaviour changes
 

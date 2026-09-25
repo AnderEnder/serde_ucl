@@ -169,6 +169,22 @@ the spec release that specifies several inputs and registered macros; C8c is too
 2. An application can register its own macros by name through the parser builder, as the spec
    describes for registered macros. Names that are neither built in nor registered stay errors.
 
+#### Project decisions for C8b (settle spec-v10 §13)
+
+1. The deterministic quirks of §13.1 are reproduced as specified: the limit on the number of
+   inputs and the include depth they share, a zero-byte first input, and the end of an input not
+   being a separator. `docs/COMPATIBILITY.md` lists them as quirks users may hit.
+2. Registered macro handlers can do both things §13.2 describes: add entries to the innermost
+   open object, and have text parsed in place of the macro.
+3. A handler can end the parse silently as §13.2 describes for a failing handler, and it can also
+   return an error with its own message, reported as an error of its own kind. libucl has no way
+   to report an error; this is an addition, not a change of libucl behaviour.
+4. Include resolution follows C3 decision 6 and C5 decision 1: a configured base directory stands
+   in for the working directory for every input; without one, a file input resolves against its
+   own directory, and a text input finds files only through the loader it was given.
+5. The conformance runner reads `.inputs` and registers handlers equivalent to the test macros
+   the case format documents; the cases move from `pending/13-inputs/` to `cases/spec/13-inputs/`.
+
 ### C8c
 
 1. A manually triggered workflow takes a libucl commit, regenerates every golden file at it and
@@ -177,3 +193,8 @@ the spec release that specifies several inputs and registered macros; C8c is too
    generated inputs, seeded from the conformance cases.
 3. `tests/scaling.rs` stays the only timing-based test and says so; the test-profile opt-level
    override is documented as a speed choice.
+4. The crate targets the latest stable Rust (decided by the project owner, 2026-09-25):
+   `rust-version` is `1.98`, the current stable, in `Cargo.toml` and `tests/features/Cargo.toml`.
+   CI runs on stable only, so the separate minimum-version job goes. The README, `CHANGELOG.md`,
+   `CLAUDE.md`, `scripts/ci.sh` and test comments say "latest stable Rust (1.98 at this release)"
+   instead of 1.88. Code may use features up to 1.98.

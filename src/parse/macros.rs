@@ -15,9 +15,10 @@
 
 use super::core::{Core, Settings, is_space, parse_nested};
 use super::error::position_at;
+use super::registered::{Host, MacroCall as HandlerCall, MacroError, Registered, Repr};
 use super::string;
 use super::vars::Expander;
-use super::{Error, ErrorKind, MAX_ARGUMENT_DEPTH, PathSegment};
+use super::{Error, ErrorKind, MAX_ARGUMENT_DEPTH, MAX_INCLUDE_DEPTH, PathSegment};
 use crate::value::{DuplicateStrategy, Entry, ParserFlags, Slot, UclObject, UclValue};
 
 /// The macros of §9.2.
@@ -252,11 +253,18 @@ pub(super) fn find_key(object: &UclObject, name: &str, ignore_case: bool) -> Opt
     })
 }
 
+/// A macro's name as read: a macro the application registered, which replaces a built-in one
+/// of the same name (§13.2), or a built-in one.
+enum Named {
+    Registered(Registered),
+    Builtin(MacroKind),
+}
+
 impl Core<'_, '_, '_, '_> {
     /// A `.` where a key could start is a macro (§9.1): `.NAME (ARGUMENTS)? VALUE` (§9.2).
     ///
     /// - A NAME that runs to the end of input is ignored, whatever it is.
-    /// - An unknown NAME is an error.
+    /// - A NAME that is neither registered (§13.2) nor built in is an error.
     /// - A known NAME followed by whitespace, then at most one group of comments that follow
     ///   each other directly, then the end of input, is ignored.
     /// - After ARGUMENTS, the end of input (after the same skipping) is an error.
@@ -276,9 +284,14 @@ impl Core<'_, '_, '_, '_> {
             return Ok(());
         }
         let name = &self.src[name_start..name_end];
-        let Some(kind) = MacroKind::from_name(name) else {
-            let name = String::from_utf8_lossy(name).into_owned();
-            return Err(self.error(ErrorKind::UnknownMacro { name }, at));
+        let registered = self.includes.macros.and_then(|table| table.get(name));
+        let named = match (registered, MacroKind::from_name(name)) {
+            (Some(registered), _) => Named::Registered(registered.clone()),
+            (None, Some(kind)) => Named::Builtin(kind),
+            (None, None) => {
+                let name = String::from_utf8_lossy(name).into_owned();
+                return Err(self.error(ErrorKind::UnknownMacro { name }, at));
+            }
         };
         self.pos = name_end;
         self.macro_gap()?;
@@ -291,14 +304,26 @@ impl Core<'_, '_, '_, '_> {
             if self.peek().is_none() {
                 return Err(self.error(ErrorKind::MissingValue, self.pos));
             }
-            args
+            Some(args)
         } else if self.peek().is_none() {
             return Ok(());
         } else {
-            Arguments::default()
+            None
         };
         let value_at = self.pos;
         let value = self.macro_value()?;
+        let kind = match named {
+            Named::Builtin(kind) => kind,
+            Named::Registered(registered) => {
+                let src = self.src;
+                let name = std::str::from_utf8(&src[name_start..name_end])
+                    .expect("registered names are text");
+                self.run_registered(name, &registered, args.as_ref(), &value, at)?;
+                self.after_macro()?;
+                return self.macro_ran();
+            }
+        };
+        let args = args.map_or_else(Arguments::default, Arguments::from_root);
         let call = MacroCall {
             kind,
             at,
@@ -371,9 +396,10 @@ impl Core<'_, '_, '_, '_> {
     /// Parses the text between the parentheses at `open` and `end - 1` as a document of its own
     /// (§9.2): the same flags, priority 0, the `append` strategy, and only the file variables of
     /// a document given as bytes (`FILENAME` is `undef`), none under `NO_FILEVARS`. It may
-    /// include files, as a new parser would. Errors report positions in the enclosing input,
-    /// unless they are in a file it includes; a silent stop there makes the macro fail.
-    fn macro_arguments(&mut self, open: usize, end: usize) -> Result<Arguments, Error> {
+    /// include files, as a new parser would, and knows only the built-in macros (§13.2). Errors
+    /// report positions in the enclosing input, unless they are in a file it includes; a silent
+    /// stop there makes the macro fail. Returns the document's root.
+    fn macro_arguments(&mut self, open: usize, end: usize) -> Result<UclValue, Error> {
         if self.depth + 1 >= MAX_ARGUMENT_DEPTH {
             return Err(self.error(
                 ErrorKind::ArgumentsTooDeep {
@@ -416,7 +442,54 @@ impl Core<'_, '_, '_, '_> {
                     None => Error::new(kind, position_at(self.src, open + 1 + e.position().offset)),
                 }
             })?;
-        Ok(Arguments::from_root(root))
+        Ok(root)
+    }
+
+    // ----- registered macros (§13.2) -------------------------------------------------------
+
+    /// Runs the handler of the registered macro `name` at `at`. The text of a failed or stopped
+    /// [`HandlerCall::parse`] decides the outcome; otherwise the handler's result does.
+    fn run_registered(
+        &mut self,
+        name: &str,
+        registered: &Registered,
+        args: Option<&UclValue>,
+        value: &[u8],
+        at: usize,
+    ) -> Result<(), Error> {
+        if let Some(table) = self.includes.macros {
+            table.ran.set(true);
+        }
+        // A context macro gets the root as built so far, with the open containers (§13.2).
+        let root = registered
+            .context
+            .then(|| self.filled_copy(&[]).unwrap_or(UclValue::Null));
+        let (outcome, text_error) = {
+            let mut call = HandlerCall::new(self, name, value, args, root.as_ref(), at);
+            let outcome = (registered.handler)(&mut call);
+            (outcome, call.take_text_error())
+        };
+        // An error in text parsed in place is reported at the macro; one in a file the text
+        // includes names that file.
+        let from_text = |this: &Self, e: Error| match e.file() {
+            Some(_) => e,
+            None => Error::new(e.kind().clone(), position_at(this.src, at)),
+        };
+        if let Some(error) = text_error {
+            return Err(from_text(self, error));
+        }
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(MacroError(Repr::Stop)) => {
+                let name = name.to_owned();
+                Err(self.error(ErrorKind::MacroStopped { name }, at))
+            }
+            Err(MacroError(Repr::Failed(message))) => {
+                let name = name.to_owned();
+                Err(self.error(ErrorKind::MacroFailed { name, message }, at))
+            }
+            Err(MacroError(Repr::Text(error))) => Err(from_text(self, *error)),
+        }
     }
 
     /// Reads VALUE at the current position (§9.2) and expands variables in it.
@@ -668,6 +741,69 @@ impl Core<'_, '_, '_, '_> {
             });
         }
         Ok(())
+    }
+}
+
+impl Host for Core<'_, '_, '_, '_> {
+    fn add_entry(&mut self, key: String, value: UclValue, at: usize) -> Result<(), MacroError> {
+        if self.open_containers() == 0 {
+            return Err(MacroError::new(
+                "no object is open to add entries to: the root has closed",
+            ));
+        }
+        if let Err(e) = self.check_nesting(&value, at) {
+            return Err(MacroError::new(e.kind().to_string()));
+        }
+        if self.settings.flags.contains(ParserFlags::KEY_LOWERCASE)
+            && key.bytes().any(|b| b.is_ascii_uppercase())
+        {
+            self.uppercase_keys = true;
+        }
+        let object = self
+            .current()
+            .as_object_mut()
+            .expect("macros are read inside objects");
+        let index = match object.entry_mut(&key) {
+            Some(entry) => {
+                entry.push_slot(Slot::new(value, 0));
+                entry.len() - 1
+            }
+            None => {
+                object.insert_entry(key.clone(), Entry::from_slot(Slot::new(value, 0)));
+                0
+            }
+        };
+        if self
+            .facts
+            .as_ref()
+            .is_some_and(super::OutputFacts::records_locations)
+            && let Some(node) = self.facts_node_below(&[PathSegment::Key { key, index }])
+        {
+            // A value a handler adds was written where the macro is.
+            let facts = self.facts.as_mut().expect("checked above");
+            facts.locate(node, at, Some(at));
+        }
+        Ok(())
+    }
+
+    fn parse_text(&mut self, text: &[u8], at: usize) -> Result<(), Error> {
+        if self.open_containers() == 0 {
+            return Err(self.error(ErrorKind::AfterRootClosedByInclude, at));
+        }
+        // The text counts as one more open input unit (§13.2).
+        if self.includes.files.len() >= MAX_INCLUDE_DEPTH {
+            let limit = MAX_INCLUDE_DEPTH;
+            return Err(self.error(ErrorKind::IncludeTooDeep { limit }, at));
+        }
+        // The text is part of the file where the macro stands (oracle runs, QUESTIONS.md #59).
+        let unit = self.includes.files.len();
+        let file = self.includes.files.last().cloned().flatten();
+        self.includes.files.push(file);
+        let settings = self.settings;
+        let result = self.parse_included(text, settings, None);
+        // Files the text included that stopped stay open; the text does not.
+        self.includes.files.remove(unit);
+        result
     }
 }
 

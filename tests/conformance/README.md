@@ -20,11 +20,13 @@ None of them is written by hand.
   symbolic link under `files/v4/`, and file names with `[` and `]` under `files/v5/g/`); they are
   not cases themselves (`files/v6/` among them, with fixtures for spec-v6). Some `09-macros` cases
   include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
-  `../09-macros/files/`.
+  `../09-macros/files/`. `cases/spec/13-inputs/files/` holds the further inputs of the §13 cases
+  (`<case>.<n>.inc`, `n01.inc`…`n16.inc`) and the files they include.
 - `pending/`, when present, holds cases that a released spec version added but the crate does not
   pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
-  `cases/spec/` when the crate passes it. `pending/13-inputs/` holds the cases of spec §13.
+  `cases/spec/` when the crate passes it. There is none at present: the cases of spec §13 moved
+  to `cases/spec/13-inputs/`.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
   are now libucl's, not the old hand-written assertions.
 - `<case>.golden.json` next to each case is libucl's typed dump of that case, produced by
@@ -87,7 +89,9 @@ None of them is written by hand.
 The test target has three tests, each with its own known-failure list:
 
 - `libucl_conformance_new_core` parses every case with the crate's parser and compares the result
-  with `<case>.golden.json`.
+  with `<case>.golden.json`. A case with a `.inputs` file is parsed as several inputs into one
+  parser (`Parser::inputs`); the flags `registered-macros` and `registered-priority-override`
+  register handlers equivalent to the oracle's test macros (spec §13.2).
 - `libucl_conformance_emitters` takes every case that has output golden files, parses it with the
   crate's parser, writes the result in each format and compares the bytes with `<case>.config.golden`,
   `<case>.json.golden`, `<case>.json-compact.golden`, `<case>.yaml.golden` and, where present,

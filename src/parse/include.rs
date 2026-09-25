@@ -28,6 +28,7 @@ use super::core::{Core, NestTarget, Settings};
 use super::glob;
 use super::loader::{FileKind, Loader};
 use super::macros::{MacroCall, MacroKind, priority_bits};
+use super::registered::MacroTable;
 use super::{Error, ErrorKind, MAX_INCLUDE_DEPTH};
 use crate::value::{DuplicateStrategy, UclValue};
 use std::cell::Cell;
@@ -45,13 +46,23 @@ pub(crate) struct Budget {
 }
 
 impl Budget {
-    /// A budget of `limit` bytes of which the document, `document` bytes long, has used its
-    /// share.
-    pub(crate) fn new(limit: Option<u64>, document: usize) -> Rc<Self> {
+    /// A budget of `limit` bytes, none of them used yet.
+    pub(crate) fn new(limit: Option<u64>) -> Rc<Self> {
         Rc::new(Self {
             limit,
-            used: Cell::new(document as u64),
+            used: Cell::new(0),
         })
+    }
+
+    /// Counts an input of `len` bytes given as bytes; `false` if it goes over the limit.
+    pub(crate) fn take(&self, len: usize) -> bool {
+        let used = self.used.get().saturating_add(len as u64);
+        self.used.set(used);
+        self.limit.is_none_or(|limit| used <= limit)
+    }
+
+    pub(crate) fn limit(&self) -> Option<u64> {
+        self.limit
     }
 }
 
@@ -64,11 +75,11 @@ pub(crate) enum Read {
     },
 }
 
-/// The include state of one parse.
+/// The include state of one parse, shared by its inputs (spec §13.1).
 pub(crate) struct Includes<'l> {
     pub(crate) loader: &'l dyn Loader,
     /// The directory relative paths resolve against, and `CURDIR` of a document given as bytes
-    /// (project decision 6).
+    /// (project decision 6). It is set for each input (WORKLIST C8b decision 4).
     pub(crate) base: PathBuf,
     /// The `path` list in effect: set by any include macro, it stays for the rest of the parse
     /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
@@ -76,43 +87,62 @@ pub(crate) struct Includes<'l> {
     search: Option<Vec<String>>,
     /// The parser's search path, which macro argument documents start with.
     default_search: Option<Vec<String>>,
-    /// The canonical path of each open input unit, the main document first; `None` for a
-    /// document given as bytes.
-    files: Vec<Option<PathBuf>>,
-    budget: Rc<Budget>,
+    /// The file of each open input unit, the inputs first: an included file's canonical path;
+    /// for an input given as a file, its path; for one given as bytes, and for text a registered
+    /// macro parses in place, the file of the unit before it, if any (oracle runs, QUESTIONS.md
+    /// #59). An include of the last one's file includes itself (§9.4). Inputs stay open for the
+    /// rest of the parse (spec §13.1, *How many inputs*), and so do included files that stop
+    /// silently.
+    pub(crate) files: Vec<Option<PathBuf>>,
+    pub(crate) budget: Rc<Budget>,
+    /// The macros the application registered (spec §13.2); `None` in macro argument documents,
+    /// which know only the built-in macros.
+    pub(crate) macros: Option<&'l MacroTable>,
+    /// The number of input units opened so far, which gives each its own identity.
+    units: usize,
 }
 
 impl<'l> Includes<'l> {
-    /// The state for a parse of the document `main` (`None`: given as bytes), with the parser's
-    /// search path `search`.
+    /// The state for a parse with no input read yet, with the parser's search path `search`.
     pub(crate) fn new(
         loader: &'l dyn Loader,
         base: PathBuf,
-        main: Option<PathBuf>,
         search: Option<Vec<String>>,
         budget: Rc<Budget>,
+        macros: Option<&'l MacroTable>,
     ) -> Self {
         Self {
             loader,
             base,
             search: search.clone(),
             default_search: search,
-            files: vec![main],
+            files: Vec::new(),
             budget,
+            macros,
+            units: 0,
         }
     }
 
     /// The state for a macro argument document, which is parsed as if a new parser with the same
     /// settings were given it as bytes (spec §9.2): the parser's search path is in effect there,
-    /// not a `path` list of the document that holds the macro.
+    /// not a `path` list of the document that holds the macro, and no registered macro is known
+    /// (§13.2).
     pub(crate) fn for_arguments(&self) -> Includes<'l> {
-        Includes::new(
+        let mut includes = Includes::new(
             self.loader,
             self.base.clone(),
-            None,
             self.default_search.clone(),
             Rc::clone(&self.budget),
-        )
+            None,
+        );
+        includes.files.push(None);
+        includes
+    }
+
+    /// An identity for a new input unit, distinct from those of the units opened before.
+    pub(crate) fn new_unit(&mut self) -> usize {
+        self.units += 1;
+        self.units
     }
 
     /// Reads the file at `path`, a canonical path, through the loader, and counts its bytes
@@ -432,9 +462,13 @@ impl Core<'_, '_, '_, '_> {
             .unwrap_or_default();
         let saved = self.expander.enter_file(filename, curdir);
         self.includes.files.push(Some(canonical.to_path_buf()));
-        let result = self.parse_included(bytes, request.settings, canonical);
-        self.includes.files.pop();
-        self.expander.leave_file(saved);
+        let result = self.parse_included(bytes, request.settings, Some(canonical));
+        // A file that stops silently stays open for the rest of the parse, with its file
+        // variables, which matters to later inputs (oracle runs, QUESTIONS.md #59).
+        if !result.as_ref().is_err_and(Error::is_stopped) {
+            self.includes.files.pop();
+            self.expander.leave_file(saved);
+        }
         result?;
         if key.is_some() {
             // The containers of the key, and whatever the file left open in them, are done.

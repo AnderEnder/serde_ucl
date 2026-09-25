@@ -57,13 +57,18 @@ impl Error {
         matches!(self.kind, ErrorKind::Unsupported { .. })
     }
 
-    /// True for a silent stop ([`ErrorKind::Stopped`]).
+    /// True for a silent stop: [`ErrorKind::Stopped`], or [`ErrorKind::MacroStopped`] for a
+    /// registered macro whose handler stopped the parse (spec §13.2).
     pub fn is_stopped(&self) -> bool {
-        matches!(self.kind, ErrorKind::Stopped { .. })
+        matches!(
+            self.kind,
+            ErrorKind::Stopped { .. } | ErrorKind::MacroStopped { .. }
+        )
     }
 
     /// For a silent stop, the root value as parsed up to the macro that stopped: what libucl
-    /// returns as the result in that situation (spec §9.4).
+    /// returns as the result in that situation (spec §9.4). For a stop in one of several inputs
+    /// ([`crate::parse::Inputs`]), the root as parsed so far, with the inputs before.
     pub fn partial(&self) -> Option<&UclValue> {
         self.partial.as_deref()
     }
@@ -177,9 +182,12 @@ pub enum ErrorKind {
     NotAFile { path: String },
     /// An include macro names the file that holds it (spec §9.4).
     IncludeSelf { path: String },
-    /// More input units open at once than [`crate::parse::MAX_INCLUDE_DEPTH`] allows.
+    /// More input units open at once than [`crate::parse::MAX_INCLUDE_DEPTH`] allows: the
+    /// inputs given to the parser, the files they include, and text registered macros parse in
+    /// place (spec §9.4, §13).
     IncludeTooDeep { limit: usize },
-    /// An included file starts with `[` where a bracketed root would start (spec §9.4).
+    /// An included file, or text a registered macro parses in place, starts with `[` where a
+    /// bracketed root would start (spec §9.4, §13.2).
     IncludeArrayRoot,
     /// Input after a macro whose included file closed the braced root of the document: only
     /// whitespace and `;` may follow there, up to the end of the unit (oracle runs,
@@ -209,6 +217,26 @@ pub enum ErrorKind {
     /// ([`crate::parse::Parser::set_max_input_bytes`]). `path` is the file that went over it,
     /// or `None` for the document itself.
     InputTooLarge { limit: u64, path: Option<String> },
+    /// More inputs given to one parser than it takes (spec §13.1, *How many inputs*): every
+    /// input counts as an open input unit for the rest of the parse, and so does an included
+    /// file that stopped silently (oracle runs, QUESTIONS.md #59); at most `limit`
+    /// ([`crate::parse::MAX_INCLUDE_DEPTH`]) may be open.
+    TooManyInputs { limit: usize },
+    /// A later input with content after the root is complete (spec §13.1, *The root*): an
+    /// earlier input closed a braced root or held an array root, or the first input had no
+    /// bytes at all.
+    AfterRoot,
+    /// An input's first entry directly after a value that ended the input before it, with no
+    /// line break, `;`, `,` or comment between them: the end of an input is not a separator
+    /// (spec §13.1, *Quirk*).
+    UnseparatedInput { found: char },
+    /// A registered macro's handler failed with this message (spec §13.2; the message is a
+    /// project addition, WORKLIST C8b decision 3).
+    MacroFailed { name: String, message: String },
+    /// A silent stop by a registered macro's handler (spec §13.2, *Fail*): libucl ends the
+    /// input at the macro without an error message and keeps what it parsed;
+    /// [`Error::partial`] holds that.
+    MacroStopped { name: String },
 }
 
 impl fmt::Display for ErrorKind {
@@ -284,10 +312,14 @@ impl fmt::Display for ErrorKind {
                 write!(f, "'{path}' is not a regular file that can be read")
             }
             ErrorKind::IncludeSelf { path } => write!(f, "file '{path}' includes itself"),
-            ErrorKind::IncludeTooDeep { limit } => {
-                write!(f, "more than {limit} files are included inside one another")
+            ErrorKind::IncludeTooDeep { limit } => write!(
+                f,
+                "more than {limit} input units (inputs, included files, macro text) are open \
+                 inside one another"
+            ),
+            ErrorKind::IncludeArrayRoot => {
+                f.write_str("an included file or macro text cannot start with '['")
             }
-            ErrorKind::IncludeArrayRoot => f.write_str("an included file cannot start with '['"),
             ErrorKind::AfterRootClosedByInclude => {
                 f.write_str("an included file closed the root object; nothing may follow the macro")
             }
@@ -326,6 +358,27 @@ impl fmt::Display for ErrorKind {
                 f,
                 "reading '{path}' goes over the input limit of {limit} bytes for the document \
                  and the files it reads"
+            ),
+            ErrorKind::TooManyInputs { limit } => write!(
+                f,
+                "a parser takes at most {limit} inputs, fewer after included files that stopped"
+            ),
+            ErrorKind::AfterRoot => {
+                f.write_str("the root is complete: a later input can add nothing to it")
+            }
+            ErrorKind::UnseparatedInput { found } => write!(
+                f,
+                "{} directly after the value that ended the input before; a line break, ';', \
+                 ',' or a comment must come first",
+                describe(*found)
+            ),
+            ErrorKind::MacroFailed { name, message } => {
+                write!(f, "macro '.{name}' failed: {message}")
+            }
+            ErrorKind::MacroStopped { name } => write!(
+                f,
+                "parsing stopped at the macro '.{name}', whose handler failed; the entries \
+                 before it are kept"
             ),
         }
     }

@@ -8,7 +8,7 @@ pub(crate) type Handler<'a> = dyn FnMut(&str) -> Option<String> + 'a;
 pub(crate) struct Expander<'a> {
     /// Registered variables in lookup order (spec §7.1).
     variables: Vec<(String, String)>,
-    handler: Option<&'a mut Handler<'a>>,
+    handler: Option<Box<Handler<'a>>>,
     enabled: bool,
 }
 
@@ -22,13 +22,30 @@ const FILE_VARS: [&str; 2] = ["FILENAME", "CURDIR"];
 impl<'a> Expander<'a> {
     pub(crate) fn new(
         variables: Vec<(String, String)>,
-        handler: Option<&'a mut Handler<'a>>,
+        handler: Option<Box<Handler<'a>>>,
         enabled: bool,
     ) -> Self {
         Self {
             variables,
             handler,
             enabled,
+        }
+    }
+
+    /// Replaces the variables, in lookup order.
+    pub(crate) fn set_variables(&mut self, variables: Vec<(String, String)>) {
+        self.variables = variables;
+    }
+
+    /// Sets `FILENAME` and `CURDIR` for an input given as a file (spec §13.1, *File variables
+    /// and paths*): each keeps its place in the lookup order if it is defined, and is added at
+    /// the end otherwise (oracle runs). They keep these values for later inputs.
+    pub(crate) fn set_file_vars(&mut self, filename: String, curdir: String) {
+        for (name, value) in FILE_VARS.into_iter().zip([filename, curdir]) {
+            match self.variables.iter_mut().find(|(n, _)| n == name) {
+                Some(slot) => slot.1 = value,
+                None => self.variables.push((name.to_string(), value)),
+            }
         }
     }
 
@@ -204,7 +221,7 @@ mod tests {
         let v = vars(&[("H_REG", "registered")]);
         let mut handler =
             |name: &str| -> Option<String> { name.starts_with("H_").then(|| "[h]".to_string()) };
-        let mut e = Expander::new(v, Some(&mut handler), true);
+        let mut e = Expander::new(v, Some(Box::new(&mut handler)), true);
         let mut run = |t: &str| String::from_utf8(e.expand(t.as_bytes().to_vec())).unwrap();
         assert_eq!(run("${H_X}"), "[h]");
         assert_eq!(run("$H_X"), "$H_X");

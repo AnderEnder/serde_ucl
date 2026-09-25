@@ -231,6 +231,9 @@ pub(crate) struct Notes {
     pending_from: usize,
     /// Comments from this index on are held back from the next value created.
     held_from: Option<usize>,
+    /// Held comments up to this index were read in an earlier input: they attach after the
+    /// value they were held back for (§13.1; oracle runs, QUESTIONS.md #59).
+    held_earlier: Option<usize>,
     groups: CommentGroups,
     /// The value created most recently. `None` when that value is not part of the result.
     last: Option<PathRef>,
@@ -244,6 +247,7 @@ impl Notes {
             cursor: LineCursor::new(),
             pending_from: 0,
             held_from: None,
+            held_earlier: None,
             groups: CommentGroups::default(),
             last: Some(PathRef::root()),
         }
@@ -318,11 +322,22 @@ impl Notes {
     }
 
     /// A value was created at `path` (`None`: it is not part of the result). Pending comments
-    /// go before it, except those held back.
+    /// go before it, except those held back. Held comments read in an earlier input go after it.
     pub(crate) fn created(&mut self, path: Option<PathRef>) {
         let end = self.held_from.take().unwrap_or(self.count());
         self.attach(end, path.as_ref(), CommentPlacement::Before);
+        if let Some(until) = self.held_earlier.take() {
+            self.attach(until, path.as_ref(), CommentPlacement::After);
+        }
         self.last = path;
+    }
+
+    /// An input ended while a key waits for its value on a following line: the pending
+    /// comments wait for the value too. Those before the key go before it, as in one document;
+    /// those held back for it go after it, while comments of the value's own input are held as
+    /// in one document (oracle runs, QUESTIONS.md #59).
+    pub(crate) fn wait_for_value(&mut self) {
+        self.held_earlier = Some(self.count());
     }
 
     /// A container closed with its bracket, or the input ended: pending comments go after the

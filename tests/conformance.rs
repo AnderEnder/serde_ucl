@@ -21,6 +21,12 @@
 //! the reason `divergence:signature` must fail with exactly that error. A silent stop (spec §9.4,
 //! `Error::is_stopped`) is not a rejection: its partial result is compared with the golden file.
 //!
+//! A case with a `.inputs` file is parsed as several inputs into one parser (spec §13.1): the
+//! case's own file first, then each further input with its own priority and strategy, through
+//! `Parser::inputs`. A silent stop in one input does not end the parse; an error in any input
+//! makes the result an error. The flags `registered-macros` and `registered-priority-override`
+//! register macros equivalent to the oracle's test macros (spec §13.2, *The test macros*).
+//!
 //! For cases with `dump-comments` in their `.flags`, the new core's dump also records the saved
 //! comments attached to each value, as the oracle's does (`tests/conformance/README.md`): `"c"` for
 //! comments attached before the value, `"ca"` for those attached after it.
@@ -49,8 +55,10 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{CommentPlacement, FsLoader, Parser as CoreParser, PathSegment};
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue};
+use ucl_lexer::parse::{
+    CommentPlacement, FsLoader, Input, MacroCall, MacroError, Parser as CoreParser, PathSegment,
+};
+use ucl_lexer::{DuplicateStrategy, ParserFlags, UclObject, UclValue};
 
 const CONFORMANCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance");
 
@@ -59,6 +67,57 @@ struct Case {
     input: PathBuf,
     golden: PathBuf,
     flags: Vec<String>,
+    /// The further inputs of `<case>.inputs` (spec §13.1), in order.
+    inputs: Vec<FurtherInput>,
+}
+
+/// One line of a `<case>.inputs` file: `MODE PRIORITY STRATEGY PATH`
+/// (`tests/conformance/README.md`).
+struct FurtherInput {
+    /// `file`: added by its path; `chunk`: its bytes added as a document given as text.
+    file: bool,
+    priority: u8,
+    strategy: DuplicateStrategy,
+    path: PathBuf,
+}
+
+fn strategy_named(name: &str) -> Option<DuplicateStrategy> {
+    Some(match name {
+        "append" => DuplicateStrategy::Append,
+        "merge" => DuplicateStrategy::Merge,
+        "rewrite" => DuplicateStrategy::Rewrite,
+        "error" => DuplicateStrategy::Error,
+        _ => return None,
+    })
+}
+
+/// The further inputs listed in `path`, a `<case>.inputs` file, with paths relative to `dir`.
+fn further_inputs(path: &Path, dir: &Path) -> Vec<FurtherInput> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(|line| line.split('#').next().unwrap().trim())
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let bad = || panic!("{}: bad input line '{line}'", path.display());
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let [mode, priority, strategy, file] = fields[..] else {
+                bad()
+            };
+            let priority: u32 = priority.parse().unwrap_or_else(|_| bad());
+            FurtherInput {
+                file: match mode {
+                    "file" => true,
+                    "chunk" => false,
+                    _ => bad(),
+                },
+                priority: (priority & 0x0f) as u8,
+                strategy: strategy_named(strategy).unwrap_or_else(|| bad()),
+                path: dir.join(file),
+            }
+        })
+        .collect()
 }
 
 enum Outcome {
@@ -94,6 +153,7 @@ fn discover() -> Vec<Case> {
             Case {
                 id: format!("{rel}/{stem}"),
                 golden: dir.join(format!("{stem}.golden.json")),
+                inputs: further_inputs(&dir.join(format!("{stem}.inputs")), dir),
                 input,
                 flags,
             }
@@ -250,6 +310,10 @@ struct Setup {
     dump_comments: bool,
     /// `save-comments` or `dump-comments`: the case has config output with comments.
     save_comments: bool,
+    /// `registered-macros`: the test macros `.emit`, `.seen`, `.fail` and `.ctx` (spec §13.2).
+    registered_macros: bool,
+    /// `registered-priority-override`: the handler of `.seen` registered as `priority`.
+    priority_override: bool,
 }
 
 fn setup(case: &Case) -> Setup {
@@ -282,6 +346,10 @@ fn setup(case: &Case) -> Setup {
             setup.handler = true;
         } else if flag == "string-input" {
             setup.string_input = true;
+        } else if flag == "registered-macros" {
+            setup.registered_macros = true;
+        } else if flag == "registered-priority-override" {
+            setup.priority_override = true;
         } else if let Some(var) = flag.strip_prefix("var:") {
             let (name, value) = var
                 .split_once('=')
@@ -293,13 +361,10 @@ fn setup(case: &Case) -> Setup {
                 .unwrap_or_else(|_| panic!("{}: bad flag '{flag}'", case.id));
             setup.priority = Some((n & 0x0f) as u8);
         } else if let Some(name) = flag.strip_prefix("strategy:") {
-            setup.strategy = Some(match name {
-                "append" => DuplicateStrategy::Append,
-                "merge" => DuplicateStrategy::Merge,
-                "rewrite" => DuplicateStrategy::Rewrite,
-                "error" => DuplicateStrategy::Error,
-                _ => panic!("{}: unknown strategy in '{flag}'", case.id),
-            });
+            setup.strategy = Some(
+                strategy_named(name)
+                    .unwrap_or_else(|| panic!("{}: unknown strategy in '{flag}'", case.id)),
+            );
         } else {
             panic!("{}: unknown .flags entry '{flag}'", case.id);
         }
@@ -307,9 +372,131 @@ fn setup(case: &Case) -> Setup {
     setup
 }
 
+// ----- the test macros (spec §13.2, *The test macros*) ------------------------------------
+
+/// `.emit`: has its VALUE text parsed in place, and fails if that fails or stops.
+fn emit_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
+    let text = call.value().to_vec();
+    call.parse(text).map_err(|_| MacroError::stop())
+}
+
+/// A copy of `value` as the oracle's test macros make it: an entry whose first value is an object
+/// or an array is copied as that value only, as `.inherit` copies (spec §9.7; oracle runs,
+/// QUESTIONS.md #24 and #59).
+fn test_macro_copy(value: &UclValue) -> UclValue {
+    match value {
+        UclValue::Object(object) => {
+            let mut copy = UclObject::new();
+            for (key, entry) in object {
+                let count = match entry.first() {
+                    UclValue::Object(_) | UclValue::Array(_) => 1,
+                    _ => entry.len(),
+                };
+                let mut slots = entry.slots()[..count].iter().map(|slot| {
+                    ucl_lexer::Slot::new(test_macro_copy(slot.value()), slot.priority())
+                });
+                let mut copied = ucl_lexer::Entry::from_slot(slots.next().expect("a value"));
+                slots.for_each(|slot| copied.push_slot(slot));
+                copy.insert_entry(key.clone(), copied);
+            }
+            UclValue::Object(copy)
+        }
+        UclValue::Array(items) => UclValue::Array(items.iter().map(test_macro_copy).collect()),
+        scalar => scalar.clone(),
+    }
+}
+
+/// `.seen`: adds `seen = { data: <VALUE text>, args: <a copy of the ARGUMENTS, or null> }` to the
+/// innermost open object, and fails if there is none.
+fn seen_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
+    let mut seen = UclObject::new();
+    seen.insert(
+        "data",
+        UclValue::String(String::from_utf8_lossy(call.value()).into_owned()),
+    );
+    let args = call.arguments().map_or(UclValue::Null, test_macro_copy);
+    seen.insert("args", args);
+    call.add("seen", UclValue::Object(seen))
+        .map_err(|_| MacroError::stop())
+}
+
+/// `.fail`: fails and does nothing else.
+fn fail_macro(_: &mut MacroCall<'_>) -> Result<(), MacroError> {
+    Err(MacroError::stop())
+}
+
+/// `.ctx`, a context macro: adds `ctx` with a copy of the root it received, and fails like
+/// `.seen`.
+fn ctx_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
+    let root = call.root().map_or(UclValue::Null, test_macro_copy);
+    call.add("ctx", root).map_err(|_| MacroError::stop())
+}
+
+/// Registers the test macros a case's `.flags` ask for.
+fn register_test_macros(parser: &mut CoreParser, setup: &Setup) {
+    if setup.registered_macros {
+        parser
+            .register_macro("emit", emit_macro)
+            .register_macro("seen", seen_macro)
+            .register_macro("fail", fail_macro)
+            .register_context_macro("ctx", ctx_macro);
+    }
+    if setup.priority_override {
+        parser.register_macro("priority", seen_macro);
+    }
+}
+
+/// Parses the case's own file and then its further inputs with one parser (spec §13.1). A silent
+/// stop ends only its input; the first error ends the parse.
+fn run_inputs(
+    parser: &mut CoreParser,
+    case: &Case,
+    as_bytes: bool,
+) -> Result<UclValue, ucl_lexer::parse::Error> {
+    let own = fs::read(&case.input).unwrap();
+    let further: Vec<Vec<u8>> = case
+        .inputs
+        .iter()
+        .map(|input| {
+            if input.file {
+                Vec::new()
+            } else {
+                fs::read(&input.path).unwrap()
+            }
+        })
+        .collect();
+    let mut inputs = parser.inputs();
+    let first = if as_bytes {
+        Input::bytes(&own)
+    } else {
+        Input::file(&case.input)
+    };
+    let mut all = vec![first];
+    for (spec, bytes) in case.inputs.iter().zip(&further) {
+        let input = if spec.file {
+            Input::file(&spec.path)
+        } else {
+            Input::bytes(bytes)
+        };
+        all.push(
+            input
+                .with_priority(spec.priority)
+                .with_strategy(spec.strategy),
+        );
+    }
+    for input in all {
+        match inputs.add(input) {
+            Err(e) if !e.is_stopped() => return Err(e),
+            _ => {}
+        }
+    }
+    inputs.finish()
+}
+
 /// Runs the new core on a case, applying its `.flags` file as the oracle does
-/// (`docs/spec/README.md`, "How the conformance oracle runs every case"). A silent stop gives its
-/// partial result. Returns the parser, for its saved comments and output facts, and the result.
+/// (`docs/spec/README.md`, "How the conformance oracle runs every case"), and its `.inputs`. A
+/// silent stop gives its partial result. Returns the parser, for its saved comments and output
+/// facts, and the result.
 fn run_new_core(
     case: &Case,
     setup: &Setup,
@@ -331,11 +518,15 @@ fn run_new_core(
     if let Some(strategy) = setup.strategy {
         parser.set_strategy(strategy);
     }
+    register_test_macros(&mut parser, setup);
     // The oracle parses every case as a string, then defines FILENAME and CURDIR from the
     // case's path unless the case has `no-filevars` (spec §12.7). The core defines them
     // whenever it parses a file (project decision 5).
     let no_filevars = setup.flags.contains(ParserFlags::NO_FILEVARS);
-    let result = if setup.string_input || no_filevars {
+    let as_bytes = setup.string_input || no_filevars;
+    let result = if !case.inputs.is_empty() {
+        run_inputs(&mut parser, case, as_bytes)
+    } else if as_bytes {
         let bytes = fs::read(&case.input).unwrap();
         parser.parse(&bytes)
     } else {
@@ -440,6 +631,10 @@ fn uses_macros(case: &Case) -> bool {
             "priority",
             "load",
             "inherit",
+            "emit",
+            "seen",
+            "fail",
+            "ctx",
         ]
         .iter()
         .any(|m| {

@@ -1,6 +1,6 @@
 //! A by-value builder for [`Parser`].
 
-use super::{Loader, Parser};
+use super::{Loader, MacroCall, MacroError, Parser};
 use crate::value::{DuplicateStrategy, ParserFlags};
 use std::path::PathBuf;
 
@@ -98,6 +98,27 @@ impl ParserBuilder {
         handler: impl FnMut(&str) -> Option<String> + 'static,
     ) -> Self {
         self.parser.set_variable_handler(handler);
+        self
+    }
+
+    /// Registers a macro under `name` ([`Parser::register_macro`], spec §13.2).
+    pub fn with_macro(
+        mut self,
+        name: impl Into<String>,
+        handler: impl Fn(&mut MacroCall<'_>) -> Result<(), MacroError> + 'static,
+    ) -> Self {
+        self.parser.register_macro(name, handler);
+        self
+    }
+
+    /// Registers a context macro under `name`, whose handler also gets the root as built so far
+    /// ([`Parser::register_context_macro`], spec §13.2).
+    pub fn with_context_macro(
+        mut self,
+        name: impl Into<String>,
+        handler: impl Fn(&mut MacroCall<'_>) -> Result<(), MacroError> + 'static,
+    ) -> Self {
+        self.parser.register_context_macro(name, handler);
         self
     }
 

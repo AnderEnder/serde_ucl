@@ -1789,3 +1789,66 @@
     file input (the golden file would hold the checkout path).
   - Commits: `3c30bf3` (oracle, script, cases), `b8f338d` (spec; tagged `spec-v10`).
   - The spec contains behaviour only.
+- 2026-09-25 — Role: implementation team. Item: C8b (several inputs into one parser, registered
+  macros; spec-v10 §13).
+  - Inputs consulted: `docs/clean-room/` (PROTOCOL, WORKLIST C8b and its project decisions,
+    QUESTIONS, this log); `docs/spec/` at HEAD, which `git diff --stat spec-v10 HEAD --
+    docs/spec/` shows equal to `spec-v10`: §13 in full, and `git diff spec-v9 spec-v10 --
+    docs/spec/` (§9.2, §9.4, §10.8, §12.8, README); the conformance suite (the 101 cases of
+    `pending/13-inputs/` with their `.flags`, `.inputs`, `files/` and golden files,
+    `pending/README.md`, `tests/conformance/README.md`, `tests/conformance.rs`);
+    `scripts/regen-golden.sh` (its flag and input mapping and case loop, to run the oracle as the
+    golden files were made) and `scripts/ci.sh`; the crate's own files (`src/parse/`,
+    `src/value.rs`, `src/de.rs`, `src/error.rs`, `src/lib.rs`, `README.md`, `CHANGELOG.md`).
+    `grep` ran on `src/` (the old `lexer.rs` and `parser.rs` no longer exist; excluded anyway),
+    `tests/`, `examples/`, `scripts/` and single named files. Git: `git log --oneline`, `git tag`,
+    `git status`, `git show --stat` of HEAD at the start (`f6453ce`, WORKLIST only), the spec
+    diffs above, and `git show --stat` and the WORKLIST diff of `6c37b7c` (see below); scratch
+    worktrees of this session's own commit under `target/c8b/wt`, to run `scripts/ci.sh` on it.
+    The tooling showed me the worktree's current `CLAUDE.md`; the main checkout's initial git
+    status listed the names `PLAN.md` and `REVIEW.md`, which I did not open. One background
+    command's output went under `/private/tmp`; I did not open it, and wrote every later log
+    under `target/c8b/`. The advisor tool (a reviewer that sees this session's transcript) was
+    called twice: the first call, before the design, timed out; the second reviewed the finished
+    work.
+  - Black-box oracle runs (`target/libucl-oracle/ucl-dump` with `-i`, `-R`, `-O`, `-c`, `-F`,
+    `-v`, `-e`), in `target/c8b/probe/`: about 400 single probes of the joins between inputs and
+    of the test macros (`target/c8b/p1.py`–`p22.py`), and four differential rounds that compare
+    the crate with the oracle on 39,017 generated combinations of two or three inputs (entries,
+    separators, whitespace, comments, closed roots, stops, includes, inputs given as files, the
+    test macros, priorities and strategies; `target/c8b/gen_diff*.py`). After the fixes below
+    they match everywhere, apart from the byte saved after a block comment that ends an input,
+    which §12.5 leaves uncertain.
+  - Work: `Parser::inputs`, `Inputs` and `Input` (§13.1), with `Parser::parse` and
+    `Parser::parse_file` now parses of one input; `Parser::register_macro`,
+    `Parser::register_context_macro`, `ParserBuilder::with_macro` and
+    `ParserBuilder::with_context_macro`, `MacroCall`, `MacroError` and `MacroHandler` (§13.2);
+    new error kinds `TooManyInputs`, `AfterRoot`, `UnseparatedInput`, `MacroFailed` and
+    `MacroStopped` (`Error::is_stopped` covers the last). The parser core keeps a document state
+    from one input to the next (`Document`, `Boundary` in `src/parse/core.rs`). The oracle runs
+    showed rules at the joins that §13 does not state, implemented as observed and asked as
+    QUESTIONS.md #59: whitespace-only later inputs, values on a following line in a later input,
+    section names after a separator at the end of an input, what may follow a closed root,
+    comments at the joins, included files that stop and stay open, the file of a text input,
+    and the copies the test macros make. The conformance runner reads `.inputs`, maps
+    `registered-macros` and `registered-priority-override`, and registers handlers equivalent to
+    the four test macros; `tests/inputs_and_macros.rs` covers the API (21 tests).
+  - Results: the 101 cases, now in `cases/spec/13-inputs/`, all pass: new core 1501 cases, 1497
+    pass (was 1400 and 1396), 4 expected failures unchanged; emitters 1113 cases with output,
+    1109 match in every format (was 1046 and 1042; config with comments 56 of 56); readback
+    1109 cases parse, the other differences unchanged at 5 per format (#57 and #58, whose
+    `READBACK_PENDING` entries this item leaves alone). `xfail-new.txt` and `xfail-emit.txt`
+    unchanged. `scripts/ci.sh` passes with stable Rust and with `RUSTUP_TOOLCHAIN=1.88`.
+  - For the lead: the case move (`git mv` of `pending/13-inputs/` to `cases/spec/13-inputs/`
+    and `git rm` of `pending/README.md`) was staged in this worktree's index when another
+    session's commit `6c37b7c` ("C8c: target the latest stable Rust (1.98)", WORKLIST only)
+    was made, and that commit took it in. `6c37b7c` therefore holds the move without the runner
+    that reads the cases, so `scripts/ci.sh` fails at `6c37b7c` itself; it passes at this
+    item's commits. I did not rewrite `6c37b7c`. `docs/COMPATIBILITY.md` and the §13 note
+    "the cases are in `pending/13-inputs/`" belong to the spec team and are unchanged; wording
+    for COMPATIBILITY.md is in my report.
+  - Questions: #59.
+  - Commits: `e8af70e` (API, core, tests, runner), `91a9388` (README), and the `C8b:` commit
+    that adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

@@ -80,6 +80,65 @@
 //! # Ok::<(), ucl_lexer::UclError>(())
 //! ```
 //!
+//! ## Several inputs and custom macros
+//!
+//! A parser can read several inputs into one result, each with its own priority and duplicate
+//! strategy ([`parse::Parser::inputs`], [`parse::Input`]; spec §13.1). Defaults can so be
+//! layered under a user's file: at a higher priority the user's values win, and under `merge`
+//! objects combine.
+//!
+//! ```rust
+//! use ucl_lexer::parse::{Input, MemoryLoader, ParserBuilder};
+//! use ucl_lexer::DuplicateStrategy;
+//!
+//! let mut files = MemoryLoader::new();
+//! files.add_file("/usr/share/app/app.conf", "workers = 4\nlog { level = info }\n");
+//! files.add_file("/etc/app/app.conf", "workers = 16\nlog { file = /var/log/app.log }\n");
+//! let mut parser = ParserBuilder::new().with_loader(files).build();
+//! let mut inputs = parser.inputs();
+//! inputs.add(Input::file("/usr/share/app/app.conf"))?;
+//! inputs.add(
+//!     Input::file("/etc/app/app.conf")
+//!         .with_priority(1)
+//!         .with_strategy(DuplicateStrategy::Merge),
+//! )?;
+//! let value = inputs.finish()?;
+//! let root = value.as_object().unwrap();
+//! assert_eq!(root["workers"].as_integer(), Some(16));
+//! let log = root["log"].as_object().unwrap();
+//! assert_eq!(log["level"].as_str(), Some("info"));
+//! assert_eq!(log["file"].as_str(), Some("/var/log/app.log"));
+//! # Ok::<(), ucl_lexer::parse::Error>(())
+//! ```
+//!
+//! An application can also register macros of its own ([`parse::ParserBuilder::with_macro`];
+//! spec §13.2). A handler adds entries where the macro stands, has text parsed in place of the
+//! macro, stops the parse silently or fails with a message ([`parse::MacroCall`],
+//! [`parse::MacroError`]):
+//!
+//! ```rust
+//! use ucl_lexer::parse::{MacroError, ParserBuilder};
+//! use ucl_lexer::UclValue;
+//!
+//! let mut parser = ParserBuilder::new()
+//!     // `.version`: adds the application's version where the macro stands.
+//!     .with_macro("version", |call| {
+//!         call.add("version", UclValue::String("1.4.2".into()))
+//!     })
+//!     // `.feature NAME`: the settings of a named feature, parsed in place.
+//!     .with_macro("feature", |call| match call.value_str() {
+//!         Some("tls") => call.parse("tls { enabled = true; port = 443 }"),
+//!         _ => Err(MacroError::new("unknown feature")),
+//!     })
+//!     .build();
+//! let value = parser.parse(b".version {}\nserver { .feature tls\n}")?;
+//! let root = value.as_object().unwrap();
+//! assert_eq!(root["version"].as_str(), Some("1.4.2"));
+//! let tls = root["server"].as_object().unwrap()["tls"].as_object().unwrap();
+//! assert_eq!(tls["port"].as_integer(), Some(443));
+//! # Ok::<(), ucl_lexer::parse::Error>(())
+//! ```
+//!
 //! ## Errors
 //!
 //! Every function returns [`UclError`]. A document the parser rejects is
