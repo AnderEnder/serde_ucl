@@ -121,6 +121,10 @@ behaviour, and each place says so. The decisions for §9, §10 and the API are r
 - Macro argument documents nest at most 64 deep in the project, the document holding the outermost
   macro included; deeper nesting is an error. libucl sets no limit of its own (§9.2;
   `cases/spec/09-macros/macro_args_nested_100_levels`).
+- A copy made by `.inherit` that would nest a value more than 1024 containers deep, the root
+  included, is an error, the same limit as for containers open at once (§11.2). libucl sets no
+  limit: copies of copies can nest a value tens of thousands of levels deep (§9.7). No case: the
+  golden file would be deeper than the conformance runner reads.
 - A variable-handler result that shares its string with other text is substituted in place in the
   project. libucl's result there depends on memory contents (§7.7).
 - A failure inside an included file after which libucl goes on with the same macro, a glob of

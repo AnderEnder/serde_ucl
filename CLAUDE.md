@@ -160,6 +160,12 @@ cargo doc --open
   `target/libucl-oracle/ucl-dump`, which `scripts/regen-golden.sh` builds.
 - No wall-clock thresholds in tests. `tests/scaling.rs` checks that time grows linearly by
   comparing time ratios within one run.
+- `tests/stack_depth.rs` checks that no entry point overflows a 2 MiB stack at the deepest
+  accepted input; `scripts/ci.sh` also runs it with the crate unoptimised (`cargo test` builds the
+  crate with `opt-level = 2`).
+- `tests/features/` is a separate package that depends on the crate without the `load` feature
+  (the crate's dev-dependency on itself turns `load` on for every other test build);
+  `scripts/ci.sh` runs it.
 - The README's code examples run as doctests (`ReadmeDoctests` in `src/lib.rs`).
 - Unit tests live inline under `#[cfg(test)]`; integration tests in `tests/`; benchmarks in `benches/`.
 

@@ -1639,3 +1639,10 @@
     entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: session lead (oracle side). Item: spec-v9 and C7 review.
+  - QUESTIONS #56 answered as a project decision: the 1024-level limit on values nested by
+    `.inherit` copies is accepted, following the precedent of #26; recorded in the spec README,
+    `docs/COMPATIBILITY.md` and QUESTIONS.md, tagged `spec-v9`. No behaviour of libucl changed in
+    the spec. `CLAUDE.md` names `tests/stack_depth.rs` and `tests/features/`; the
+    clean-implementer agent embeds it.
+  - The C7 grep naming `.` was rejected by the shell before it ran; not an exposure.
