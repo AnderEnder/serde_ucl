@@ -233,7 +233,7 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
 
 ### Packaging
 
-- The minimum supported Rust version is 1.88 (`rust-version` in `Cargo.toml`).
+- The crate targets the latest stable Rust (1.98 at this release; `rust-version` in `Cargo.toml`).
 - The license files `LICENSE-MIT` and `LICENSE-APACHE` are added, for the crate's license
   `MIT OR Apache-2.0`.
 - The package holds only the library sources, `Cargo.toml`, `README.md`, `CHANGELOG.md` and the

@@ -6,3 +6,4 @@
 cobertura.xml
 travis_wait_*.log
 /tests/features/target/
+/fuzz/target/

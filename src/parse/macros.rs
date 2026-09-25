@@ -531,7 +531,8 @@ impl Core<'_, '_, '_, '_> {
 
     /// After a macro: whitespace, line breaks and `;` are skipped, and the next entry may start
     /// right there. A `,` there, or a `#` that is the last byte of the input, is an error
-    /// (§9.2).
+    /// (§9.2), and so is such a `#` after comments with whitespace directly before it, as where
+    /// the first key of the root could start (§2.2).
     fn after_macro(&mut self) -> Result<(), Error> {
         while self.peek().is_some_and(|b| is_space(b) || b == b';') {
             self.pos += 1;
@@ -541,7 +542,7 @@ impl Core<'_, '_, '_, '_> {
             Some(b'#') if self.pos + 1 == self.src.len() => {
                 Err(self.error(ErrorKind::HashAtEnd, self.pos))
             }
-            _ => Ok(()),
+            _ => self.check_hash_at_end_ahead(),
         }
     }
 
@@ -966,8 +967,25 @@ mod tests {
             ".priority(priority=4)#",
             ".priority(priority=4) #",
             ".priority(priority=4)\n#",
+            // After comments too, as where the first key of the root could start (§2.2;
+            // oracle runs, C8c).
+            ".priority 3;#\n #",
+            ".priority 3\n#\n #",
+            ".priority 1\n# c\n\n#",
+            ".priority 1\n# c\n# d\n #",
+            ".priority 1\n/* c */ #",
+            ".priority 1\n/* c */\n#",
+            "a = 1\n.priority 1;# c\n #",
         ] {
             assert_eq!(kind(input), ErrorKind::HashAtEnd, "{input:?}");
+        }
+        // Directly after a comment the `#` is a comment (§2.2).
+        for input in [
+            ".priority 1\n# c\n#",
+            ".priority 1\n/* c */#",
+            ".priority 1\n# c\n",
+        ] {
+            assert!(parse(input.as_bytes()).is_ok(), "{input:?}");
         }
         assert_eq!(kind(".priority {3"), ErrorKind::UnterminatedMacroValue);
         assert_eq!(kind(".priority \"3"), ErrorKind::UnterminatedString);

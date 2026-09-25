@@ -8,12 +8,15 @@
 # committed, so running the tests needs no C toolchain.
 #
 # Environment:
+#   LIBUCL_COMMIT     libucl commit to build, as a full 40-character SHA (default: the pinned
+#                     commit below, from which the committed golden files come). scripts/ci.sh
+#                     pin sets it to regenerate the golden files at another commit for review.
 #   LIBUCL_DIR        existing libucl checkout to use (must be at LIBUCL_COMMIT)
 #   LIBUCL_BUILD_DIR  where to build libucl (default: target/libucl-oracle/build)
 #   CC                C compiler (default: cc)
 set -eu
 
-LIBUCL_COMMIT=24c8b399062ae4691168c243e3b7345ef7f31956
+LIBUCL_COMMIT=${LIBUCL_COMMIT:-24c8b399062ae4691168c243e3b7345ef7f31956}
 LIBUCL_URL=https://github.com/vstakhov/libucl.git
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -23,6 +26,12 @@ LIBUCL_DIR=${LIBUCL_DIR:-"$WORK/libucl"}
 LIBUCL_BUILD_DIR=${LIBUCL_BUILD_DIR:-"$WORK/build"}
 CC=${CC:-cc}
 DUMP="$WORK/ucl-dump"
+
+# A full SHA, since the checkout's HEAD is compared with it below.
+if [ ${#LIBUCL_COMMIT} -ne 40 ] || [ -n "$(printf '%s' "$LIBUCL_COMMIT" | tr -d 0-9a-f)" ]; then
+	echo "error: LIBUCL_COMMIT must be a full 40-character commit SHA, not '$LIBUCL_COMMIT'" >&2
+	exit 1
+fi
 
 mkdir -p "$WORK"
 
@@ -34,6 +43,10 @@ actual=$(git -C "$LIBUCL_DIR" rev-parse HEAD)
 if [ "$actual" != "$LIBUCL_COMMIT" ]; then
 	if [ "$LIBUCL_DIR" = "$WORK/libucl" ]; then
 		git -C "$LIBUCL_DIR" fetch --quiet origin
+		# A commit that no branch holds can still be fetched by its SHA.
+		if ! git -C "$LIBUCL_DIR" cat-file -e "$LIBUCL_COMMIT^{commit}" 2>/dev/null; then
+			git -C "$LIBUCL_DIR" fetch --quiet origin "$LIBUCL_COMMIT"
+		fi
 		git -C "$LIBUCL_DIR" checkout --quiet "$LIBUCL_COMMIT"
 	else
 		echo "error: $LIBUCL_DIR is at $actual, expected $LIBUCL_COMMIT" >&2

@@ -256,7 +256,6 @@ fn empty_name_heredoc(src: &[u8], start: usize, content_start: usize) -> Result<
 /// lowercased as written (spec §12.1).
 pub(crate) fn decode_unquoted(raw: &[u8]) -> (Vec<u8>, bool) {
     let mut out = Vec::with_capacity(raw.len());
-    let mut escaped_dollars = 0;
     let mut i = 0;
     while i < raw.len() {
         let b = raw[i];
@@ -286,15 +285,27 @@ pub(crate) fn decode_unquoted(raw: &[u8]) -> (Vec<u8>, bool) {
                 i += 2 + available.min(1);
             }
         } else {
-            if next == b'$' {
-                escaped_dollars += 1;
-            }
             out.push(simple_escape(next));
             i += 2;
         }
     }
-    let dollars = raw.iter().filter(|&&b| b == b'$').count();
-    (out, dollars > escaped_dollars)
+    (out, has_unescaped_dollar(raw))
+}
+
+/// Whether `raw`, an unquoted value as written, has a `$` that is not written as `\$` (spec
+/// §7.6). Backslashes pair from the left, each with the byte after it, whatever a `\u` escape
+/// then makes of those bytes: in `\u\$` the `$` is written as `\$`, although decoding drops the
+/// backslash as the byte after `\u` (§4.8; oracle runs, C8c).
+fn has_unescaped_dollar(raw: &[u8]) -> bool {
+    let mut i = 0;
+    while i < raw.len() {
+        match raw[i] {
+            b'\\' => i += 2,
+            b'$' => return true,
+            _ => i += 1,
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -490,5 +501,11 @@ mod tests {
         assert!(expands(r"\\$ABI"));
         assert!(expands(r"\$ABI\u$000"));
         assert!(!expands("plain"));
+        // Written as `\$` even where a `\u` escape takes the backslash (oracle runs, C8c).
+        assert!(!expands(r"\$ABI\u\$"));
+        assert_eq!(decode_unquoted(br"\$ABI\u\$").0, b"$ABIu$");
+        assert!(!expands(r"\$ABI\u1\$"));
+        assert!(!expands(r"\u\$ABI"));
+        assert!(expands(r"\$ABI\u\\$"));
     }
 }

@@ -26,21 +26,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 UCL (Universal Configuration Language) for Rust with serde: package `ucl-rust-lexer`, library
-`ucl_lexer`, minimum Rust 1.88. The crate reads and writes UCL as libucl, the C library used by
-FreeBSD, does. Compatibility is defined by behaviour: the behaviour spec in `docs/spec/` and the
-conformance suite in `tests/conformance/`, whose golden files come from libucl.
-`docs/COMPATIBILITY.md` lists the deliberate differences and the libucl quirks the crate
+`ucl_lexer`, latest stable Rust (1.98 at this release). The crate reads and writes UCL as libucl,
+the C library used by FreeBSD, does. Compatibility is defined by behaviour: the behaviour spec in
+`docs/spec/` and the conformance suite in `tests/conformance/`, whose golden files come from
+libucl. `docs/COMPATIBILITY.md` lists the deliberate differences and the libucl quirks the crate
 reproduces.
 
-- `src/parse/`: the parser (`Parser`, `ParserBuilder`, parser flags, variables, macros, loaders).
+- `src/parse/`: the parser. `mod.rs` (`Parser`: flags, variables, loader, base directory, search
+  directories, input limit), `builder.rs` (`ParserBuilder`), `core.rs` (document structure),
+  `number.rs`, `string.rs`, `vars.rs`, `comments.rs` (saved comments), `macros.rs` (macro syntax
+  and the built-in macros), `include.rs` and `glob.rs` (`.include`, `.try_include`, `.load`),
+  `loader.rs` (`FsLoader`, `MemoryLoader`), `inputs.rs` (several inputs into one parser,
+  `Parser::inputs`, spec §13.1), `registered.rs` (macros the application registers, `MacroCall`,
+  spec §13.2), `facts.rs` and `tree.rs` (what the output formats need to know about the parse),
+  `error.rs` (`Error`, `ErrorKind`).
 - `src/emit/`: libucl's output formats (config, JSON, compact JSON, YAML).
-- `src/de.rs`, `src/de/`: serde deserialization; `src/ser/`: serde serialization.
+- `src/de.rs`, `src/de/`: serde deserialization; `src/ser/`: serde serialization;
+  `src/handoff.rs`: moves a whole `UclValue` past serde's data model, so that deep values do not
+  recurse.
 - `src/value.rs`: the value model; `src/error.rs`: `UclError` and `Position`; `src/time.rs`: the
   `Duration` helper.
 - `tests/conformance.rs` and `tests/conformance/`: the conformance runners and cases;
-  `tests/serde_roundtrip.rs` and `tests/serde_corpus/`: serde round trips.
-- `scripts/ci.sh`: what CI runs; `scripts/regen-golden.sh` and `tools/ucl-dump/`: the oracle that
-  produces the golden files.
+  `tests/common/oracle.rs`: running the crate as the oracle runs a case, and the comparison of
+  dumps, shared by the conformance runner and the fuzzer; `tests/serde_roundtrip.rs` and
+  `tests/serde_corpus/`: serde round trips; `tests/inputs_and_macros.rs`: several inputs and
+  registered macros through the API; `tests/error_positions.rs`: positions of deserialization
+  errors.
+- `fuzz/`: the differential fuzzer `ucl-differential`, a package of its own outside `cargo test`
+  (`fuzz/README.md`).
+- `scripts/ci.sh`: what CI runs, and the `golden`, `pin` and `fuzz` modes;
+  `scripts/regen-golden.sh` and `tools/ucl-dump/`: the oracle that produces the golden files.
+- `.github/workflows/`: `ci.yml` (`scripts/ci.sh` on Linux and macOS with stable Rust),
+  `golden.yml` (the nightly drift check), `pin-move.yml` (manual: the golden files at another
+  libucl commit, published for review, nothing committed) and `fuzz.yml` (manual: the
+  differential fuzzer).
 
 ## Clean-Room Rules
 
@@ -100,11 +119,15 @@ cargo bench --bench parse_benchmarks
 # Everything CI runs on push and pull request
 scripts/ci.sh
 
-# The same with the minimum Rust version, as the CI matrix does
-RUSTUP_TOOLCHAIN=1.88 scripts/ci.sh
-
 # The nightly drift check: rebuild libucl, regenerate every golden file, fail on any change
 scripts/ci.sh golden
+
+# What moving the libucl pin to another commit (a full SHA) would change: regenerates every
+# golden file at it and writes a summary and a patch to target/pin-move/; commits nothing
+scripts/ci.sh pin <commit>
+
+# The differential fuzzer for N seconds (fuzz/README.md); fails if it finds a difference
+scripts/ci.sh fuzz 600
 ```
 
 ### Running Examples
@@ -150,24 +173,30 @@ cargo doc --open
   compares the parse of every case in `tests/conformance/` with its `<case>.golden.json`;
   `libucl_conformance_emitters` compares the output of every parsed case in each format, byte for
   byte, with libucl's; `libucl_conformance_readback` parses each output again and compares the
-  value, allowing only the losses spec §10.8 lists (others are in `READBACK_PENDING`, each with
-  its question). Known failures are listed in `tests/conformance/xfail-new.txt` and
-  `xfail-emit.txt` with a reason; they hold only justified divergences, may only shrink, and a
-  listed case that passes fails the run. `tests/conformance/README.md` describes the layout.
+  value, allowing only the losses spec §10.8 lists (an unlisted difference would go in
+  `READBACK_PENDING` with its question; the list is empty). Known failures are listed in
+  `tests/conformance/xfail-new.txt` and `xfail-emit.txt` with a reason; they hold only justified
+  divergences, may only shrink, and a listed case that passes fails the run.
+  `tests/conformance/README.md` describes the layout.
 - Golden files come only from libucl, through `scripts/regen-golden.sh` (git, CMake and a C
   compiler; runs on macOS). Never edit them by hand. Cases and golden files belong to the spec
   team.
 - serde: `cargo test --test serde_roundtrip` checks round trips and the corpus in
   `tests/serde_corpus/`; `UCL_SERDE_REGEN=1` regenerates the corpus and needs the oracle binary
   `target/libucl-oracle/ucl-dump`, which `scripts/regen-golden.sh` builds.
-- No wall-clock thresholds in tests. `tests/scaling.rs` checks that time grows linearly by
-  comparing time ratios within one run.
+- No wall-clock thresholds in tests. `tests/scaling.rs` is the only timing-based test: it checks
+  that time grows linearly by comparing time ratios within one run, which only time can show.
 - `tests/stack_depth.rs` checks that no entry point overflows a 2 MiB stack at the deepest
   accepted input; `scripts/ci.sh` also runs it with the crate unoptimised (`cargo test` builds the
-  crate with `opt-level = 2`).
+  crate with `opt-level = 2`, for speed only; the tests pass without it).
 - `tests/features/` is a separate package that depends on the crate without the `load` feature
   (the crate's dev-dependency on itself turns `load` on for every other test build);
   `scripts/ci.sh` runs it.
+- `fuzz/` is the differential fuzzer: it mutates the conformance cases, parses each input with
+  the crate and with the oracle binary, compares them as the conformance runner does, and saves
+  reduced differences under `target/fuzz-differential/findings/`. It needs
+  `target/libucl-oracle/ucl-dump`; `scripts/ci.sh` only formats, lints and unit-tests it. A
+  difference goes to `docs/clean-room/QUESTIONS.md`, or is fixed where the spec is clear.
 - The README's code examples run as doctests (`ReadmeDoctests` in `src/lib.rs`).
 - Unit tests live inline under `#[cfg(test)]`; integration tests in `tests/`; benchmarks in `benches/`.
 
@@ -219,7 +248,8 @@ cargo doc --open
   (for example §9.4).
 - Text input reads no files by default; only `from_file` and parsers given a file loader do
   (WORKLIST C5, decision 1).
-- `cargo fmt`, and clippy clean with `-D warnings` on stable and on Rust 1.88.
+- `cargo fmt`, and clippy clean with `-D warnings` on the latest stable Rust (1.98 at this
+  release); CI runs stable only.
 - Every Cargo feature (`fs`, `load`) is referenced by a `#[cfg]`.
 - User-visible changes are recorded in `CHANGELOG.md`.
 - Unit tests inline with `#[cfg(test)]`; integration tests in `tests/`.

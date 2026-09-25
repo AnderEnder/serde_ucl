@@ -78,6 +78,12 @@ None of them is written by hand.
 
     scripts/regen-golden.sh              # clones and builds libucl at the pinned commit under target/
     LIBUCL_DIR=/path/to/libucl scripts/regen-golden.sh   # reuse an existing checkout at that commit
+    LIBUCL_COMMIT=<sha> scripts/regen-golden.sh          # build another libucl commit instead
+
+`scripts/ci.sh pin <sha>` shows what moving the pin to another commit would change: it
+regenerates every golden file at that commit, runs the conformance tests against them, and writes
+a summary and a patch to `target/pin-move/`. The workflow *Golden files at another libucl commit*
+(`.github/workflows/pin-move.yml`) runs it on demand and publishes the result; it commits nothing.
 
 `scripts/create-cases.sh` recreates `cases/review/` and `cases/additions/` byte for byte.
 
@@ -103,11 +109,11 @@ The test target has three tests, each with its own known-failure list:
   format with the crate's emitters, and parses the output again with nothing registered (no
   variables, no handler, `no-filevars`). The value read back must equal the value written, apart
   from the losses spec §10.8 lists; an output that §10.8 says is unreadable (keys written bare that
-  cannot be read bare) may read back as anything. Differences that §10.8 does not list are held in
-  `READBACK_PENDING` in `tests/conformance.rs`, per case and format, each with the question in
-  `docs/clean-room/QUESTIONS.md` that asks about it. The report line gives, per format, the
-  outputs that read back as the same value, those let through as unreadable, those rejected for a
-  float, and the pending ones.
+  cannot be read bare) may read back as anything. Differences that §10.8 does not list would be
+  held in `READBACK_PENDING` in `tests/conformance.rs`, per case and format, each with the
+  question in `docs/clean-room/QUESTIONS.md` that asks about it; the list is empty since
+  spec-v10 answered #57 and #58. The report line gives, per format, the outputs that read back as
+  the same value, those let through as unreadable, those rejected for a float, and the others.
 
 A run fails when a case fails without an entry in its list, and also when a listed case passes.
 So the lists can only shrink; remove an entry as soon as its case passes.

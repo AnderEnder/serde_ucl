@@ -1,0 +1,26 @@
+# The differential fuzzer: compares the crate's parse result with libucl's (the oracle binary
+# target/libucl-oracle/ucl-dump) on generated inputs, seeded from the conformance cases. It is a
+# package of its own, outside `cargo test`; README.md says how to run it. scripts/ci.sh checks
+# that it builds, is formatted and passes clippy, and runs its unit tests, none of which needs
+# the oracle.
+[package]
+name = "ucl-differential-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+# A workspace of its own, like tests/features/: the crate's own builds never include it.
+[workspace]
+
+[[bin]]
+name = "ucl-differential"
+path = "src/main.rs"
+
+[dependencies]
+# `load`, so that `.load` behaves as in the oracle and in the conformance runner.
+ucl-rust-lexer = { path = "..", features = ["load"] }
+serde_json = "1"
+
+[profile.release]
+debug = "line-tables-only"

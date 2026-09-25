@@ -1,0 +1,52 @@
+# Manually triggered: what moving the libucl pin to another commit would change. It builds
+# libucl at the given commit with scripts/regen-golden.sh, regenerates every golden file, runs the
+# conformance tests against the new files (scripts/ci.sh pin), and publishes the result for
+# review: the job summary shows what changed, and the artifact holds the full patch and the test
+# logs. It never commits or pushes: the token can only read, and the checkout keeps no
+# credentials. It runs on macOS, where the committed golden files were generated (golden.yml).
+name: Golden files at another libucl commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: libucl commit to build, as a full 40-character SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  pin-move:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: scripts/ci.sh pin
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: scripts/ci.sh pin "$COMMIT"
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f target/pin-move/summary.md ]; then
+            cat target/pin-move/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "scripts/ci.sh pin wrote no summary; see the log of the step before." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload the changes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-files-pin-move
+          path: target/pin-move/
+          if-no-files-found: ignore

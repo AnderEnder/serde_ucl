@@ -2,8 +2,8 @@
 name = "ucl-rust-lexer"
 version = "0.2.0"
 edition = "2024"
-# The lowest Rust version the crate builds with: let chains need 1.88.
-rust-version = "1.88"
+# The crate targets the latest stable Rust (1.98 at this release); CI builds with stable only.
+rust-version = "1.98"
 authors = ["Andrii Radyk"]
 description = "UCL (Universal Configuration Language) with serde: reads and writes UCL as libucl does"
 license = "MIT OR Apache-2.0"
@@ -60,7 +60,9 @@ harness = false
 name = "serde_benchmarks"
 harness = false
 
-# Optimise the crate in test builds: the conformance and serde round-trip tests parse and write
-# thousands of documents.
+# Optimise the crate in test builds. This is for speed only: the serde round-trip, scaling and
+# generated-document tests parse and write many documents, and run about five times faster this
+# way. No test depends on it; they all pass unoptimised too, and scripts/ci.sh runs the
+# stack-depth tests that way, as a debug build of an application builds the crate.
 [profile.test.package.ucl-rust-lexer]
 opt-level = 2

@@ -1,6 +1,12 @@
 //! Parse, emit and serde time grow linearly with the input and with nesting depth, up to the
 //! nesting limit (`parse::MAX_NESTING`).
 //!
+//! This is the only timing-based test (WORKLIST C6 and C8c; the benches in `benches/` measure
+//! time but check nothing). What it checks, that no input shape makes the work grow faster than
+//! the input, can be observed only through time: every other test checks results, which a
+//! quadratic implementation gets right too. Everything else, limits and stack use
+//! (`tests/stack_depth.rs`) included, is tested without a clock.
+//!
 //! Each check times one operation on two documents of the same shape, one about eight times the
 //! size of the other (for nested documents, nested about eight times as deep), in the same test
 //! run, and compares the growth of the time with the growth of the size. Linear growth gives a
@@ -23,9 +29,9 @@
 //!   state and pass in any order.
 //!
 //! `timed` also runs each test on a thread with a large stack. The nested documents are nearly
-//! 1000 levels deep, serde's deserializer and serializer recurse once per level, and the 2 MiB
-//! stack of a test thread is too small for that with some toolchains (rust-version 1.88 among
-//! them). Stack use is not what this file measures.
+//! 1000 levels deep, and stack use is not what this file measures: `tests/stack_depth.rs` checks
+//! that every entry point fits in a 2 MiB stack, and a large one here keeps a stack limit from
+//! failing a test about time.
 
 use std::fmt::Write;
 use std::hint::black_box;

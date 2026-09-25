@@ -1,5 +1,6 @@
 # Runs scripts/ci.sh, the checks a developer runs locally before pushing, on Linux and macOS
-# with stable Rust and with the crate's rust-version from Cargo.toml.
+# with stable Rust. The crate targets the latest stable Rust (rust-version in Cargo.toml), so
+# there is no separate job for an older toolchain.
 name: CI
 
 on:
@@ -16,30 +17,16 @@ env:
 
 jobs:
   checks:
-    name: ${{ matrix.os }}, ${{ matrix.rust }}
+    name: ${{ matrix.os }}, stable
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        rust: [stable, rust-version]
     steps:
       - uses: actions/checkout@v5
-      - name: Toolchain version
-        id: toolchain
-        env:
-          RUST: ${{ matrix.rust }}
-        run: |
-          if [ "$RUST" = rust-version ]; then
-            version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
-            test -n "$version"
-          else
-            version=$RUST
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: scripts/ci.sh

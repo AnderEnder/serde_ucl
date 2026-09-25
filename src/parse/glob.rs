@@ -17,13 +17,15 @@ pub(crate) fn has_wildcard(path: &str) -> bool {
 /// The paths that `pattern` matches, sorted by byte value. A relative pattern is matched below
 /// `base`, which is not itself a pattern.
 pub(crate) fn expand(loader: &dyn Loader, base: &Path, pattern: &str) -> Vec<PathBuf> {
-    let (start, rest) = match pattern.strip_prefix('/') {
-        Some(rest) => (PathBuf::from("/"), rest),
-        None => (base.to_path_buf(), pattern),
+    let mut parts = components(pattern);
+    let start = if parts.len() > 1 && parts[0].is_empty() {
+        parts.remove(0);
+        PathBuf::from("/")
+    } else {
+        base.to_path_buf()
     };
-    let mut parts: Vec<&str> = rest.split('/').collect();
     // A pattern that ends in `/` matches directories only.
-    let dirs_only = parts.len() > 1 && parts.last() == Some(&"");
+    let dirs_only = parts.len() > 1 && parts.last().is_some_and(String::is_empty);
     if dirs_only {
         parts.pop();
     }
@@ -73,6 +75,30 @@ pub(crate) fn expand(loader: &dyn Loader, base: &Path, pattern: &str) -> Vec<Pat
     });
     paths.dedup();
     paths
+}
+
+/// The components of a pattern, split at each `/`. A backslash quotes the next character (spec
+/// §9.4, *Globs*), and a quoted `/` is still a `/`, since no name can hold one: `g\/*` is `g/*`
+/// (oracle runs, C8c). Other quoting backslashes stay for [`matches`] and [`unescape`].
+fn components(pattern: &str) -> Vec<String> {
+    let mut parts = vec![String::new()];
+    let mut chars = pattern.chars();
+    while let Some(c) = chars.next() {
+        let part = parts.last_mut().expect("at least one component");
+        match c {
+            '\\' => match chars.next() {
+                Some('/') => parts.push(String::new()),
+                Some(quoted) => {
+                    part.push('\\');
+                    part.push(quoted);
+                }
+                None => part.push('\\'),
+            },
+            '/' => parts.push(String::new()),
+            c => part.push(c),
+        }
+    }
+    parts
 }
 
 /// Whether a path component holds a wildcard or a bracket that is not quoted.
@@ -273,6 +299,16 @@ mod tests {
         assert_eq!(names("/c/g/a*"), ["/c/g/a.inc"]);
         assert_eq!(names("g/a.inc/*"), Vec::<String>::new());
         assert_eq!(names("none/*"), Vec::<String>::new());
+        // A quoted `/` separates components too (oracle runs, C8c).
+        assert_eq!(names("g\\/*"), ["/c/g/a.inc", "/c/g/sub"]);
+        assert_eq!(names("g/\\/a*"), ["/c/g/a.inc"]);
+        assert_eq!(names("\\/c\\/g/a*"), ["/c/g/a.inc"]);
+        assert_eq!(names("\\g/a*"), ["/c/g/a.inc"]);
+        assert_eq!(
+            names("g\\\\/*"),
+            Vec::<String>::new(),
+            "a quoted backslash, then a `/`"
+        );
         assert!(has_wildcard("a*") && has_wildcard("a?") && !has_wildcard("[ab].inc"));
     }
 }

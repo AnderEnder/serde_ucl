@@ -1333,6 +1333,8 @@ mod tests {
             ["a.inc"]
         );
         assert_eq!(ok(".include(glob=true) \"*/sub/x.inc\""), ["gx"]);
+        // A quoted `/` in the pattern still separates (spec §9.4, *Globs*; the C8c fuzzer).
+        assert_eq!(ok(".include(glob=true) \"g\\/*.inc\""), ["ga", "gb"]);
         assert!(matches!(
             run(&files, ".include(glob=true) \"g/[ab].inc\"")
                 .unwrap_err()

@@ -47,18 +47,21 @@
 //! first point where the two dumps, or the two outputs, differ, and a suggested xfail reason; the
 //! readback test also prints every difference and every output it lets through as unreadable.
 
-use serde_json::{Value as J, json};
-use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
-use std::panic::{self, AssertUnwindSafe};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{
-    CommentPlacement, FsLoader, Input, MacroCall, MacroError, Parser as CoreParser, PathSegment,
+#[path = "common/oracle.rs"]
+mod oracle;
+
+use oracle::{
+    Setup, comment_map, configure, dump, find_diff, quietly, read_flags, strategy_named,
+    strip_unobservable_priorities,
 };
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclObject, UclValue};
+use serde_json::Value as J;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use ucl_lexer::emit::Format;
+use ucl_lexer::parse::{FsLoader, Input, Parser as CoreParser, PathSegment};
+use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue};
 
 const CONFORMANCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance");
 
@@ -79,16 +82,6 @@ struct FurtherInput {
     priority: u8,
     strategy: DuplicateStrategy,
     path: PathBuf,
-}
-
-fn strategy_named(name: &str) -> Option<DuplicateStrategy> {
-    Some(match name {
-        "append" => DuplicateStrategy::Append,
-        "merge" => DuplicateStrategy::Merge,
-        "rewrite" => DuplicateStrategy::Rewrite,
-        "error" => DuplicateStrategy::Error,
-        _ => return None,
-    })
 }
 
 /// The further inputs listed in `path`, a `<case>.inputs` file, with paths relative to `dir`.
@@ -141,15 +134,7 @@ fn discover() -> Vec<Case> {
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            let flags_path = dir.join(format!("{stem}.flags"));
-            let flags = fs::read_to_string(&flags_path)
-                .map(|text| {
-                    text.lines()
-                        .map(|l| l.split('#').next().unwrap().trim().to_string())
-                        .filter(|l| !l.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
+            let flags = read_flags(&dir.join(format!("{stem}.flags")));
             Case {
                 id: format!("{rel}/{stem}"),
                 golden: dir.join(format!("{stem}.golden.json")),
@@ -177,119 +162,6 @@ fn collect(dir: &Path, ext: &str, recursive: bool, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Dumps a crate value in the same schema as `tools/ucl-dump`: every value of a multi-value
-/// entry, times as `"time"`, and `"pri"` on any entry value whose priority is non-zero. The model
-/// keeps priorities only on entry values, which is where libucl's dumps have them. With
-/// `comments`, also the saved comments attached to each value.
-fn dump(value: &UclValue, comments: Option<&CommentMap>) -> J {
-    dump_node(value, 0, &mut Vec::new(), comments)
-}
-
-/// Saved comments by value path: the dump key (`"c"` or `"ca"`) and the comment texts.
-type CommentMap = HashMap<Vec<PathSegment>, (&'static str, Vec<String>)>;
-
-/// The new core's attached comments of the last parse, keyed by value path.
-fn comment_map(parser: &CoreParser) -> CommentMap {
-    let comments = parser.comments();
-    parser
-        .attached_comments()
-        .iter()
-        .map(|group| {
-            let key = match group.placement {
-                CommentPlacement::Before => "c",
-                CommentPlacement::After => "ca",
-            };
-            let texts = group
-                .comments
-                .iter()
-                .map(|&i| comments[i].text.clone())
-                .collect();
-            (group.path.clone(), (key, texts))
-        })
-        .collect()
-}
-
-fn dump_node(
-    value: &UclValue,
-    priority: u8,
-    path: &mut Vec<PathSegment>,
-    comments: Option<&CommentMap>,
-) -> J {
-    let mut node = match value {
-        UclValue::Object(obj) => {
-            let mut entries = Vec::new();
-            for (k, entry) in obj.iter() {
-                let mut values = Vec::new();
-                for (index, slot) in entry.slots().iter().enumerate() {
-                    path.push(PathSegment::Key {
-                        key: k.clone(),
-                        index,
-                    });
-                    values.push(dump_node(slot.value(), slot.priority(), path, comments));
-                    path.pop();
-                }
-                entries.push(json!({"k": k, "v": values}));
-            }
-            json!({"t": "object", "entries": entries})
-        }
-        UclValue::Array(arr) => {
-            let mut items = Vec::new();
-            for (index, item) in arr.iter().enumerate() {
-                path.push(PathSegment::Index(index));
-                items.push(dump_node(item, 0, path, comments));
-                path.pop();
-            }
-            json!({"t": "array", "v": items})
-        }
-        UclValue::Integer(i) => json!({"t": "int", "v": i.to_string()}),
-        UclValue::Float(f) => json!({"t": "float", "v": format!("{f:?}")}),
-        UclValue::Time(t) => json!({"t": "time", "v": format!("{t:?}")}),
-        UclValue::String(s) => json!({"t": "string", "v": s}),
-        UclValue::Boolean(b) => json!({"t": "bool", "v": b}),
-        UclValue::Null => json!({"t": "null"}),
-    };
-    if priority != 0 {
-        node["pri"] = J::from(priority);
-    }
-    if let Some((key, texts)) = comments.and_then(|map| map.get(path.as_slice())) {
-        node[*key] = J::from(texts.clone());
-    }
-    node
-}
-
-/// Removes the priorities the spec says are not observable (`docs/spec/08-duplicates.md` §8.7):
-/// that of the root object and those of array elements. libucl's dumps record them, but they never
-/// affect a parse result or any output format.
-fn strip_unobservable_priorities(node: &mut J, is_root: bool) {
-    if is_root && let Some(map) = node.as_object_mut() {
-        map.remove("pri");
-    }
-    match node.get("t").and_then(J::as_str) {
-        Some("array") => {
-            if let Some(items) = node.get_mut("v").and_then(J::as_array_mut) {
-                for item in items {
-                    if let Some(map) = item.as_object_mut() {
-                        map.remove("pri");
-                    }
-                    strip_unobservable_priorities(item, false);
-                }
-            }
-        }
-        Some("object") => {
-            if let Some(entries) = node.get_mut("entries").and_then(J::as_array_mut) {
-                for entry in entries {
-                    if let Some(values) = entry.get_mut("v").and_then(J::as_array_mut) {
-                        for value in values {
-                            strip_unobservable_priorities(value, false);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
 /// What a parser made of a case: a dump, a rejection, or a reason why the case could not be run.
 enum Parsed {
     Value(J),
@@ -298,152 +170,9 @@ enum Parsed {
     Unsupported(String),
 }
 
-/// The settings a case's `.flags` file asks for (`tests/conformance/README.md`).
-#[derive(Default)]
-struct Setup {
-    flags: ParserFlags,
-    vars: Vec<(String, String)>,
-    handler: bool,
-    priority: Option<u8>,
-    strategy: Option<DuplicateStrategy>,
-    string_input: bool,
-    dump_comments: bool,
-    /// `save-comments` or `dump-comments`: the case has config output with comments.
-    save_comments: bool,
-    /// `registered-macros`: the test macros `.emit`, `.seen`, `.fail` and `.ctx` (spec §13.2).
-    registered_macros: bool,
-    /// `registered-priority-override`: the handler of `.seen` registered as `priority`.
-    priority_override: bool,
-}
-
+/// The settings the case's `.flags` file asks for.
 fn setup(case: &Case) -> Setup {
-    let mut setup = Setup::default();
-    for flag in &case.flags {
-        let flag = flag.as_str();
-        let parser_flag = match flag {
-            "key-lowercase" => Some(ParserFlags::KEY_LOWERCASE),
-            "zerocopy" => Some(ParserFlags::ZEROCOPY),
-            "no-time" => Some(ParserFlags::NO_TIME),
-            "no-implicit-arrays" => Some(ParserFlags::NO_IMPLICIT_ARRAYS),
-            "save-comments" => {
-                setup.save_comments = true;
-                Some(ParserFlags::SAVE_COMMENTS)
-            }
-            // Also records the attached comments in the dump ("c"/"ca" keys,
-            // tests/conformance/README.md).
-            "dump-comments" => {
-                setup.dump_comments = true;
-                setup.save_comments = true;
-                Some(ParserFlags::SAVE_COMMENTS)
-            }
-            "disable-macro" => Some(ParserFlags::DISABLE_MACRO),
-            "no-filevars" => Some(ParserFlags::NO_FILEVARS),
-            _ => None,
-        };
-        if let Some(f) = parser_flag {
-            setup.flags |= f;
-        } else if flag == "variable-handler" {
-            setup.handler = true;
-        } else if flag == "string-input" {
-            setup.string_input = true;
-        } else if flag == "registered-macros" {
-            setup.registered_macros = true;
-        } else if flag == "registered-priority-override" {
-            setup.priority_override = true;
-        } else if let Some(var) = flag.strip_prefix("var:") {
-            let (name, value) = var
-                .split_once('=')
-                .unwrap_or_else(|| panic!("{}: bad flag '{flag}'", case.id));
-            setup.vars.push((name.to_string(), value.to_string()));
-        } else if let Some(n) = flag.strip_prefix("priority:") {
-            let n: u32 = n
-                .parse()
-                .unwrap_or_else(|_| panic!("{}: bad flag '{flag}'", case.id));
-            setup.priority = Some((n & 0x0f) as u8);
-        } else if let Some(name) = flag.strip_prefix("strategy:") {
-            setup.strategy = Some(
-                strategy_named(name)
-                    .unwrap_or_else(|| panic!("{}: unknown strategy in '{flag}'", case.id)),
-            );
-        } else {
-            panic!("{}: unknown .flags entry '{flag}'", case.id);
-        }
-    }
-    setup
-}
-
-// ----- the test macros (spec §13.2, *The test macros*) ------------------------------------
-
-/// `.emit`: has its VALUE text parsed in place, and fails if that fails or stops.
-fn emit_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
-    let text = call.value().to_vec();
-    call.parse(text).map_err(|_| MacroError::stop())
-}
-
-/// A copy of `value` as the oracle's test macros make it: an entry whose first value is an object
-/// or an array is copied as that value only, as `.inherit` copies (spec §9.7; oracle runs,
-/// QUESTIONS.md #24 and #59).
-fn test_macro_copy(value: &UclValue) -> UclValue {
-    match value {
-        UclValue::Object(object) => {
-            let mut copy = UclObject::new();
-            for (key, entry) in object {
-                let count = match entry.first() {
-                    UclValue::Object(_) | UclValue::Array(_) => 1,
-                    _ => entry.len(),
-                };
-                let mut slots = entry.slots()[..count].iter().map(|slot| {
-                    ucl_lexer::Slot::new(test_macro_copy(slot.value()), slot.priority())
-                });
-                let mut copied = ucl_lexer::Entry::from_slot(slots.next().expect("a value"));
-                slots.for_each(|slot| copied.push_slot(slot));
-                copy.insert_entry(key.clone(), copied);
-            }
-            UclValue::Object(copy)
-        }
-        UclValue::Array(items) => UclValue::Array(items.iter().map(test_macro_copy).collect()),
-        scalar => scalar.clone(),
-    }
-}
-
-/// `.seen`: adds `seen = { data: <VALUE text>, args: <a copy of the ARGUMENTS, or null> }` to the
-/// innermost open object, and fails if there is none.
-fn seen_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
-    let mut seen = UclObject::new();
-    seen.insert(
-        "data",
-        UclValue::String(String::from_utf8_lossy(call.value()).into_owned()),
-    );
-    let args = call.arguments().map_or(UclValue::Null, test_macro_copy);
-    seen.insert("args", args);
-    call.add("seen", UclValue::Object(seen))
-        .map_err(|_| MacroError::stop())
-}
-
-/// `.fail`: fails and does nothing else.
-fn fail_macro(_: &mut MacroCall<'_>) -> Result<(), MacroError> {
-    Err(MacroError::stop())
-}
-
-/// `.ctx`, a context macro: adds `ctx` with a copy of the root it received, and fails like
-/// `.seen`.
-fn ctx_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
-    let root = call.root().map_or(UclValue::Null, test_macro_copy);
-    call.add("ctx", root).map_err(|_| MacroError::stop())
-}
-
-/// Registers the test macros a case's `.flags` ask for.
-fn register_test_macros(parser: &mut CoreParser, setup: &Setup) {
-    if setup.registered_macros {
-        parser
-            .register_macro("emit", emit_macro)
-            .register_macro("seen", seen_macro)
-            .register_macro("fail", fail_macro)
-            .register_context_macro("ctx", ctx_macro);
-    }
-    if setup.priority_override {
-        parser.register_macro("priority", seen_macro);
-    }
+    Setup::from_flags(&case.flags).unwrap_or_else(|e| panic!("{}: {e}", case.id))
 }
 
 /// Parses the case's own file and then its further inputs with one parser (spec §13.1). A silent
@@ -501,24 +230,10 @@ fn run_new_core(
     case: &Case,
     setup: &Setup,
 ) -> (CoreParser, Result<UclValue, ucl_lexer::parse::Error>) {
-    let mut parser = CoreParser::with_flags(setup.flags);
-    // The oracle reads the filesystem; a parser's default loader holds no files.
-    parser.set_loader(FsLoader::new());
-    parser.set_base_dir(case.input.parent().expect("a case is in a directory"));
-    parser.register_variable("ABI", "unknown");
-    for (name, value) in &setup.vars {
-        parser.register_variable(name.as_str(), value.as_str());
-    }
-    if setup.handler {
-        parser.set_variable_handler(|name| name.starts_with("H_").then(|| "[handled]".to_string()));
-    }
-    if let Some(priority) = setup.priority {
-        parser.set_priority(priority);
-    }
-    if let Some(strategy) = setup.strategy {
-        parser.set_strategy(strategy);
-    }
-    register_test_macros(&mut parser, setup);
+    let mut parser = configure(
+        setup,
+        case.input.parent().expect("a case is in a directory"),
+    );
     // The oracle parses every case as a string, then defines FILENAME and CURDIR from the
     // case's path unless the case has `no-filevars` (spec §12.7). The core defines them
     // whenever it parses a file (project decision 5).
@@ -542,7 +257,7 @@ fn run_new_core(
 /// Parses a case with the new core and dumps the result.
 fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
     let setup = setup(case);
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+    let result = quietly(|| {
         let (parser, result) = run_new_core(case, &setup);
         match result {
             Ok(v) => {
@@ -552,72 +267,8 @@ fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
             Err(e) if e.is_unsupported() => Parsed::Unsupported(e.to_string()),
             Err(e) => Parsed::Rejected(e.to_string()),
         }
-    }));
+    });
     result.map_err(|_| "panic")
-}
-
-/// Compares two dumps. Floats and times are compared as numbers (NaN equals NaN).
-fn find_diff(golden: &J, actual: &J, path: &str) -> Option<String> {
-    if let (Some(gt), Some(at)) = (golden.get("t"), actual.get("t"))
-        && gt == at
-        && (gt == "float" || gt == "time")
-    {
-        let g = golden["v"].as_str().and_then(|s| s.parse::<f64>().ok());
-        let a = actual["v"].as_str().and_then(|s| s.parse::<f64>().ok());
-        let same = match (g, a) {
-            (Some(g), Some(a)) => g.to_bits() == a.to_bits() || (g.is_nan() && a.is_nan()),
-            _ => false,
-        };
-        let rest_same = strip(golden, &["v"]) == strip(actual, &["v"]);
-        return if same && rest_same {
-            None
-        } else {
-            Some(format!("{path}: libucl {golden} crate {actual}"))
-        };
-    }
-    match (golden, actual) {
-        (J::Object(g), J::Object(a)) => {
-            let keys: BTreeSet<_> = g.keys().chain(a.keys()).collect();
-            for k in keys {
-                match (g.get(k), a.get(k)) {
-                    (Some(gv), Some(av)) => {
-                        if let Some(d) = find_diff(gv, av, &format!("{path}.{k}")) {
-                            return Some(d);
-                        }
-                    }
-                    _ => return Some(format!("{path}: libucl {golden} crate {actual}")),
-                }
-            }
-            None
-        }
-        (J::Array(g), J::Array(a)) => {
-            for (i, (gv, av)) in g.iter().zip(a.iter()).enumerate() {
-                if let Some(d) = find_diff(gv, av, &format!("{path}[{i}]")) {
-                    return Some(d);
-                }
-            }
-            if g.len() != a.len() {
-                return Some(format!(
-                    "{path}: length libucl {} crate {}",
-                    g.len(),
-                    a.len()
-                ));
-            }
-            None
-        }
-        _ if golden == actual => None,
-        _ => Some(format!("{path}: libucl {golden} crate {actual}")),
-    }
-}
-
-fn strip(value: &J, fields: &[&str]) -> J {
-    let mut v = value.clone();
-    if let J::Object(map) = &mut v {
-        for f in fields {
-            map.remove(*f);
-        }
-    }
-    v
 }
 
 fn uses_macros(case: &Case) -> bool {
@@ -655,7 +306,8 @@ fn evaluate(case: &Case, parse: fn(&Case) -> Result<Parsed, &'static str>) -> Ou
             };
         }
     };
-    let mut golden: J = serde_json::from_str(&golden_text).expect("golden files are valid JSON");
+    let mut golden: J = serde_json::from_str(&golden_text)
+        .unwrap_or_else(|e| panic!("{}: the golden file is not valid JSON: {e}", case.id));
     strip_unobservable_priorities(&mut golden, true);
     let golden_is_error = golden.get("error").is_some();
 
@@ -718,9 +370,6 @@ fn load_xfail(file: &str) -> BTreeMap<String, String> {
     map
 }
 
-/// Serialises the panic-hook swap of the two tests, which cargo runs in parallel.
-static PANIC_HOOK: Mutex<()> = Mutex::new(());
-
 #[test]
 fn libucl_conformance_new_core() {
     run_suite("new core", "xfail-new.txt", parse_with_new_core);
@@ -735,15 +384,8 @@ fn run_suite(label: &str, xfail_file: &str, parse: fn(&Case) -> Result<Parsed, &
     let xfail = load_xfail(xfail_file);
     let report = std::env::var_os("UCL_CONFORMANCE_REPORT").is_some();
 
-    // Parser panics are caught per case; keep their messages out of the output.
-    let outcomes: Vec<(&Case, Outcome)> = {
-        let _guard = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
-        let hook = panic::take_hook();
-        panic::set_hook(Box::new(|_| {}));
-        let outcomes = cases.iter().map(|c| (c, evaluate(c, parse))).collect();
-        panic::set_hook(hook);
-        outcomes
-    };
+    // Parser panics are caught per case, without their messages (`quietly`).
+    let outcomes: Vec<(&Case, Outcome)> = cases.iter().map(|c| (c, evaluate(c, parse))).collect();
 
     let known: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
     let mut problems = Vec::new();
@@ -897,7 +539,8 @@ fn two_pass_config(case: &Case) -> Result<String, String> {
 /// file, and its `.res` file if it is an upstream case.
 fn evaluate_outputs(case: &Case) -> Option<OutputOutcome> {
     let golden_text = fs::read_to_string(&case.golden).ok()?;
-    let golden: J = serde_json::from_str(&golden_text).expect("golden files are valid JSON");
+    let golden: J = serde_json::from_str(&golden_text)
+        .unwrap_or_else(|e| panic!("{}: the golden file is not valid JSON: {e}", case.id));
     let setup = setup(case);
     let mut expected: Vec<(&'static str, PathBuf)> = OUTPUT_FORMATS
         .iter()
@@ -925,7 +568,7 @@ fn evaluate_outputs(case: &Case) -> Option<OutputOutcome> {
             path.display()
         );
     }
-    let result = panic::catch_unwind(AssertUnwindSafe(|| -> OutputOutcome {
+    let result = quietly(|| -> OutputOutcome {
         let (parser, result) = run_new_core(case, &setup);
         let value = result.map_err(|e| format!("crate error: {e}"))?;
         let mut outcomes = Vec::new();
@@ -956,7 +599,7 @@ fn evaluate_outputs(case: &Case) -> Option<OutputOutcome> {
             outcomes.push((RES, outcome));
         }
         Ok(outcomes)
-    }));
+    });
     Some(result.unwrap_or_else(|_| Err("panic".to_string())))
 }
 
@@ -969,17 +612,10 @@ fn libucl_conformance_emitters() {
     let cases = discover();
     let xfail = load_xfail("xfail-emit.txt");
     let report = std::env::var_os("UCL_CONFORMANCE_REPORT").is_some();
-    let outcomes: Vec<(&Case, OutputOutcome)> = {
-        let _guard = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
-        let hook = panic::take_hook();
-        panic::set_hook(Box::new(|_| {}));
-        let outcomes = cases
-            .iter()
-            .filter_map(|c| evaluate_outputs(c).map(|o| (c, o)))
-            .collect();
-        panic::set_hook(hook);
-        outcomes
-    };
+    let outcomes: Vec<(&Case, OutputOutcome)> = cases
+        .iter()
+        .filter_map(|c| evaluate_outputs(c).map(|o| (c, o)))
+        .collect();
 
     let known: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
     let parse_failures = load_xfail("xfail-new.txt");
@@ -1053,33 +689,8 @@ fn libucl_conformance_emitters() {
 /// question that asks about it: `(case, formats, reason)`. libucl reads its own golden output
 /// files the same way (checked with the oracle). Like the xfail files, the list may only shrink:
 /// an entry whose difference is gone fails the test.
-const READBACK_PENDING: &[(&str, &[&str], &str)] = &[
-    (
-        "cases/spec/05-numbers/time_infinite_in_json_form",
-        &ALL_FORMATS,
-        "QUESTIONS.md #57: -inf reads back as a string",
-    ),
-    (
-        "cases/spec/05-numbers/time_suffix_overflow_infinite",
-        &ALL_FORMATS,
-        "QUESTIONS.md #57: -inf reads back as a string",
-    ),
-    (
-        "cases/spec/10-output/floats_boundaries",
-        &ALL_FORMATS,
-        "QUESTIONS.md #57: -inf reads back as a string",
-    ),
-    (
-        "cases/spec/10-output/floats_exact_decimal_expansion",
-        &ALL_FORMATS,
-        "QUESTIONS.md #58 (a): a long negative %f output reads back as a string",
-    ),
-    (
-        "cases/spec/05-numbers/time_subnormal_through_ms",
-        &ALL_FORMATS,
-        "QUESTIONS.md #58 (b): the %.15g output of a subnormal time is rejected",
-    ),
-];
+/// Empty since spec-v10 §10.8 answered QUESTIONS.md #57 and #58.
+const READBACK_PENDING: &[(&str, &[&str], &str)] = &[];
 
 /// The labels of the four formats of spec §10.
 const ALL_FORMATS: [&str; 4] = ["config", "json", "json-compact", "yaml"];
@@ -1107,17 +718,23 @@ impl Written {
 enum FloatBack {
     /// A float with these bits, or NaN.
     Float(f64),
-    /// A `%f` output of 127 or more characters without a leading `-` reads back as that string
-    /// (§10.8, `cases/spec/05-numbers/float_max`).
+    /// Output that reads back as this string (§10.8): `-inf`, and a `%f` output whose digits and
+    /// `.` take 127 or more characters, a leading `-` not counted
+    /// (`readback_percent_f_length_limit`, `cases/spec/05-numbers/float_max`).
     Text(String),
-    /// A `%.15g` output below the normal range, which reading rejects. §10.8 lists this for the
-    /// smallest normal float (`readback_fifteen_digit_min_normal_error`) and no other value.
+    /// A `%.15g` output below the normal range, which reading rejects together with the whole
+    /// document (§10.8): the smallest normal float and every subnormal time
+    /// (`readback_fifteen_digit_min_normal_error`, `readback_fifteen_digit_subnormal_error`).
     BelowNormal,
 }
 
 /// The float that the output of `v` reads back as. Rust's `{:.6}` and `{:.14e}` round the exact
 /// decimal value of the double, ties to even, as the C conversions of §10.3 do.
 fn float_back(v: f64) -> FloatBack {
+    if v == f64::NEG_INFINITY {
+        // Written `-inf` (§10.3), which reads as a string (§4, §10.8).
+        return FloatBack::Text("-inf".to_string());
+    }
     if !v.is_finite() {
         return FloatBack::Float(v);
     }
@@ -1137,7 +754,7 @@ fn float_back(v: f64) -> FloatBack {
     } else {
         // `%f`: 6 decimals.
         let text = format!("{v:.6}");
-        if !text.starts_with('-') && text.len() >= 127 {
+        if text.strip_prefix('-').unwrap_or(&text).len() >= 127 {
             FloatBack::Text(text)
         } else {
             FloatBack::Float(text.parse().expect("a float"))
@@ -1188,7 +805,8 @@ struct Readback<'a> {
     diffs: Vec<String>,
     /// Keys written bare that cannot be read bare (§10.8), found while walking the value.
     unreadable: UnreadableKeys,
-    /// The value holds the smallest normal float, whose `%.15g` output reading rejects (§10.8).
+    /// The value holds a float or time whose `%.15g` output lies below the normal range, which
+    /// reading rejects (§10.8).
     below_normal: bool,
 }
 
@@ -1272,7 +890,7 @@ impl<'a> Readback<'a> {
                 }
             }
             UclValue::Float(v) | UclValue::Time(v)
-                if matches!(float_back(*v), FloatBack::BelowNormal) && *v == f64::MIN_POSITIVE =>
+                if matches!(float_back(*v), FloatBack::BelowNormal) =>
             {
                 self.below_normal = true;
             }
@@ -1429,8 +1047,8 @@ enum ReadbackOutcome {
     Same,
     /// Unreadable, because of keys that §10.8 lists as making the output unreadable.
     UnreadableKeys(Vec<String>),
-    /// Rejected, because of the smallest normal float, whose `%.15g` output lies below the normal
-    /// range (§10.8).
+    /// Rejected, because of a float or time whose `%.15g` output lies below the normal range
+    /// (§10.8).
     BelowNormal,
     /// Differences that §10.8 does not list.
     Differs(Vec<String>),
@@ -1478,46 +1096,40 @@ fn read_back(parser: &CoreParser, value: &UclValue, format: Format) -> ReadbackO
 
 /// For every case that parses, the output in each format of spec §10 reads back as the same
 /// value, apart from the losses §10.8 lists: times become floats, bytes written `\uFFFD` become
-/// U+FFFD, floats keep the precision of their conversion (§10.3) and a `%f` output of 127 or more
-/// characters becomes a string, the `%.15g` output of the smallest normal float is rejected, keys written
-/// bare that cannot be read bare make the output unreadable, values of a multi-value entry
-/// written with different spellings read back under separate keys in the config format, JSON
-/// and YAML write a multi-value entry as an explicit array (only a first value that is an array,
-/// §10.7) and the empty key as `null`, and priorities, saved comments and marks are not written.
-/// The output is read with nothing registered, so no string expands. Other differences are in
-/// `READBACK_PENDING` with the question that asks about them.
+/// U+FFFD, floats keep the precision of their conversion (§10.3), a `%f` output whose digits and
+/// `.` take 127 or more characters becomes a string, −∞ becomes the string `"-inf"`, a `%.15g`
+/// output below the normal range is rejected, keys written bare that cannot be read bare make the
+/// output unreadable, values of a multi-value entry written with different spellings read back
+/// under separate keys in the config format, JSON and YAML write a multi-value entry as an
+/// explicit array (only a first value that is an array, §10.7) and the empty key as `null`, and
+/// priorities, saved comments and marks are not written. The output is read with nothing
+/// registered, so no string expands. Other differences would go in `READBACK_PENDING`, each with
+/// the question that asks about it.
 #[test]
 fn libucl_conformance_readback() {
     let cases = discover();
     let report = std::env::var_os("UCL_CONFORMANCE_REPORT").is_some();
-    let outcomes: Vec<(&Case, CaseReadback)> = {
-        let _guard = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
-        let hook = panic::take_hook();
-        panic::set_hook(Box::new(|_| {}));
-        let outcomes = cases
-            .iter()
-            .filter_map(|case| {
-                let setup = setup(case);
-                let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    let (parser, result) = run_new_core(case, &setup);
-                    let value = result.ok()?;
-                    Some(
-                        OUTPUT_FORMATS
-                            .iter()
-                            .map(|(label, format)| (*label, read_back(&parser, &value, *format)))
-                            .collect(),
-                    )
-                }));
-                match result {
-                    Ok(None) => None,
-                    Ok(Some(outcomes)) => Some((case, Ok(outcomes))),
-                    Err(_) => Some((case, Err("panic".to_string()))),
-                }
-            })
-            .collect();
-        panic::set_hook(hook);
-        outcomes
-    };
+    let outcomes: Vec<(&Case, CaseReadback)> = cases
+        .iter()
+        .filter_map(|case| {
+            let setup = setup(case);
+            let result = quietly(|| {
+                let (parser, result) = run_new_core(case, &setup);
+                let value = result.ok()?;
+                Some(
+                    OUTPUT_FORMATS
+                        .iter()
+                        .map(|(label, format)| (*label, read_back(&parser, &value, *format)))
+                        .collect(),
+                )
+            });
+            match result {
+                Ok(None) => None,
+                Ok(Some(outcomes)) => Some((case, Ok(outcomes))),
+                Err(_) => Some((case, Err("panic".to_string()))),
+            }
+        })
+        .collect();
 
     assert_eq!(ALL_FORMATS, OUTPUT_FORMATS.map(|(label, _)| label));
     let known: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();

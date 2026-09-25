@@ -32,7 +32,7 @@ ucl-rust-lexer = { git = "https://github.com/AnderEnder/ucl-rust-lexer" }
 serde = { version = "1", features = ["derive"] }
 ```
 
-The minimum supported Rust version is 1.88.
+The crate targets the latest stable Rust (1.98 at this release).
 
 ## Reading configuration
 
@@ -596,7 +596,7 @@ The [examples](examples/) are programs that check their results with assertions;
 
 `scripts/ci.sh` runs every check CI runs: `cargo fmt --check`, clippy with warnings denied, the
 tests, the examples, the benches' build and `cargo doc`. CI runs it on Linux and macOS with
-stable Rust and with Rust 1.88.
+stable Rust.
 
 ```sh
 scripts/ci.sh
@@ -613,6 +613,14 @@ libucl at a pinned commit under `target/`, builds it and the dump tool in `tools
 runs every case. It needs git, CMake and a C compiler, and runs on macOS, where the committed files
 were generated. `scripts/ci.sh golden` runs it, regenerates the serde corpus in
 `tests/serde_corpus/` as well, and fails if any golden file changed; CI runs that every night.
+`scripts/ci.sh pin <sha>` does the same with libucl at another commit and writes what would
+change to `target/pin-move/`; the manually triggered workflow `pin-move.yml` runs it and
+publishes the result for review.
+
+`fuzz/` holds a differential fuzzer that parses generated inputs, seeded from the conformance
+cases, with the crate and with libucl, and saves every input on which they differ
+(`fuzz/README.md`). It is not part of `cargo test`; `scripts/ci.sh fuzz 600` runs it for ten
+minutes, and so does the manually triggered workflow `fuzz.yml`.
 
 ## License
 

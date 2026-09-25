@@ -6,7 +6,7 @@
 name = "ucl-feature-tests"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.98"
 publish = false
 
 # A workspace of its own: in one with the crate, `cargo test --workspace` would build the crate

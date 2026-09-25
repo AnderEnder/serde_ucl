@@ -1,0 +1,62 @@
+# Manually triggered: the differential fuzzer (fuzz/README.md), which compares the crate's parse
+# results with libucl's on generated inputs, seeded from the conformance cases. scripts/ci.sh fuzz
+# builds the oracle with scripts/regen-golden.sh and runs the fuzzer; the job fails if it finds a
+# difference. The summary and every finding are uploaded as an artifact. It runs on macOS, where
+# the oracle builds (golden.yml).
+name: Differential fuzzing
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: How long to fuzz, in seconds
+        required: true
+        default: "600"
+        type: string
+      seed:
+        description: Seed of the generator (empty for one from the clock)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fuzz:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: scripts/ci.sh fuzz
+        env:
+          SECONDS_INPUT: ${{ inputs.seconds }}
+          SEED_INPUT: ${{ inputs.seed }}
+        run: scripts/ci.sh fuzz "$SECONDS_INPUT" "$SEED_INPUT"
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f target/fuzz-differential/summary.txt ]; then
+            {
+              echo '```'
+              cat target/fuzz-differential/summary.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload the findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-fuzzing
+          path: |
+            target/fuzz-differential/summary.txt
+            target/fuzz-differential/findings/
+          if-no-files-found: ignore

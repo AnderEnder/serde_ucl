@@ -2136,6 +2136,44 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
+    /// Looks ahead, consuming nothing, through whitespace and comments for a `#` that is the
+    /// last byte of the input with whitespace directly before it: the error of §2.2's *Quirk*,
+    /// which holds after a macro as where the first key of the root could start, so also after
+    /// comments (`.priority 1⏎# c⏎ #`; oracle runs, C8c). The byte at the current position is not
+    /// whitespace. An unterminated block comment is left for the next skip to report.
+    pub(super) fn check_hash_at_end_ahead(&self) -> Result<(), Error> {
+        let src = self.src;
+        let mut at = self.pos;
+        let mut after_space = false;
+        loop {
+            match src.get(at) {
+                Some(&b) if is_space(b) => {
+                    at += 1;
+                    after_space = true;
+                }
+                Some(b'#') if after_space && at + 1 == src.len() => {
+                    return Err(self.error(ErrorKind::HashAtEnd, at));
+                }
+                Some(b'#') => {
+                    // The comment takes its line break (§2.2).
+                    at = src[at..]
+                        .iter()
+                        .position(|&b| b == b'\n')
+                        .map_or(src.len(), |n| at + n + 1);
+                    after_space = false;
+                }
+                Some(b'/') if src.get(at + 1) == Some(&b'*') => match block_comment_end(src, at) {
+                    Some(end) => {
+                        at = end;
+                        after_space = false;
+                    }
+                    None => return Ok(()),
+                },
+                _ => return Ok(()),
+            }
+        }
+    }
+
     /// The error of §2.2's *Quirk* for a `#` at the current position.
     fn check_hash_at_end(&self, after_space: bool) -> Result<(), Error> {
         if after_space && self.peek() == Some(b'#') && self.pos + 1 == self.src.len() {

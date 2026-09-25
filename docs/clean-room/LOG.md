@@ -1881,3 +1881,118 @@
     implementer's staged move of the §13 cases, leaving CI red at that one commit. History is
     left unchanged.
   - The spec contains behaviour only.
+- 2026-09-25 — Role: implementation team. Item: C8c (tooling: pin-move workflow, differential
+  fuzzer, the timing test and test profile, latest stable Rust), with the readback cleanup for
+  spec-v10 §10.8 and the `CLAUDE.md` update for C8a–C8c.
+  - Inputs consulted: `docs/clean-room/` (PROTOCOL, WORKLIST C6–C8c, QUESTIONS, the latest
+    entries of this log); `docs/spec/` at HEAD, which `git diff --stat spec-v11 HEAD --
+    docs/spec/` shows equal to `spec-v11`: §10.3 and §10.8, §9.2 (*ARGUMENTS*), §9.3, §9.5, §6.3,
+    §2.2–§2.3, §4.8, §7.6, §7.8, §13.2 (*What the handler can do*, *The test macros*), the README's
+    *Divergences*, and `grep` on the spec for "working directory", "NUL", "Uncertain"; the
+    conformance suite (`tests/conformance.rs`, `tests/conformance/README.md`, the xfail lists
+    through the runner, and the cases and golden files `macro_args_nested_60_levels`,
+    `macro_args_macros_inside`, `macro_args_inherit_inside`, `macro_args_include_inside`,
+    `heredoc_short_input_is_string`, `macro_registered_text_array_error`,
+    `files/v4/open_brace.inc`); `scripts/ci.sh`, `scripts/regen-golden.sh` and
+    `.github/workflows/`; the crate's own files (`Cargo.toml`, `tests/features/Cargo.toml`,
+    `README.md`, `CHANGELOG.md`, the worktree's current `CLAUDE.md`, `tests/scaling.rs`,
+    `src/parse/error.rs`, `src/parse/glob.rs`, parts of `src/parse/core.rs`,
+    `src/parse/macros.rs`, `src/parse/string.rs` and `src/parse/include.rs`, `.gitignore`, the
+    first doc line of every file in `src/` and `tests/`); an `ls` of the worktree root and of
+    `scripts/`, `tools/`, `src/`, `tests/` and `.github/workflows/` at the start (no forbidden
+    names among them). `tools/ucl-dump/` was not opened; its options came
+    from running the binary without arguments and from the flag mapping in
+    `scripts/regen-golden.sh`. `grep` ran on `src/`, `tests/`, `docs/spec/`, `docs/clean-room/`,
+    `scripts/` and single named files, and a final `git grep -n '1\.88'` over `src`, `tests`,
+    `examples`, `benches`, `docs/spec`, `docs/clean-room`, `scripts`, `.github`, `fuzz`, `tools`
+    and the root's README, CHANGELOG, CLAUDE.md and Cargo.toml (no hit outside WORKLIST and
+    this log; nothing in `tools/` matched, so nothing of it was shown). Git: `git status`, `git log --oneline`, `git tag`,
+    `git show --stat` of `6c37b7c`, `b7f1555`, `f7ccd8c` and `0755ce8`, `git diff --stat` of
+    `6c37b7c` without `CLAUDE.md` and the cases, the spec diff above, `git show HEAD:CLAUDE.md`
+    after this session's own commit of it (to check that the sections from *Claude Code
+    Configuration for Rust Projects* on are unchanged), and `git ls-remote` of libucl's
+    repository (refs only: HEAD, which is the pinned commit, and the release tags). The main
+    checkout's initial git status listed the names `PLAN.md` and `REVIEW.md`, which I did not
+    open. Background commands wrote their output files under `/private/tmp`; I did not open
+    them, and redirected every command's output under `target/c8c/`. I listed `target/` and
+    `target/libucl-oracle/` (the clone's directory name only) and opened nothing in the clone or
+    in `build.log`. The advisor tool (a reviewer that sees this session's transcript) was
+    called before the work and before the end.
+  - Black-box oracle runs: about 250 single probes of `target/libucl-oracle/ucl-dump` in
+    `target/c8c/probe/` (through the fuzzer's `--check`), and the fuzz runs below. For the
+    pin-move check, `scripts/ci.sh pin` ran in a scratch worktree (`target/c8c/wt`, removed
+    since) with its own libucl clone, at the pinned commit and at libucl 0.9.4 (`058286f`, the
+    tag's commit from `git ls-remote`); its output went to files of which I read only the
+    script's own progress lines, `summary.md`, `files.txt` and the two test logs, never the build
+    log.
+  - Work, in order:
+    - Rust (WORKLIST C8c item 4): `rust-version = "1.98"` in both manifests; CI runs stable only
+      (the `rust-version` matrix job is gone); README, `CHANGELOG.md`, `CLAUDE.md`,
+      `scripts/ci.sh` and `tests/scaling.rs` say latest stable Rust (1.98 at this release). No
+      code worked around 1.88, so none was simplified; clippy with MSRV 1.98 found nothing.
+    - Timing test and test profile: `tests/scaling.rs` says it is the only timing-based test and
+      why (linear growth shows only in time; it compares ratios within one run); the
+      `opt-level = 2` test-profile override in `Cargo.toml` is documented as a speed choice. The
+      whole suite passes with `--config 'profile.test.package.ucl-rust-lexer.opt-level=0'`; the
+      serde round-trip, scaling and generated-document tests take about five times longer that
+      way.
+    - Readback (spec-v10 §10.8, #57 and #58): the runner excuses −∞ read back as `"-inf"`, the
+      `%f` length rule without a leading `-`, and every `%.15g` output below the normal range;
+      `READBACK_PENDING` is empty.
+    - `tests/common/oracle.rs`: the runner's flag setup, parser setup with the test macros, dump
+      and dump comparison, shared by `tests/conformance.rs` and the fuzzer through `#[path]`. The
+      runner keeps parser panics quiet with a hook that is silent only on the thread inside
+      `quietly()`, instead of swapping the process-wide hook, and names the case whose golden
+      file is not valid JSON.
+    - Pin move: `scripts/regen-golden.sh` takes `LIBUCL_COMMIT` (a full SHA; the default is the
+      pinned commit, so the default behaviour is unchanged) and fetches a commit no branch holds;
+      `scripts/ci.sh pin COMMIT` regenerates the golden files and the serde corpus, removes output
+      files of cases libucl now rejects, runs the conformance tests, and writes
+      `target/pin-move/` (`summary.md`, binary `golden.patch` with new files, `files.txt`, logs)
+      through an index of its own; `.github/workflows/pin-move.yml` (manual, macOS, read-only
+      token, no persisted credentials) runs it and publishes the summary and the artifact. At
+      the pinned commit the patch is empty and the tests pass; at 0.9.4, 376 golden files
+      change (28 added) in 162 cases and corpus files, `git apply` of the patch reproduces them,
+      and the summary names the failure (`depth_limit_error`'s dump is nested deeper than
+      `serde_json` reads).
+    - Fuzzer: `fuzz/` (package `ucl-differential-fuzz`, binary `ucl-differential`, stable Rust,
+      its own workspace), `fuzz/README.md`; `scripts/ci.sh` formats, lints and unit-tests it;
+      `scripts/ci.sh fuzz [SECONDS [SEED]]` and the manual workflow `fuzz.yml` run it.
+  - Fuzz results (12 jobs, inputs of at most 4096 bytes; oracle crashes, dumps too deep for
+    `serde_json`, non-UTF-8 text, signatures and the argument-depth limit skipped):
+    - seed 20260925, 600 s: 962,578 inputs, 960,377 agree, 1,607 skipped, 594 differ (370 the
+      crate accepts, 215 it rejects, 9 values differ), 45 reduced findings;
+    - seed 20260926, 600 s: 975,650 inputs, 973,556 agree, 1,552 skipped, 542 differ, 41 findings;
+    - seed 20260927, 300 s, after the glob fix: 462,999 inputs, 462,004 agree, 244 differ;
+    - seed 20260928, 300 s, after the `#` fix: 432,510 inputs, 431,591 agree, 225 differ.
+    Every class of difference was reduced, checked with the oracle and either fixed or asked.
+    `--replay` of all 153 saved findings with the final crate: 3 agree (the three fixes), 2 are
+    now skipped as non-UTF-8 (a filter added after run 1), and the other 148 fall under #60
+    (22), #61 (86), #62 (8), #63 (8), #64 (4), #65 (8), #66 (5), #67 (3), #68 (3) and #69 (1):
+    - fixed where the spec is clear, each with unit tests: a quoted `/` in a glob pattern
+      (§9.4 *Globs*, `g\/*`); a last-byte `#` after comments that follow a macro (§2.2,
+      `.priority 3;#⏎ #`); and whether an unquoted value expands when a short `\u` escape takes
+      the backslash of a `\$` (§7.6, `\$ABI\u\$`);
+    - asked as QUESTIONS.md #60–#69 (the crate follows the spec text in each): errors in
+      argument documents nested in argument documents (#60, the largest class, mostly from the
+      nested-arguments seeds); `<<` and two or more uppercase letters at the end of a unit
+      (#61, the most frequent single input); the priority of the `.ctx` copy (#62); a `(` as the
+      last byte after NAME (#63); `\"` outside quotes in ARGUMENTS (#64); VT or FF before a
+      last-byte `#` after an entry (#65); keys lost in `.seen` copies (#66); a unit that ends
+      right after its leading bracket, and text in place that starts with `[` (#67); NUL bytes
+      in `.inherit` copies (#68); a NUL in a macro VALUE (#69).
+  - Results: conformance counts unchanged: new core 1575 cases, 1571 pass, 4 expected failures;
+    emitters 1162 cases with output, 1158 match in every format; readback 1158 cases parse, and
+    per format, as C8c item 5 asks, the pending differences became excused losses: config
+    [1144, 11, 3, 0], json and json-compact [1155, 0, 3, 0], yaml [1146, 9, 3, 0] (was 1140,
+    1151 and 1142 with 5 pending each). `xfail-new.txt` and `xfail-emit.txt` unchanged.
+    `scripts/ci.sh` (stable 1.98.1) passes at each of this item's 13 commits, run one by one
+    in a scratch worktree detached at each (`target/c8c/pc`, removed since; exit status 0 for
+    all, the fuzz package's checks from `29f8357` on); `actionlint` and `shellcheck` are clean; `cargo publish --dry-run --target-dir target/publish-check` packages
+    41 files, without `fuzz/`, and verifies.
+  - Questions: #60–#69.
+  - Commits: `255abda`, `2dc04b2`, `f1aae04`, `4e20ec1`, `29f8357`, `bdb75c3`, `fe65c31`,
+    `1653611`, `f7ba94a`, `c405204`, `8e67800`, `7b74acb`, and the `C8c:` commit that adds this
+    entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
