@@ -1,0 +1,7 @@
+seen {
+    data = "V";
+    args {
+        n = 1;
+        k = "A";
+    }
+}

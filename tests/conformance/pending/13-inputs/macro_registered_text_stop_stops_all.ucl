@@ -1,0 +1,2 @@
+.emit ".try_include \"missing\""
+k = 1

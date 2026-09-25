@@ -207,4 +207,5 @@ specifies that output. The other output formats of §10 never contain comments.
 
 These are parser inputs rather than flags, and have `.flags` entries too: `var:NAME=VALUE`
 (§7.1), `variable-handler` (§7.7), `priority:N` and `strategy:NAME` for the main document
-(§8.3, §8.4), and `string-input` (§7.8).
+(§8.3, §8.4), `string-input` (§7.8), and `registered-macros` and `registered-priority-override`
+(§13.2). A `.inputs` file gives further inputs, each with its own priority and strategy (§13.1).

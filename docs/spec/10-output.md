@@ -239,10 +239,20 @@ from these exceptions (found by reading back the config output of every conforma
 - A time is written as a float and reads back as `float` (`times`).
 - Bytes written `\uFFFD` (§10.2) read back as U+FFFD.
 - Floats lose precision: the `%f` row keeps 6 decimals (`3.141592653589793` → `3.141593`), the
-  `%.15g` row 15 significant digits. A `%f` output of 127 or more characters, without a leading
-  `-`, reads back as a string (§5.3; `cases/spec/05-numbers/float_max`). The `%.15g` output of the
-  smallest normal float, `2.2250738585072e-308`, lies below the normal range and is rejected
-  (`readback_fifteen_digit_min_normal_error`).
+  `%.15g` row 15 significant digits. A `%f` output whose digits and `.` take 127 or more
+  characters, a leading `-` not counted, reads back as a string (§5.3): 1e119 and −1e119 (126
+  characters without the `-`) read back as floats, 1e120 and −1e120 (127) as strings
+  (`readback_percent_f_length_limit`, `cases/spec/05-numbers/float_max`,
+  `floats_exact_decimal_expansion` key `b`). A `%.15g` output below the normal range is rejected,
+  and the whole document with it (§5.3): the smallest normal float, whose 15 digits
+  `2.2250738585072e-308` round below it, and every subnormal time, which §10.3 writes in the
+  `%.15g` form, such as `2.22507385850696e-311` (`readback_fifteen_digit_min_normal_error`,
+  `readback_fifteen_digit_subnormal_error`, `cases/spec/05-numbers/time_subnormal_through_ms`).
+- −∞, as a float or a time, is written `-inf` (§10.3), which reads back as the string `"-inf"`
+  (§4), in every format; +∞ reads back as `float +∞`, a time +∞ as a float as above
+  (`readback_minus_infinity_is_string`, `floats_boundaries` key `l`,
+  `cases/spec/05-numbers/time_suffix_overflow_infinite` keys `b` and `i`,
+  `cases/spec/05-numbers/time_infinite_in_json_form` key `w`).
 - Keys written bare that cannot be read bare make the output unreadable: the quirk keys of §10.1,
   keys created by `.include` with `key` or `prefix`, the keys of arrays built from repeated keys
   under `no-implicit-arrays` or by `target="array"` (§10.1), and keys that do not begin with a byte a bare

@@ -1,0 +1,2 @@
+.emit {.seen "inner"}
+k = 1

@@ -1,0 +1,4 @@
+registered-macros
+strategy:rewrite
+priority:5
+no-implicit-arrays

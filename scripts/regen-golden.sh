@@ -77,9 +77,39 @@ flag_opts() {
 			var:*=*) opts="$opts -v ${line#var:}" ;;
 			priority:*) opts="$opts -p ${line#priority:}" ;;
 			strategy:*) opts="$opts -s ${line#strategy:}" ;;
+			registered-macros) opts="$opts -R" ;;
+			registered-priority-override) opts="$opts -O" ;;
 			*) echo "error: unknown flag '$line' in $1" >&2; exit 1 ;;
 			esac
 		done < "$1"
+	fi
+	printf '%s' "$opts"
+}
+
+# Maps a <case>.inputs file (one further input per line: MODE PRIORITY STRATEGY PATH, '#'
+# comments) to dumper options. PATH is relative to the case's directory.
+input_opts() {
+	opts=""
+	inputs_file=$1
+	if [ -f "$inputs_file" ]; then
+		while IFS= read -r line || [ -n "$line" ]; do
+			line=$(printf '%s' "$line" | sed 's/#.*//')
+			# shellcheck disable=SC2086
+			set -- $line
+			if [ $# -eq 0 ]; then
+				continue
+			fi
+			if [ $# -ne 4 ]; then
+				echo "error: bad input line '$line' in $inputs_file" >&2
+				exit 1
+			fi
+			mode=$1
+			case "$mode" in
+			chunk | file) ;;
+			*) echo "error: bad input mode '$mode' in $inputs_file" >&2; exit 1 ;;
+			esac
+			opts="$opts -i $mode:$2:$3:$4"
+		done < "$inputs_file"
 	fi
 	printf '%s' "$opts"
 }
@@ -90,6 +120,9 @@ list=$(
 		find "$CONF/libucl/basic" -maxdepth 1 -type f -name '*.in'
 		if [ -d "$CONF/cases" ]; then
 			find "$CONF/cases" -type f -name '*.ucl'
+		fi
+		if [ -d "$CONF/pending" ]; then
+			find "$CONF/pending" -type f -name '*.ucl'
 		fi
 	} | LC_ALL=C sort
 )
@@ -102,6 +135,7 @@ for case in $list; do
 	base=$(basename "$case")
 	stem=${base%.*}
 	opts=$(flag_opts "$dir/$stem.flags")
+	opts="$opts$(input_opts "$dir/$stem.inputs")"
 	# Run from the case's directory, so relative include paths resolve the same on every machine.
 	# shellcheck disable=SC2086
 	(cd "$dir" && "$DUMP" $opts "$base" 2>/dev/null) > "$dir/$stem.golden.json"

@@ -22,8 +22,9 @@ None of them is written by hand.
   include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
   `../09-macros/files/`.
 - `pending/`, when present, holds cases that a released spec version added but the crate does not
-  pass yet, with their golden files and a README; the runners do not read it. Each case moves to
-  `cases/spec/` when the crate passes it.
+  pass yet, with their golden files and a README; the runners do not read it, but
+  `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
+  `cases/spec/` when the crate passes it. `pending/13-inputs/` holds the cases of spec §13.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
   are now libucl's, not the old hand-written assertions.
 - `<case>.golden.json` next to each case is libucl's typed dump of that case, produced by
@@ -44,8 +45,20 @@ None of them is written by hand.
   resolves to `[handled]`, every other name is refused); `priority:N` and `strategy:NAME` (the
   priority and duplicate strategy of the input chunk; strategies are `append`, `merge`, `rewrite`,
   `error`); `string-input` (do not set the file variables from the case path, as for a document
-  given as a string: libucl then defines `FILENAME` as `undef`). See `tools/ucl-dump/ucl_dump.c`
-  for the exact oracle options.
+  given as a string: libucl then defines `FILENAME` as `undef`); `registered-macros` (register
+  the test macros `.emit`, `.seen`, `.fail` and `.ctx` of spec §13.2) and
+  `registered-priority-override` (also register the handler of `.seen` under the name
+  `priority`, replacing the built-in macro). See `tools/ucl-dump/ucl_dump.c` for the exact oracle
+  options.
+- `<case>.inputs` (optional) lists further inputs that the same parser reads after the case's own
+  file (spec §13.1), in order, one per line: `MODE PRIORITY STRATEGY PATH`, with `#` comments.
+  MODE is `chunk` (the file's bytes are added as a document given as text; the file variables
+  stay as they are) or `file` (the file is added by its path, as a file, which sets `FILENAME` and
+  `CURDIR` from it); PRIORITY is a decimal number; STRATEGY is `append`, `merge`, `rewrite` or
+  `error`; PATH is relative to the case's directory. The case's own `.flags` apply to the parser,
+  and `priority:N` and `strategy:NAME` to the case's own file only. The golden files record the
+  result after the last input; it is an error if any input reported one. Further inputs are named
+  so that they are not cases themselves, under `files/` (for example `files/<case>.<n>.inc`).
 - Every case is parsed with the variable `ABI` registered as `unknown`, and with the file variables
   `FILENAME` and `CURDIR` set from the case path (unless `no-filevars`). The oracle runs each case
   from the case's own directory, so relative include paths resolve against that directory.

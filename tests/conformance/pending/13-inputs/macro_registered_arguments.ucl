@@ -1,0 +1,5 @@
+.seen(a = 1, b = "s", c = [1, 2]) "v"
+.seen() "v"
+.seen "v"
+.seen(n = 1, n = 2) "v"
+.seen(o = { .priority 3; p = 1 }) "v"

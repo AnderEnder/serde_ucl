@@ -58,6 +58,29 @@
  *       config-comments: the config output with the comments the parser saved
  *       (implies -C; ucl_object_emit_full with the parser's comments). A parse
  *       failure prints "error\n".
+ *   -i MODE:PRIORITY:STRATEGY:PATH  after the main input, add PATH as a further
+ *       input to the same parser, with that priority and duplicate strategy;
+ *       may be repeated, inputs are added in order. MODE is "chunk" (the
+ *       file's bytes are added as a document given as a string: the file
+ *       variables are left as they are) or "file" (the file is added by path,
+ *       as a file: libucl sets FILENAME and CURDIR from it). Every input is
+ *       added even after an earlier one failed; the result is an error if any
+ *       input reported one.
+ *   -R  register the test macros, each with the parser as its user data:
+ *       .emit     parses its value text in place of the macro (as a chunk
+ *                 inserted at the macro's position) and returns what that
+ *                 returns;
+ *       .seen     inserts, into the innermost open object, the key "seen" with
+ *                 an object {"data": <the value text it received, as a
+ *                 string>, "args": <a copy of the argument object, or null>};
+ *                 fails (returns false) when the innermost open container is
+ *                 not an object;
+ *       .fail     returns false and does nothing else;
+ *       .ctx      a context macro: inserts, into the innermost open object,
+ *                 the key "ctx" with a copy of the context object it received;
+ *                 fails when the innermost open container is not an object.
+ *   -O  also register the handler of .seen under the name "priority", after
+ *       the built-in macros.
  */
 /* getopt/optarg/optind under -std=c99 on glibc. */
 #define _POSIX_C_SOURCE 200809L
@@ -332,6 +355,122 @@ test_var_handler(const unsigned char *data, size_t len, unsigned char **replace,
 	return false;
 }
 
+static bool
+test_macro_emit(const unsigned char *data, size_t len, const ucl_object_t *args, void *ud)
+{
+	(void) args;
+	return ucl_parser_insert_chunk((struct ucl_parser *) ud, data, len);
+}
+
+static bool
+test_macro_seen(const unsigned char *data, size_t len, const ucl_object_t *args, void *ud)
+{
+	ucl_object_t *cur = ucl_parser_get_current_stack_object((struct ucl_parser *) ud, 0);
+	ucl_object_t *rec;
+
+	if (cur == NULL) {
+		return false;
+	}
+	rec = ucl_object_typed_new(UCL_OBJECT);
+	/* ucl_object_fromlstring takes a length of 0 as "up to the NUL", so build "" directly. */
+	ucl_object_insert_key(rec, len > 0 ? ucl_object_fromlstring((const char *) data, len) : ucl_object_fromstring(""),
+						  "data", 0, true);
+	ucl_object_insert_key(rec, args != NULL ? ucl_object_copy(args) : ucl_object_typed_new(UCL_NULL),
+						  "args", 0, true);
+	ucl_object_insert_key(cur, rec, "seen", 0, true);
+	ucl_object_unref(cur);
+	return true;
+}
+
+static bool
+test_macro_fail(const unsigned char *data, size_t len, const ucl_object_t *args, void *ud)
+{
+	(void) data;
+	(void) len;
+	(void) args;
+	(void) ud;
+	return false;
+}
+
+static bool
+test_macro_ctx(const unsigned char *data, size_t len, const ucl_object_t *args,
+			   const ucl_object_t *context, void *ud)
+{
+	ucl_object_t *cur = ucl_parser_get_current_stack_object((struct ucl_parser *) ud, 0);
+	ucl_object_t *copy;
+
+	(void) data;
+	(void) len;
+	(void) args;
+	if (cur == NULL) {
+		return false;
+	}
+	copy = context != NULL ? ucl_object_copy(context) : ucl_object_typed_new(UCL_NULL);
+	ucl_object_insert_key(cur, copy, "ctx", 0, true);
+	ucl_object_unref(cur);
+	return true;
+}
+
+static bool
+parse_strategy(const char *name, enum ucl_duplicate_strategy *out)
+{
+	if (strcmp(name, "append") == 0) {
+		*out = UCL_DUPLICATE_APPEND;
+	}
+	else if (strcmp(name, "merge") == 0) {
+		*out = UCL_DUPLICATE_MERGE;
+	}
+	else if (strcmp(name, "rewrite") == 0) {
+		*out = UCL_DUPLICATE_REWRITE;
+	}
+	else if (strcmp(name, "error") == 0) {
+		*out = UCL_DUPLICATE_ERROR;
+	}
+	else {
+		return false;
+	}
+	return true;
+}
+
+struct extra_input {
+	bool as_file;
+	unsigned priority;
+	enum ucl_duplicate_strategy strat;
+	const char *path;
+};
+
+/* Parses MODE:PRIORITY:STRATEGY:PATH. */
+static bool
+parse_extra_input(char *spec, struct extra_input *out)
+{
+	char *mode = spec, *prio, *strat, *path;
+
+	if ((prio = strchr(mode, ':')) == NULL) {
+		return false;
+	}
+	*prio++ = '\0';
+	if ((strat = strchr(prio, ':')) == NULL) {
+		return false;
+	}
+	*strat++ = '\0';
+	if ((path = strchr(strat, ':')) == NULL) {
+		return false;
+	}
+	*path++ = '\0';
+	if (strcmp(mode, "chunk") == 0) {
+		out->as_file = false;
+	}
+	else if (strcmp(mode, "file") == 0) {
+		out->as_file = true;
+	}
+	else {
+		return false;
+	}
+	out->priority = (unsigned) strtoul(prio, NULL, 10);
+	out->path = path;
+	return parse_strategy(strat, &out->strat) && *path != '\0';
+}
+
 static unsigned char *
 read_file(const char *path, size_t *out_len)
 {
@@ -378,6 +517,9 @@ main(int argc, char **argv)
 	bool handler = false;
 	bool dump_comm = false;
 	bool emit_comments = false;
+	bool test_macros = false, override_priority = false;
+	struct extra_input extra[64];
+	int nextra = 0;
 	unsigned priority = 0;
 	enum ucl_duplicate_strategy strat = UCL_DUPLICATE_APPEND;
 	struct ucl_parser *parser;
@@ -385,7 +527,7 @@ main(int argc, char **argv)
 	size_t len = 0;
 	ucl_object_t *top;
 
-	while ((opt = getopt(argc, argv, "lzTICMFSce:v:Hp:s:")) != -1) {
+	while ((opt = getopt(argc, argv, "lzTICMFSce:v:Hp:s:i:RO")) != -1) {
 		switch (opt) {
 		case 'l':
 			flags |= UCL_PARSER_KEY_LOWERCASE;
@@ -428,22 +570,23 @@ main(int argc, char **argv)
 			priority = (unsigned) strtoul(optarg, NULL, 10);
 			break;
 		case 's':
-			if (strcmp(optarg, "append") == 0) {
-				strat = UCL_DUPLICATE_APPEND;
-			}
-			else if (strcmp(optarg, "merge") == 0) {
-				strat = UCL_DUPLICATE_MERGE;
-			}
-			else if (strcmp(optarg, "rewrite") == 0) {
-				strat = UCL_DUPLICATE_REWRITE;
-			}
-			else if (strcmp(optarg, "error") == 0) {
-				strat = UCL_DUPLICATE_ERROR;
-			}
-			else {
+			if (!parse_strategy(optarg, &strat)) {
 				fprintf(stderr, "unknown strategy '%s'\n", optarg);
 				return 2;
 			}
+			break;
+		case 'i':
+			if (nextra >= 64 || !parse_extra_input(optarg, &extra[nextra])) {
+				fprintf(stderr, "bad input '%s'\n", optarg);
+				return 2;
+			}
+			nextra++;
+			break;
+		case 'R':
+			test_macros = true;
+			break;
+		case 'O':
+			override_priority = true;
 			break;
 		case 'e':
 			if (strcmp(optarg, "config") == 0) {
@@ -469,12 +612,12 @@ main(int argc, char **argv)
 			}
 			break;
 		default:
-			fprintf(stderr, "usage: %s [-lzTICMFScH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
+			fprintf(stderr, "usage: %s [-lzTICMFScHRO] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-i MODE:PRIORITY:STRATEGY:PATH] [-e FORMAT] <file>\n", argv[0]);
 			return 2;
 		}
 	}
 	if (optind != argc - 1) {
-		fprintf(stderr, "usage: %s [-lzTICMFScH] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-e FORMAT] <file>\n", argv[0]);
+		fprintf(stderr, "usage: %s [-lzTICMFScHRO] [-v NAME=VALUE] [-p N] [-s STRATEGY] [-i MODE:PRIORITY:STRATEGY:PATH] [-e FORMAT] <file>\n", argv[0]);
 		return 2;
 	}
 
@@ -505,11 +648,38 @@ main(int argc, char **argv)
 	if (handler) {
 		ucl_parser_set_variables_handler(parser, test_var_handler, NULL);
 	}
+	if (test_macros) {
+		ucl_parser_register_macro(parser, "emit", test_macro_emit, parser);
+		ucl_parser_register_macro(parser, "seen", test_macro_seen, parser);
+		ucl_parser_register_macro(parser, "fail", test_macro_fail, parser);
+		ucl_parser_register_context_macro(parser, "ctx", test_macro_ctx, parser);
+	}
+	if (override_priority) {
+		ucl_parser_register_macro(parser, "priority", test_macro_seen, parser);
+	}
 	if (filevars) {
 		ucl_parser_set_filevars(parser, argv[optind], true);
 	}
 
 	ucl_parser_add_chunk_full(parser, buf, len, priority, strat, UCL_PARSE_UCL);
+	for (int i = 0; i < nextra; i++) {
+		if (extra[i].as_file) {
+			ucl_parser_add_file_full(parser, extra[i].path, extra[i].priority, extra[i].strat,
+									 UCL_PARSE_UCL);
+		}
+		else {
+			size_t elen = 0;
+			unsigned char *ebuf = read_file(extra[i].path, &elen);
+
+			if (ebuf == NULL) {
+				perror(extra[i].path);
+				return 2;
+			}
+			/* libucl keeps pointers into chunks it has read, so the buffer stays allocated. */
+			ucl_parser_add_chunk_full(parser, ebuf, elen, extra[i].priority, extra[i].strat,
+									  UCL_PARSE_UCL);
+		}
+	}
 
 	if (ucl_parser_get_error(parser) != NULL) {
 		fprintf(stderr, "libucl: %s\n", ucl_parser_get_error(parser));

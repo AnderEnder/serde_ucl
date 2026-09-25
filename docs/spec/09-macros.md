@@ -120,7 +120,7 @@ With `disable-macro` set, a macro is a syntax error (§12.6).
   (`macro_name_includes_semicolon_error`).
 - It must be non-empty (`. include` is an error), matches case-sensitively (`.Include` is an
   error), and must be one of `include`, `try_include`, `includes`, `priority`, `load`, `inherit`,
-  or a macro the application registered. An unknown name is an error (`unknown_macro_error`,
+  or a macro the application registered (§13.2). An unknown name is an error (`unknown_macro_error`,
   `macro_space_after_dot_error`, `macro_name_case_sensitive_error`,
   `cases/errors/e05_unknown_macro`, `cases/errors/e06_unknown_macro_with_args`).
 
@@ -360,7 +360,8 @@ appears (`include_quoted`, `include_inside_object`, `libucl/basic/23`).
 - At most 16 input units may be open at once, the main document included. So 15 nested includes
   are fine and 16 are an error (`include_nesting_limit_ok`, `include_nesting_limit_error`). A cycle
   of files including each other ends at this limit, with an error, also for `.try_include`
-  (`include_cycle_nesting_limit_error`, `try_include_cycle_nesting_limit_error`).
+  (`include_cycle_nesting_limit_error`, `try_include_cycle_nesting_limit_error`). Earlier inputs
+  of the same parser and text a registered macro has parsed in place count too (§13).
 - Saved comments (§12.5) are collected across units: comments pending before the macro may attach
   to the first value of the included file, and the end of the included file attaches pending
   comments as the end of input does (`comments_carry_into_included_file`,

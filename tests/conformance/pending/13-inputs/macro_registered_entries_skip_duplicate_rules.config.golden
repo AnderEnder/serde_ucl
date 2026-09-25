@@ -1,0 +1,9 @@
+seen = 1;
+seen {
+    data = "a";
+    args = null;
+}
+seen {
+    data = "b";
+    args = null;
+}

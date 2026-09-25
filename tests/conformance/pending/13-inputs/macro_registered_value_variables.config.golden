@@ -1,0 +1,12 @@
+seen {
+    data = "$$";
+    args = null;
+}
+seen {
+    data = "$ unknown";
+    args = null;
+}
+seen {
+    data = "unknownx";
+    args = null;
+}

@@ -1,0 +1,2 @@
+.include "files/macro_fails.inc"
+b = 2;

@@ -1,0 +1,3 @@
+.seen "$$"
+.seen "$$ $ABI"
+.seen "${ABI}x"

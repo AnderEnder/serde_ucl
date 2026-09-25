@@ -1769,3 +1769,23 @@
     `f80a3a5`, `3c0393f`, and the `C8a:` commit that adds this entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: spec team. Item: C0, release `spec-v10`.
+  - Inputs: libucl source at the pinned commit (the parser's input, macro and chunk handling and
+    the header's documented API), black-box runs of the oracle, `docs/spec/`,
+    `docs/clean-room/QUESTIONS.md` #57–#58 and WORKLIST C8b.
+  - Oracle: `tools/ucl-dump` gains `-i MODE:PRIORITY:STRATEGY:PATH` (further inputs, as text or as
+    a file), `-R` (test macros `.emit`, `.seen`, `.fail`, `.ctx`) and `-O` (the `.seen` handler
+    registered as `priority`). `scripts/regen-golden.sh` maps `<case>.inputs` and the flags
+    `registered-macros` and `registered-priority-override`, and regenerates `pending/` too. A
+    regeneration changed no existing golden file, and two runs gave identical files.
+  - Spec: new §13 (several inputs into one parser; registered macros); §10.8 answers #57 (−∞ reads
+    back as the string `"-inf"`) and #58 (the `%f` length rule of §5.3; every `%.15g` output below
+    the normal range is rejected); cross-references in §9.2, §9.4 and §12.8; README sections,
+    *Known gaps* and coverage (1400 committed cases, 101 pending).
+  - Cases: 3 in `cases/spec/10-output/` (`readback_minus_infinity_is_string`,
+    `readback_percent_f_length_limit`, `readback_fifteen_digit_subnormal_error`), which the crate
+    passes; 101 in `tests/conformance/pending/13-inputs/`, which the runners do not read yet. Not
+    committed: a `{` after a zero-byte first input (crashes libucl) and the file variables set by a
+    file input (the golden file would hold the checkout path).
+  - Commits: `3c30bf3` (oracle, script, cases), `b8f338d` (spec; tagged `spec-v10`).
+  - The spec contains behaviour only.

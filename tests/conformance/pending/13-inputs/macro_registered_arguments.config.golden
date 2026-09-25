@@ -1,0 +1,34 @@
+seen {
+    data = "v";
+    args {
+        a = 1;
+        b = "s";
+        c [
+            1,
+            2,
+        ]
+    }
+}
+seen {
+    data = "v";
+    args {}
+}
+seen {
+    data = "v";
+    args = null;
+}
+seen {
+    data = "v";
+    args {
+        n = 1;
+        n = 2;
+    }
+}
+seen {
+    data = "v";
+    args {
+        o {
+            p = 1;
+        }
+    }
+}
