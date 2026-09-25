@@ -428,12 +428,18 @@ fn main() {
 
 ## Limits
 
-- Containers nest at most 1024 deep (`parse::MAX_NESTING`), included files 16 deep
-  (`parse::MAX_INCLUDE_DEPTH`) and macro argument lists 64 deep (`parse::MAX_ARGUMENT_DEPTH`).
-- Parsing and the emitters handle documents nested to that limit on a 2 MiB thread stack. serde
-  deserialization and serialization recurse once per level of nesting: in a debug build, a
-  document nested a few hundred levels deep needs more than 2 MiB, the default stack of a spawned
-  thread.
+- Containers nest at most 1024 deep, the root included (`parse::MAX_NESTING`), included files 16
+  deep (`parse::MAX_INCLUDE_DEPTH`) and macro argument lists 64 deep
+  (`parse::MAX_ARGUMENT_DEPTH`). The nesting limit also holds for the objects that `.inherit`
+  copies: a copy that would be nested deeper is an error, which libucl does not report.
+- Parsing, the emitters and serde handle every document the parser accepts on a 2 MiB thread
+  stack, the default of a spawned thread, in a debug build. serde converts a `UclValue` or
+  `UclObject`, also as a field of another type, with the same stack at any depth; the text
+  functions write it up to the nesting limit.
+- serde deserializes into, and serializes from, every other type by recursion through its serde
+  impls, so there the nesting is limited to 128 maps and sequences, the outermost included
+  (`MAX_SERDE_NESTING`, the limit `serde_json` also uses). Deeper nesting fails with
+  `SerdeError::TooDeep`. A value that the target skips, such as an unknown field, does not count.
 - Keys and strings must be valid UTF-8; libucl accepts other bytes.
 
 ## Cargo features

@@ -23,11 +23,22 @@
 //! Values are owned: a target that borrows from the input, such as a `&str` field, is an error
 //! (`invalid type: string "…", expected a borrowed string`); use `String` or `Cow<str>`.
 //!
-//! `Deserialize for UclValue` keeps what the table flattens: from this crate's deserializer, a
-//! time stays a time and an entry with several values keeps them all, so
-//! `from_value::<UclValue>(v)` gives `v` back, apart from priorities and the marks of values
-//! that `.inherit` copied or `no-implicit-arrays` collected. From any other deserializer it
-//! takes what that format offers; integers above `i64::MAX` are an error.
+//! `Deserialize for UclValue` keeps what the table flattens: from this crate's deserializer it
+//! takes the value itself, so a time stays a time, an entry with several values keeps them all,
+//! and `from_value::<UclValue>(v)` gives `v` back unchanged, priorities and the marks of values
+//! that `.inherit` copied or `no-implicit-arrays` collected included. From any other deserializer
+//! it takes what that format offers; integers above `i64::MAX` are an error.
+//!
+//! # Depth
+//!
+//! A [`UclValue`](crate::UclValue) (or [`UclObject`](crate::UclObject)) is taken in one step,
+//! with the same stack at any depth, so it can be as deep as the parser allows (1024 containers,
+//! [`crate::parse::MAX_NESTING`]) on a thread with a small stack. Any other type is read by
+//! recursion through its `Deserialize` impl, one level per map or sequence, and there the
+//! deserializer enters at most [`MAX_SERDE_NESTING`] maps and sequences inside one another, the
+//! document included; deeper, it fails with [`SerdeError::TooDeep`](crate::error::SerdeError).
+//! A value that the target skips, such as an unknown field of a struct, is not entered and does
+//! not count. A `UclValue` field of a typed target is taken in one step as well.
 //!
 //! # Parsing
 //!
@@ -53,6 +64,31 @@ mod value;
 
 use value::ValueDeserializer;
 pub use value::from_value;
+
+/// The most maps and sequences (UCL objects and arrays, and the values of a key that has
+/// several) nested inside one another that deserialization into, and serialization from, a
+/// type other than [`UclValue`](crate::UclValue) and [`UclObject`](crate::UclObject) follows,
+/// the outermost included. Deeper nesting fails with
+/// [`SerdeError::TooDeep`](crate::error::SerdeError).
+///
+/// serde reads and writes such types by recursion, one call per level, and the stack each level
+/// takes depends on the types. 128 levels, the limit `serde_json` also uses, fit in a 2 MiB
+/// thread stack in a debug build with room to spare; a `UclValue` has no such limit (see
+/// [the module documentation](self#depth) and [`crate::ser`]).
+pub const MAX_SERDE_NESTING: usize = 128;
+
+/// The nesting of a map or sequence entered inside `depth` of them, for serde
+/// (de)serialization of types other than `UclValue`: `depth + 1`, or the error past
+/// [`MAX_SERDE_NESTING`].
+pub(crate) fn enter(depth: usize) -> Result<usize, UclError> {
+    if depth < MAX_SERDE_NESTING {
+        Ok(depth + 1)
+    } else {
+        Err(UclError::Serde(crate::error::SerdeError::TooDeep {
+            limit: MAX_SERDE_NESTING,
+        }))
+    }
+}
 
 use crate::error::UclError;
 use crate::parse::{Parser, ParserBuilder};

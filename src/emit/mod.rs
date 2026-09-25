@@ -169,7 +169,7 @@ impl<'a> Emitter<'a> {
                 value.type_name()
             ));
         }
-        if exact && nesting(value) > crate::parse::MAX_NESTING {
+        if exact && crate::value::nesting(value) > crate::parse::MAX_NESTING {
             writer.fail(format!(
                 "a value nested more than {} containers deep, the root included (spec §11.2)",
                 crate::parse::MAX_NESTING
@@ -184,31 +184,6 @@ impl<'a> Emitter<'a> {
         }
         writer
     }
-}
-
-/// The most containers (objects and arrays) open at once in `value`, itself included.
-fn nesting(value: &UclValue) -> usize {
-    let mut deepest = 0;
-    let mut stack = vec![(value, 1)];
-    while let Some((value, depth)) = stack.pop() {
-        match value {
-            UclValue::Object(object) => {
-                deepest = deepest.max(depth);
-                stack.extend(
-                    object
-                        .entries()
-                        .flat_map(|e| e.values())
-                        .map(|v| (v, depth + 1)),
-                );
-            }
-            UclValue::Array(items) => {
-                deepest = deepest.max(depth);
-                stack.extend(items.iter().map(|v| (v, depth + 1)));
-            }
-            _ => {}
-        }
-    }
-    deepest
 }
 
 /// `value` as pretty JSON (spec §10.4).

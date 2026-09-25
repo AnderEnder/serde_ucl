@@ -1,0 +1,21 @@
+# Tests of the crate built with feature sets that its own test builds cannot have. The crate's
+# dev-dependency on itself turns `load` on for every one of its test targets, so a test of what
+# happens without `load` never runs there. This package depends on the crate as an application
+# does. scripts/ci.sh runs its tests with the crate's default features and with none.
+[package]
+name = "ucl-feature-tests"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+# A workspace of its own: in one with the crate, `cargo test --workspace` would build the crate
+# once for both packages, with `load` on.
+[workspace]
+
+[dependencies]
+ucl-rust-lexer = { path = "../..", default-features = false }
+
+[features]
+default = ["fs"]
+fs = ["ucl-rust-lexer/fs"]

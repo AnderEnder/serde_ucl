@@ -690,6 +690,17 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
+    /// Fails when `value`, added to the current object, would be nested more than
+    /// [`MAX_NESTING`] containers deep, the root included, so that no value the parser returns
+    /// is nested deeper than containers can be open (spec §11.2). Only `.inherit` adds values
+    /// that hold containers without opening them (§9.7).
+    pub(super) fn check_nesting(&self, value: &UclValue, at: usize) -> Result<(), Error> {
+        if self.frames.len() + crate::value::nesting(value) > MAX_NESTING {
+            return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
+        }
+        Ok(())
+    }
+
     /// Pushes a frame for a container. `path` is its path from the root when the caller has it
     /// already; otherwise [`Core::frame_path`] works it out when it is needed.
     fn push_frame(

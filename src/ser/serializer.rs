@@ -1,7 +1,9 @@
 //! The serializer that turns any `Serialize` value into a [`UclValue`] (see [`super::to_value`]).
 
 use super::marker;
+use crate::de::enter;
 use crate::error::{SerdeError, UclError};
+use crate::handoff;
 use crate::value::{UclObject, UclValue};
 use serde::ser::{self, Impossible, Serialize};
 
@@ -11,43 +13,6 @@ fn unrepresentable(what: String) -> UclError {
 
 fn custom(message: impl std::fmt::Display) -> UclError {
     <UclError as ser::Error>::custom(message)
-}
-
-/// What serializing one value gives: the value, or, for the private newtype struct
-/// [`marker::MULTI`], every value of a multi-value entry.
-pub(super) enum Node {
-    One(UclValue),
-    Many(Vec<UclValue>),
-}
-
-impl Node {
-    /// The node as one value: the values of a multi-value entry outside an object become an
-    /// explicit array.
-    pub(super) fn into_value(self) -> UclValue {
-        match self {
-            Node::One(value) => value,
-            Node::Many(values) => UclValue::Array(values),
-        }
-    }
-}
-
-/// Adds the value(s) of `node` to `key` of `object`. A key that is already present gets another
-/// value, as a repeated key does when parsing (spec §8.2).
-fn add(object: &mut UclObject, key: String, node: Node) -> Result<(), UclError> {
-    match node {
-        Node::One(value) => object.append(key, value),
-        Node::Many(values) if values.is_empty() => {
-            return Err(custom(format!(
-                "the key {key:?} with no values: an entry holds at least one value"
-            )));
-        }
-        Node::Many(values) => {
-            for value in values {
-                object.append(key.as_str(), value);
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Serializes a Rust value into a [`UclValue`].
@@ -64,10 +29,30 @@ fn add(object: &mut UclObject, key: String, node: Node) -> Result<(), UclError> 
 /// | map, struct | object, fields and entries in order |
 /// | unit variant | the variant's name |
 /// | newtype, tuple and struct variant | object with one key, the variant's name |
-pub(super) struct ValueSerializer;
+///
+/// A [`UclValue`] or [`UclObject`] is copied as it is, in one step at any depth (see
+/// [`crate::handoff`]). Other values are serialized by recursion through their `Serialize`
+/// impls, and the serializer enters at most [`crate::de::MAX_SERDE_NESTING`] maps and sequences
+/// inside one another: the object of a newtype, tuple or struct variant counts, and so does the
+/// array or object inside a tuple or struct variant.
+pub(super) struct ValueSerializer {
+    /// How many maps and sequences hold the value: 0 for the root.
+    depth: usize,
+}
+
+impl ValueSerializer {
+    /// The serializer of a root value.
+    pub(super) fn new() -> Self {
+        Self::nested(0)
+    }
+
+    fn nested(depth: usize) -> Self {
+        Self { depth }
+    }
+}
 
 impl ser::Serializer for ValueSerializer {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
     type SerializeSeq = SeqSerializer;
     type SerializeTuple = SeqSerializer;
@@ -77,93 +62,93 @@ impl ser::Serializer for ValueSerializer {
     type SerializeStruct = MapSerializer;
     type SerializeStructVariant = VariantSerializer<MapSerializer>;
 
-    fn serialize_bool(self, v: bool) -> Result<Node, UclError> {
-        Ok(Node::One(UclValue::Boolean(v)))
+    fn serialize_bool(self, v: bool) -> Result<UclValue, UclError> {
+        Ok(UclValue::Boolean(v))
     }
 
-    fn serialize_i8(self, v: i8) -> Result<Node, UclError> {
+    fn serialize_i8(self, v: i8) -> Result<UclValue, UclError> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i16(self, v: i16) -> Result<Node, UclError> {
+    fn serialize_i16(self, v: i16) -> Result<UclValue, UclError> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i32(self, v: i32) -> Result<Node, UclError> {
+    fn serialize_i32(self, v: i32) -> Result<UclValue, UclError> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_i64(self, v: i64) -> Result<Node, UclError> {
-        Ok(Node::One(UclValue::Integer(v)))
+    fn serialize_i64(self, v: i64) -> Result<UclValue, UclError> {
+        Ok(UclValue::Integer(v))
     }
 
-    fn serialize_i128(self, v: i128) -> Result<Node, UclError> {
+    fn serialize_i128(self, v: i128) -> Result<UclValue, UclError> {
         match i64::try_from(v) {
             Ok(v) => self.serialize_i64(v),
             Err(_) => Err(out_of_range(v)),
         }
     }
 
-    fn serialize_u8(self, v: u8) -> Result<Node, UclError> {
+    fn serialize_u8(self, v: u8) -> Result<UclValue, UclError> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_u16(self, v: u16) -> Result<Node, UclError> {
+    fn serialize_u16(self, v: u16) -> Result<UclValue, UclError> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_u32(self, v: u32) -> Result<Node, UclError> {
+    fn serialize_u32(self, v: u32) -> Result<UclValue, UclError> {
         self.serialize_i64(v.into())
     }
 
-    fn serialize_u64(self, v: u64) -> Result<Node, UclError> {
+    fn serialize_u64(self, v: u64) -> Result<UclValue, UclError> {
         match i64::try_from(v) {
             Ok(v) => self.serialize_i64(v),
             Err(_) => Err(out_of_range(v)),
         }
     }
 
-    fn serialize_u128(self, v: u128) -> Result<Node, UclError> {
+    fn serialize_u128(self, v: u128) -> Result<UclValue, UclError> {
         match i64::try_from(v) {
             Ok(v) => self.serialize_i64(v),
             Err(_) => Err(out_of_range(v)),
         }
     }
 
-    fn serialize_f32(self, v: f32) -> Result<Node, UclError> {
+    fn serialize_f32(self, v: f32) -> Result<UclValue, UclError> {
         self.serialize_f64(v.into())
     }
 
-    fn serialize_f64(self, v: f64) -> Result<Node, UclError> {
-        Ok(Node::One(UclValue::Float(v)))
+    fn serialize_f64(self, v: f64) -> Result<UclValue, UclError> {
+        Ok(UclValue::Float(v))
     }
 
-    fn serialize_char(self, v: char) -> Result<Node, UclError> {
-        Ok(Node::One(UclValue::String(v.to_string())))
+    fn serialize_char(self, v: char) -> Result<UclValue, UclError> {
+        Ok(UclValue::String(v.to_string()))
     }
 
-    fn serialize_str(self, v: &str) -> Result<Node, UclError> {
-        Ok(Node::One(UclValue::String(v.to_owned())))
+    fn serialize_str(self, v: &str) -> Result<UclValue, UclError> {
+        Ok(UclValue::String(v.to_owned()))
     }
 
-    fn serialize_bytes(self, v: &[u8]) -> Result<Node, UclError> {
+    fn serialize_bytes(self, v: &[u8]) -> Result<UclValue, UclError> {
         let bytes = v.iter().map(|&b| UclValue::Integer(b.into())).collect();
-        Ok(Node::One(UclValue::Array(bytes)))
+        Ok(UclValue::Array(bytes))
     }
 
-    fn serialize_none(self) -> Result<Node, UclError> {
+    fn serialize_none(self) -> Result<UclValue, UclError> {
         self.serialize_unit()
     }
 
-    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Node, UclError> {
+    fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<UclValue, UclError> {
         value.serialize(self)
     }
 
-    fn serialize_unit(self) -> Result<Node, UclError> {
-        Ok(Node::One(UclValue::Null))
+    fn serialize_unit(self) -> Result<UclValue, UclError> {
+        Ok(UclValue::Null)
     }
 
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Node, UclError> {
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<UclValue, UclError> {
         self.serialize_unit()
     }
 
@@ -172,26 +157,28 @@ impl ser::Serializer for ValueSerializer {
         _name: &'static str,
         _index: u32,
         variant: &'static str,
-    ) -> Result<Node, UclError> {
+    ) -> Result<UclValue, UclError> {
         self.serialize_str(variant)
     }
 
-    /// A newtype struct is its content, except for the private names of [`marker`]: a time, and
-    /// the values of a multi-value entry.
+    /// A newtype struct is its content, except for the private names of [`marker`]: a time,
+    /// and a whole [`UclValue`] or [`UclObject`], which is copied as it is.
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
         self,
         name: &'static str,
         value: &T,
-    ) -> Result<Node, UclError> {
+    ) -> Result<UclValue, UclError> {
         if name == marker::TIME {
             match value.serialize(self)? {
-                Node::One(UclValue::Float(seconds)) => Ok(Node::One(UclValue::Time(seconds))),
+                UclValue::Float(seconds) => Ok(UclValue::Time(seconds)),
                 _ => Err(custom("a UCL time holds a number of seconds as an f64")),
             }
-        } else if name == marker::MULTI {
-            match value.serialize(self)? {
-                Node::One(UclValue::Array(values)) => Ok(Node::Many(values)),
-                _ => Err(custom("the values of a multi-value entry are a sequence")),
+        } else if name == marker::VALUE {
+            let depth = self.depth;
+            match handoff::request(|| value.serialize(ValueSerializer::nested(depth))) {
+                (Ok(_), Some(tree)) => Ok(tree),
+                (Ok(_), None) => Err(custom("a UCL value that did not hand itself over")),
+                (Err(e), _) => Err(e),
             }
         } else {
             value.serialize(self)
@@ -204,15 +191,17 @@ impl ser::Serializer for ValueSerializer {
         _index: u32,
         variant: &'static str,
         value: &T,
-    ) -> Result<Node, UclError> {
+    ) -> Result<UclValue, UclError> {
+        let depth = enter(self.depth)?;
         let mut object = UclObject::new();
-        add(&mut object, variant.to_owned(), value.serialize(self)?)?;
-        Ok(Node::One(UclValue::Object(object)))
+        object.append(variant, value.serialize(ValueSerializer::nested(depth))?);
+        Ok(UclValue::Object(object))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<SeqSerializer, UclError> {
         Ok(SeqSerializer {
             items: Vec::with_capacity(len.unwrap_or(0).min(4096)),
+            depth: enter(self.depth)?,
         })
     }
 
@@ -235,16 +224,16 @@ impl ser::Serializer for ValueSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<VariantSerializer<SeqSerializer>, UclError> {
-        Ok(VariantSerializer {
-            variant,
-            inner: self.serialize_seq(Some(len))?,
-        })
+        // The variant's object holds the array.
+        let inner = ValueSerializer::nested(enter(self.depth)?).serialize_seq(Some(len))?;
+        Ok(VariantSerializer { variant, inner })
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<MapSerializer, UclError> {
         Ok(MapSerializer {
             object: UclObject::new(),
             key: None,
+            depth: enter(self.depth)?,
         })
     }
 
@@ -259,10 +248,9 @@ impl ser::Serializer for ValueSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<VariantSerializer<MapSerializer>, UclError> {
-        Ok(VariantSerializer {
-            variant,
-            inner: self.serialize_map(Some(len))?,
-        })
+        // The variant's object holds the struct's object.
+        let inner = ValueSerializer::nested(enter(self.depth)?).serialize_map(Some(len))?;
+        Ok(VariantSerializer { variant, inner })
     }
 }
 
@@ -275,12 +263,14 @@ fn out_of_range(v: impl std::fmt::Display) -> UclError {
 /// Elements of a sequence, tuple or tuple struct.
 pub(super) struct SeqSerializer {
     items: Vec<UclValue>,
+    /// The nesting of the sequence, which holds the elements.
+    depth: usize,
 }
 
 impl SeqSerializer {
     fn push<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), UclError> {
         self.items
-            .push(value.serialize(ValueSerializer)?.into_value());
+            .push(value.serialize(ValueSerializer::nested(self.depth))?);
         Ok(())
     }
 
@@ -290,57 +280,58 @@ impl SeqSerializer {
 }
 
 impl ser::SerializeSeq for SeqSerializer {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), UclError> {
         self.push(value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
-        Ok(Node::One(self.finish()))
+    fn end(self) -> Result<UclValue, UclError> {
+        Ok(self.finish())
     }
 }
 
 impl ser::SerializeTuple for SeqSerializer {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), UclError> {
         self.push(value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
-        Ok(Node::One(self.finish()))
+    fn end(self) -> Result<UclValue, UclError> {
+        Ok(self.finish())
     }
 }
 
 impl ser::SerializeTupleStruct for SeqSerializer {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), UclError> {
         self.push(value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
-        Ok(Node::One(self.finish()))
+    fn end(self) -> Result<UclValue, UclError> {
+        Ok(self.finish())
     }
 }
 
-/// Entries of a map or fields of a struct.
+/// Entries of a map or fields of a struct. A key that is already present gets another value,
+/// as a repeated key does when parsing (spec §8.2).
 pub(super) struct MapSerializer {
     object: UclObject,
     key: Option<String>,
+    /// The nesting of the map, which holds the values.
+    depth: usize,
 }
 
 impl MapSerializer {
     fn field<T: ?Sized + Serialize>(&mut self, key: &str, value: &T) -> Result<(), UclError> {
-        add(
-            &mut self.object,
-            key.to_owned(),
-            value.serialize(ValueSerializer)?,
-        )
+        let value = value.serialize(ValueSerializer::nested(self.depth))?;
+        self.object.append(key, value);
+        Ok(())
     }
 
     fn finish(self) -> UclValue {
@@ -349,7 +340,7 @@ impl MapSerializer {
 }
 
 impl ser::SerializeMap for MapSerializer {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), UclError> {
@@ -362,16 +353,16 @@ impl ser::SerializeMap for MapSerializer {
             .key
             .take()
             .ok_or_else(|| custom("a map value was serialized before its key"))?;
-        add(&mut self.object, key, value.serialize(ValueSerializer)?)
+        self.field(&key, value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
-        Ok(Node::One(self.finish()))
+    fn end(self) -> Result<UclValue, UclError> {
+        Ok(self.finish())
     }
 }
 
 impl ser::SerializeStruct for MapSerializer {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_field<T: ?Sized + Serialize>(
@@ -382,8 +373,8 @@ impl ser::SerializeStruct for MapSerializer {
         self.field(key, value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
-        Ok(Node::One(self.finish()))
+    fn end(self) -> Result<UclValue, UclError> {
+        Ok(self.finish())
     }
 }
 
@@ -394,28 +385,28 @@ pub(super) struct VariantSerializer<S> {
 }
 
 impl<S> VariantSerializer<S> {
-    fn wrap(variant: &'static str, value: UclValue) -> Node {
+    fn wrap(variant: &'static str, value: UclValue) -> UclValue {
         let mut object = UclObject::new();
         object.append(variant, value);
-        Node::One(UclValue::Object(object))
+        UclValue::Object(object)
     }
 }
 
 impl ser::SerializeTupleVariant for VariantSerializer<SeqSerializer> {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<(), UclError> {
         self.inner.push(value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
+    fn end(self) -> Result<UclValue, UclError> {
         Ok(Self::wrap(self.variant, self.inner.finish()))
     }
 }
 
 impl ser::SerializeStructVariant for VariantSerializer<MapSerializer> {
-    type Ok = Node;
+    type Ok = UclValue;
     type Error = UclError;
 
     fn serialize_field<T: ?Sized + Serialize>(
@@ -426,7 +417,7 @@ impl ser::SerializeStructVariant for VariantSerializer<MapSerializer> {
         self.inner.field(key, value)
     }
 
-    fn end(self) -> Result<Node, UclError> {
+    fn end(self) -> Result<UclValue, UclError> {
         Ok(Self::wrap(self.variant, self.inner.finish()))
     }
 }

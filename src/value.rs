@@ -21,7 +21,9 @@ use std::fmt;
 pub type UclArray = Vec<UclValue>;
 
 /// A UCL value.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Cloning does not recurse: it takes the same stack at any depth of nesting.
+#[derive(Debug, PartialEq)]
 pub enum UclValue {
     Object(UclObject),
     Array(UclArray),
@@ -32,6 +34,123 @@ pub enum UclValue {
     String(String),
     Boolean(bool),
     Null,
+}
+
+/// Written out rather than derived, which would recurse once per level of nesting: `.inherit`
+/// copies values nested as deep as the parser allows (spec §9.7, §11.2), and a derived clone of
+/// such a value overflows a 2 MiB stack in a debug build. The copy keeps each value's priority
+/// and marks.
+impl Clone for UclValue {
+    fn clone(&self) -> Self {
+        match self {
+            UclValue::Object(_) | UclValue::Array(_) => clone_tree(self),
+            UclValue::Integer(i) => UclValue::Integer(*i),
+            UclValue::Float(f) => UclValue::Float(*f),
+            UclValue::Time(t) => UclValue::Time(*t),
+            UclValue::String(s) => UclValue::String(s.clone()),
+            UclValue::Boolean(b) => UclValue::Boolean(*b),
+            UclValue::Null => UclValue::Null,
+        }
+    }
+}
+
+/// A copy of the container `root`, built with a heap stack: every value is copied after the
+/// values inside it, which wait on `done` in order until their container is built.
+fn clone_tree(root: &UclValue) -> UclValue {
+    enum Step<'a> {
+        /// Copy this value: a scalar at once, a container after its values.
+        Copy(&'a UclValue),
+        /// Build the copy of this container from the copies of its values on `done`.
+        Build(&'a UclValue),
+    }
+    let mut todo = vec![Step::Copy(root)];
+    let mut done: Vec<UclValue> = Vec::new();
+    while let Some(step) = todo.pop() {
+        match step {
+            Step::Copy(value @ UclValue::Object(object)) => {
+                todo.push(Step::Build(value));
+                todo.extend(
+                    object
+                        .entries()
+                        .flat_map(Entry::values)
+                        .rev()
+                        .map(Step::Copy),
+                );
+            }
+            Step::Copy(value @ UclValue::Array(items)) => {
+                todo.push(Step::Build(value));
+                todo.extend(items.iter().rev().map(Step::Copy));
+            }
+            Step::Copy(scalar) => done.push(scalar.clone()),
+            Step::Build(UclValue::Object(object)) => {
+                let count = object.entries().map(Entry::len).sum::<usize>();
+                let mut values = done.split_off(done.len() - count).into_iter();
+                let entries = object
+                    .entries
+                    .iter()
+                    .map(|(key, entry)| {
+                        let slots = entry
+                            .slots
+                            .iter()
+                            .map(|slot| slot.with_value(values.next().expect("copied")))
+                            .collect();
+                        (key.clone(), Entry { slots })
+                    })
+                    .collect();
+                done.push(UclValue::Object(UclObject { entries }));
+            }
+            Step::Build(UclValue::Array(items)) => {
+                let elements = done.split_off(done.len() - items.len());
+                done.push(UclValue::Array(elements));
+            }
+            Step::Build(_) => unreachable!("only containers are built"),
+        }
+    }
+    done.pop().expect("the root was copied")
+}
+
+/// Drops `value` with a heap stack. Dropping a value recurses once per level of nesting, which
+/// matters where the call stack is already deep, or the value deeper than the parser allows.
+pub(crate) fn discard(value: UclValue) {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            UclValue::Object(object) => stack.extend(
+                object
+                    .into_iter()
+                    .flat_map(|(_, entry)| entry.into_values()),
+            ),
+            UclValue::Array(items) => stack.extend(items),
+            _ => {}
+        }
+    }
+}
+
+/// The most containers (objects and arrays) nested inside one another in `value`, itself
+/// included: 0 for a scalar, 1 for a container that holds only scalars. Counted with a heap
+/// stack.
+pub(crate) fn nesting(value: &UclValue) -> usize {
+    let mut deepest = 0;
+    let mut stack = vec![(value, 1)];
+    while let Some((value, depth)) = stack.pop() {
+        match value {
+            UclValue::Object(object) => {
+                deepest = deepest.max(depth);
+                stack.extend(
+                    object
+                        .entries()
+                        .flat_map(Entry::values)
+                        .map(|v| (v, depth + 1)),
+                );
+            }
+            UclValue::Array(items) => {
+                deepest = deepest.max(depth);
+                stack.extend(items.iter().map(|v| (v, depth + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
 }
 
 impl UclValue {
@@ -852,6 +971,62 @@ mod tests {
 
     fn values(obj: &UclObject, key: &str) -> Vec<UclValue> {
         obj.get_all(key).cloned().collect()
+    }
+
+    #[test]
+    fn clone_keeps_order_priorities_and_marks() {
+        let mut inner = UclObject::new();
+        inner.insert_entry("z", Entry::from_slot(Slot::inherited(int(1), 3)));
+        inner.append("y", UclValue::Time(1.5));
+        inner.append("y", UclValue::Array(vec![int(2), UclValue::Null]));
+        let mut obj = UclObject::new();
+        obj.insert("b", UclValue::Object(inner));
+        obj.insert_entry(
+            "a",
+            Entry::from_slot(Slot::collection(UclValue::Array(vec![
+                UclValue::String("s".into()),
+                UclValue::Array(vec![]),
+                UclValue::Object(UclObject::new()),
+            ]))),
+        );
+        obj.append("a", UclValue::Float(-0.0));
+        let value = UclValue::Object(obj);
+        let copy = value.clone();
+        // Derived `PartialEq` compares every slot's priority and marks too.
+        assert_eq!(copy, value);
+        let (copy, value) = (copy.as_object().unwrap(), value.as_object().unwrap());
+        assert_eq!(copy.keys().collect::<Vec<_>>(), ["b", "a"]);
+        let inner = copy["b"].as_object().unwrap();
+        assert_eq!(inner.keys().collect::<Vec<_>>(), ["z", "y"]);
+        let z = &inner.entry("z").unwrap().slots()[0];
+        assert_eq!((z.priority(), z.is_inherited()), (3, true));
+        assert!(copy.entry("a").unwrap().slots()[0].is_collected());
+        assert!(value.entry("a").unwrap().slots()[0].is_collected());
+    }
+
+    #[test]
+    fn clone_does_not_recurse() {
+        // Objects and arrays alternating, nested 20,000 deep: a derived clone overflows a
+        // 2 MiB stack at about 550 levels in a debug build.
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                let mut value = int(1);
+                for depth in 0..20_000 {
+                    value = if depth % 2 == 0 {
+                        UclValue::Array(vec![value])
+                    } else {
+                        UclValue::Object([("k", value)].into_iter().collect())
+                    };
+                }
+                let copy = value.clone();
+                assert_eq!(nesting(&copy), 20_000);
+                // Dropping recurses; so does `==`. Neither is under test.
+                std::mem::forget((value, copy));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     fn insert(obj: &mut UclObject, key: &str, v: UclValue, pri: u8, s: DuplicateStrategy) {

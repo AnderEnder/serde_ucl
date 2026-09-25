@@ -107,6 +107,14 @@ pub enum SerdeError {
     /// root that is not an object or an array. See [`crate::ser`] for the full list.
     #[error("cannot serialize {0}")]
     Unrepresentable(String),
+
+    /// Deserializing into, or serializing from, a type other than [`UclValue`](crate::UclValue)
+    /// and [`UclObject`](crate::UclObject) met more than `limit`
+    /// ([`MAX_SERDE_NESTING`](crate::de::MAX_SERDE_NESTING)) maps and sequences nested inside
+    /// one another, the outermost included. serde reads and writes such types by recursion, one
+    /// call per level, so the limit keeps a thread's stack from overflowing.
+    #[error("more than {limit} maps and sequences nested inside one another")]
+    TooDeep { limit: usize },
 }
 
 impl serde::de::Error for UclError {

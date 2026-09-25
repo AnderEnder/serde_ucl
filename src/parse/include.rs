@@ -1501,13 +1501,5 @@ mod tests {
         assert_eq!(obj(&v).entry("K").unwrap().len(), 2);
     }
 
-    #[cfg(not(feature = "load"))]
-    #[test]
-    fn load_needs_its_feature() {
-        assert!(
-            run(&[], ".load(key=\"k\") \"x\"")
-                .unwrap_err()
-                .is_unsupported()
-        );
-    }
+    // Without the `load` feature, `.load` is unsupported: tests/features/tests/load_feature.rs.
 }

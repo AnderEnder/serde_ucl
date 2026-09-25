@@ -135,3 +135,13 @@ README, crate docs, `CLAUDE.md`, Cargo metadata, license files and CI.
 2. CI runs the same commands a developer runs locally, through one script the workflows call.
    Tests stay independent so they run in parallel. The nightly drift job runs
    `scripts/regen-golden.sh` exactly as a developer would and fails if any golden file changes.
+
+## C7 — Robustness follow-ups
+
+1. No input the parser accepts may overflow the stack in serde deserialization or serialization.
+   On a 2 MiB thread in a debug build, `from_str::<UclValue>`, `to_value`, `to_string` and the
+   other serde entry points either handle every depth the parser accepts (spec §11.2) or return
+   an error at a documented depth limit. A stack overflow is never acceptable.
+2. The test `load_needs_its_feature` runs in `scripts/ci.sh`: the crate's dev-dependency on itself
+   currently turns `load` on for every test build.
+3. The version becomes `0.2.0`, since this release breaks the 0.1.0 API (pre-1.0 semver).

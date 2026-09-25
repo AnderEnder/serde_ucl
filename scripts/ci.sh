@@ -26,8 +26,15 @@ run() {
 	"$@"
 }
 
+# The package in tests/features/ tests the crate with feature sets that the crate's own test
+# builds cannot have: its dev-dependency on itself turns `load` on in every one of them. It is a
+# workspace of its own, built in a target directory of its own.
+FEATURES_MANIFEST=tests/features/Cargo.toml
+FEATURES_TARGET=target/features
+
 checks() {
 	run cargo fmt --all --check
+	run cargo fmt --manifest-path "$FEATURES_MANIFEST" --all --check
 
 	run cargo clippy --all-targets --all-features -- -D warnings
 	# The crate's dev-dependency on itself turns the features `fs` and `load` back on for every
@@ -36,8 +43,19 @@ checks() {
 	# The remaining feature sets: `fs` alone (the default) and `load` alone.
 	run cargo clippy --lib -- -D warnings
 	run cargo clippy --lib --no-default-features --features load -- -D warnings
+	run cargo clippy --manifest-path "$FEATURES_MANIFEST" --target-dir "$FEATURES_TARGET" \
+		--all-targets -- -D warnings
 
 	run cargo test
+	# The tests of stack depth again, with the crate unoptimised as a debug build of an
+	# application builds it: the test profile optimises it (Cargo.toml).
+	run cargo test --lib --test stack_depth \
+		--config 'profile.test.package.ucl-rust-lexer.opt-level=0'
+	# The crate without `load`: with its default features, and with none.
+	run cargo test --manifest-path "$FEATURES_MANIFEST" --target-dir "$FEATURES_TARGET"
+	run cargo test --manifest-path "$FEATURES_MANIFEST" --target-dir "$FEATURES_TARGET" \
+		--no-default-features
+
 	run cargo build --examples --benches
 	# Every example checks its results with assertions.
 	for example in examples/*.rs; do

@@ -541,7 +541,7 @@ impl Core<'_, '_, '_, '_> {
             else {
                 break;
             };
-            self.copy_entry(key, i, replace, &source);
+            self.copy_entry(key, i, replace, &source, call.at)?;
         }
         Ok(())
     }
@@ -576,7 +576,18 @@ impl Core<'_, '_, '_, '_> {
     /// Adds entry `index`, whose key is `key`, of the object at `source`, copied by `.inherit`,
     /// to the current object. The copies keep the output facts of the values they copy (spec
     /// §10.1).
-    fn copy_entry(&mut self, key: String, index: usize, replace: bool, source: &[PathSegment]) {
+    ///
+    /// A copy that would be nested more than [`super::MAX_NESTING`] containers deep, the root
+    /// included, is an error at `at`, the macro. libucl accepts it (a project divergence, see
+    /// [`Core::check_nesting`]).
+    fn copy_entry(
+        &mut self,
+        key: String,
+        index: usize,
+        replace: bool,
+        source: &[PathSegment],
+        at: usize,
+    ) -> Result<(), Error> {
         let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
         if key_lowercase && key.bytes().any(|b| b.is_ascii_uppercase()) {
             self.uppercase_keys = true;
@@ -584,12 +595,15 @@ impl Core<'_, '_, '_, '_> {
         let ignore_case = key_lowercase && self.uppercase_keys;
         let existing = self.find_current_key(&key, ignore_case);
         if !replace && existing.is_some() {
-            return;
+            return Ok(());
         }
         // Taken before anything is copied: the source may contain the current object (§9.7).
         let Some(slots) = self.inherited_slots(source, index) else {
-            return;
+            return Ok(());
         };
+        for slot in &slots {
+            self.check_nesting(slot.value(), at)?;
+        }
         let copied_facts: Option<Vec<_>> = self.facts.as_ref().map(|facts| {
             (0..slots.len())
                 .map(|index| {
@@ -626,20 +640,20 @@ impl Core<'_, '_, '_, '_> {
                 slots.into_iter().for_each(|slot| entry.push_slot(slot));
                 (name.clone(), first_index)
             }
-            Some(_) => return,
+            Some(_) => return Ok(()),
         };
         let Some(copied_facts) = copied_facts else {
-            return;
+            return Ok(());
         };
         if copied_facts.iter().all(Vec::is_empty) && target == key {
-            return;
+            return Ok(());
         }
         for (offset, subtree) in copied_facts.into_iter().enumerate().take(count) {
             let Some(node) = self.facts_node_below(&[PathSegment::Key {
                 key: target.clone(),
                 index: first_index + offset,
             }]) else {
-                return;
+                return Ok(());
             };
             let facts = self.facts.as_mut().expect("facts are recorded");
             // The copy's key is spelled as the copied value's key was.
@@ -653,13 +667,14 @@ impl Core<'_, '_, '_, '_> {
                 f.key_spelling = (spelling != target).then_some(spelling)
             });
         }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{CommentPlacement, Parser, parse};
+    use crate::parse::{CommentPlacement, MAX_NESTING, Parser, parse};
 
     fn arguments(text: &str) -> Arguments {
         Arguments::from_root(parse(text.as_bytes()).unwrap())
@@ -1042,6 +1057,54 @@ mod tests {
             let v = parse(input.as_bytes()).unwrap();
             assert_eq!(ints(obj(&obj(&v)["e"]), "a"), [0], "{args}");
         }
+    }
+
+    /// `name { a { a { … } } }`: an object `depth` containers deep, with `inner` in the last.
+    fn chain(name: &str, depth: usize, inner: &str) -> String {
+        format!(
+            "{name} {{ {}{inner}{}\n",
+            "a { ".repeat(depth - 1),
+            " }".repeat(depth)
+        )
+    }
+
+    #[test]
+    fn inherit_copies_nest_no_deeper_than_the_limit() {
+        // A copy placed `m` containers deep, the root included, of an object `n` deep holds
+        // containers `m + n - 1` deep. The oracle accepts any depth here; the core allows what
+        // spec §11.2 allows to be open at once, 1024 containers with the root.
+        let source = chain("d", 600, "leaf = 1;");
+        let at_limit = format!("{source}{}", chain("e", 424, ".inherit \"d\";"));
+        let v = parse(at_limit.as_bytes()).unwrap();
+        assert_eq!(crate::value::nesting(&v), MAX_NESTING);
+        let beyond = format!("{source}{}", chain("e", 425, ".inherit \"d\";"));
+        let e = parse(beyond.as_bytes()).unwrap_err();
+        assert_eq!(e.kind(), &ErrorKind::NestingTooDeep { limit: MAX_NESTING });
+        // At the macro, after `e { ` and 424 times `a { `.
+        assert_eq!((e.position().line, e.position().column), (2, 1 + 4 * 425));
+
+        // The copy of an enclosing object holds the objects open inside it (§9.7, *Quirk*).
+        let enclosing = |depth| chain("o", depth, ".inherit \"o\";");
+        let v = parse(enclosing(512).as_bytes()).unwrap();
+        assert_eq!(crate::value::nesting(&v), MAX_NESTING);
+        assert_eq!(
+            kind(&enclosing(513)),
+            ErrorKind::NestingTooDeep { limit: MAX_NESTING }
+        );
+
+        // Chains of copies, each of which libucl nests 1000 levels deeper, stop at the limit.
+        let mut chained = chain("r0", 1000, "leaf = 1;");
+        for i in 1..20 {
+            chained.push_str(&chain(
+                &format!("r{i}"),
+                1000,
+                &format!(".inherit \"r{}\";", i - 1),
+            ));
+        }
+        assert_eq!(
+            kind(&chained),
+            ErrorKind::NestingTooDeep { limit: MAX_NESTING }
+        );
     }
 
     #[test]

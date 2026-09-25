@@ -1545,3 +1545,97 @@
     1.88.0 as well; `5d24627` in this worktree with both.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: implementation team. Item: C7 (robustness follow-ups: stack depth in serde,
+  the `load` feature test, version 0.2.0).
+  - Inputs consulted: `docs/clean-room/` (PROTOCOL, WORKLIST C6 and C7, QUESTIONS in full, the
+    C6a and C6b entries of this log); `docs/spec/` at `spec-v8` through `git show spec-v8:…`
+    (§11.2, §9.7; at HEAD only the spec README differs from the tag); `docs/COMPATIBILITY.md`
+    (its first 60 lines, to word a suggestion; not edited); the crate's own files (`src/`,
+    `tests/scaling.rs`, parts of `tests/serde_roundtrip.rs`, the conformance runner's report,
+    `README.md`, `CHANGELOG.md`, `Cargo.toml`, `.gitignore`), `scripts/ci.sh` and
+    `.github/workflows/ci.yml`; serde's API as used by the crate. The tooling showed me the
+    worktree's current `CLAUDE.md` once, and the main checkout's initial git status listed the
+    names `PLAN.md` and `REVIEW.md`; neither was opened. Background command output that the
+    tooling wrote under `/private/tmp` was not opened; every log I read is under `target/c7/`.
+    One search command I issued named `.` (the repository root), against the search rule; zsh
+    rejected its unquoted `--include=*.rs` glob before grep started, so nothing was searched or
+    read. The same search was then run on the allowed directories.
+  - Black-box oracle runs: 5 runs of `target/libucl-oracle/ucl-dump -e json-compact` on scratch
+    inputs in `target/c7/probe/`: chains of objects nested 1000 deep, each with `.inherit` of the
+    one before in its innermost object (2, 5 and 20 objects: accepted, output nested 2000, 4997
+    and 19,982 deep, from 12 KB, 30 KB and 120 KB of input), and an object nested 500 or 1000
+    deep inherited at the top level (accepted).
+  - Cause of the overflows, measured with a scratch binary (`target/c7/stack/`, a 2 MiB thread,
+    Rust 1.98.1, the crate unoptimised, object chains): `from_value::<UclValue>` reached 240
+    levels, `to_value` of a `UclValue` 606 (and so `to_string`), `from_value::<serde_json::Value>`
+    717, a derived `Clone` 549, `Debug` 1026, `==` 1825, drop 3056, the JSON emitter 2344, the
+    config emitter more than 4096. serde passes a value through its data model one level at a
+    time, several frames per level. Two further findings: `.inherit` copied values with the
+    derived `Clone`, so parsing itself overflowed, also inside §11.2 (an object nested 1000 deep
+    and `r1 { .inherit "r0" }`, 1001 levels); and a chain of copies nests a value without bound
+    in libucl, so "every depth the parser accepts" was not bounded by §11.2.
+  - Fix, parser: `Clone for UclValue` is written out with a heap stack; a copy by `.inherit`
+    that would nest a value more than 1024 containers deep, the root included, is
+    `ErrorKind::NestingTooDeep` at the macro (`Core::check_nesting`), so no parsed value is
+    deeper than containers can be open. This is a divergence; QUESTIONS.md #56 asks whether it
+    is acceptable. `NestingTooDeep`'s message now reads "containers nested inside one another".
+  - Fix, serde: the crate's serializer and deserializer move a `UclValue` or `UclObject` whole,
+    past serde's data model, through a thread-local slot (`src/handoff.rs`), asked for by the
+    private newtype struct `marker::VALUE`; other serializers and deserializers see an ordinary
+    newtype struct. `from_value::<UclValue>(v)` and `to_value(&v)` now give `v` back with
+    priorities and marks (the docs said these were lost). The entry and time markers of the
+    deserializer, which the move makes unreachable, are removed. Types other than `UclValue` are
+    read and written by recursion through their own impls; the serializer and deserializer
+    count the maps and sequences they enter and fail past `MAX_SERDE_NESTING` = 128 (the limit
+    `serde_json` uses) with the new `SerdeError::TooDeep`, dropping the rest of a value too deep
+    for them with a heap stack; the text functions drop their copy the same way.
+  - Depth now, 2 MiB thread, debug: `from_str`, `from_slice`, `from_reader`, `from_file`, the
+    `from_str_with_*` functions and `from_value` into `UclValue` or `UclObject`, and `to_value`
+    of one: any depth (5000 checked; parsed values are at most 1024 deep); `to_string`,
+    `to_json_string`, `to_json_string_compact`, `to_yaml_string`, `to_writer` of one: 1024 levels
+    with the root, deeper is `Unrepresentable` as before; all of them into or from any other
+    type: 128 maps and sequences, deeper is `TooDeep`. Least stack measured with the crate
+    unoptimised (stable): typed serialization at 128 levels 353 KiB (`serde_json::Value`) and
+    433 KiB (a recursive struct), typed deserialization 417 and 673 KiB, `to_json_string` of a
+    `UclValue` 1024 deep 673 KiB, dropping such a value 673 KiB. `tests/stack_depth.rs` passes on
+    1 MiB threads with the crate unoptimised, with 1.98.1 and 1.88.0 (checked by editing a
+    scratch copy; committed at 2 MiB).
+  - Tests: `tests/stack_depth.rs` (8 tests, 2 MiB threads): parsing and the emitters, with saved
+    comments and output facts, and every serde entry point listed in the work item, on the
+    deepest accepted documents (objects, arrays, a root array, multi-value entries, commented
+    objects, and an `.inherit` copy reaching 1024), typed targets at 128 and 129 levels, a
+    `UclValue` field of a typed target, and a value built 1025 deep. Unit tests: the `.inherit`
+    limit and its position (`macros.rs`), clone order, priorities and marks, and clone at 20,000
+    levels (`value.rs`). `cargo test` builds the crate optimised (`profile.test`), so
+    `scripts/ci.sh` also runs `cargo test --lib --test stack_depth` with
+    `--config 'profile.test.package.ucl-rust-lexer.opt-level=0'`; the two builds use separate
+    artifacts.
+  - `load_needs_its_feature`: moved from `src/parse/include.rs` to `tests/features/`, a package
+    and workspace of its own that depends on the crate without `load` (lock file seeded from the
+    crate's, same versions). `scripts/ci.sh` checks its format and clippy and runs its test with
+    the crate's default features and with none, in `target/features`. With `--features
+    ucl-rust-lexer/load` the test fails and cargo exits non-zero, which stops the script.
+    `.gitignore` ignores `tests/features/target/`, where cargo builds when run in that directory.
+  - Version 0.2.0 in `Cargo.toml`, both lock files and the CHANGELOG heading; the README and the
+    docs name no crate version. CHANGELOG: the serde move, `MAX_SERDE_NESTING`,
+    `SerdeError::TooDeep`, and the `.inherit` limit.
+  - Results: `cargo test` 324 tests in 16 binaries. Conformance unchanged: new core 1393 of
+    1397, emitters 1040 of 1044, `xfail-new.txt` and `xfail-emit.txt` unchanged. `scripts/ci.sh`
+    passes with 1.98.1 and 1.88.0 at `c2c1681`, and with 1.98.1 at `ce3d5d8` in a scratch
+    worktree. `cargo publish --dry-run --target-dir target/c7/publish` succeeds at `e350359`
+    (39 files), as it did at `f9c3066`, the depth commit before a README wording fix was amended
+    into it (now `c2c1681`); not published.
+  - For the lead: `cargo publish --dry-run` with the default target directory (C6b) left a
+    fingerprint under `target/debug` that plain `cargo build` in this worktree kept using, with
+    sources under `target/package/`, so `cargo build` reported the crate fresh after source
+    changes (`cargo check`, `cargo test` and clippy were unaffected). `cargo clean -p
+    ucl-rust-lexer` removed it; `--target-dir` avoids it. Not changed and not serde: the derived
+    `Debug` of a `UclValue` 1024 deep needs about 2 MiB unoptimised, and drop and `==` recurse
+    (3056 and 1825 levels on 2 MiB). The stack figures and margins are from aarch64 macOS only;
+    CI's Linux runners are x86_64, not measured. `CLAUDE.md` does not mention `tests/features/`
+    or `tests/stack_depth.rs`; I did not edit it.
+  - Questions: #56 (the `.inherit` depth limit as a divergence).
+  - Commits: `7fff0b5`, `ce3d5d8`, `c2c1681`, `e350359`, and the `C7:` commit that adds this
+    entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

@@ -2,7 +2,7 @@
 
 All notable changes to this crate are recorded here.
 
-## Unreleased
+## 0.2.0
 
 This release replaces the parser with one that reads UCL as libucl does, adds output in libucl's
 formats and serde serialization, and removes the old lexer, parser and extension API. It is not
@@ -110,6 +110,12 @@ Added:
   written, floats included. JSON output is valid JSON: a time is written as its number of
   seconds, and a NaN or infinite float or time cannot be written as JSON
   (`SerdeError::Unrepresentable`, also used for other values that have no form in a format).
+- The crate's serde functions move a `UclValue` or `UclObject` as it is, also as a field of
+  another type, with the same stack at any depth: `from_value::<UclValue>(v)` and `to_value(&v)`
+  give `v` back, priorities and the marks of `.inherit` copies included. Other types are read
+  and written by recursion, and there nesting is limited to `MAX_SERDE_NESTING` (128) maps and
+  sequences; deeper nesting fails with the new `SerdeError::TooDeep`. Cloning a `UclValue`
+  takes the same stack at any depth as well.
 - `time` serializes `Duration` as well as deserializing it.
 - `from_slice`, `from_reader`, `from_file` (feature `fs`) and `from_value`; `from_value`,
   `from_str_with_env` and `from_str_with_map` are also re-exported from the crate root.
@@ -156,10 +162,13 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
 - URLs are never fetched: `.include(url=true)` of a path containing `://` fails with
   `ErrorKind::UrlNotSupported`, and with `try=true` is skipped. Without `url=true` such a path is
   an ordinary path.
-- Limits: containers nest at most 1024 deep (`parse::MAX_NESTING`), included files 16 deep
+- Limits: containers nest at most 1024 deep, the root included (`parse::MAX_NESTING`), also in
+  the objects that `.inherit` copies (libucl sets no limit there); included files 16 deep
   (`parse::MAX_INCLUDE_DEPTH`) and macro argument documents 64 deep
-  (`parse::MAX_ARGUMENT_DEPTH`; libucl sets no limit there). The old lexer's configurable limits
-  are gone.
+  (`parse::MAX_ARGUMENT_DEPTH`; libucl sets no limit there either). The old lexer's
+  configurable limits are gone. serde deserialization into, and serialization from, types
+  other than `UclValue` and `UclObject` follows at most 128 nested maps and sequences
+  (`MAX_SERDE_NESTING`).
 - Deserializing into a borrowed `&str` field is not supported and fails with "expected a
   borrowed string"; use `String` or `Cow<str>`.
 

@@ -107,6 +107,17 @@
 //! [`crate::time::serialize`] reports a `Duration` that a 64-bit float of seconds cannot hold
 //! exactly as [`SerdeError::Custom`].
 //!
+//! # Depth
+//!
+//! A [`UclValue`] or [`UclObject`], also as a field of another type, is copied as it is, with
+//! the same stack at any depth: [`to_value`] of one gives an equal value, priorities and marks
+//! included, and the text functions write any value the parser returns, up to 1024 containers
+//! deep (spec §11.2). Any other type is serialized by recursion through its `Serialize` impl, one
+//! level per map or sequence, and there serialization enters at most
+//! [`MAX_SERDE_NESTING`](crate::MAX_SERDE_NESTING) maps and sequences inside one another, the
+//! outermost included; deeper, it fails with [`SerdeError::TooDeep`]. The object of an enum
+//! variant counts as a map, and the array or object inside a tuple or struct variant counts too.
+//!
 //! # Serde's own limits
 //!
 //! `Some(None)` and `Some(())` are written `null` and read back as `None`, as in every
@@ -118,9 +129,10 @@ mod serializer;
 
 use crate::emit::{Emitter, Format};
 use crate::error::{SerdeError, UclError};
+use crate::handoff;
 use crate::value::{Entry, UclObject, UclValue};
 use serde::ser::{Serialize, SerializeMap, Serializer};
-use serializer::{Node, ValueSerializer};
+use serializer::ValueSerializer;
 use std::io;
 
 /// Serializes `value` into a [`UclValue`] tree, in the mapping of the table below. The tree can
@@ -140,15 +152,16 @@ use std::io;
 /// | newtype, tuple and struct variant | object with one key, the variant's name |
 /// | `Duration` with [`crate::time`] | time |
 pub fn to_value<T: ?Sized + Serialize>(value: &T) -> Result<UclValue, UclError> {
-    value.serialize(ValueSerializer).map(Node::into_value)
+    value.serialize(ValueSerializer::new())
 }
 
 fn to_text<T: ?Sized + Serialize>(value: &T, format: Format) -> Result<String, UclError> {
     let tree = to_value(value)?;
-    Emitter::new(format)
-        .round_trip()
-        .try_emit(&tree)
-        .map_err(|what| UclError::Serde(SerdeError::Unrepresentable(what)))
+    let text = Emitter::new(format).round_trip().try_emit(&tree);
+    // A tree built in code may be deeper than the text formats allow (the emitter rejects it),
+    // and deeper than a recursive drop could take.
+    crate::value::discard(tree);
+    text.map_err(|what| UclError::Serde(SerdeError::Unrepresentable(what)))
 }
 
 /// Serializes `value` as UCL text in the config format (spec §10.5), which reads back exactly
@@ -188,14 +201,57 @@ pub fn to_writer<W: io::Write, T: ?Sized + Serialize>(
 }
 
 impl Serialize for UclValue {
-    /// Objects as maps, arrays as sequences, and scalars as themselves. A time is a newtype
+    /// The crate's serializers copy the value as it is, in one step at any depth: times,
+    /// multi-value entries, priorities and marks included. Other serializers see a newtype
+    /// struct with a private name, which most formats write as its content, around the value:
+    /// objects as maps, arrays as sequences, and scalars as themselves. A time is a newtype
     /// struct around its `f64` seconds, and an entry with several values a newtype struct around
-    /// the sequence of its values: other serializers see a number and a sequence, while this
-    /// crate's keep them as a time and as several values of one key.
+    /// the sequence of its values, so they see a number and a sequence.
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            UclValue::Object(object) => object.serialize(serializer),
-            UclValue::Array(items) => serializer.collect_seq(items),
+        serializer.serialize_newtype_struct(marker::VALUE, &Tree::Value(self))
+    }
+}
+
+impl Serialize for UclObject {
+    /// As `Serialize for UclValue` serializes the object.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_newtype_struct(marker::VALUE, &Tree::Object(self))
+    }
+}
+
+/// The content of the newtype struct [`marker::VALUE`] that `Serialize for UclValue` and
+/// `Serialize for UclObject` write. Asked by the crate's serializer, it hands a copy of the
+/// value over (see [`crate::handoff`]); for any other serializer, it writes the value's
+/// structure.
+enum Tree<'a> {
+    Value(&'a UclValue),
+    Object(&'a UclObject),
+}
+
+impl Serialize for Tree<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if handoff::wanted() {
+            handoff::put(match *self {
+                Tree::Value(value) => value.clone(),
+                Tree::Object(object) => UclValue::Object(object.clone()),
+            });
+            return serializer.serialize_unit();
+        }
+        match *self {
+            Tree::Value(value) => Structure(value).serialize(serializer),
+            Tree::Object(object) => ObjectStructure(object).serialize(serializer),
+        }
+    }
+}
+
+/// A value as serde's data model has it, for serializers other than the crate's.
+struct Structure<'a>(&'a UclValue);
+
+impl Serialize for Structure<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.0 {
+            UclValue::Object(object) => ObjectStructure(object).serialize(serializer),
+            UclValue::Array(items) => serializer.collect_seq(items.iter().map(Structure)),
             UclValue::Integer(i) => serializer.serialize_i64(*i),
             UclValue::Float(f) => serializer.serialize_f64(*f),
             UclValue::Time(t) => serializer.serialize_newtype_struct(marker::TIME, t),
@@ -206,16 +262,18 @@ impl Serialize for UclValue {
     }
 }
 
-impl Serialize for UclObject {
-    /// A map from each key to its value; see `Serialize for UclValue` for keys with several
-    /// values.
+/// An object as a map from each key to its value; the values of a key that has several are the
+/// private newtype struct [`marker::MULTI`] around the sequence of them.
+struct ObjectStructure<'a>(&'a UclObject);
+
+impl Serialize for ObjectStructure<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(self.len()))?;
-        for (key, entry) in self.iter() {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, entry) in self.0.iter() {
             if entry.is_multi() {
                 map.serialize_entry(key, &MultiValue(entry))?;
             } else {
-                map.serialize_entry(key, entry.first())?;
+                map.serialize_entry(key, &Structure(entry.first()))?;
             }
         }
         map.end()
@@ -235,6 +293,6 @@ struct Values<'a>(&'a Entry);
 
 impl Serialize for Values<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.0.values())
+        serializer.collect_seq(self.0.values().map(Structure))
     }
 }

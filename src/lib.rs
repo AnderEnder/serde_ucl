@@ -131,6 +131,7 @@
 pub mod de;
 pub mod emit;
 pub mod error;
+mod handoff;
 pub mod parse;
 pub mod ser;
 pub mod time;
@@ -145,8 +146,8 @@ mod error_tests;
 struct ReadmeDoctests;
 
 pub use de::{
-    UclDeserializer, from_reader, from_slice, from_str, from_str_with_env, from_str_with_map,
-    from_str_with_variables, from_value,
+    MAX_SERDE_NESTING, UclDeserializer, from_reader, from_slice, from_str, from_str_with_env,
+    from_str_with_map, from_str_with_variables, from_value,
 };
 
 #[cfg(feature = "fs")]

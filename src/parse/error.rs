@@ -148,7 +148,8 @@ pub enum ErrorKind {
     InvalidUtf8,
     /// A repeated key that the duplicate strategy does not accept (spec §8).
     DuplicateKey { key: String },
-    /// More containers open at once than the nesting limit allows (spec §11.2).
+    /// More containers nested inside one another than the nesting limit allows (spec §11.2):
+    /// open at once, or in the copies `.inherit` adds (§9.7).
     NestingTooDeep { limit: usize },
     /// A macro name that is not known.
     UnknownMacro { name: String },
@@ -245,7 +246,7 @@ impl fmt::Display for ErrorKind {
                 write!(f, "key '{key}' cannot take another value")
             }
             ErrorKind::NestingTooDeep { limit } => {
-                write!(f, "more than {limit} containers are open")
+                write!(f, "more than {limit} containers nested inside one another")
             }
             ErrorKind::UnknownMacro { name } if name.is_empty() => {
                 f.write_str("'.' must be followed by a macro name")

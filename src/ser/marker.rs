@@ -1,20 +1,24 @@
-//! Names of the newtype structs that carry what serde's data model has no place for: UCL time
-//! values and multi-value entries (spec §8.2). The crate's own serializer and deserializer
-//! recognise them; any other serializer or deserializer sees an ordinary newtype struct, so a
-//! time is a plain `f64` and a multi-value entry a sequence. The names cannot clash with Rust
+//! Private names by which the crate's serde types carry what serde's data model has no place
+//! for: UCL time values, multi-value entries (spec §8.2), and whole [`UclValue`](crate::UclValue)
+//! trees (see [`crate::handoff`]). The crate's own serializer and deserializer recognise them;
+//! any other serializer or deserializer sees an ordinary newtype struct, so a time is a plain
+//! `f64`, a multi-value entry a sequence and a tree its content. The names cannot clash with Rust
 //! identifiers.
 
-/// A UCL time: a newtype struct around the `f64` number of seconds.
+/// A UCL time: a newtype struct around the `f64` number of seconds, written by
+/// [`crate::time::serialize`] and, for other serializers, by `Serialize for UclValue`.
 pub(crate) const TIME: &str = "$__ucl_lexer_private_Time";
 
-/// The values of a multi-value entry: a newtype struct around the sequence of values, written
-/// by `Serialize for UclObject` as the value of the entry's key.
+/// The values of a multi-value entry: a newtype struct around the sequence of values, which
+/// `Serialize for UclObject` writes, for serializers other than the crate's, as the value of the
+/// entry's key.
 pub(crate) const MULTI: &str = "$__ucl_lexer_private_Multi";
 
-/// Asked for by `Deserialize for UclValue`. The crate's deserializer answers with a time as an
-/// enum variant named [`TIME`], and every other value as usual.
+/// A whole value: the newtype struct that `Serialize for UclValue` and `Serialize for UclObject`
+/// write, and that `Deserialize for UclValue` asks for. The crate's serializer and deserializer
+/// then move the value itself (see [`crate::handoff`]).
 pub(crate) const VALUE: &str = "$__ucl_lexer_private_Value";
 
-/// Asked for by `Deserialize for UclValue` for the value of an object's key. The crate's
-/// deserializer answers with an enum variant named [`MULTI`] holding every value of the entry.
-pub(crate) const ENTRY: &str = "$__ucl_lexer_private_Entry";
+/// The enum variant by which the crate's deserializer answers a request for [`VALUE`]: the value
+/// is waiting in [`crate::handoff`].
+pub(crate) const TREE: &str = "$__ucl_lexer_private_Tree";
