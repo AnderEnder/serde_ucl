@@ -1,0 +1,6 @@
+a = <<
+a
+${ABI}x
+b = <<
+$ABI
+${ABI}x

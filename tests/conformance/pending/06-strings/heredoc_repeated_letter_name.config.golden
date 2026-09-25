@@ -1,0 +1,24 @@
+a = <<EOD
+x
+
+EOD;
+b = <<EOD
+x
+A
+EOD;
+c = <<EOD
+x
+
+EOD;
+d = <<EOD
+x
+AAB
+EOD;
+e = <<EOD
+x
+
+EOD;
+f = <<EOD
+x
+
+EOD;

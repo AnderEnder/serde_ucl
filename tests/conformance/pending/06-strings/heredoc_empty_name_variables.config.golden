@@ -1,0 +1,8 @@
+a = <<EOD
+a
+${ABI}
+EOD;
+b = <<EOD
+unknown
+unknown
+EOD;

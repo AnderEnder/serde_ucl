@@ -21,6 +21,9 @@ None of them is written by hand.
   not cases themselves (`files/v6/` among them, with fixtures for spec-v6). Some `09-macros` cases
   include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
   `../09-macros/files/`.
+- `pending/` holds cases that a released spec version added but the crate does not pass yet, with
+  their golden files and a README; the runners do not read it. Each case moves to `cases/spec/`
+  when the crate passes it.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
   are now libucl's, not the old hand-written assertions.
 - `<case>.golden.json` next to each case is libucl's typed dump of that case, produced by
@@ -47,15 +50,14 @@ None of them is written by hand.
   `FILENAME` and `CURDIR` set from the case path (unless `no-filevars`). The oracle runs each case
   from the case's own directory, so relative include paths resolve against that directory.
 - Known failures, one list per runner, each entry `<case-id> <reason>` with an optional `# note`:
-  - `xfail.txt`: the existing parser (`libucl_conformance`);
-  - `xfail-new.txt`: the new parser core (`libucl_conformance_new_core`). Reasons are a spec
+  - `xfail-new.txt`: the crate's parser (`libucl_conformance_new_core`). Reasons are a spec
     version (`spec-vN`) for rules that version added, `divergence:<topic>` for a place where the
     project decided to differ from libucl (spec README, *Divergences decided by the project*), and
     `non-utf8`;
-  - `xfail-emit.txt`: the output of the new core's emitters (`libucl_conformance_emitters`). It may
-    hold only cases that the new core does not parse and that `xfail-new.txt` also lists, with
-    reason `divergence:<topic>`; an entry covers every output of its case. Output that the new
-    core writes differently for a case it parses cannot be listed, so such a case fails the run.
+  - `xfail-emit.txt`: the output of the crate's emitters (`libucl_conformance_emitters`). It may
+    hold only cases that the crate does not parse and that `xfail-new.txt` also lists, with
+    reason `divergence:<topic>`; an entry covers every output of its case. Output that the crate
+    writes differently for a case it parses cannot be listed, so such a case fails the run.
 
 ## Regenerating
 
@@ -69,13 +71,12 @@ None of them is written by hand.
     cargo test --test conformance
     UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture   # per-case detail
 
-The test target has three tests, each with its own known-failure list:
+The test target has two tests, each with its own known-failure list:
 
-- `libucl_conformance` parses every case with the existing parser and compares the result with
-  `<case>.golden.json`.
-- `libucl_conformance_new_core` does the same with the new parser core.
+- `libucl_conformance_new_core` parses every case with the crate's parser and compares the result
+  with `<case>.golden.json`.
 - `libucl_conformance_emitters` takes every case that has output golden files, parses it with the
-  new core, writes the result in each format and compares the bytes with `<case>.config.golden`,
+  crate's parser, writes the result in each format and compares the bytes with `<case>.config.golden`,
   `<case>.json.golden`, `<case>.json-compact.golden`, `<case>.yaml.golden` and, where present,
   `<case>.config-comments.golden`. For upstream cases it also reproduces the two passes of spec
   §10.9 and compares the result with the `.res` file. A case that parses without error but has no
@@ -101,7 +102,7 @@ finite `weight` in `typed_sample` and a finite `Circle` in `typed_enums`. The su
 `times`, written with `ms` (spec §10.8), are in its config and YAML files only.
 
 - Without the oracle binary (`target/libucl-oracle/ucl-dump`), the test `corpus_reads_back` checks
-  that the serializer still writes the same bytes, and that both the new core's reading and the
+  that the serializer still writes the same bytes, and that both the crate's reading and the
   stored libucl reading give the value that was serialized.
 - With the binary present, it also checks that the stored readings are current, and the tests
   that give generated values to libucl (`oracle_reads_generated_values_back`,

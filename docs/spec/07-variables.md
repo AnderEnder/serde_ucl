@@ -25,7 +25,7 @@ Names are case-sensitive: `$abi` and `${abi}` do not match `ABI` (`names_case_se
 | --- | --- | --- |
 | double-quoted string values | yes | `braced`, `unbraced` |
 | unquoted string values | yes | `in_unquoted_atoms`, `cases/additions/a06_bare_var`, `libucl/basic/3` (`${ABI}` in a URL) |
-| heredoc strings | yes | `in_heredoc`, `cases/spec/06-strings/heredoc_variables` |
+| heredoc strings | yes; with an empty NAME only when the first content line has a `$` (§6.3) | `in_heredoc`, `cases/spec/06-strings/heredoc_variables`, `cases/spec/06-strings/heredoc_empty_name_variables` |
 | macro values (all three forms) | yes | `cases/spec/09-macros/include_curdir` (quoted), `cases/spec/09-macros/include_braces_variables` (braces), `cases/spec/09-macros/macro_value_variables` (bare) |
 | single-quoted strings | no | `not_in_single_quotes`, `cases/spec/06-strings/sq_no_variables` |
 | keys, bare or quoted | no | `not_in_keys`, `cases/spec/03-keys/quoted_no_variable_expansion` |

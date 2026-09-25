@@ -1,0 +1,4 @@
+{
+    "a": "a\n${ABI}",
+    "b": "unknown\nunknown"
+}

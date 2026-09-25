@@ -57,8 +57,9 @@ code or hints.
 - Git history of `src/` before commit `ef8007e`: no `git log -p`, `git show` or `git diff` against
   earlier commits for `src/` paths. Earlier revisions of `src/value.rs` contain the removed code
   that was derived from libucl.
-- `src/lexer.rs` and `src/parser.rs` as a source of design or code. They predate the clean room
-  and are replaced at cut-over. Calling them is fine where the work item needs it.
+- The old `src/lexer.rs` and `src/parser.rs`, deleted at the cut-over (C5b): their contents in
+  git history (`git show`, `git log -p`, `git diff` or checkouts of any revision that has them).
+  They predate the clean room and are not a source of design or code.
 - Anything else an oracle-side participant writes, other than work-item goals in
   `docs/clean-room/WORKLIST.md` and conformance cases.
 

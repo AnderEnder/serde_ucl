@@ -1289,3 +1289,28 @@
   - The C5b search-rule breach (a `grep -c` over the two old files for six dependency and feature
     names, printing six zero counts and no text) is not an exposure: no content of either file
     was shown and the result was not used. No action beyond this record.
+- 2026-09-25 — Role: spec team. Item: C0, `spec-v8` (tag on `521b860`), and the oracle-side
+  cleanup after the C5 cut-over.
+  - Inputs: libucl source at the pinned commit (the heredoc reader), black-box runs of
+    `target/libucl-oracle/ucl-dump`, `docs/clean-room/QUESTIONS.md` #55, the existing spec,
+    `tests/conformance/`, `scripts/` and `tools/`, and the crate's `tests/api_tests.rs` test names
+    for `docs/COMPATIBILITY.md`.
+  - #55 answered in §6.3: the end rule of a heredoc with an empty NAME is deterministic (first LF,
+    `;` or `,` after the first content line's LF; last byte dropped; unterminated at the end of
+    input; `$` after the first LF does not turn on expansion, also noted in §7.2). Added the quirk
+    of a NAME of one repeated letter. Four new cases with all golden files; the crate fails all
+    four, so they are held in `tests/conformance/pending/06-strings/` with a README.
+  - `tests/conformance/README.md`: two runners, no `xfail.txt`, `pending/` described.
+  - `scripts/run_benchmarks.sh`, `scripts/profile_performance.sh` and `scripts/memory_analysis.sh`
+    removed: they ran only benches deleted in C5 and nothing referred to them. `tools/` had no
+    stale references.
+  - Spec README: coverage rows for the three cases moved from `pending/` in C4c and for the four
+    new pending cases (with their final paths); the table maps all 1393 cases in `cases/` and
+    `libucl/`. *Known gaps* updated; the C5 decisions recorded under *Divergences decided by the
+    project*.
+  - `PROTOCOL.md`: the forbidden-input line now covers the git history of the deleted
+    `src/lexer.rs` and `src/parser.rs`.
+  - `docs/COMPATIBILITY.md` written for crate users: deliberate differences with reasons and
+    cases or tests, choices that match libucl, and 30 notable quirks with spec sections and cases.
+  - No existing golden file changed; full `cargo test` passes at every commit.
+  - The spec contains behaviour only.

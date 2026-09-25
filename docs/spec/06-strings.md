@@ -85,6 +85,7 @@ letters (`heredoc_basic`, `heredoc_other_uppercase_names`, `cases/review/14_here
   `<<EOD⏎EOD⏎x⏎EOD⏎` → `"EOD⏎x"` (`heredoc_first_line_is_content`).
 - Lines that only look similar are content: ` EOD` (indented) and `EODX` (longer)
   (`heredoc_indented_terminator_is_content`, `heredoc_longer_line_is_content`, `libucl/basic/4`).
+  The exception is a NAME of one repeated letter (quirk below).
 - NAME followed by anything else is not a terminator, so the heredoc runs on and ends
   unterminated, which is an error. This covers trailing spaces (`EOD  `) and a `}` on the same
   line (`EOD}`); a `}` on the next line is fine (`heredoc_terminator_trailing_space_error`,
@@ -96,8 +97,27 @@ letters (`heredoc_basic`, `heredoc_other_uppercase_names`, `cases/review/14_here
   line and no terminator line, which is an error (`heredoc_empty_error`,
   `cases/additions/a30_heredoc_empty`). One blank line gives
   the empty string: `<<EOD⏎⏎EOD⏎` → `""` (`heredoc_blank_line_content`).
-- **Quirk.** An empty NAME is allowed: `<<⏎x⏎⏎` ends at the first empty line → `"x"`
-  (`heredoc_empty_terminator`).
+- **Quirk.** A NAME of one letter repeated (`A`, `EE`, `XXX`) is also ended by a line of more
+  of that letter, followed by LF, `;`, `,` or the end of input. If NAME has n letters and the line
+  has m, the line break before the line and m − n − 1 of the letters stay in the content:
+  `<<A⏎x⏎AA⏎` → `"x⏎"`, `<<A⏎x⏎AAA⏎` → `"x⏎A"`, `<<EE⏎x⏎EEE⏎` → `"x⏎"`, and `<<A⏎x⏎AA;` and
+  `<<A⏎x⏎AA` at the end of input → `"x⏎"`. A line of the letters followed by anything else is
+  content: `<<A⏎x⏎AAB⏎A⏎` → `"x⏎AAB"` (`heredoc_repeated_letter_name`).
+- **Quirk.** An empty NAME is allowed, with an end rule of its own. The first content line, with
+  its LF, is always content. After that LF the heredoc ends at the first LF, `;` or `,`, wherever
+  it stands, at the start of a line or inside one. The string is the text from the start of the
+  content up to that byte, without its last byte; the LF, `;` or `,` itself is not part of the
+  heredoc and is read next, after the value (`heredoc_empty_name_end_rule`):
+  - `<<⏎x⏎⏎` → `"x"`: an empty line ends it, and the byte dropped is the line break
+    (`heredoc_empty_terminator`); `<<⏎⏎⏎` → `""`; `<<⏎x⏎;` → `"x"`;
+  - `<<⏎a⏎b⏎` → `"a⏎"` and `<<⏎ab⏎cd⏎` → `"ab⏎c"`: the second line ends at its line break, and
+    its last byte is dropped; `<<⏎x⏎y;⏎` → `"x⏎"`, and the `;` then ends the value;
+  - `<<⏎;x⏎⏎` → `";x"` and `<<⏎x;⏎⏎` → `"x;"`: bytes of the first line never end it;
+  - with no LF, `;` or `,` after the first LF, the heredoc is unterminated, which is an error:
+    `<<⏎content⏎`, `<<⏎x⏎y` and `<<⏎⏎` at the end of input (`heredoc_empty_name_eof_error`);
+  - only a `$` in the first content line turns on variable expansion, which then covers the whole
+    string; a `$` after the first LF does not: `<<⏎a⏎${ABI}x⏎` → `"a⏎${ABI}"`, but
+    `<<⏎$ABI⏎${ABI}x⏎` → `"unknown⏎unknown"` (`heredoc_empty_name_variables`, §7).
 - CR has no special meaning in the content: `x⏎` written with CR LF gives `"x\r"`
   (`heredoc_crlf_content`). CR LF directly after the opener means it is not a heredoc (below).
 - Heredocs may be array elements (`heredoc_in_array`).

@@ -1,0 +1,19 @@
+a = <<A
+x
+AA
+b = <<A
+x
+AAA
+c = <<EE
+x
+EEE
+d = <<A
+x
+AAB
+A
+e = <<A
+x
+AA;
+f = <<A
+x
+AA

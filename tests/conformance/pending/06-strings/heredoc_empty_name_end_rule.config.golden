@@ -1,0 +1,16 @@
+a = "x";
+b = <<EOD
+a
+
+EOD;
+c = <<EOD
+ab
+c
+EOD;
+d = <<EOD
+x
+
+EOD;
+e = ";x";
+f = "";
+g = "x";

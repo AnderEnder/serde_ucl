@@ -99,8 +99,8 @@ those of array elements (§8.7). The conformance runner ignores them.
 ## Divergences decided by the project
 
 The project deliberately differs from libucl in these places. The spec still describes libucl's
-behaviour, and each place says so. The decisions for §9 and §10 are recorded in
-`docs/clean-room/WORKLIST.md` (C3 and C4, *Project decisions*).
+behaviour, and each place says so. The decisions for §9, §10 and the API are recorded in
+`docs/clean-room/WORKLIST.md` (C3, C4 and C5, *Project decisions*).
 
 - Non-UTF-8 bytes in keys and strings are an **error** in the project (libucl accepts them;
   `libucl/basic/22`). This also covers strings made invalid by `\u` escapes of surrogate code
@@ -110,6 +110,14 @@ behaviour, and each place says so. The decisions for §9 and §10 are recorded i
   oracle is, ignores `sign` (§9.4; `cases/spec/09-macros/includes_like_include`,
   `cases/spec/09-macros/include_sign_param_no_effect`).
 - `.load` is available only behind a default-off feature in the project (§9.6).
+- A document given as text, without a path, reads no files by default in the project: an
+  `.include`, `.try_include` or `.load` in it finds no file and behaves as §9.4 and §9.6 describe
+  for a missing file. libucl reads files relative to the working directory. A caller can give such
+  a document file access; a document parsed from a file has it.
+- The project never uses the process working directory. For a document parsed from a file, the
+  file's directory stands in for it: relative include paths resolve against that directory, in
+  included files too, and `CURDIR` in macro argument lists (§9.2) is that directory. For a document
+  given as text, a configured base directory stands in for it.
 - Macro argument documents nest at most 64 deep in the project, the document holding the outermost
   macro included; deeper nesting is an error. libucl sets no limit of its own (§9.2;
   `cases/spec/09-macros/macro_args_nested_100_levels`).
@@ -173,18 +181,18 @@ answers the implementer questions in `docs/clean-room/QUESTIONS.md` #1–#4, `sp
 #5–#16, `spec-v4` answers #17–#22 and completes §9 for the macro work, `spec-v5` answers
 #23–#33, `spec-v6` answers #34–#49 and completes §10 for the output work: every case that
 parses now has libucl's output in each format, §10.8 says what reads back exactly, and §10.10
-specifies the config output with saved comments. `spec-v7` answers #50–#54.
+specifies the config output with saved comments. `spec-v7` answers #50–#54, and `spec-v8`
+answers #55.
 
 The places where §9 and §10 left the project's behaviour open (the include parameters `sign`,
 `url` and `path`, how the API reports a silent stop, parsing a file under `no-filevars`, whether
 saved comments are written, and serde's JSON forms) are decided; see *Divergences decided by the
 project*.
 
-Three rules of `spec-v7` have no committed case yet, because the conformance runner accepts no
-known failure for output that the new core writes differently: the lone CR after a backslash in
-a single-quoted string (§6.2), the `nan` and `inf` layout under the merge quirk (§10.7), and the
-unquoted key of a `no-implicit-arrays` collection (§10.1). Their cases are added once the core
-follows these rules.
+Four cases of `spec-v8` are held in `tests/conformance/pending/`, because the crate does not
+follow their rules yet: where a heredoc with an empty NAME ends, its variable expansion and its
+end-of-input error, and a NAME of one repeated letter (§6.3). They move to `cases/spec/06-strings/`
+once the crate passes them.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
@@ -195,7 +203,10 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1390 cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1393 cases in `cases/` and
+`libucl/`, and 4 cases held in `pending/` until the crate passes them, listed with the paths they
+will have (`cases/spec/06-strings/heredoc_empty_name_*` and
+`cases/spec/06-strings/heredoc_repeated_letter_name`).
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -852,6 +863,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1390 case
 | `cases/spec/06-strings/heredoc_crlf_content` | §6 |
 | `cases/spec/06-strings/heredoc_crlf_opener_error` | §6 |
 | `cases/spec/06-strings/heredoc_empty_error` | §6 |
+| `cases/spec/06-strings/heredoc_empty_name_end_rule` | §6 |
+| `cases/spec/06-strings/heredoc_empty_name_eof_error` | §6 |
+| `cases/spec/06-strings/heredoc_empty_name_variables` | §6, §7 |
 | `cases/spec/06-strings/heredoc_empty_terminator` | §6 |
 | `cases/spec/06-strings/heredoc_first_line_is_content` | §6 |
 | `cases/spec/06-strings/heredoc_in_array` | §6 |
@@ -861,6 +875,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1390 case
 | `cases/spec/06-strings/heredoc_lowercase_error` | §6 |
 | `cases/spec/06-strings/heredoc_no_escapes` | §6 |
 | `cases/spec/06-strings/heredoc_other_uppercase_names` | §6 |
+| `cases/spec/06-strings/heredoc_repeated_letter_name` | §6 |
 | `cases/spec/06-strings/heredoc_short_input_is_string` | §6 |
 | `cases/spec/06-strings/heredoc_space_after_opener_error` | §6 |
 | `cases/spec/06-strings/heredoc_terminator_at_eof` | §6 |
@@ -874,6 +889,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1390 case
 | `cases/spec/06-strings/sq_basic` | §6 |
 | `cases/spec/06-strings/sq_escaped_quote` | §6 |
 | `cases/spec/06-strings/sq_line_continuation` | §6 |
+| `cases/spec/06-strings/sq_line_continuation_lone_cr` | §6 |
 | `cases/spec/06-strings/sq_no_escapes` | §6 |
 | `cases/spec/06-strings/sq_no_variables` | §6 |
 | `cases/spec/06-strings/sq_not_interpreted` | §6 |
@@ -1485,11 +1501,13 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1390 case
 | `cases/spec/10-output/multi_value_key_spelling_per_value` | §10, §12 |
 | `cases/spec/10-output/multi_value_merge_quirk_layout_empty` | §10 |
 | `cases/spec/10-output/multi_value_merge_quirk_layout_inherited` | §10 |
+| `cases/spec/10-output/multi_value_merge_quirk_layout_nan_inf` | §10 |
 | `cases/spec/10-output/multi_value_merge_quirk_layout_nonempty` | §10 |
 | `cases/spec/10-output/multi_value_merge_quirk_layout_own_kind` | §10 |
 | `cases/spec/10-output/multi_value_mixed_values` | §10 |
 | `cases/spec/10-output/nested_implicit_arrays` | §10 |
 | `cases/spec/10-output/nested_layout` | §10 |
+| `cases/spec/10-output/no_implicit_arrays_collection_key_bare` | §10 |
 | `cases/spec/10-output/no_implicit_arrays_collection_key_first_spelling` | §10 |
 | `cases/spec/10-output/objects` | §10 |
 | `cases/spec/10-output/priorities_not_emitted` | §10 |
