@@ -13,7 +13,10 @@
 //!
 //! Run with `cargo run --example real_world_usage`.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "the configuration types mirror whole documents; the example reads some fields"
+)]
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -415,7 +418,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         assert!(config.http.max_request_size > 0);
         assert!(config.http.timeout >= 0.0);
         assert!(config.http.keep_alive >= 0.0);
-        assert!(config.http.tls.protocols.len() >= 1);
+        assert!(!config.http.tls.protocols.is_empty());
         assert!(!config.http.tls.cert_file.is_empty());
         assert!(!config.http.tls.key_file.is_empty());
         assert!(!config.database.migrations.auto_migrate);

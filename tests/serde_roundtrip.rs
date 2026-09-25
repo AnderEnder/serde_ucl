@@ -1994,7 +1994,10 @@ fn from_value_on_parsed_documents() {
     assert_eq!(parsed::<Repos>("").unwrap().repo, Vec::<String>::new());
     // An object is not a sequence.
     #[derive(Debug, Deserialize)]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "a deserialization target; the test checks the error"
+    )]
     struct Sections {
         section: Vec<u32>,
     }

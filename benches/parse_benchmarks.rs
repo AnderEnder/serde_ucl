@@ -53,11 +53,24 @@ fn bench_json(c: &mut Criterion) {
 
 fn bench_nested(c: &mut Criterion) {
     let mut group = c.benchmark_group("parse/nested");
-    for depth in [10, 500] {
+    for depth in [10, 500, 1000] {
         let input = common::nested(depth);
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(depth), &input, |b, input| {
             let mut parser = Parser::new();
+            b.iter(|| parser.parse(black_box(input.as_bytes())).unwrap());
+        });
+    }
+    group.finish();
+    let input = common::nested_mixed(1000);
+    let mut group = c.benchmark_group("parse/nested-mixed-1000");
+    group.throughput(Throughput::Bytes(input.len() as u64));
+    for (name, flags) in [
+        ("default", ParserFlags::empty()),
+        ("save-comments", ParserFlags::SAVE_COMMENTS),
+    ] {
+        group.bench_function(name, |b| {
+            let mut parser = Parser::with_flags(flags);
             b.iter(|| parser.parse(black_box(input.as_bytes())).unwrap());
         });
     }

@@ -122,3 +122,16 @@ Add `docs/COMPATIBILITY.md` (divergences and quirks, each with its case). Set Ca
 (`repository`, `authors`, `rust-version`) and add license files for `MIT OR Apache-2.0`. CI: clippy
 with `-D warnings`, `cargo fmt --check`, no wall-clock assertions in tests, and a nightly job that
 regenerates golden files and fails on drift.
+
+Split into two work items: C6a brings the core up to `spec-v8` (the cases in
+`tests/conformance/pending/`), makes clippy clean with `-D warnings`, makes every Cargo feature
+real or removes it, and removes super-linear slowdowns on deeply nested input; C6b does the
+README, crate docs, `CLAUDE.md`, Cargo metadata, license files and CI.
+
+### Project decisions for C6
+
+1. Crate and library names stay `ucl-rust-lexer` / `ucl_lexer`. `repository` is
+   `https://github.com/AnderEnder/ucl-rust-lexer`; `authors` is `Andrii Radyk`.
+2. CI runs the same commands a developer runs locally, through one script the workflows call.
+   Tests stay independent so they run in parallel. The nightly drift job runs
+   `scripts/regen-golden.sh` exactly as a developer would and fails if any golden file changes.

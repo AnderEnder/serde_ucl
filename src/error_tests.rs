@@ -116,12 +116,16 @@ mod tests {
 
     #[test]
     fn test_malformed_heredoc() {
-        // An empty NAME is allowed; the heredoc ends at the first empty line (spec §6.3,
-        // *Quirk*), and without one it is unterminated. Where it ends at the end of input without
-        // an empty line is QUESTIONS.md #55.
+        // An empty NAME is allowed: after the first content line, the heredoc ends at the first
+        // LF, `;` or `,`, and without one it is unterminated (spec §6.3, *Quirk*; QUESTIONS.md
+        // #55).
         assert_eq!(
             value_of_k(b"k = <<\ncontent\n\n"),
             UclValue::String("content".into())
+        );
+        assert_eq!(
+            error(b"k = <<\ncontent\n").0,
+            ErrorKind::UnterminatedHeredoc
         );
         assert_eq!(error(b"[<<\nx\n]").0, ErrorKind::UnterminatedHeredoc);
         // NAME is uppercase letters only (spec §6.3): `<<term123` is an unquoted value, and the

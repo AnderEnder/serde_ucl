@@ -26,14 +26,12 @@ criterion = { version = "0.5", features = ["html_reports"] }
 ucl-rust-lexer = { path = ".", features = ["load"] }
 
 [features]
-default = ["std", "fs"]
-std = []
+default = ["fs"]
 # The filesystem loader for `.include` and `.load` (`parse::FsLoader`), and `from_file`.
 fs = []
-# The `.load` macro (spec §9.6); off by default.
+# The `.load` macro (spec §9.6); off by default. Without it, `.load` fails with the
+# "unsupported" error (`ErrorKind::Unsupported`).
 load = []
-save-comments = []
-strict-unicode = []
 
 [lib]
 name = "ucl_lexer"

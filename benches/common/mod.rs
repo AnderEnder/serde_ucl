@@ -1,6 +1,6 @@
 //! Documents and types shared by the benchmarks. Every generated document is valid libucl.
 
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each bench uses part of this module")]
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -81,6 +81,20 @@ pub fn nested(depth: usize) -> String {
         out.push_str(" }");
     }
     out.push('\n');
+    out
+}
+
+/// Objects nested `depth` deep, one per line, each with a comment, a number and a single-quoted
+/// string (which the config output keeps, spec §10.1), with a value at the bottom.
+pub fn nested_mixed(depth: usize) -> String {
+    let mut out = String::new();
+    for i in 0..depth {
+        writeln!(out, "l{i} {{ # level {i}\nn = {i}; s = 'q{i}';").unwrap();
+    }
+    out.push_str("leaf = 1;\n");
+    for _ in 0..depth {
+        out.push_str("}\n");
+    }
     out
 }
 

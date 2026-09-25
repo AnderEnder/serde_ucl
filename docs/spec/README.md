@@ -189,10 +189,7 @@ The places where §9 and §10 left the project's behaviour open (the include par
 saved comments are written, and serde's JSON forms) are decided; see *Divergences decided by the
 project*.
 
-Four cases of `spec-v8` are held in `tests/conformance/pending/`, because the crate does not
-follow their rules yet: where a heredoc with an empty NAME ends, its variable expansion and its
-end-of-input error, and a NAME of one repeated letter (§6.3). They move to `cases/spec/06-strings/`
-once the crate passes them.
+Every case is committed; none is held back.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
@@ -203,10 +200,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1393 cases in `cases/` and
-`libucl/`, and 4 cases held in `pending/` until the crate passes them, listed with the paths they
-will have (`cases/spec/06-strings/heredoc_empty_name_*` and
-`cases/spec/06-strings/heredoc_repeated_letter_name`).
+Every case in `tests/conformance/` and the section(s) that explain it: 1397 cases in `cases/` and
+`libucl/`.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the

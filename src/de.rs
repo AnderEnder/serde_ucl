@@ -531,7 +531,10 @@ mod tests {
         // It used to read as the sequence of its values, silently dropping the keys.
         #[derive(Debug, Deserialize)]
         struct Sections {
-            #[allow(dead_code)]
+            #[allow(
+                dead_code,
+                reason = "a deserialization target; the test checks the error"
+            )]
             section: Vec<u32>,
         }
         let err = from_str::<Sections>("section { a = 1; b = 2 }").unwrap_err();
@@ -564,7 +567,10 @@ mod tests {
         assert!(err.is_none(), "an integral time converts");
         #[derive(Debug, Deserialize)]
         struct Flag {
-            #[allow(dead_code)]
+            #[allow(
+                dead_code,
+                reason = "a deserialization target; the test checks the error"
+            )]
             f: bool,
         }
         let err = from_str::<Flag>("f = 1").unwrap_err();

@@ -21,9 +21,9 @@ None of them is written by hand.
   not cases themselves (`files/v6/` among them, with fixtures for spec-v6). Some `09-macros` cases
   include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
   `../09-macros/files/`.
-- `pending/` holds cases that a released spec version added but the crate does not pass yet, with
-  their golden files and a README; the runners do not read it. Each case moves to `cases/spec/`
-  when the crate passes it.
+- `pending/`, when present, holds cases that a released spec version added but the crate does not
+  pass yet, with their golden files and a README; the runners do not read it. Each case moves to
+  `cases/spec/` when the crate passes it.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
   are now libucl's, not the old hand-written assertions.
 - `<case>.golden.json` next to each case is libucl's typed dump of that case, produced by

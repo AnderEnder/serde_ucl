@@ -1,14 +1,15 @@
 //! Facts remembered from parsing that the config and YAML output formats depend on (spec §10.1).
 //!
 //! Values are identified by their path from the root, as saved comments are
-//! ([`super::AttachedComments`]). Only facts that differ from what the emitter assumes for a value
-//! without facts are stored, so a document without single-quoted strings, heredocs or escaped
-//! keys records nothing. When the duplicate rules of §8 move or replace values, the parser updates
-//! the paths the same way it does for comments.
+//! ([`super::AttachedComments`]). The facts are kept in a tree of those paths, one node per path
+//! segment, so that the parser records a fact, and the emitter finds one, with one step from the
+//! node of the value's container, at any depth. Only facts that differ from what the emitter
+//! assumes for a value without facts are stored, so a document without single-quoted strings,
+//! heredocs or escaped keys records nothing. When the duplicate rules of §8 move or replace
+//! values, the parser updates the tree the same way it does the paths of comments.
 
 use super::PathSegment;
-use std::collections::BTreeMap;
-use std::ops::Bound;
+use super::tree::Children;
 
 /// What the output formats need to know about one value beyond the value itself (spec §10.1).
 ///
@@ -41,16 +42,49 @@ impl ValueFacts {
     }
 }
 
+/// A node of [`OutputFacts`], which stands for a path from the root.
+pub(crate) type NodeId = usize;
+
+/// The node of the root's path, which is empty.
+pub(crate) const ROOT: NodeId = 0;
+
+#[derive(Debug, Clone, Default)]
+struct Node {
+    facts: ValueFacts,
+    /// The nodes of the values of an object's entries, or of an array's elements, at this path.
+    children: Children,
+}
+
 /// The output facts of a parsed document, by value path: what [`crate::emit::Emitter`] needs to
 /// write the document as libucl does (spec §10.1). [`super::Parser::output_facts`] gives those of
 /// the last parse.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct OutputFacts {
-    /// Ordered by path, so that the facts of a value and of everything inside it are one range.
-    values: BTreeMap<Vec<PathSegment>, ValueFacts>,
+    /// The tree of paths; `nodes[ROOT]` is the root. A node taken out of the tree stays in the
+    /// vector, unused, until [`OutputFacts::clear`].
+    nodes: Vec<Node>,
+    /// The number of nodes in the tree whose facts are not the default.
+    recorded: usize,
 }
 
 pub(crate) type ValuePath = Vec<PathSegment>;
+
+impl Default for OutputFacts {
+    fn default() -> Self {
+        Self {
+            nodes: vec![Node::default()],
+            recorded: 0,
+        }
+    }
+}
+
+impl PartialEq for OutputFacts {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl Eq for OutputFacts {}
 
 impl OutputFacts {
     /// No facts.
@@ -60,139 +94,189 @@ impl OutputFacts {
 
     /// True if no value has a fact recorded.
     pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.recorded == 0
     }
 
     /// The facts of the value at `path`, if any were recorded.
     pub fn get(&self, path: &[PathSegment]) -> Option<&ValueFacts> {
-        self.values.get(path)
+        self.facts_of(self.node_at(path)?)
     }
 
-    /// Sets the facts of the value at `path`; default facts remove the entry.
+    /// Sets the facts of the value at `path`; default facts remove those recorded.
     pub fn insert(&mut self, path: Vec<PathSegment>, facts: ValueFacts) {
-        if facts.is_default() {
-            self.values.remove(&path);
+        let node = if facts.is_default() {
+            self.node_at(&path)
         } else {
-            self.values.insert(path, facts);
+            Some(self.descend_or_insert(ROOT, &path))
+        };
+        if let Some(node) = node {
+            self.set(node, facts);
         }
     }
 
     /// Every recorded path and its facts, in path order.
-    pub fn iter(&self) -> impl Iterator<Item = (&[PathSegment], &ValueFacts)> {
-        self.values.iter().map(|(p, f)| (p.as_slice(), f))
+    pub fn iter(&self) -> impl Iterator<Item = (Vec<PathSegment>, &ValueFacts)> {
+        let mut recorded = Vec::with_capacity(self.recorded);
+        let mut stack = vec![(ROOT, Vec::new())];
+        while let Some((node, path)) = stack.pop() {
+            let n = &self.nodes[node];
+            for (segment, child) in n.children.iter() {
+                let mut path = path.clone();
+                path.push(segment);
+                stack.push((child, path));
+            }
+            if !n.facts.is_default() {
+                recorded.push((path, &n.facts));
+            }
+        }
+        recorded.sort_by(|a, b| a.0.cmp(&b.0));
+        recorded.into_iter()
     }
 
     pub(crate) fn clear(&mut self) {
-        self.values.clear();
+        *self = Self::default();
     }
 
-    /// Changes the facts of the value at `path` with `change`.
-    pub(crate) fn update(&mut self, path: &[PathSegment], change: impl FnOnce(&mut ValueFacts)) {
-        let mut facts = self.values.get(path).cloned().unwrap_or_default();
+    /// The facts recorded at `node`, if any.
+    pub(crate) fn facts_of(&self, node: NodeId) -> Option<&ValueFacts> {
+        let facts = &self.nodes[node].facts;
+        (!facts.is_default()).then_some(facts)
+    }
+
+    /// The node of value `index` of entry `key` of the object at `node`, if there is one.
+    pub(crate) fn child_key(&self, node: NodeId, key: &str, index: usize) -> Option<NodeId> {
+        self.nodes[node].children.key(key, index)
+    }
+
+    /// The node of element `index` of the array at `node`, if there is one.
+    pub(crate) fn child_element(&self, node: NodeId, index: usize) -> Option<NodeId> {
+        self.nodes[node].children.element(index)
+    }
+
+    /// The node of `path`, if there is one.
+    fn node_at(&self, path: &[PathSegment]) -> Option<NodeId> {
+        path.iter()
+            .try_fold(ROOT, |node, segment| self.nodes[node].children.get(segment))
+    }
+
+    /// The node of `segment` below `node`, added if there is none.
+    pub(crate) fn child_or_insert(&mut self, node: NodeId, segment: &PathSegment) -> NodeId {
+        if let Some(child) = self.nodes[node].children.get(segment) {
+            return child;
+        }
+        let child = self.nodes.len();
+        self.nodes.push(Node::default());
+        self.nodes[node].children.insert(segment, child);
+        child
+    }
+
+    /// The node of `path` below `node`, added with the nodes on the way if missing.
+    pub(crate) fn descend_or_insert(&mut self, node: NodeId, path: &[PathSegment]) -> NodeId {
+        path.iter()
+            .fold(node, |node, segment| self.child_or_insert(node, segment))
+    }
+
+    fn set(&mut self, node: NodeId, facts: ValueFacts) {
+        let was = !self.nodes[node].facts.is_default();
+        let now = !facts.is_default();
+        self.recorded = self.recorded + usize::from(now) - usize::from(was);
+        self.nodes[node].facts = facts;
+    }
+
+    /// Changes the facts of the value at `node` with `change`.
+    pub(crate) fn update(&mut self, node: NodeId, change: impl FnOnce(&mut ValueFacts)) {
+        let mut facts = self.nodes[node].facts.clone();
         change(&mut facts);
-        self.insert(path.to_vec(), facts);
+        self.set(node, facts);
     }
 
-    /// The recorded paths from `start` on, as long as `inside` holds for them.
-    fn paths_from(
-        &self,
-        start: &[PathSegment],
-        inside: impl Fn(&[PathSegment]) -> bool,
-    ) -> Vec<ValuePath> {
-        self.values
-            .range::<[PathSegment], _>((Bound::Included(start), Bound::Unbounded))
-            .map(|(p, _)| p)
-            .take_while(|p| inside(p))
-            .cloned()
-            .collect()
-    }
-
-    /// The recorded paths of the values of entry `key` in the object at `object` whose index
-    /// satisfies `index`, and of everything inside them.
-    fn entry_paths(
-        &self,
-        object: &[PathSegment],
-        key: &str,
-        index: impl Fn(usize) -> bool,
-    ) -> Vec<ValuePath> {
-        let n = object.len();
-        let mut start = object.to_vec();
-        start.push(PathSegment::Key {
-            key: key.to_owned(),
-            index: 0,
-        });
-        let mut paths = self.paths_from(&start, |p| {
-            p.len() > n
-                && p[..n] == *object
-                && matches!(&p[n], PathSegment::Key { key: k, .. } if k == key)
-        });
-        paths.retain(|p| matches!(&p[n], PathSegment::Key { index: i, .. } if index(*i)));
-        paths
-    }
-
-    /// Removes the facts of everything inside the value at `path`, but not its own.
-    pub(crate) fn clear_below(&mut self, path: &[PathSegment]) {
-        let n = path.len();
-        for p in self.paths_from(path, |p| p.len() >= n && p[..n] == *path) {
-            if p.len() > n {
-                self.values.remove(&p);
+    /// Takes the node `node` and everything below it out of the tree.
+    fn drop_subtree(&mut self, node: NodeId) {
+        let mut stack = vec![node];
+        while let Some(node) = stack.pop() {
+            let n = &mut self.nodes[node];
+            if !n.facts.is_default() {
+                self.recorded -= 1;
             }
+            stack.extend(n.children.take_all());
+        }
+    }
+
+    /// Removes the facts of everything inside the value at `node`, but not its own.
+    pub(crate) fn clear_below(&mut self, node: NodeId) {
+        for child in self.nodes[node].children.take_all() {
+            self.drop_subtree(child);
         }
     }
 
     /// Values of entry `key` in the object at `object` were replaced: value `slot`, or all of
     /// them. Their facts, and those of anything inside them, are dropped.
-    pub(crate) fn replaced(&mut self, object: &[PathSegment], key: &str, slot: Option<usize>) {
-        for p in self.entry_paths(object, key, |i| slot.is_none_or(|s| s == i)) {
-            self.values.remove(&p);
+    pub(crate) fn replaced(&mut self, object: NodeId, key: &str, slot: Option<usize>) {
+        let children = &mut self.nodes[object].children;
+        let dropped: Vec<NodeId> = match slot {
+            Some(slot) => children.take_value(key, slot).into_iter().collect(),
+            None => children
+                .take_values(key)
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect(),
+        };
+        for child in dropped {
+            self.drop_subtree(child);
         }
     }
 
     /// Entry `key` of the object at `object` became a `NO_IMPLICIT_ARRAYS` collection: its first
     /// `count` values are now the first elements of the array that is its only value.
-    pub(crate) fn collected(&mut self, object: &[PathSegment], key: &str, count: usize) {
-        let n = object.len();
-        // All are taken out before any is put back: a new path can be an old one of the first
-        // value, when that value is an array.
-        let moved: Vec<(ValuePath, ValueFacts)> = self
-            .entry_paths(object, key, |i| i < count)
-            .into_iter()
-            .map(|p| {
-                let facts = self.values.remove(&p).expect("the path was just found");
-                (p, facts)
+    pub(crate) fn collected(&mut self, object: NodeId, key: &str, count: usize) {
+        let moved: Vec<(usize, NodeId)> = (0..count)
+            .filter_map(|index| {
+                let child = self.nodes[object].children.take_value(key, index)?;
+                Some((index, child))
             })
             .collect();
-        for (old, facts) in moved {
-            let PathSegment::Key { index, .. } = &old[n] else {
-                unreachable!("a value of the entry")
-            };
-            let mut new = old[..n].to_vec();
-            new.push(PathSegment::Key {
-                key: key.to_owned(),
-                index: 0,
-            });
-            new.push(PathSegment::Index(*index));
-            new.extend_from_slice(&old[n + 1..]);
-            self.values.insert(new, facts);
+        if moved.is_empty() {
+            return;
+        }
+        let array = self.nodes.len();
+        self.nodes.push(Node::default());
+        let first = PathSegment::Key {
+            key: key.to_owned(),
+            index: 0,
+        };
+        self.nodes[object].children.insert(&first, array);
+        for (index, child) in moved {
+            let element = PathSegment::Index(index);
+            self.nodes[array].children.insert(&element, child);
         }
     }
 
     /// The facts of the value at `from` and of everything inside it, with paths relative to it.
     pub(crate) fn subtree(&self, from: &[PathSegment]) -> Vec<(ValuePath, ValueFacts)> {
-        let n = from.len();
-        self.values
-            .range::<[PathSegment], _>((Bound::Included(from), Bound::Unbounded))
-            .take_while(|(p, _)| p.len() >= n && p[..n] == *from)
-            .map(|(p, f)| (p[n..].to_vec(), f.clone()))
-            .collect()
+        let Some(node) = self.node_at(from) else {
+            return Vec::new();
+        };
+        let mut facts = Vec::new();
+        let mut stack = vec![(node, Vec::new())];
+        while let Some((node, path)) = stack.pop() {
+            let n = &self.nodes[node];
+            if !n.facts.is_default() {
+                facts.push((path.clone(), n.facts.clone()));
+            }
+            for (segment, child) in n.children.iter() {
+                let mut path = path.clone();
+                path.push(segment);
+                stack.push((child, path));
+            }
+        }
+        facts
     }
 
     /// Records `facts`, a [`OutputFacts::subtree`], below the value at `to`.
-    pub(crate) fn graft(&mut self, to: &[PathSegment], facts: Vec<(ValuePath, ValueFacts)>) {
+    pub(crate) fn graft(&mut self, to: NodeId, facts: Vec<(ValuePath, ValueFacts)>) {
         for (rest, f) in facts {
-            let mut path = to.to_vec();
-            path.extend(rest);
-            self.insert(path, f);
+            let node = self.descend_or_insert(to, &rest);
+            self.set(node, f);
         }
     }
 }
@@ -220,12 +304,15 @@ mod tests {
         let mut facts = OutputFacts::new();
         facts.insert(vec![key("a", 0)], ValueFacts::default());
         assert!(facts.is_empty());
-        facts.update(&[key("a", 0)], |f| f.single_quoted = true);
-        facts.update(&[key("a", 0)], |f| f.key_quoted = Some(true));
-        assert_eq!(facts.get(&[key("a", 0)]).unwrap().key_quoted, Some(true));
-        facts.update(&[key("a", 0)], |f| f.single_quoted = false);
-        facts.update(&[key("a", 0)], |f| f.key_quoted = None);
+        let a = facts.child_or_insert(ROOT, &key("a", 0));
         assert!(facts.is_empty());
+        facts.update(a, |f| f.single_quoted = true);
+        facts.update(a, |f| f.key_quoted = Some(true));
+        assert_eq!(facts.get(&[key("a", 0)]).unwrap().key_quoted, Some(true));
+        facts.update(a, |f| f.single_quoted = false);
+        facts.update(a, |f| f.key_quoted = None);
+        assert!(facts.is_empty());
+        assert_eq!(facts, OutputFacts::new());
     }
 
     #[test]
@@ -234,18 +321,31 @@ mod tests {
         facts.insert(vec![key("o", 0), key("a", 0)], sq());
         facts.insert(vec![key("o", 0), key("a", 1), PathSegment::Index(0)], sq());
         facts.insert(vec![key("o", 0), key("b", 0)], sq());
-        facts.collected(&[key("o", 0)], "a", 1);
+        let o = facts.child_key(ROOT, "o", 0).unwrap();
+        facts.collected(o, "a", 1);
         assert!(
             facts
                 .get(&[key("o", 0), key("a", 0), PathSegment::Index(0)])
                 .is_some()
         );
-        facts.replaced(&[key("o", 0)], "a", Some(1));
+        facts.replaced(o, "a", Some(1));
         assert_eq!(facts.iter().count(), 2);
         let copied = facts.subtree(&[key("o", 0)]);
-        facts.graft(&[key("p", 0)], copied);
+        let p = facts.child_or_insert(ROOT, &key("p", 0));
+        facts.graft(p, copied);
         assert!(facts.get(&[key("p", 0), key("b", 0)]).is_some());
-        facts.clear_below(&[key("o", 0)]);
+        facts.clear_below(o);
         assert_eq!(facts.iter().count(), 2);
+        let paths: Vec<_> = facts.iter().map(|(path, _)| path).collect();
+        assert_eq!(
+            paths,
+            [
+                vec![key("p", 0), key("a", 0), PathSegment::Index(0)],
+                vec![key("p", 0), key("b", 0)],
+            ]
+        );
+        facts.replaced(p, "a", None);
+        facts.replaced(p, "b", None);
+        assert!(facts.is_empty());
     }
 }

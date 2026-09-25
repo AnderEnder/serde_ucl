@@ -1314,3 +1314,138 @@
     cases or tests, choices that match libucl, and 30 notable quirks with spec sections and cases.
   - No existing golden file changed; full `cargo test` passes at every commit.
   - The spec contains behaviour only.
+- 2026-09-25 — Role: implementation team. Item: C6a (spec-v8, clippy, Cargo features, linear
+  time on nested input).
+  - Inputs consulted: `git diff spec-v7 spec-v8 -- docs/spec/` and §6.3, §7.2 at `spec-v8`
+    (`docs/spec/` at HEAD is identical to the tag); `docs/clean-room/` (PROTOCOL, WORKLIST C6
+    and its project decisions, QUESTIONS #55, the C5b and spec-v8 entries of this log);
+    `docs/COMPATIBILITY.md` (searched for heredoc, feature and nesting lines; nothing stale);
+    the conformance cases and golden files, `tests/conformance/pending/` with its README,
+    `tests/conformance/README.md`, `xfail-new.txt`, `xfail-emit.txt`; the crate's own files;
+    `git show ef8007e:Cargo.toml` (the features of the CHANGELOG baseline) and
+    `git ls-tree -r --name-only ef8007e -- src/` (file names only, to confirm that `src/parse/`,
+    and so `OutputFacts` and `AttachedComments`, did not exist in 0.1.0). About 33 black-box runs
+    of `target/libucl-oracle/ucl-dump` on scratch inputs under `target/c6a/probe/`: heredoc
+    names of one repeated letter (14), heredocs with an empty name (11), `.inherit` of an object
+    that holds the current one at depth 2–4 (5), and the validity of the new bench and test
+    documents (3). Searches named `src/`, `tests/`, `examples/`, `benches/`, `docs/spec/`,
+    `docs/clean-room/` and `target/c6a/` only. The tooling showed me the worktree's current
+    `CLAUDE.md` once; it matches the clean version I was given. The main checkout's initial git
+    status listed the names `PLAN.md` and `REVIEW.md`; neither was opened. `scripts/` and `tools/`
+    were not opened.
+  - spec-v8 (§6.3, §7.2): a heredoc NAME of one repeated letter is also ended by a longer line
+    of that letter; a heredoc with an empty NAME ends at the first LF, `;` or `,` after its first
+    line, drops its last byte, leaves that byte to be read next, and expands variables only
+    when its first line has a `$` (`parse::string::heredoc` returns the content, where the input
+    continues, and whether to expand). The four pending cases moved unchanged to
+    `cases/spec/06-strings/`; `pending/` is deleted. The assertion held back for #55
+    (`k = <<⏎content⏎` is an unterminated heredoc) is back in `src/error_tests.rs`. The
+    conformance README now says `pending/` exists only when there are pending cases.
+  - Clippy: `cargo clippy --all-targets --all-features -- -D warnings`, the same with
+    `--no-default-features`, and `cargo clippy --lib --no-default-features -- -D warnings` pass
+    (the crate's dev-dependency on itself turns `fs` and `load` back on for `--all-targets`,
+    hence the `--lib` run). Fixed: `enum_variant_names` (`Number::NotNumber` → `Number::Text`),
+    `redundant_locals` in a test, `collapsible_if` in the runner, `bool_assert_comparison` and
+    `len_zero` in two examples, and `approx_constant` in two tests, whose input floats `3.14`
+    are now `2.75`. No `allow` was added. The eight existing `allow(dead_code)` attributes stay,
+    each now with a `reason`: deserialization targets whose fields are never read (error tests
+    and examples) and the bench module that each bench uses in part.
+  - Cargo features (decisions): `fs` (default) is real: it gates `parse::FsLoader` and
+    `from_file`; kept. `load` is real: it gates `.load`, which otherwise fails with the
+    "unsupported" error; kept, its comment now says so. `std` had no `#[cfg]` and the crate
+    always needs the standard library (I/O, paths, the filesystem loader, serde's std support):
+    removed, `default = ["fs"]`. `save-comments` had no `#[cfg]`; comments are saved at run time
+    with `ParserFlags::SAVE_COMMENTS`, which the conformance runner needs in every build:
+    removed. `strict-unicode` had no `#[cfg]`; keys and strings are always checked to be UTF-8
+    (a divergence the project decided, spec README): removed. `CHANGELOG.md` records the three
+    removals under *Removed features*.
+  - Nesting, cause: the parser filled open containers in place in the tree and, for every
+    entry or element it inserted, walked from the root through every open container to the
+    current one, with a hash lookup of each level's key (`resolve`): O(depth) per value, so
+    O(n × depth) for a document. More costs grew with depth: output facts (single-quoted
+    strings, heredocs, keys that need quoting) were stored under full paths, so recording one
+    and finding one in the emitters cost O(depth) path copies or comparisons per value; with
+    `SAVE_COMMENTS`, every value's full path was copied, and every attached comment group was
+    found and stored by its full path; and the bracket scan that decides whether a word starts a
+    section path re-read the rest of the line for every name.
+  - Nesting, fix: an open container now lives in its frame; an empty container of its kind
+    keeps its place in the parent and it goes back when it closes, so the current container is
+    one step away. `.inherit`, the only reader of the tree beyond the current container, finds
+    open containers through the frames and copies them as they are (§9.7, *Quirk*;
+    `Core::value_at`, `Core::filled_copy`; unit test with five oracle runs). A `debug_assert`
+    checks, in every test run, that only the top frame's container changes. Paths are shared
+    lists (`PathRef`) worked out once per frame when needed. Output facts and saved comments are
+    trees of path segments (`OutputFacts`; `comments::CommentGroups`) whose children are found
+    directly by key and value index (`parse::tree::Children`); the parser keeps each frame's
+    facts node, each path node remembers its place in the comment tree, and the emitters walk
+    the facts tree, and a comment tree built once per emit, node by node. The paths of
+    `AttachedComments` are written out on the first call of `Parser::attached_comments`. The
+    bracket scan's result is reused for every position before the byte it found. Both types
+    are new in this release (not in 0.1.0), so `OutputFacts::iter` yielding owned paths needs no
+    CHANGELOG entry; the public signatures of the comment API are unchanged.
+  - Also found with a scratch harness (`target/c6a/scale/`) and fixed, on flat input: under
+    `KEY_LOWERCASE`, after a key whose escape gives an uppercase letter, each new key was compared
+    with every key of its object (quadratic in object width; frames now keep an index of keys by
+    lowercase form, extended as keys are added, since the parser never removes or reorders
+    entries); with saved comments, each replaced or collected value scanned and re-indexed every
+    comment group (quadratic in comment groups; the comment tree above removes the scan).
+  - Not changed: the indented output formats (config, JSON, YAML) are as large as depth ×
+    lines; their time is linear in the output.
+  - Test: `tests/scaling.rs` times each operation on two documents about 8 times apart in size
+    (and depth, for nested ones) in one run, takes the fastest of 7 interleaved samples, and fails
+    when the time grows more than 3 times the size ratio (linear ≈ 8, quadratic ≈ 64). Parse:
+    nested objects with facts, comments and `.inherit`, with and without `SAVE_COMMENTS`; nested
+    arrays; a section path; keys compared regardless of case; replaced values with saved
+    comments; many values of one key with facts and comments. Emit: all four formats with facts,
+    and with comments (sizes taken from the output); many values of one key with comments. Serde:
+    `from_str`, `from_value`, `to_value`, `to_json_string_compact`, `to_string`. It runs in about
+    0.5 s. It fails against `5484bb5` (time ×59–63 for size ×8.3); the width checks against
+    `8bf25c5` (×54 for ×9.4, ×65 for ×8.9); the comment checks against `f19341f` (×45.7 for
+    ×8.4, ×47.3 for ×8.7). The final file passed 10 of 10 runs, 5 of them with 16 busy
+    processes on 14 cores.
+  - Benches (criterion, median time). Before: the library code of `04dd3cf`, run with the bench
+    groups that were then committed as `81859c3`. After: `028d289`.
+
+    | Bench | Before | After |
+    | --- | --- | --- |
+    | parse/nested/10 | 3.73 µs (20.4 MiB/s) | 3.67 µs (20.8 MiB/s) |
+    | parse/nested/500 | 1.366 ms (3.07 MiB/s) | 157 µs (26.8 MiB/s) |
+    | parse/nested/1000 | 6.71 ms (1.26 MiB/s) | 303 µs (28.0 MiB/s) |
+    | parse/nested-mixed-1000/default | 90.6 ms (448 KiB/s) | 1.15 ms (34.4 MiB/s) |
+    | parse/nested-mixed-1000/save-comments | 173 ms (234 KiB/s) | 1.87 ms (21.2 MiB/s) |
+    | parse/config/1000 | 7.36 ms (66.1 MiB/s) | 5.37 ms (90.7 MiB/s) |
+    | parse/config-100-flags/save-comments | 1.12 ms (42.9 MiB/s) | 792 µs (60.9 MiB/s) |
+    | parse/config-100-flags/key-lowercase | 701 µs (68.8 MiB/s) | 535 µs (90.2 MiB/s) |
+    | parse/json/1000 | 3.06 ms (45.1 MiB/s) | 2.91 ms (47.5 MiB/s) |
+    | parse/variables/1000 | 1.15 ms (77.2 MiB/s) | 1.15 ms (77.2 MiB/s) |
+    | emit/config-1000/config | 5.74 ms | 1.20 ms |
+    | emit/config-1000/json-compact | 4.12 ms | 1.43 ms |
+    | emit/nested-mixed-1000/config | 78.7 ms | 4.81 ms |
+    | emit/nested-mixed-1000/json-compact | 54.0 ms (501 KiB/s) | 233 µs (113 MiB/s) |
+    | emit/nested-mixed-1000/yaml | 104 ms | 3.02 ms |
+    | serde/nested-mixed-1000/from_str | 93.2 ms (436 KiB/s) | 1.86 ms (21.3 MiB/s) |
+    | serde/deserialize-1000/from_str | 7.95 ms | 5.91 ms |
+    | serde/nested-mixed-1000/to_json_string_compact | 481 µs | 469 µs |
+    | serde/nested-mixed-1000/to_string | 5.28 ms | 6.05 ms |
+    | serde/serialize-1000/to_string | 2.51 ms | 2.49 ms |
+
+    `serde/nested-mixed-1000/to_string` writes 7.5 MB and varies with page faults: a
+    side-by-side probe of the old and new crate had either one ahead from run to run; its code
+    path does not use facts or comments. All numbers are in `target/c6a/bench-{before,final}.txt`
+    on the machine that ran them.
+  - Result: `cargo test` passes, 302 tests (lib 169, integration 119 with `scaling` 4, doc 14).
+    Conformance: new core 1393 of 1397, emitters 1040 of 1044; `xfail-new.txt` and
+    `xfail-emit.txt` unchanged, the four justified divergences each. `cargo fmt --check`,
+    `cargo build --examples --benches`, `cargo check --no-default-features`,
+    `cargo check --features load` and `cargo doc --no-deps` succeed without warnings.
+    `cargo test` was run at each commit from `3ada2e5` to `028d289` in a scratch worktree: no
+    failure at any of them.
+  - Stale lines in files this item does not own: `docs/spec/README.md` 192–195 and 206–209
+    (the four cases are no longer in `pending/`; spec team); `README.md` *Feature Flags*
+    (`std`, `zero-copy`, `save-comments`, `strict-unicode`; C6b).
+  - Questions: none.
+  - Commits: `3ada2e5`, `004ddbc`, `5484bb5`, `81859c3`, `30020db`, `8bf25c5`, `3fdb123`,
+    `a23533b`, `4a632be` (the first version of this entry), `f19341f`, `028d289`, and the
+    `C6a:` commit that records this version.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

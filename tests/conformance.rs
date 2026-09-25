@@ -194,10 +194,8 @@ fn dump_node(
 /// that of the root object and those of array elements. libucl's dumps record them, but they never
 /// affect a parse result or any output format.
 fn strip_unobservable_priorities(node: &mut J, is_root: bool) {
-    if is_root {
-        if let Some(map) = node.as_object_mut() {
-            map.remove("pri");
-        }
+    if is_root && let Some(map) = node.as_object_mut() {
+        map.remove("pri");
     }
     match node.get("t").and_then(J::as_str) {
         Some("array") => {

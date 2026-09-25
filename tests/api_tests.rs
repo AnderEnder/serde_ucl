@@ -263,7 +263,10 @@ fn non_utf8_keys_and_strings_are_errors() {
 fn borrowed_str_fields_are_an_error() {
     // Values are owned, so a target that borrows from the input cannot be filled.
     #[derive(Debug, Deserialize)]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "a deserialization target; the test checks the error"
+    )]
     struct Borrowed<'a> {
         name: &'a str,
     }

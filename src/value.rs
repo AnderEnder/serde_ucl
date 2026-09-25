@@ -319,6 +319,11 @@ impl Slot {
         }
     }
 
+    /// A slot with this slot's priority and marks that holds `value`.
+    pub(crate) fn with_value(&self, value: UclValue) -> Self {
+        Self { value, ..*self }
+    }
+
     /// The slot marked as copied by `.inherit` (spec §9.7). Its value, priority and
     /// `NO_IMPLICIT_ARRAYS` collection mark are kept.
     pub(crate) fn into_inherited(self) -> Self {

@@ -12,7 +12,7 @@ pub(crate) enum Number {
     /// The value is a number that ends at the given offset (after any suffix).
     Value(UclValue, usize),
     /// The value is not a number; it is read as an unquoted string instead.
-    NotNumber,
+    Text,
     /// The value is a number outside the representable range, which rejects the document
     /// (spec §5.8).
     OutOfRange,
@@ -88,13 +88,13 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
         i += 1;
     }
     if i == int_start {
-        return Number::NotNumber;
+        return Number::Text;
     }
 
     if matches!(at(i), Some(b'x' | b'X')) {
         let digits = i + 1;
         let Some(end) = hex_run(src, digits) else {
-            return Number::NotNumber;
+            return Number::Text;
         };
         return match hex_value(&src[digits..end], negative) {
             Some(v) => finish(src, end, Base::Int(v), true, no_time),
@@ -109,7 +109,7 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
     loop {
         match at(i) {
             Some(b'0'..=b'9') => i += 1,
-            Some(b'.') if dot => return Number::NotNumber,
+            Some(b'.') if dot => return Number::Text,
             Some(b'.') => {
                 dot = true;
                 i += 1;
@@ -117,7 +117,7 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
             Some(b'e' | b'E') => {
                 let signed = matches!(at(i + 1), Some(b'+' | b'-'));
                 if exponent || !(signed || at(i + 1).is_some_and(|b| b.is_ascii_digit())) {
-                    return Number::NotNumber;
+                    return Number::Text;
                 }
                 exponent = true;
                 i += if signed { 2 } else { 1 };
@@ -126,7 +126,7 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
         }
     }
     if i - int_start >= LENGTH_LIMIT {
-        return Number::NotNumber;
+        return Number::Text;
     }
     if matches!(at(i), Some(b'x' | b'X')) {
         return decimal_after_x(src, i + 1, negative, no_time);
@@ -185,13 +185,13 @@ fn finish(src: &[u8], number_end: usize, base: Base, is_hex: bool, no_time: bool
     let suffix = if end > number_end {
         match Suffix::parse(&src[number_end..end], no_time) {
             Some(s) => Some(s),
-            None => return Number::NotNumber,
+            None => return Number::Text,
         }
     } else {
         None
     };
     if !followed_properly(src, end, suffix.is_some()) {
-        return Number::NotNumber;
+        return Number::Text;
     }
     Number::Value(apply(base, suffix, is_hex), end)
 }
@@ -226,7 +226,7 @@ fn followed_properly(src: &[u8], mut end: usize, has_suffix: bool) -> bool {
 /// (QUESTIONS.md #19).
 fn decimal_after_x(src: &[u8], digits: usize, negative: bool, no_time: bool) -> Number {
     let Some(run_end) = hex_run(src, digits) else {
-        return Number::NotNumber;
+        return Number::Text;
     };
     let run = &src[digits..run_end];
     let mut len = run.iter().take_while(|b| b.is_ascii_digit()).count();
@@ -255,11 +255,11 @@ fn decimal_after_x(src: &[u8], digits: usize, negative: bool, no_time: bool) -> 
     } else {
         match Suffix::parse(rest, no_time) {
             Some(s) => Some(s),
-            None => return Number::NotNumber,
+            None => return Number::Text,
         }
     };
     if !followed_properly(src, end, suffix.is_some()) {
-        return Number::NotNumber;
+        return Number::Text;
     }
     let value = match suffix {
         Some(Suffix::Binary(m)) => {
@@ -353,7 +353,7 @@ mod tests {
         for s in [
             "1e", "1e+", "1ee3", "1..2", "1.2.3", "1e3.5", "1.5e", "1_000", "-", "-a",
         ] {
-            assert_eq!(num(s), Number::NotNumber, "{s}");
+            assert_eq!(num(s), Number::Text, "{s}");
         }
     }
 
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(value("-12x34"), UclValue::Integer(-0x34));
         assert_eq!(value("-0x8000000000000000"), UclValue::Integer(i64::MIN));
         for s in ["0x", "0xg", "0x1.5", "0x-1", "-0x", "1x"] {
-            assert_eq!(num(s), Number::NotNumber, "{s}");
+            assert_eq!(num(s), Number::Text, "{s}");
         }
         assert_eq!(num("0xFFFFFFFFFFFFFFFF"), Number::OutOfRange);
     }
@@ -390,8 +390,8 @@ mod tests {
         ] {
             assert_eq!(num(s), Number::OutOfRange, "{s}");
         }
-        assert_eq!(num("99999999999999999999x"), Number::NotNumber);
-        assert_eq!(num("1e999E"), Number::NotNumber);
+        assert_eq!(num("99999999999999999999x"), Number::Text);
+        assert_eq!(num("1e999E"), Number::Text);
         assert_eq!(value("0e-400"), UclValue::Float(0.0));
         assert_eq!(
             value("2.2250738585072014e-308"),
@@ -415,7 +415,7 @@ mod tests {
             "0x8000000000000000.",
             "12x8000000000000000.5",
         ] {
-            assert_eq!(num(s), Number::NotNumber, "{s}");
+            assert_eq!(num(s), Number::Text, "{s}");
         }
         for s in [
             "1e999.5",
@@ -430,7 +430,7 @@ mod tests {
         }
         assert_eq!(value("99999999999999999999."), UclValue::Float(1e20));
         assert_eq!(value("99999999999999999999.5"), UclValue::Float(1e20));
-        assert_eq!(num("1e5.5"), Number::NotNumber);
+        assert_eq!(num("1e5.5"), Number::Text);
     }
 
     #[test]
@@ -477,14 +477,14 @@ mod tests {
             "1.5x1d ",
             "1.5x1e999.",
         ] {
-            assert_eq!(num(s), Number::NotNumber, "{s}");
+            assert_eq!(num(s), Number::Text, "{s}");
         }
         for s in ["1.5x1e999", "1.5x1e999kb", "1.5x1e999 x", "1.5x1e999e"] {
             assert_eq!(num(s), Number::OutOfRange, "{s}");
         }
         assert_eq!(num("1.5x10 ;"), Number::Value(UclValue::Integer(0), 6));
-        assert_eq!(scan(b"1.5x10s", 0, true), Number::NotNumber);
-        assert_eq!(scan(b"1.5x1d", 0, true), Number::NotNumber);
+        assert_eq!(scan(b"1.5x10s", 0, true), Number::Text);
+        assert_eq!(scan(b"1.5x1d", 0, true), Number::Text);
         assert_eq!(
             scan(b"1.5x10ms", 0, true),
             Number::Value(UclValue::Integer(0), 8)
@@ -496,7 +496,7 @@ mod tests {
         let n126 = "1".repeat(125) + ".";
         assert!(matches!(value(&n126), UclValue::Float(_)));
         let n127 = "1".repeat(126) + ".";
-        assert_eq!(num(&n127), Number::NotNumber);
+        assert_eq!(num(&n127), Number::Text);
     }
 
     #[test]
@@ -515,9 +515,9 @@ mod tests {
         assert_eq!(value("0x10k"), UclValue::Integer(16000));
         assert_eq!(value("0x10ms"), UclValue::Integer(16));
         for s in ["1t", "1tb", "1b", "1mins", "1sec", "1k5", "1k ", "1s/"] {
-            assert_eq!(num(s), Number::NotNumber, "{s}");
+            assert_eq!(num(s), Number::Text, "{s}");
         }
-        assert_eq!(scan(b"1s", 0, true), Number::NotNumber);
+        assert_eq!(scan(b"1s", 0, true), Number::Text);
         assert_eq!(
             scan(b"1ms", 0, true),
             Number::Value(UclValue::Time(0.001), 3)
@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(num("1}"), Number::Value(UclValue::Integer(1), 1));
         assert_eq!(num("1#c"), Number::Value(UclValue::Integer(1), 1));
         for s in ["1 2", "1-2", "1/2", "1=2", "10 s", "1{", "30/* c */"] {
-            assert_eq!(num(s), Number::NotNumber, "{s}");
+            assert_eq!(num(s), Number::Text, "{s}");
         }
     }
 }

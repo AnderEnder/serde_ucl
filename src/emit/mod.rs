@@ -36,11 +36,12 @@ mod text;
 
 pub use text::key_needs_quoting;
 
+use crate::parse::facts::{self, NodeId};
+use crate::parse::tree::Children;
 use crate::parse::{
     AttachedComments, Comment, CommentPlacement, OutputFacts, PathSegment, ValueFacts,
 };
 use crate::value::UclValue;
-use std::collections::HashMap;
 
 /// An output format of spec §10.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -143,17 +144,21 @@ impl<'a> Emitter<'a> {
         let exact = self.mode == Mode::RoundTrip;
         let comments = match (self.format, self.comments) {
             (Format::Config, Some((comments, attached))) if !exact => {
-                comment_map(comments, attached)
+                CommentTree::new(comments, attached)
             }
-            _ => HashMap::new(),
+            _ => CommentTree::default(),
         };
         let facts = self.facts.filter(|f| !f.is_empty() && !exact);
+        let track = facts.is_some() || !comments.is_empty();
         let mut writer = Writer {
             out: String::new(),
-            track: facts.is_some() || !comments.is_empty(),
+            track,
+            cursor: vec![(
+                facts.map(|_| facts::ROOT),
+                (!comments.is_empty()).then_some(0),
+            )],
             facts,
             comments,
-            path: Vec::new(),
             mode: self.mode,
             json: exact && matches!(self.format, Format::Json | Format::JsonCompact),
             error: None,
@@ -227,30 +232,71 @@ pub fn to_yaml(value: &UclValue) -> String {
     Emitter::new(Format::Yaml).emit(value)
 }
 
-type CommentMap<'a> = HashMap<&'a [PathSegment], (CommentPlacement, Vec<&'a str>)>;
+/// Saved comments by value, as a tree of the values' paths that the writer walks down with the
+/// value it writes, so that finding a value's comments takes one step at any depth.
+#[derive(Debug, Default)]
+struct CommentTree<'a> {
+    /// `nodes[0]` is the root's path, when there is any node.
+    nodes: Vec<CommentNode<'a>>,
+}
 
-fn comment_map<'a>(comments: &'a [Comment], attached: &'a [AttachedComments]) -> CommentMap<'a> {
-    attached
-        .iter()
-        .map(|group| {
+#[derive(Debug, Default)]
+struct CommentNode<'a> {
+    comments: Option<(CommentPlacement, Vec<&'a str>)>,
+    children: Children,
+}
+
+impl<'a> CommentTree<'a> {
+    fn new(comments: &'a [Comment], attached: &'a [AttachedComments]) -> Self {
+        let mut tree = Self::default();
+        for group in attached {
             let texts = group
                 .comments
                 .iter()
                 .filter_map(|&i| comments.get(i).map(|c| c.text.as_str()))
                 .collect();
-            (group.path.as_slice(), (group.placement, texts))
-        })
-        .collect()
+            let mut node = tree.root();
+            for segment in &group.path {
+                node = tree.child_or_insert(node, segment);
+            }
+            tree.nodes[node].comments = Some((group.placement, texts));
+        }
+        tree
+    }
+
+    fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    fn root(&mut self) -> usize {
+        if self.nodes.is_empty() {
+            self.nodes.push(CommentNode::default());
+        }
+        0
+    }
+
+    fn child_or_insert(&mut self, node: usize, segment: &PathSegment) -> usize {
+        if let Some(child) = self.nodes[node].children.get(segment) {
+            return child;
+        }
+        let child = self.nodes.len();
+        self.nodes.push(CommentNode::default());
+        self.nodes[node].children.insert(segment, child);
+        child
+    }
 }
 
-/// The state of one [`Emitter::emit`]: the output, and the path of the value being written
-/// when facts or comments are looked up by path.
+/// The state of one [`Emitter::emit`]: the output, and where the value being written is in the
+/// output facts and the saved comments, when there are any.
 struct Writer<'a> {
     out: String,
     facts: Option<&'a OutputFacts>,
-    comments: CommentMap<'a>,
+    comments: CommentTree<'a>,
+    /// There are facts or comments to look up.
     track: bool,
-    path: Vec<PathSegment>,
+    /// For the value being written and each container it is in, innermost last: its node in the
+    /// output facts and in the comment tree, if it has one.
+    cursor: Vec<(Option<NodeId>, Option<usize>)>,
     mode: Mode,
     /// Round-trip mode in JSON or compact JSON: numbers are JSON numbers.
     json: bool,
@@ -272,32 +318,41 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// The nodes of the value being written.
+    fn here(&self) -> (Option<NodeId>, Option<usize>) {
+        *self.cursor.last().expect("the root is entered")
+    }
+
     /// Enters value `index` of the entry `key`.
     fn enter_key(&mut self, key: &str, index: usize) {
         if self.track {
-            self.path.push(PathSegment::Key {
-                key: key.to_owned(),
-                index,
-            });
+            let (fact, comment) = self.here();
+            let fact = fact.and_then(|n| self.facts?.child_key(n, key, index));
+            let comment = comment.and_then(|n| self.comments.nodes[n].children.key(key, index));
+            self.cursor.push((fact, comment));
         }
     }
 
     /// Enters element `index` of an array.
     fn enter_index(&mut self, index: usize) {
         if self.track {
-            self.path.push(PathSegment::Index(index));
+            let (fact, comment) = self.here();
+            let fact = fact.and_then(|n| self.facts?.child_element(n, index));
+            let comment = comment.and_then(|n| self.comments.nodes[n].children.element(index));
+            self.cursor.push((fact, comment));
         }
     }
 
     fn leave(&mut self) {
         if self.track {
-            self.path.pop();
+            self.cursor.pop();
         }
     }
 
     /// The facts of the value being written.
     fn facts(&self) -> Option<&ValueFacts> {
-        self.facts.and_then(|f| f.get(&self.path))
+        let (node, _) = self.here();
+        self.facts?.facts_of(node?)
     }
 
     /// Writes the key of the entry value being written, whose entry is `entry_key`: its own
@@ -322,7 +377,8 @@ impl<'a> Writer<'a> {
 
     /// The saved comments of the value being written that are attached with `placement`.
     fn comments(&self, placement: CommentPlacement) -> Vec<&'a str> {
-        match self.comments.get(self.path.as_slice()) {
+        let (_, node) = self.here();
+        match node.and_then(|n| self.comments.nodes[n].comments.as_ref()) {
             Some((p, texts)) if *p == placement => texts.clone(),
             _ => Vec::new(),
         }

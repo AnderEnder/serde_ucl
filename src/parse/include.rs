@@ -400,13 +400,7 @@ impl Core<'_, '_, '_, '_> {
             Err(kind) => return Err(self.error(kind, call.value_at)),
         };
         let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
-        let exists = {
-            let object = self
-                .current()
-                .as_object()
-                .expect("macros are read inside objects");
-            super::macros::find_key(object, &key, key_lowercase).is_some()
-        };
+        let exists = self.find_current_key(&key, key_lowercase).is_some();
         if exists {
             return Err(self.error(ErrorKind::LoadKeyExists { key }, call.at));
         }
@@ -444,11 +438,11 @@ impl Core<'_, '_, '_, '_> {
             .insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
         if multiline
             && self.facts.is_some()
-            && let Some(mut path) = self.top_path()
+            && let Some(node) =
+                self.facts_node_below(&[crate::parse::PathSegment::Key { key, index: 0 }])
         {
-            path.push(crate::parse::PathSegment::Key { key, index: 0 });
             let facts = self.facts.as_mut().expect("checked above");
-            facts.update(&path, |f| f.multiline = true);
+            facts.update(node, |f| f.multiline = true);
         }
         Ok(())
     }

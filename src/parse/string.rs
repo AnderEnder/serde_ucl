@@ -145,17 +145,45 @@ pub(crate) fn heredoc_opener(src: &[u8], start: usize) -> Option<(usize, usize)>
     (src.get(name_end) == Some(&b'\n')).then_some((name_start, name_end))
 }
 
+/// A heredoc read by [`heredoc`].
+#[derive(Debug)]
+pub(crate) struct Heredoc {
+    pub(crate) content: Vec<u8>,
+    /// The offset where the input continues after the heredoc.
+    pub(crate) end: usize,
+    /// Whether variables are expanded in the content (spec §7.2): always when NAME is not
+    /// empty; with an empty NAME only when the first content line has a `$`.
+    pub(crate) expand: bool,
+}
+
+/// Whether a line of a heredoc that ends with NAME at `src[at]` is a terminator line: NAME is
+/// followed by LF, `;`, `,` or the end of input (spec §6.3).
+fn ends_terminator(src: &[u8], at: usize) -> bool {
+    matches!(src.get(at), None | Some(b'\n' | b';' | b','))
+}
+
 /// Reads the heredoc whose opener starts at `src[start]` (spec §6.3); [`heredoc_opener`] must
-/// have accepted it. Returns the content and the offset just after NAME on the terminator line.
+/// have accepted it.
 ///
 /// The content is every line after the opening line up to the terminator line: a line that
 /// holds NAME followed by LF, `;`, `,` or the end of input. The first content line is never a
-/// terminator. The line break before the terminator line is not content.
-pub(crate) fn heredoc(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
+/// terminator. The line break before the terminator line is not content, and the input
+/// continues just after NAME on the terminator line.
+///
+/// **Quirk.** A NAME of one letter repeated n times is also ended by a line of m > n of that
+/// letter followed by LF, `;`, `,` or the end of input; the line break before that line and
+/// m − n − 1 of the letters stay in the content, and the input continues after the m letters.
+///
+/// An empty NAME has an end rule of its own, [`empty_name_heredoc`].
+pub(crate) fn heredoc(src: &[u8], start: usize) -> Result<Heredoc, Error> {
     let (name_start, name_end) =
         heredoc_opener(src, start).expect("caller checked the heredoc opener");
     let name = &src[name_start..name_end];
     let content_start = name_end + 1;
+    if name.is_empty() {
+        return empty_name_heredoc(src, start, content_start);
+    }
+    let repeated = name.iter().all(|&b| b == name[0]);
     // Start of the second content line, the first that may be a terminator.
     let mut line = match src[content_start..].iter().position(|&b| b == b'\n') {
         Some(n) => content_start + n + 1,
@@ -163,17 +191,53 @@ pub(crate) fn heredoc(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Erro
     };
     loop {
         let after_name = line + name.len();
-        if src[line..].starts_with(name)
-            && matches!(src.get(after_name), None | Some(b'\n' | b';' | b','))
-        {
-            let content = src[content_start..line - 1].to_vec();
-            return Ok((content, after_name));
+        if src[line..].starts_with(name) && ends_terminator(src, after_name) {
+            return Ok(Heredoc {
+                content: src[content_start..line - 1].to_vec(),
+                end: after_name,
+                expand: true,
+            });
+        }
+        if repeated {
+            let letters = src[line..].iter().take_while(|&&b| b == name[0]).count();
+            if letters > name.len() && ends_terminator(src, line + letters) {
+                let kept = letters - name.len() - 1;
+                return Ok(Heredoc {
+                    content: src[content_start..line + kept].to_vec(),
+                    end: line + letters,
+                    expand: true,
+                });
+            }
         }
         match src[line..].iter().position(|&b| b == b'\n') {
             Some(n) => line += n + 1,
             None => return Err(error(src, start, ErrorKind::UnterminatedHeredoc)),
         }
     }
+}
+
+/// A heredoc with an empty NAME (spec §6.3, *Quirk*), whose content starts at
+/// `src[content_start]`. The first content line and its LF are content. After that LF the
+/// heredoc ends at the first LF, `;` or `,`: the content is the text up to that byte without
+/// its last byte, and the input continues at the byte itself. Only a `$` in the first content
+/// line turns on variable expansion.
+fn empty_name_heredoc(src: &[u8], start: usize, content_start: usize) -> Result<Heredoc, Error> {
+    let unterminated = || error(src, start, ErrorKind::UnterminatedHeredoc);
+    let first_end = src[content_start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|n| content_start + n)
+        .ok_or_else(unterminated)?;
+    let end = src[first_end + 1..]
+        .iter()
+        .position(|&b| matches!(b, b'\n' | b';' | b','))
+        .map(|n| first_end + 1 + n)
+        .ok_or_else(unterminated)?;
+    Ok(Heredoc {
+        content: src[content_start..end - 1].to_vec(),
+        end,
+        expand: src[content_start..first_end].contains(&b'$'),
+    })
 }
 
 /// Decodes the backslash escapes of an unquoted value (spec §4.7, §4.8).
@@ -301,8 +365,54 @@ mod tests {
 
     fn hd(s: &str) -> Result<(String, usize), ErrorKind> {
         heredoc(s.as_bytes(), 0)
-            .map(|(b, end)| (String::from_utf8(b).unwrap(), end))
+            .map(|h| (String::from_utf8(h.content).unwrap(), h.end))
             .map_err(|e| e.kind().clone())
+    }
+
+    #[test]
+    fn heredoc_repeated_letter_name() {
+        // spec §6.3, *Quirk*: a longer line of NAME's one letter ends the heredoc.
+        assert_eq!(hd("<<A\nx\nAA\n").unwrap(), ("x\n".into(), 8));
+        assert_eq!(hd("<<A\nx\nAAA\n").unwrap(), ("x\nA".into(), 9));
+        assert_eq!(hd("<<EE\nx\nEEE\n").unwrap().0, "x\n");
+        assert_eq!(hd("<<AA\nx\nAAAAA\n").unwrap().0, "x\nAA");
+        assert_eq!(hd("<<A\nx\nAA;").unwrap(), ("x\n".into(), 8));
+        assert_eq!(hd("<<A\nx\nAA").unwrap().0, "x\n");
+        assert_eq!(hd("<<A\nx\nAAB\nA\n").unwrap().0, "x\nAAB");
+        // The first content line is still content; fewer letters are content; the quirk needs
+        // one repeated letter.
+        assert_eq!(hd("<<A\nAA\nx\nA\n").unwrap().0, "AA\nx");
+        assert_eq!(hd("<<AAA\nx\nA\nAAA\n").unwrap().0, "x\nA");
+        assert_eq!(hd("<<AB\nx\nABB\nAB\n").unwrap().0, "x\nABB");
+        assert_eq!(hd("<<A\nx\nAA}\n"), Err(ErrorKind::UnterminatedHeredoc));
+    }
+
+    #[test]
+    fn heredoc_empty_name() {
+        // spec §6.3, *Quirk*: after the first content line, the first LF, `;` or `,` ends the
+        // heredoc; its last byte is dropped and the byte itself is read next.
+        assert_eq!(hd("<<\nx\n\n").unwrap(), ("x".into(), 5));
+        assert_eq!(hd("<<\n\n\n").unwrap(), ("".into(), 4));
+        assert_eq!(hd("<<\nx\n;").unwrap(), ("x".into(), 5));
+        assert_eq!(hd("<<\na\nb\n").unwrap(), ("a\n".into(), 6));
+        assert_eq!(hd("<<\nab\ncd\n").unwrap().0, "ab\nc");
+        assert_eq!(hd("<<\nx\ny;\n").unwrap(), ("x\n".into(), 6));
+        assert_eq!(hd("<<\nx\ny,1").unwrap(), ("x\n".into(), 6));
+        assert_eq!(hd("<<\n;x\n\n").unwrap().0, ";x");
+        assert_eq!(hd("<<\nx;\n\n").unwrap().0, "x;");
+        assert_eq!(hd("<<\nx\ny}\n").unwrap().0, "x\ny");
+        for unterminated in ["<<\ncontent\n", "<<\nx\ny", "<<\n\n", "<<\nx"] {
+            assert_eq!(
+                hd(unterminated),
+                Err(ErrorKind::UnterminatedHeredoc),
+                "{unterminated:?}"
+            );
+        }
+        // Only a `$` in the first content line turns on variable expansion (§7.2).
+        let expand = |s: &str| heredoc(s.as_bytes(), 0).unwrap().expand;
+        assert!(!expand("<<\na\n${ABI}x\n"));
+        assert!(expand("<<\n$ABI\n${ABI}x\n"));
+        assert!(expand("<<EOD\na\nEOD\n"));
     }
 
     #[test]

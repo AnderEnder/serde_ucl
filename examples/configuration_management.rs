@@ -254,7 +254,7 @@ fn layered_environments() -> Result<(), Box<dyn std::error::Error>> {
                 assert_eq!(config.database.host, "prod-db.internal");
                 assert_eq!(config.database.replicas.len(), 2);
                 assert_eq!(config.logging.level, "warn");
-                assert_eq!(config.feature_flags["enhanced_logging"], true);
+                assert!(config.feature_flags["enhanced_logging"]);
             }
         }
         println!();
@@ -299,7 +299,10 @@ fn print_summary(config: &ApplicationConfig) {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "the example reads only some of the fields it deserializes"
+)]
 struct Server {
     host: String,
     port: u16,

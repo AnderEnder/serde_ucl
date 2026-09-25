@@ -169,6 +169,10 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
   suffix handlers, string post-processors, validation hooks), the configurable lexer limits,
   source-context error formatting, and the syntax extensions listed above (`//` comments,
   `\u{…}` escapes, `${NAME:-default}`).
+- Cargo features `std`, `save-comments` and `strict-unicode`, which had no effect: the crate
+  always uses the standard library, comments are saved with the parser flag
+  `ParserFlags::SAVE_COMMENTS`, and keys and strings are always checked to be UTF-8. Remove them
+  from `features` lists; `default-features = false` now turns off `fs` only.
 - Examples: `cpp_comments_demo`, `extensibility_demo` and `performance_comparison`. The other
   examples are rewritten on the new API.
 - Benches: `lexer_benchmarks`, `parser_benchmarks`, `zero_copy_benchmarks`,

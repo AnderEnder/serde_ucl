@@ -242,16 +242,6 @@ fn ends_bare_value(b: u8) -> bool {
     matches!(b, b'\n' | b'\r' | 0 | b',' | b';' | b'#' | b']' | b'}')
 }
 
-/// The values of `entry` that `.inherit` copies: all of them, or only the first when that is an
-/// object or an array (QUESTIONS.md #24).
-fn copied_slots(entry: &Entry) -> Vec<Slot> {
-    let slots = entry.slots();
-    match entry.first() {
-        UclValue::Object(_) | UclValue::Array(_) => slots[..1].to_vec(),
-        _ => slots.to_vec(),
-    }
-}
-
 /// The position of `name` in `object`: the key itself or, with `ignore_case`, a key that
 /// differs from it only in ASCII case (§12.1).
 pub(super) fn find_key(object: &UclObject, name: &str, ignore_case: bool) -> Option<usize> {
@@ -525,15 +515,6 @@ impl Core<'_, '_, '_, '_> {
             .filter(|n| !n.is_empty())
             .and_then(|n| find_key(root, n, key_lowercase))
             .ok_or_else(|| self.error(missing(), call.value_at))?;
-        let count = match root.get_index(source_index).map(|(_, e)| e.first()) {
-            Some(UclValue::Object(source)) => source.len(),
-            _ => {
-                return Err(self.error(
-                    ErrorKind::InheritSourceNotObject { name: name.clone() },
-                    call.value_at,
-                ));
-            }
-        };
         let source_key = root
             .get_index(source_index)
             .map(|(key, _)| key.clone())
@@ -542,26 +523,73 @@ impl Core<'_, '_, '_, '_> {
             key: source_key,
             index: 0,
         }];
+        let count = match self.value_at(&source) {
+            Some(UclValue::Object(object)) => object.len(),
+            _ => {
+                return Err(self.error(
+                    ErrorKind::InheritSourceNotObject { name: name.clone() },
+                    call.value_at,
+                ));
+            }
+        };
         for i in 0..count {
-            let Some((key, slots)) = self
-                .root
-                .as_object()
-                .and_then(|root| root.get_index(source_index))
-                .and_then(|(_, entry)| entry.first().as_object())
-                .and_then(|source| source.get_index(i))
-                .map(|(key, entry)| (key.clone(), copied_slots(entry)))
+            let Some(key) = self
+                .value_at(&source)
+                .and_then(UclValue::as_object)
+                .and_then(|object| object.get_index(i))
+                .map(|(key, _)| key.clone())
             else {
                 break;
             };
-            self.copy_entry(key, slots, replace, &source);
+            self.copy_entry(key, i, replace, &source);
         }
         Ok(())
     }
 
-    /// Adds one entry copied by `.inherit` from the object at `source` to the current object.
-    /// The copies keep the output facts of the values they copy (spec §10.1).
-    fn copy_entry(&mut self, key: String, slots: Vec<Slot>, replace: bool, source: &[PathSegment]) {
+    /// The values `.inherit` copies from entry `index` of the object at `source`, as they are
+    /// now, with any containers open inside them: all of them, or the first only when it is an
+    /// object or an array (QUESTIONS.md #24).
+    fn inherited_slots(&self, source: &[PathSegment], index: usize) -> Option<Vec<Slot>> {
+        let (key, entry) = self.value_at(source)?.as_object()?.get_index(index)?;
+        let count = match entry.first() {
+            UclValue::Object(_) | UclValue::Array(_) => 1,
+            _ => entry.len(),
+        };
+        let mut slots = Vec::with_capacity(count);
+        for (slot_index, slot) in entry.slots()[..count].iter().enumerate() {
+            let value = match slot.value() {
+                UclValue::Object(_) | UclValue::Array(_) => {
+                    let mut path = source.to_vec();
+                    path.push(PathSegment::Key {
+                        key: key.clone(),
+                        index: slot_index,
+                    });
+                    self.filled_copy(&path)?
+                }
+                scalar => scalar.clone(),
+            };
+            slots.push(slot.with_value(value));
+        }
+        Some(slots)
+    }
+
+    /// Adds entry `index`, whose key is `key`, of the object at `source`, copied by `.inherit`,
+    /// to the current object. The copies keep the output facts of the values they copy (spec
+    /// §10.1).
+    fn copy_entry(&mut self, key: String, index: usize, replace: bool, source: &[PathSegment]) {
+        let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
+        if key_lowercase && key.bytes().any(|b| b.is_ascii_uppercase()) {
+            self.uppercase_keys = true;
+        }
+        let ignore_case = key_lowercase && self.uppercase_keys;
+        let existing = self.find_current_key(&key, ignore_case);
+        if !replace && existing.is_some() {
+            return;
+        }
         // Taken before anything is copied: the source may contain the current object (§9.7).
+        let Some(slots) = self.inherited_slots(source, index) else {
+            return;
+        };
         let copied_facts: Option<Vec<_>> = self.facts.as_ref().map(|facts| {
             (0..slots.len())
                 .map(|index| {
@@ -575,16 +603,11 @@ impl Core<'_, '_, '_, '_> {
                 .collect()
         });
         let count = slots.len();
-        let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
-        if key_lowercase && key.bytes().any(|b| b.is_ascii_uppercase()) {
-            self.uppercase_keys = true;
-        }
-        let ignore_case = key_lowercase && self.uppercase_keys;
         let object = self
             .current()
             .as_object_mut()
             .expect("macros are read inside objects");
-        let (target, first_index) = match find_key(object, &key, ignore_case) {
+        let (target, first_index) = match existing {
             None => {
                 let mut slots = slots
                     .into_iter()
@@ -611,24 +634,22 @@ impl Core<'_, '_, '_, '_> {
         if copied_facts.iter().all(Vec::is_empty) && target == key {
             return;
         }
-        let Some(object_path) = self.top_path() else {
-            return;
-        };
-        let facts = self.facts.as_mut().expect("facts are recorded");
         for (offset, subtree) in copied_facts.into_iter().enumerate().take(count) {
-            let mut path = object_path.clone();
-            path.push(PathSegment::Key {
+            let Some(node) = self.facts_node_below(&[PathSegment::Key {
                 key: target.clone(),
                 index: first_index + offset,
-            });
+            }]) else {
+                return;
+            };
+            let facts = self.facts.as_mut().expect("facts are recorded");
             // The copy's key is spelled as the copied value's key was.
             let spelling = subtree
                 .iter()
                 .find(|(rest, _)| rest.is_empty())
                 .and_then(|(_, f)| f.key_spelling.clone())
                 .unwrap_or_else(|| key.clone());
-            facts.graft(&path, subtree);
-            facts.update(&path, |f| {
+            facts.graft(node, subtree);
+            facts.update(node, |f| {
                 f.key_spelling = (spelling != target).then_some(spelling)
             });
         }
@@ -669,6 +690,37 @@ mod tests {
             .get_all(key)
             .map(|v| v.as_integer().unwrap())
             .collect()
+    }
+
+    #[test]
+    fn inherit_copies_open_containers_as_they_are() {
+        // §9.7, *Quirk*: a source that holds the current object is copied with what the open
+        // containers have received so far, at any depth (oracle runs).
+        for (input, expected) in [
+            (
+                r#"o { x = 1; p { y = 2; e { z = 3; .inherit "o"; w = 4 } } }"#,
+                r#"{"o":{"x":1,"p":{"y":2,"e":{"z":3,"x":1,"p":{"y":2,"e":{"z":3,"x":1}},"w":4}}}}"#,
+            ),
+            (
+                r#"o { x = 1; p { y = 2; e { z = 3; .inherit(replace=true) "o" } } }"#,
+                r#"{"o":{"x":1,"p":{"y":2,"e":{"z":3,"x":1,"p":{"y":2,"e":{"z":3,"x":1}}}}}}"#,
+            ),
+            (
+                r#"o { x = 1; p [ { e { z = 3; .inherit "o" } } ] }"#,
+                r#"{"o":{"x":1,"p":[{"e":{"z":3,"x":1,"p":[{"e":{"z":3,"x":1}}]}}]}}"#,
+            ),
+            (
+                r#"o { a = 1; a { b = 2; .inherit "o" } }"#,
+                r#"{"o":{"a":[1,{"b":2,"a":[1,{"b":2}]}]}}"#,
+            ),
+            (
+                r#"o { a { b { c { .inherit "o" } } } }"#,
+                r#"{"o":{"a":{"b":{"c":{"a":{"b":{"c":{}}}}}}}}"#,
+            ),
+        ] {
+            let value = parse(input.as_bytes()).unwrap();
+            assert_eq!(crate::emit::to_json_compact(&value), expected, "{input}");
+        }
     }
 
     #[test]

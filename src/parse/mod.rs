@@ -47,13 +47,14 @@ mod builder;
 mod comments;
 mod core;
 mod error;
-mod facts;
+pub(crate) mod facts;
 mod glob;
 mod include;
 mod loader;
 mod macros;
 mod number;
 mod string;
+pub(crate) mod tree;
 mod vars;
 
 pub use builder::ParserBuilder;
@@ -66,6 +67,7 @@ pub use loader::{FileKind, Loader, MemoryLoader};
 use crate::error::Position;
 use crate::value::{DuplicateStrategy, ParserFlags, UclValue};
 use indexmap::IndexMap;
+use std::cell::OnceCell;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -148,7 +150,9 @@ pub struct Parser {
     loader: Box<dyn Loader>,
     base_dir: Option<PathBuf>,
     comments: Vec<Comment>,
-    attached: Vec<AttachedComments>,
+    attached: comments::CommentGroups,
+    /// [`Parser::attached_comments`], written out from `attached` when first asked for.
+    attached_paths: OnceCell<Vec<AttachedComments>>,
     facts: OutputFacts,
 }
 
@@ -189,7 +193,8 @@ impl Parser {
             loader,
             base_dir: None,
             comments: Vec::new(),
-            attached: Vec::new(),
+            attached: comments::CommentGroups::default(),
+            attached_paths: OnceCell::new(),
             facts: OutputFacts::new(),
         }
     }
@@ -287,7 +292,7 @@ impl Parser {
     /// silently, are attached to. A comment attached to a value that a later repeat of its key
     /// replaced (spec §8) is in [`Parser::comments`] but in none of these.
     pub fn attached_comments(&self) -> &[AttachedComments] {
-        &self.attached
+        self.attached_paths.get_or_init(|| self.attached.attached())
     }
 
     /// What the output formats need to know about the values of the last successful parse, or
@@ -414,7 +419,8 @@ impl Parser {
             variables.insert(name.clone(), value.clone());
         }
         self.comments.clear();
-        self.attached.clear();
+        self.attached = comments::CommentGroups::default();
+        self.attached_paths = OnceCell::new();
         self.facts.clear();
         let settings = core::Settings {
             flags: self.flags,
@@ -1041,7 +1047,6 @@ mod tests {
         let v = p.parse(b".include \"sub/part.conf\"").unwrap();
         assert_eq!(obj(&v)["b"], UclValue::Integer(5));
         // The same directory is `CURDIR` in macro argument lists (spec §9.2).
-        let mut loader = loader;
         loader.add_file(
             "/etc/app/args.conf",
             ".include(key=\"$CURDIR\") \"leaf.conf\"\n",

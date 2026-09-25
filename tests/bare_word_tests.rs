@@ -315,7 +315,7 @@ mod bare_word_tests {
             port = 8080
             mixed = abc123
             hex_like = 0xabc
-            float_like = 3.14
+            float_like = 2.75
             scientific = 1e10
         "#;
 
@@ -323,7 +323,7 @@ mod bare_word_tests {
 
         // Pure numbers should be parsed as numbers
         assert_eq!(result["port"], 8080);
-        assert_eq!(result["float_like"], 3.14);
+        assert_eq!(result["float_like"], 2.75);
 
         // Mixed alphanumeric should be strings
         assert_eq!(result["version"], "v1.2.3");

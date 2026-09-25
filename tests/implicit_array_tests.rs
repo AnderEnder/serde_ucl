@@ -96,7 +96,7 @@ mod implicit_array_tests {
             mixed_values = 42
             mixed_values = true
             mixed_values = null
-            mixed_values = 3.14
+            mixed_values = 2.75
         "#;
 
         let result: Value = from_str(config).expect("Should preserve mixed types in arrays");
@@ -108,7 +108,7 @@ mod implicit_array_tests {
         assert_eq!(values[1], 42);
         assert_eq!(values[2], true);
         assert_eq!(values[3], Value::Null);
-        assert_eq!(values[4], 3.14);
+        assert_eq!(values[4], 2.75);
     }
 
     #[test]

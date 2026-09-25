@@ -192,7 +192,10 @@ fn serde_targets() -> Result<(), UclError> {
     // A float that is not integral does not fit an integer target.
     #[derive(Debug, Deserialize)]
     struct Retries {
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "a deserialization target; the example shows the error"
+        )]
         retries: u32,
     }
     let err = from_str::<Retries>("retries = 2.5").unwrap_err();

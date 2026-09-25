@@ -1,9 +1,13 @@
 //! Document structure: entries, keys, named sections and containers (spec §1–§4, §8, §11).
 //!
 //! The parser keeps an explicit stack of the containers that are open, so nesting depth never
-//! grows the call stack. Containers are filled in place: an object or array is inserted into its
-//! parent (by the duplicate rules of §8) when its opening bracket is read, and later entries go
-//! straight into it. Each stack frame records how to reach its container from the one below.
+//! grows the call stack. An object or array is inserted into its parent (by the duplicate rules of
+//! §8) when its opening bracket is read. While it is open, its frame on the stack holds it, and an
+//! empty container of its kind keeps its place in the parent; when it closes, it goes back to
+//! that place. So later entries go straight into the container of the top frame, at the same cost
+//! at any depth. Each stack frame records where its container goes in the container of the frame
+//! below. The few readers that need the tree as parsed so far, open containers included
+//! (`.inherit`, §9.7), use [`Core::value_at`] and [`Core::filled_copy`].
 //!
 //! Input units (§9.4): an included file is parsed by a [`Core`] of its own that takes over the
 //! container stack, the tree and the saved comments of the unit that includes it, and hands them
@@ -11,19 +15,20 @@
 //! containers the including unit opened, and leaves section objects open for it (§9.4, *Where
 //! the entries go*).
 
-use super::comments::{Notes, ValuePath};
+use super::comments::{CommentGroups, Notes, PathRef, ValuePath};
 use super::error::position_at;
-use super::facts::OutputFacts;
+use super::facts::{self, NodeId, OutputFacts};
 use super::include::Includes;
-use super::macros::find_key;
 use super::number::{self, Number};
 use super::string;
 use super::vars::Expander;
-use super::{AttachedComments, Comment, Error, ErrorKind, MAX_NESTING, PathSegment};
+use super::{Comment, Error, ErrorKind, MAX_NESTING, PathSegment};
 use crate::emit::key_needs_quoting;
 use crate::value::{
     DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclObject, UclValue,
 };
+use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// The settings of one input unit.
@@ -37,7 +42,7 @@ pub(crate) struct Settings {
 /// Where saved comments go (spec §12.5).
 pub(crate) struct CommentSink<'c> {
     pub(crate) comments: &'c mut Vec<Comment>,
-    pub(crate) attached: &'c mut Vec<AttachedComments>,
+    pub(crate) attached: &'c mut CommentGroups,
 }
 
 /// Parses a whole document into its root value.
@@ -99,9 +104,14 @@ fn parse_unit(
         recent: None,
         first_key_shares: false,
         section_shares: false,
+        bracket_scan: (usize::MAX, 0),
     };
     let result = core.run();
     let kept = result.as_ref().is_ok() || result.as_ref().is_err_and(Error::is_stopped);
+    if kept {
+        // After a silent stop, the containers still open go back into the partial tree.
+        core.close_all_frames();
+    }
     if let (Some(sink), Some(facts)) = (facts_sink, core.facts.take())
         && kept
     {
@@ -252,6 +262,24 @@ impl Step {
         self.try_enter(value)
             .expect("an open container stays where it was inserted")
     }
+
+    /// The steps of `path` in turn.
+    fn path(path: &[PathSegment]) -> Step {
+        Step::Path(path.iter().map(Step::from_segment).collect())
+    }
+}
+
+/// The value at `path` inside `value`.
+fn get<'v>(value: &'v UclValue, path: &[PathSegment]) -> Option<&'v UclValue> {
+    path.iter().try_fold(value, |value, segment| match segment {
+        PathSegment::Key { key, index } => value
+            .as_object()?
+            .entry(key)?
+            .slots()
+            .get(*index)
+            .map(Slot::value),
+        PathSegment::Index(index) => value.as_array()?.get(*index),
+    })
 }
 
 /// The offset after the `*/` that ends the block comment at `start` (§2.3), or `None` when it is
@@ -313,10 +341,11 @@ fn only_comments(src: &[u8], from: usize) -> bool {
 /// Where a frame's container lives.
 #[derive(Debug)]
 enum Home {
-    /// It is the root value.
+    /// It is the root value, [`Core::root`].
     Root,
-    /// It is inside the container of the frame below.
-    Attached(Step),
+    /// It belongs at the step inside the container of the frame below, where an empty container
+    /// of its kind keeps its place while the frame holds it. It goes back there when it closes.
+    Attached(Step, UclValue),
     /// It is parsed and then discarded, because a value with a higher priority exists (§8.3).
     Detached(UclValue),
 }
@@ -328,33 +357,24 @@ struct Frame {
     home: Home,
     /// No element or entry has been read into the container yet.
     fresh: bool,
-    /// The container's path from the root, kept only when comments are saved; `None` also for a
-    /// detached container.
-    path: Option<ValuePath>,
+    /// The container's path from the root, set when first needed ([`Core::frame_path`]); `None`
+    /// in it for a container that is not part of the result.
+    path: OnceCell<Option<PathRef>>,
+    /// The container's node in the output facts, set when first needed ([`Core::facts_node`]).
+    facts_node: OnceCell<Option<NodeId>>,
+    /// For an object, the index of each key by its ASCII lowercase form, for finding keys
+    /// regardless of case (§12.1): built when first needed, for the entries up to the count
+    /// kept with it, and extended as entries are added ([`Core::find_current_key`]).
+    lowercase_keys: Option<(usize, HashMap<String, usize>)>,
     /// The input unit that opened the container: 0 for the main document, `n` for a file
     /// included `n` levels deep (§9.4).
     unit: usize,
 }
 
-/// The container of the top frame.
-fn resolve<'v>(root: &'v mut UclValue, frames: &'v mut [Frame]) -> &'v mut UclValue {
-    let base = frames
-        .iter()
-        .rposition(|f| !matches!(f.home, Home::Attached(_)))
-        .expect("the root frame is at the bottom");
-    let (below, above) = frames.split_at_mut(base + 1);
-    let mut current = match &mut below[base].home {
-        Home::Root => root,
-        Home::Detached(value) => value,
-        Home::Attached(_) => unreachable!(),
-    };
-    for frame in above.iter() {
-        let Home::Attached(step) = &frame.home else {
-            unreachable!("only the base frame is not attached")
-        };
-        current = step.enter(current);
-    }
-    current
+/// Where an object is in the saved comments and the output facts ([`Core::object_places`]).
+struct Places {
+    path: Option<PathRef>,
+    node: Option<NodeId>,
 }
 
 /// An entry as it was before an insertion, for keeping saved comments with their values.
@@ -471,12 +491,15 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     outer_run: bool,
     /// The value created most recently (§12.5), kept while a name run is in effect in this unit
     /// or an including one: its path from the root, or `None` when it is not part of the result.
-    recent: Option<ValuePath>,
+    recent: Option<PathRef>,
     /// This included unit's leading `{` took over a brace (§9.4), and no key has been read yet.
     first_key_shares: bool,
     /// The key being read is that first key: if it starts a section path, the object of its
     /// first name gets a share of the taken-over brace.
     section_shares: bool,
+    /// The last scan of [`Core::line_has_bracket`]: from the first offset, the first LF, CR,
+    /// `,`, `;`, `{` or `[` is at the second (the input's length if there is none).
+    bracket_scan: (usize, usize),
 }
 
 /// The container an included file's contents go into when it is nested under a key (§9.4,
@@ -626,12 +649,23 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// True if the rest of the current line, up to LF, CR, `,` or `;`, holds `{` or `[`
-    /// anywhere (§3.4).
-    fn line_has_bracket(&self) -> bool {
-        self.src[self.pos..]
-            .iter()
-            .take_while(|&&b| !matches!(b, b'\n' | b'\r' | b',' | b';'))
-            .any(|&b| b == b'{' || b == b'[')
+    /// anywhere (§3.4): the first of these six bytes from the current position is a bracket.
+    ///
+    /// The scan's result holds for every position up to the byte it found, so the names of a
+    /// long section path on one line are not scanned again for each name.
+    fn line_has_bracket(&mut self) -> bool {
+        let (from, found) = self.bracket_scan;
+        let found = if from <= self.pos && self.pos <= found {
+            found
+        } else {
+            let found = self.src[self.pos..]
+                .iter()
+                .position(|&b| matches!(b, b'\n' | b'\r' | b',' | b';' | b'{' | b'['))
+                .map_or(self.src.len(), |n| self.pos + n);
+            self.bracket_scan = (self.pos, found);
+            found
+        };
+        matches!(self.src.get(found), Some(b'{' | b'['))
     }
 
     // ----- containers ----------------------------------------------------------------------
@@ -642,29 +676,184 @@ impl Core<'_, '_, '_, '_> {
 
     /// The container of the top frame.
     pub(super) fn current(&mut self) -> &mut UclValue {
-        resolve(&mut self.root, &mut self.frames)
+        match &mut self.frames.last_mut().expect("a container is open").home {
+            Home::Root => &mut self.root,
+            Home::Attached(_, value) | Home::Detached(value) => value,
+        }
     }
 
+    /// The container of frame `index`.
+    fn container(&self, index: usize) -> &UclValue {
+        match &self.frames[index].home {
+            Home::Root => &self.root,
+            Home::Attached(_, value) | Home::Detached(value) => value,
+        }
+    }
+
+    /// Pushes a frame for a container. `path` is its path from the root when the caller has it
+    /// already; otherwise [`Core::frame_path`] works it out when it is needed.
     fn push_frame(
         &mut self,
         kind: Kind,
         close: Close,
         home: Home,
-        path: Option<ValuePath>,
+        path: Option<PathRef>,
         at: usize,
     ) -> Result<(), Error> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
+        }
+        let cell = OnceCell::new();
+        if let Some(path) = path {
+            let _ = cell.set(Some(path));
         }
         self.frames.push(Frame {
             kind,
             close,
             home,
             fresh: true,
-            path,
+            path: cell,
+            facts_node: OnceCell::new(),
+            lowercase_keys: None,
             unit: self.unit,
         });
         Ok(())
+    }
+
+    /// Takes the container at `step` inside the current container out of the tree for a new
+    /// frame, leaving an empty container of its kind in its place.
+    fn take_out(&mut self, step: Step, kind: Kind) -> Home {
+        let value = std::mem::replace(step.enter(self.current()), Self::empty(kind));
+        Home::Attached(step, value)
+    }
+
+    /// Pops the top frame. An attached container goes back to its place in the container of the
+    /// frame below.
+    fn pop_frame(&mut self) {
+        let frame = self.frames.pop().expect("a container is open");
+        if let Home::Attached(step, value) = frame.home {
+            let place = step.enter(self.current());
+            debug_assert!(
+                matches!(place, UclValue::Object(o) if o.is_empty())
+                    || matches!(place, UclValue::Array(a) if a.is_empty()),
+                "only the top frame's container changes"
+            );
+            *place = value;
+        }
+    }
+
+    /// Pops every frame: the end of the document, or a silent stop (§9.4).
+    fn close_all_frames(&mut self) {
+        while !self.frames.is_empty() {
+            self.pop_frame();
+        }
+    }
+
+    /// The position of `name` in the current object: the key itself or, with `ignore_case`, a key
+    /// that differs from it only in ASCII case (§12.1), as `macros::find_key` finds it. Keys are
+    /// only ever added to an object while it is parsed, or renamed to a spelling that differs
+    /// only in case, so the frame's index of lowercase keys stays valid as it is extended.
+    pub(super) fn find_current_key(&mut self, name: &str, ignore_case: bool) -> Option<usize> {
+        let frame = self.frames.last_mut().expect("a container is open");
+        let object = match &frame.home {
+            Home::Root => &self.root,
+            Home::Attached(_, value) | Home::Detached(value) => value,
+        }
+        .as_object()?;
+        if let Some(index) = object.index_of(name) {
+            return Some(index);
+        }
+        if !ignore_case {
+            return None;
+        }
+        let (indexed, keys) = frame.lowercase_keys.get_or_insert_with(Default::default);
+        debug_assert!(*indexed <= object.len(), "entries are never removed");
+        for index in *indexed..object.len() {
+            let (key, _) = object.get_index(index).expect("in range");
+            keys.entry(key.to_ascii_lowercase()).or_insert(index);
+        }
+        *indexed = object.len();
+        keys.get(&name.to_ascii_lowercase()).copied()
+    }
+
+    /// Where the value at `path` from the root is while containers are open: inside the
+    /// container of the returned frame, at the returned rest of the path.
+    fn locate<'p>(&self, path: &'p [PathSegment]) -> (usize, &'p [PathSegment]) {
+        let mut frame = 0;
+        let mut rest = path;
+        while let Some(Frame {
+            home: Home::Attached(step, _),
+            ..
+        }) = self.frames.get(frame + 1)
+        {
+            match rest.strip_prefix(step.segments().as_slice()) {
+                Some(inner) => {
+                    frame += 1;
+                    rest = inner;
+                }
+                None => break,
+            }
+        }
+        (frame, rest)
+    }
+
+    /// The value at `path` from the root as parsed so far. An open container is found in its
+    /// frame, not at the empty container that keeps its place; containers open inside it are
+    /// still empty in what is returned (see [`Core::filled_copy`]).
+    pub(super) fn value_at(&self, path: &[PathSegment]) -> Option<&UclValue> {
+        if self.frames.is_empty() {
+            return get(&self.root, path);
+        }
+        let (frame, rest) = self.locate(path);
+        get(self.container(frame), rest)
+    }
+
+    /// A copy of the value at `path` from the root as parsed so far, with the containers that
+    /// are open inside it, as they are now (§9.7, *Quirk*).
+    pub(super) fn filled_copy(&self, path: &[PathSegment]) -> Option<UclValue> {
+        if self.frames.is_empty() {
+            return get(&self.root, path).cloned();
+        }
+        let (frame, rest) = self.locate(path);
+        let mut copy = get(self.container(frame), rest)?.clone();
+        // The next frame's container, if it lies inside the value, and the chain of attached
+        // frames above it.
+        let Some(Frame {
+            home: Home::Attached(step, _),
+            ..
+        }) = self.frames.get(frame + 1)
+        else {
+            return Some(copy);
+        };
+        let segments = step.segments();
+        let Some(inner) = segments.strip_prefix(rest) else {
+            return Some(copy);
+        };
+        let mut top = frame + 1;
+        while matches!(
+            self.frames.get(top + 1),
+            Some(Frame {
+                home: Home::Attached(..),
+                ..
+            })
+        ) {
+            top += 1;
+        }
+        let mut filled = self.container(top).clone();
+        for below in (frame + 1..top).rev() {
+            let mut outer = self.container(below).clone();
+            let Home::Attached(step, _) = &self.frames[below + 1].home else {
+                unreachable!("the frames of the chain are attached")
+            };
+            *step.enter(&mut outer) = filled;
+            filled = outer;
+        }
+        if inner.is_empty() {
+            copy = filled;
+        } else {
+            *Step::path(inner).enter(&mut copy) = filled;
+        }
+        Some(copy)
     }
 
     fn empty(kind: Kind) -> UclValue {
@@ -685,27 +874,91 @@ impl Core<'_, '_, '_, '_> {
         self.notes.is_some() || self.tracking()
     }
 
-    /// The path of the top container from the root, or `None` when it is not part of the
-    /// result. Frames record their paths only when comments are saved; otherwise the path is
-    /// built from the frames' steps.
-    pub(super) fn top_path(&self) -> Option<ValuePath> {
-        if self.notes.is_some() {
-            return self.top().path.clone();
-        }
-        let mut path = Vec::new();
-        for frame in &self.frames {
-            match &frame.home {
-                Home::Root => {}
-                Home::Detached(_) => return None,
-                Home::Attached(step) => path.extend(step.segments()),
+    /// The path from the root of frame `index`'s container, or `None` when it is not part of the
+    /// result. Each frame's path is worked out once, from the path of the frame below and its
+    /// step, when it is first needed.
+    fn frame_path(&self, index: usize) -> Option<PathRef> {
+        let mut known = index;
+        while self.frames[known].path.get().is_none() {
+            match &self.frames[known].home {
+                Home::Root => {
+                    let _ = self.frames[known].path.set(Some(PathRef::root()));
+                }
+                Home::Detached(_) => {
+                    let _ = self.frames[known].path.set(None);
+                }
+                Home::Attached(..) => known -= 1,
             }
         }
-        Some(path)
+        for above in known + 1..=index {
+            let Home::Attached(step, _) = &self.frames[above].home else {
+                unreachable!("a frame whose path is not known yet is attached")
+            };
+            let path = self.frames[above - 1]
+                .path
+                .get()
+                .expect("set just before")
+                .as_ref()
+                .map(|below| below.join(step.segments()));
+            let _ = self.frames[above].path.set(path);
+        }
+        self.frames[index].path.get().cloned().flatten()
+    }
+
+    /// The node of the top container in the output facts, or `None` when facts are not recorded
+    /// or the container is not part of the result. Each frame's node is found or added once, from
+    /// the node of the frame below and its step, when it is first needed.
+    pub(super) fn facts_node(&mut self) -> Option<NodeId> {
+        let facts = self.facts.as_mut()?;
+        let index = self.frames.len() - 1;
+        let mut known = index;
+        while self.frames[known].facts_node.get().is_none() {
+            match &self.frames[known].home {
+                Home::Root => {
+                    let _ = self.frames[known].facts_node.set(Some(facts::ROOT));
+                }
+                Home::Detached(_) => {
+                    let _ = self.frames[known].facts_node.set(None);
+                }
+                Home::Attached(..) => known -= 1,
+            }
+        }
+        for above in known + 1..=index {
+            let Home::Attached(step, _) = &self.frames[above].home else {
+                unreachable!("a frame whose node is not known yet is attached")
+            };
+            let node = self.frames[above - 1]
+                .facts_node
+                .get()
+                .expect("set just before")
+                .map(|below| facts.descend_or_insert(below, &step.segments()));
+            let _ = self.frames[above].facts_node.set(node);
+        }
+        self.frames[index].facts_node.get().copied().flatten()
+    }
+
+    /// The node in the output facts of the value at `segment` in the top container, added if
+    /// missing; `None` as for [`Core::facts_node`].
+    pub(super) fn facts_node_below(&mut self, segments: &[PathSegment]) -> Option<NodeId> {
+        let object = self.facts_node()?;
+        let facts = self.facts.as_mut().expect("facts are recorded");
+        Some(facts.descend_or_insert(object, segments))
+    }
+
+    /// The path of the top container from the root, or `None` when it is not part of the
+    /// result.
+    fn top_node(&self) -> Option<PathRef> {
+        self.frame_path(self.frames.len() - 1)
+    }
+
+    /// [`Core::top_node`] written out.
+    pub(super) fn top_path(&self) -> Option<ValuePath> {
+        self.top_node().map(|path| path.to_vec())
     }
 
     /// The path of a value just placed in the current object under `key`, when values need
     /// paths and the value is part of the result.
-    fn placed_path(&self, key: &str, placement: Placement) -> Option<ValuePath> {
+    fn placed_path(&self, key: &str, placement: Placement) -> Option<PathRef> {
         if !self.wants_paths() {
             return None;
         }
@@ -724,14 +977,12 @@ impl Core<'_, '_, '_, '_> {
             },
             Placement::Dropped => return None,
         };
-        let mut path = self.top_path()?;
-        path.extend(step.segments());
-        Some(path)
+        Some(self.top_node()?.join(step.segments()))
     }
 
     /// A value was created at `path`: pending comments attach to it (§12.5), and it is the
     /// value created most recently.
-    fn created(&mut self, path: Option<ValuePath>) {
+    fn created(&mut self, path: Option<PathRef>) {
         if self.tracking() {
             self.recent.clone_from(&path);
         }
@@ -741,7 +992,7 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// Makes `path` the value created most recently, without attaching comments.
-    fn made_recent(&mut self, path: Option<ValuePath>) {
+    fn made_recent(&mut self, path: Option<PathRef>) {
         if self.tracking() {
             self.recent.clone_from(&path);
         }
@@ -895,15 +1146,14 @@ impl Core<'_, '_, '_, '_> {
         if !has_value_facts && !has_key_facts && !stale {
             return;
         }
-        let Some(mut path) = self.top_path() else {
+        let Some(node) = self.facts_node_below(&step.segments()) else {
             return;
         };
-        path.extend(step.segments());
         let facts = self.facts.as_mut().expect("facts are recorded");
         if placed.in_place {
-            facts.clear_below(&path);
+            facts.clear_below(node);
         }
-        facts.update(&path, |f| {
+        facts.update(node, |f| {
             f.single_quoted = placed.origin.single_quoted;
             f.multiline = placed.origin.multiline;
             f.normal_layout = placed.normal_layout;
@@ -921,35 +1171,50 @@ impl Core<'_, '_, '_, '_> {
         if self.facts.is_none() || !key_needs_quoting(key) {
             return;
         }
-        let Some(mut path) = self.top_path() else {
-            return;
-        };
-        path.push(PathSegment::Key {
+        let segment = PathSegment::Key {
             key: key.to_owned(),
             index: 0,
-        });
+        };
+        let Some(node) = self.facts_node_below(&[segment]) else {
+            return;
+        };
         let facts = self.facts.as_mut().expect("checked above");
-        facts.update(&path, |f| f.key_quoted = Some(false));
+        facts.update(node, |f| f.key_quoted = Some(false));
+    }
+
+    /// Where the current object is for saved comments and output facts: its path when comments
+    /// are saved, and its node when facts are recorded. Both are `None` when it is not part of
+    /// the result.
+    fn object_places(&mut self) -> Places {
+        let path = if self.notes.is_some() {
+            self.top_node()
+        } else {
+            None
+        };
+        Places {
+            path,
+            node: self.facts_node(),
+        }
     }
 
     /// Values of entry `key` of the object at `object` were replaced: value `slot`, or all.
-    fn replaced_values(&mut self, object: &[PathSegment], key: &str, slot: Option<usize>) {
-        if let Some(notes) = &mut self.notes {
-            notes.replaced(object, key, slot);
+    fn replaced_values(&mut self, object: &Places, key: &str, slot: Option<usize>) {
+        if let (Some(notes), Some(path)) = (&mut self.notes, &object.path) {
+            notes.replaced(path, key, slot);
         }
-        if let Some(facts) = &mut self.facts {
-            facts.replaced(object, key, slot);
+        if let (Some(facts), Some(node)) = (&mut self.facts, object.node) {
+            facts.replaced(node, key, slot);
         }
     }
 
     /// Entry `key` of the object at `object` became a `NO_IMPLICIT_ARRAYS` collection of its
     /// first `count` values.
-    fn collected_values(&mut self, object: &[PathSegment], key: &str, count: usize) {
-        if let Some(notes) = &mut self.notes {
-            notes.collected(object, key, count);
+    fn collected_values(&mut self, object: &Places, key: &str, count: usize) {
+        if let (Some(notes), Some(path)) = (&mut self.notes, &object.path) {
+            notes.collected(path, key, count);
         }
-        if let Some(facts) = &mut self.facts {
-            facts.collected(object, key, count);
+        if let (Some(facts), Some(node)) = (&mut self.facts, object.node) {
+            facts.collected(node, key, count);
         }
     }
 
@@ -969,17 +1234,16 @@ impl Core<'_, '_, '_, '_> {
         if !self.uppercase_keys {
             return None;
         }
-        let object = self
+        let index = self.find_current_key(&key.name, true)?;
+        let (existing, _) = self
             .current()
             .as_object()
-            .expect("entries are parsed inside objects");
-        if object.contains_key(&key.name) {
+            .and_then(|object| object.get_index(index))
+            .expect("the key was just found");
+        if *existing == key.name {
             return None;
         }
-        let existing = object
-            .keys()
-            .find(|k| k.eq_ignore_ascii_case(&key.name))?
-            .clone();
+        let existing = existing.clone();
         Some(std::mem::replace(&mut key.name, existing))
     }
 
@@ -1001,15 +1265,17 @@ impl Core<'_, '_, '_, '_> {
         else {
             return;
         };
-        let Some(object) = self.top_path() else {
-            return;
-        };
+        // The object's path is written out only when values moved.
         match placement {
             Placement::Slot(slot) if slot == len && after == len + 1 => {}
             Placement::Slot(_) if in_place => {}
-            Placement::Slot(_) if after == 1 => self.replaced_values(&object, key, None),
-            Placement::Slot(slot) => self.replaced_values(&object, key, Some(slot)),
+            Placement::Slot(slot) => {
+                let object = self.object_places();
+                let slot = (after != 1).then_some(slot);
+                self.replaced_values(&object, key, slot);
+            }
             Placement::Collected(_) if !collected => {
+                let object = self.object_places();
                 // Only the first value goes into the collection (QUESTIONS.md #25).
                 for slot in 1..len {
                     self.replaced_values(&object, key, Some(slot));
@@ -1028,19 +1294,28 @@ impl Core<'_, '_, '_, '_> {
         let placement = self.insert(&mut key, Self::empty(kind), Origin::default())?;
         let path = self.placed_path(&key.name, placement);
         let home = match placement {
-            Placement::Slot(slot) => Home::Attached(Step::Entry {
-                key: key.name,
-                slot,
-            }),
-            Placement::Collected(index) => Home::Attached(Step::Collected {
-                key: key.name,
-                index,
-            }),
+            Placement::Slot(slot) => self.take_out(
+                Step::Entry {
+                    key: key.name,
+                    slot,
+                },
+                kind,
+            ),
+            Placement::Collected(index) => self.take_out(
+                Step::Collected {
+                    key: key.name,
+                    index,
+                },
+                kind,
+            ),
             // Merged into the entry's first value, a container of the same kind (§8.4).
-            Placement::Merged => Home::Attached(Step::Entry {
-                key: key.name,
-                slot: 0,
-            }),
+            Placement::Merged => self.take_out(
+                Step::Entry {
+                    key: key.name,
+                    slot: 0,
+                },
+                kind,
+            ),
             Placement::Dropped => Home::Detached(Self::empty(kind)),
         };
         self.created(path.clone());
@@ -1056,7 +1331,8 @@ impl Core<'_, '_, '_, '_> {
         let index = self.push_element(Self::empty(kind));
         let path = self.element_path(index);
         self.created(path.clone());
-        self.push_frame(kind, close, Home::Attached(Step::Element(index)), path, at)
+        let home = Home::Attached(Step::Element(index), Self::empty(kind));
+        self.push_frame(kind, close, home, path, at)
     }
 
     /// Appends `value` to the current array and returns its index.
@@ -1069,13 +1345,11 @@ impl Core<'_, '_, '_, '_> {
         array.len() - 1
     }
 
-    fn element_path(&self, index: usize) -> Option<ValuePath> {
+    fn element_path(&self, index: usize) -> Option<PathRef> {
         if !self.wants_paths() {
             return None;
         }
-        let mut path = self.top_path()?;
-        path.push(PathSegment::Index(index));
-        Some(path)
+        Some(self.top_node()?.child(PathSegment::Index(index)))
     }
 
     /// Closes the top container after its bracket, with the section objects around it (§3.4).
@@ -1083,7 +1357,7 @@ impl Core<'_, '_, '_, '_> {
         if let Some(notes) = &mut self.notes {
             notes.trailing();
         }
-        self.frames.pop();
+        self.pop_frame();
         self.close_sections()
     }
 
@@ -1101,11 +1375,11 @@ impl Core<'_, '_, '_, '_> {
             .is_some_and(|f| f.close.closes_with_inner())
         {
             let path = if self.wants_paths() {
-                self.top_path()
+                self.top_node()
             } else {
                 None
             };
-            self.frames.pop();
+            self.pop_frame();
             outermost = Some(path);
         }
         if let Some(path) = outermost {
@@ -1142,8 +1416,7 @@ impl Core<'_, '_, '_, '_> {
             self.pos += 1;
         }
         self.root = Self::empty(kind);
-        let path = self.notes.as_ref().map(|_| Vec::new());
-        self.push_frame(kind, close, Home::Root, path, self.pos)?;
+        self.push_frame(kind, close, Home::Root, Some(PathRef::root()), self.pos)?;
         if close == Close::Eof {
             // Where the first key of an unbraced root could start (§2.2, *Quirk*).
             self.skip_space_checking_hash(after_space)?;
@@ -1190,6 +1463,7 @@ impl Core<'_, '_, '_, '_> {
             recent: self.recent.take(),
             first_key_shares: false,
             section_shares: false,
+            bracket_scan: (usize::MAX, 0),
         };
         let result = inner.run_included();
         self.root = inner.root;
@@ -1262,7 +1536,7 @@ impl Core<'_, '_, '_, '_> {
         if let Some(notes) = &mut self.notes {
             notes.trailing();
         }
-        self.frames.clear();
+        self.close_all_frames();
         Ok(())
     }
 
@@ -1294,7 +1568,9 @@ impl Core<'_, '_, '_, '_> {
     /// Closes the containers above the first `len`, without any check: the end of a file
     /// nested under a key (§9.4).
     pub(super) fn close_containers_above(&mut self, len: usize) {
-        self.frames.truncate(len);
+        while self.frames.len() > len {
+            self.pop_frame();
+        }
     }
 
     /// Opens the container that an included file nested under a key goes into, in the current
@@ -1326,19 +1602,11 @@ impl Core<'_, '_, '_, '_> {
             Close::IncludedBrace(_) => Close::IncludedBrace(Revert::Open),
             _ => Close::Eof,
         };
+        let found = self.find_current_key(&target.key, key_lowercase);
         let object = self
             .current()
             .as_object_mut()
             .expect("macros are read inside objects");
-        let found = object.index_of(&target.key).or_else(|| {
-            key_lowercase
-                .then(|| {
-                    object
-                        .keys()
-                        .position(|k| k.eq_ignore_ascii_case(&target.key))
-                })
-                .flatten()
-        });
         let empty_object = || UclValue::Object(UclObject::new());
         // Where the array frame (if any) and the object frame go.
         // The number of values of an entry whose first value moves into a new array.
@@ -1383,59 +1651,43 @@ impl Core<'_, '_, '_, '_> {
         let tracked = self.notes.is_some() || self.facts.as_ref().is_some_and(|f| !f.is_empty());
         if let Some(len) = moved_from
             && tracked
-            && let Some(object_path) = self.top_path()
         {
             // Saved comments and output facts go with the first value into the array, and those
             // of the other values are lost with them (§12.5; oracle runs).
+            let object = self.object_places();
             for slot in 1..len {
-                self.replaced_values(&object_path, &key, Some(slot));
+                self.replaced_values(&object, &key, Some(slot));
             }
-            self.collected_values(&object_path, &key, 1);
+            self.collected_values(&object, &key, 1);
         }
         if (found.is_none() || moved_from.is_some())
             && self.facts.is_some()
             && key_needs_quoting(&key)
-            && let Some(mut path) = self.top_path()
+            && let Some(node) = self.facts_node_below(&[PathSegment::Key {
+                key: key.clone(),
+                index: 0,
+            }])
         {
             // A key that `.include` creates never needs quoting (spec §10.1, *Quirk*); nor does
             // the key of an array it creates in place of the key's values (oracle runs,
             // QUESTIONS.md #51).
-            path.push(PathSegment::Key {
-                key: key.clone(),
-                index: 0,
-            });
             let facts = self.facts.as_mut().expect("checked above");
-            facts.update(&path, |f| f.key_quoted = Some(false));
+            facts.update(node, |f| f.key_quoted = Some(false));
         }
         let entry_path = self.placed_path(&key, Placement::Slot(0));
         let entry_step = Step::Entry { key, slot: 0 };
         let path = match element {
             None => {
-                self.push_frame(
-                    Kind::Object,
-                    inner_close,
-                    Home::Attached(entry_step),
-                    entry_path.clone(),
-                    at,
-                )?;
+                let home = self.take_out(entry_step, Kind::Object);
+                self.push_frame(Kind::Object, inner_close, home, entry_path.clone(), at)?;
                 entry_path
             }
             Some(index) => {
-                self.push_frame(
-                    Kind::Array,
-                    Close::Eof,
-                    Home::Attached(entry_step),
-                    entry_path,
-                    at,
-                )?;
+                let home = self.take_out(entry_step, Kind::Array);
+                self.push_frame(Kind::Array, Close::Eof, home, entry_path, at)?;
                 let path = self.element_path(index);
-                self.push_frame(
-                    Kind::Object,
-                    inner_close,
-                    Home::Attached(Step::Element(index)),
-                    path.clone(),
-                    at,
-                )?;
+                let home = self.take_out(Step::Element(index), Kind::Object);
+                self.push_frame(Kind::Object, inner_close, home, path.clone(), at)?;
                 path
             }
         };
@@ -1553,22 +1805,22 @@ impl Core<'_, '_, '_, '_> {
         };
         let (home, path) = match self.recent.clone() {
             None => (Home::Detached(Self::empty(Kind::Object)), None),
-            Some(path) => {
+            Some(recent) => {
+                let path = recent.to_vec();
                 let Some(rest) = path.strip_prefix(top.as_slice()) else {
                     return Ok(());
                 };
                 if rest.is_empty() {
                     return Ok(());
                 }
-                let step = Step::Path(rest.iter().map(Step::from_segment).collect());
+                let step = Step::path(rest);
                 if !step
                     .try_enter(self.current())
                     .is_some_and(|v| v.is_object())
                 {
                     return Ok(());
                 }
-                let path = self.notes.is_some().then_some(path);
-                (Home::Attached(step), path)
+                (self.take_out(step, Kind::Object), Some(recent))
             }
         };
         self.push_frame(Kind::Object, Close::LeftOpen, home, path, at)
@@ -1648,11 +1900,10 @@ impl Core<'_, '_, '_, '_> {
                 let index = self.push_element(value);
                 if origin.has_string_facts()
                     && self.facts.is_some()
-                    && let Some(mut path) = self.top_path()
+                    && let Some(node) = self.facts_node_below(&[PathSegment::Index(index)])
                 {
-                    path.push(PathSegment::Index(index));
                     let facts = self.facts.as_mut().expect("checked above");
-                    facts.update(&path, |f| {
+                    facts.update(node, |f| {
                         f.single_quoted = origin.single_quoted;
                         f.multiline = origin.multiline;
                     });
@@ -1825,7 +2076,7 @@ impl Core<'_, '_, '_, '_> {
     /// recently.
     fn macro_after_name(&mut self) -> Result<(), Error> {
         self.name_run = true;
-        self.recent = self.top_path();
+        self.recent = self.top_node();
         self.macro_entry()
     }
 
@@ -1972,9 +2223,8 @@ impl Core<'_, '_, '_, '_> {
         }
         let ignore_case = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE)
             && (self.uppercase_keys || key.name.bytes().any(|b| b.is_ascii_uppercase()));
-        let object = self.current().as_object()?;
-        let index = find_key(object, &key.name, ignore_case)?;
-        let (name, entry) = object.get_index(index)?;
+        let index = self.find_current_key(&key.name, ignore_case)?;
+        let (name, entry) = self.current().as_object()?.get_index(index)?;
         (entry.first().is_object() || entry.first().is_array()).then(|| name.clone())
     }
 
@@ -2023,9 +2273,13 @@ impl Core<'_, '_, '_, '_> {
                 Ok((UclValue::String(self.text(bytes, at)?), true, origin))
             }
             Some(b'<') if string::heredoc_opener(self.src, at).is_some() => {
-                let (bytes, end) = string::heredoc(self.src, at)?;
-                self.pos = end;
-                let bytes = self.expander.expand(bytes);
+                let heredoc = string::heredoc(self.src, at)?;
+                self.pos = heredoc.end;
+                let bytes = if heredoc.expand {
+                    self.expander.expand(heredoc.content)
+                } else {
+                    heredoc.content
+                };
                 let origin = Origin {
                     multiline: true,
                     ..Origin::default()
@@ -2055,7 +2309,7 @@ impl Core<'_, '_, '_, '_> {
                     return Ok((value, false));
                 }
                 Number::OutOfRange => return Err(self.error(ErrorKind::NumberOutOfRange, start)),
-                Number::NotNumber => {}
+                Number::Text => {}
             }
         }
         let end = self.unquoted_extent(start);
