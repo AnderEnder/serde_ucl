@@ -99,6 +99,22 @@ plugin/hook system), and the tests, examples and benches that exercise construct
 support. Rewrite the remaining examples on the new API. Done when the old conformance xfail list is
 retired and `xfail-new.txt` holds only justified divergences.
 
+Split into two work items after the first C5 session stopped (see LOG.md): C5a moves the public
+API, the tests, the examples and the benches to the new core, finishing the stopped session's
+uncommitted work; C5b deletes the old implementation, retires the old runner and `xfail.txt`, and
+writes `CHANGELOG.md`.
+
+### Project decisions for C5
+
+1. **No file access from text input by default** (decided by the project owner, 2026-09-25).
+   `from_str`, `from_slice`, `from_reader`, and any other entry point that parses a document
+   given without a path, use a loader that holds no files by default. An `.include`,
+   `.try_include` or `.load` in such input therefore finds no file and behaves as §9.4 and §9.6
+   describe for a missing file. `from_file` and a parser built with the filesystem loader
+   (feature `fs`) read files, resolving relative paths against the file's directory or a
+   configured base directory. A caller can opt text input into filesystem access through the
+   parser builder. The CHANGELOG states this prominently.
+
 ## C6 — Docs, packaging, CI
 
 Make every Cargo feature real (referenced by `#[cfg]`) or remove it. Correct README and crate docs.

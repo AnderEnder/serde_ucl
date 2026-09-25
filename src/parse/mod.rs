@@ -13,18 +13,24 @@
 //! [`ErrorKind::Unsupported`], and it never fetches URLs. An unknown macro is
 //! [`ErrorKind::UnknownMacro`]; a macro that §9.2 ignores at the end of input is ignored.
 //!
-//! Files come from a [`Loader`]: [`FsLoader`] by default (Cargo feature `fs`, on by default), or
-//! a [`MemoryLoader`]. Relative paths resolve against the parser's base directory
-//! ([`Parser::set_base_dir`]), or the loader's current directory without one, never against the
-//! including file (§9.3).
+//! Files come from a [`Loader`]. A parser's default loader is an empty [`MemoryLoader`], so a
+//! default parser reads no files: an include macro or `.load` in its input finds nothing and
+//! behaves as §9.4 and §9.6 describe for a missing file (project decision, WORKLIST C5 decision
+//! 1). [`FsLoader`] (Cargo feature `fs`, on by default) reads the filesystem; set it with
+//! [`Parser::set_loader`] or [`ParserBuilder::with_loader`]. Relative paths resolve against the
+//! parser's base directory ([`Parser::set_base_dir`]); without one, against the directory of the
+//! file given to [`Parser::parse_file`], or for a document given as bytes against the loader's
+//! current directory. They never resolve against the directory of an included file (§9.3).
 //!
 //! Where libucl stops parsing silently at a `.try_include` that finds no usable file, or at an
 //! `.include` of a glob pattern that matches nothing (§9.4), the parser returns an error of kind
 //! [`ErrorKind::Stopped`], from which [`Error::partial`] gives the entries parsed before the
 //! stop.
 //!
-//! This core sits next to the existing parser, which stays the default for the crate's public
-//! API until the cut-over (C5).
+//! The crate's serde entry points ([`crate::from_str`], [`crate::from_slice`],
+//! [`crate::from_reader`], [`crate::from_file`]) parse with a default [`Parser`]. Build one with
+//! other settings through its setters or [`ParserBuilder`], parse to a [`UclValue`], and
+//! deserialize that with [`crate::from_value`].
 //!
 //! ```
 //! use ucl_lexer::parse::Parser;
@@ -37,6 +43,7 @@
 //! assert_eq!(server["port"].as_integer(), Some(8080));
 //! ```
 
+mod builder;
 mod comments;
 mod core;
 mod error;
@@ -49,6 +56,7 @@ mod number;
 mod string;
 mod vars;
 
+pub use builder::ParserBuilder;
 pub use error::{Error, ErrorKind};
 pub use facts::{OutputFacts, ValueFacts};
 #[cfg(feature = "fs")]
@@ -166,12 +174,11 @@ impl fmt::Debug for Parser {
 }
 
 impl Parser {
-    /// A parser with no flags, priority 0, the `append` strategy, and the default loader:
-    /// [`FsLoader`] when the crate's `fs` feature is on, an empty [`MemoryLoader`] otherwise.
+    /// A parser with no flags, priority 0, the `append` strategy, no registered variables, no
+    /// variable handler, no base directory, and an empty [`MemoryLoader`] as its loader, so that
+    /// it reads no files (WORKLIST C5 decision 1). Set [`FsLoader`] with [`Parser::set_loader`]
+    /// to read the filesystem.
     pub fn new() -> Self {
-        #[cfg(feature = "fs")]
-        let loader: Box<dyn Loader> = Box::new(FsLoader::new());
-        #[cfg(not(feature = "fs"))]
         let loader: Box<dyn Loader> = Box::new(MemoryLoader::new());
         Self {
             flags: ParserFlags::DEFAULT,
@@ -185,6 +192,11 @@ impl Parser {
             attached: Vec::new(),
             facts: OutputFacts::new(),
         }
+    }
+
+    /// A [`ParserBuilder`], which starts from the settings of [`Parser::new`].
+    pub fn builder() -> ParserBuilder {
+        ParserBuilder::new()
     }
 
     /// A parser with the given flags.
@@ -238,7 +250,8 @@ impl Parser {
         self
     }
 
-    /// Sets where `.include`, `.try_include` and `.load` read files from.
+    /// Sets where [`Parser::parse_file`], `.include`, `.try_include` and `.load` read files from.
+    /// The default is an empty [`MemoryLoader`], which holds no files.
     pub fn set_loader(&mut self, loader: impl Loader + 'static) -> &mut Self {
         self.loader = Box::new(loader);
         self
@@ -247,8 +260,12 @@ impl Parser {
     /// Sets the directory that relative paths resolve against: paths in the include macros and
     /// `.load` (spec §9.3), and a relative path given to [`Parser::parse_file`]. It is also
     /// `CURDIR` for a document given as bytes and for macro argument lists (spec §7.8, §9.2).
-    /// Without one, the loader's [`Loader::current_dir`] is used, which for [`FsLoader`] is the
-    /// process's working directory, as in libucl.
+    ///
+    /// Without one, relative paths in a file given to [`Parser::parse_file`], and in the files it
+    /// includes, resolve against that file's directory, which is then also `CURDIR` in macro
+    /// argument lists (WORKLIST C5 decision 1; libucl uses the process's working directory).
+    /// Everything else uses the loader's [`Loader::current_dir`]: `/` for a [`MemoryLoader`]
+    /// unless it was changed, the process's working directory for [`FsLoader`].
     pub fn set_base_dir(&mut self, dir: impl Into<PathBuf>) -> &mut Self {
         self.base_dir = Some(dir.into());
         self
@@ -287,8 +304,9 @@ impl Parser {
         crate::emit::Emitter::new(format).with_facts(&self.facts)
     }
 
-    /// The directory relative paths resolve against: the base directory, or the loader's
-    /// current directory.
+    /// The directory that relative paths in a document given as bytes, and a relative path given
+    /// to [`Parser::parse_file`], resolve against: the base directory, or the loader's current
+    /// directory.
     fn base(&self) -> PathBuf {
         match &self.base_dir {
             Some(dir) => dir.clone(),
@@ -303,7 +321,8 @@ impl Parser {
     ///
     /// Unless [`ParserFlags::NO_FILEVARS`] is set, the file variables are defined as for such a
     /// document (spec §7.8): `FILENAME` is `undef` and `CURDIR` is the base directory
-    /// ([`Parser::set_base_dir`]). Registered variables of the same names override them.
+    /// ([`Parser::set_base_dir`]), or without one the loader's current directory, which is `/`
+    /// for the default loader. Registered variables of the same names override them.
     pub fn parse(&mut self, input: &[u8]) -> Result<UclValue, Error> {
         let base = self.base();
         let filevars = (!self.flags.contains(ParserFlags::NO_FILEVARS))
@@ -312,30 +331,63 @@ impl Parser {
     }
 
     /// Reads the file at `path` through the loader and parses it. A relative `path` resolves
-    /// against the base directory.
+    /// against the base directory, or without one the loader's current directory. The default
+    /// loader holds no files: set [`FsLoader`] to read the filesystem, or use
+    /// [`crate::from_file`].
+    ///
+    /// Relative paths in the file's include macros resolve against the base directory, or
+    /// without one against the directory of the file (its canonical path's parent), also inside
+    /// included files (WORKLIST C5 decision 1).
     ///
     /// `FILENAME` is the file's canonical path and `CURDIR` its directory, whatever registered
     /// variables of those names say (spec §7.1), and also under [`ParserFlags::NO_FILEVARS`]
     /// (project decision; libucl's function for parsing a file does the same, spec §12.7).
     pub fn parse_file(&mut self, path: impl AsRef<Path>) -> Result<UclValue, Error> {
-        let base = self.base();
-        let path = base.join(path.as_ref());
-        let io_error = |e: std::io::Error| {
+        let (canonical, input) = self.read_file(path.as_ref()).map_err(|(path, e)| {
             Error::new(
                 ErrorKind::Io {
                     message: format!("{}: {e}", path.display()),
                 },
                 Position::new(),
             )
+        })?;
+        self.parse_read_file(canonical, &input)
+    }
+
+    /// The first half of [`Parser::parse_file`]: `path` resolved against the base directory, made
+    /// canonical and read through the loader. On failure, the resolved path and the I/O error.
+    pub(crate) fn read_file(
+        &self,
+        path: &Path,
+    ) -> Result<(PathBuf, Vec<u8>), (PathBuf, std::io::Error)> {
+        let path = self.base().join(path);
+        let canonical = match self.loader.canonicalize(&path) {
+            Ok(canonical) => canonical,
+            Err(e) => return Err((path, e)),
         };
-        let canonical = self.loader.canonicalize(&path).map_err(io_error)?;
-        let input = self.loader.read(&canonical).map_err(io_error)?;
+        match self.loader.read(&canonical) {
+            Ok(input) => Ok((canonical, input)),
+            Err(e) => Err((path, e)),
+        }
+    }
+
+    /// The second half of [`Parser::parse_file`]: parses `input`, the contents of the file whose
+    /// canonical path is `canonical`.
+    pub(crate) fn parse_read_file(
+        &mut self,
+        canonical: PathBuf,
+        input: &[u8],
+    ) -> Result<UclValue, Error> {
         let dir = canonical
             .parent()
-            .map(|d| d.to_string_lossy().into_owned())
+            .map(Path::to_path_buf)
             .unwrap_or_default();
-        let filevars = Some((canonical.to_string_lossy().into_owned(), dir));
-        self.run(&input, base, filevars, Some(canonical))
+        let base = self.base_dir.clone().unwrap_or_else(|| dir.clone());
+        let filevars = Some((
+            canonical.to_string_lossy().into_owned(),
+            dir.to_string_lossy().into_owned(),
+        ));
+        self.run(input, base, filevars, Some(canonical))
     }
 
     /// `filevars` are `FILENAME` and `CURDIR`, if defined; `main` is the canonical path of a
@@ -394,8 +446,8 @@ impl Parser {
     }
 }
 
-/// Parses `input` with default settings: no flags, no variables other than the file variables
-/// of a document given as bytes (spec §7.8).
+/// Parses `input` with default settings ([`Parser::new`]): no flags, no variables other than the
+/// file variables of a document given as bytes (spec §7.8), and no file access.
 pub fn parse(input: &[u8]) -> Result<UclValue, Error> {
     Parser::new().parse(input)
 }
@@ -902,12 +954,27 @@ mod tests {
             .parse(b"a = $FILENAME")
             .unwrap();
         assert_eq!(obj(&v)["a"], UclValue::String("$FILENAME".into()));
+        // `CURDIR` of a document given as bytes: the default loader's current directory, `/`,
+        // or the base directory (WORKLIST C5 decision 1).
+        let v = parse(b"a = $CURDIR").unwrap();
+        assert_eq!(obj(&v)["a"], UclValue::String("/".into()));
+        let v = Parser::builder()
+            .with_base_dir("/srv/app")
+            .build()
+            .parse(b"a = $CURDIR")
+            .unwrap();
+        assert_eq!(obj(&v)["a"], UclValue::String("/srv/app".into()));
+    }
 
+    #[cfg(feature = "fs")]
+    #[test]
+    fn file_variables_of_a_file_read_from_the_filesystem() {
         let dir = std::env::temp_dir().join(format!("ucl-parse-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("vars.conf");
         std::fs::write(&file, "f = \"$FILENAME\"\nd = \"$CURDIR\"\n").unwrap();
         let mut p = Parser::new();
+        p.set_loader(FsLoader::new());
         p.register_variable("FILENAME", "ignored for files");
         let v = p.parse_file(&file).unwrap();
         let expected = std::fs::canonicalize(&file).unwrap();
@@ -919,14 +986,85 @@ mod tests {
             obj(&v)["d"].as_str(),
             Some(expected.parent().unwrap().to_string_lossy().as_ref())
         );
+        // The default loader holds no files (WORKLIST C5 decision 1).
+        assert!(matches!(
+            Parser::new().parse_file(&file).unwrap_err().kind(),
+            ErrorKind::Io { .. }
+        ));
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(matches!(
             Parser::new()
+                .set_loader(FsLoader::new())
                 .parse_file(dir.join("missing"))
                 .unwrap_err()
                 .kind(),
             ErrorKind::Io { .. }
         ));
+    }
+
+    #[test]
+    fn relative_paths_in_a_file_resolve_against_its_directory() {
+        // WORKLIST C5 decision 1: without a base directory, relative include paths in a file
+        // given to `parse_file`, and in the files it includes, resolve against that file's
+        // directory, never against an included file's directory (§9.3).
+        let mut loader = MemoryLoader::new();
+        loader
+            .add_file("/etc/app/main.conf", "a = 1\n.include \"sub/part.conf\"\n")
+            .add_file("/etc/app/sub/part.conf", "b = 2\n.include \"leaf.conf\"\n")
+            .add_file("/etc/app/leaf.conf", "c = 3\n")
+            .add_file("/etc/app/sub/leaf.conf", "c = 4\n")
+            .add_file("/srv/sub/part.conf", "b = 5\n")
+            .set_current_dir("/srv");
+        let mut p = Parser::new();
+        p.set_loader(loader.clone());
+        let v = p.parse_file("/etc/app/main.conf").unwrap();
+        let keys: Vec<_> = obj(&v)
+            .iter()
+            .map(|(k, e)| (k.to_string(), e.first().clone()))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                ("a".to_string(), UclValue::Integer(1)),
+                ("b".to_string(), UclValue::Integer(2)),
+                ("c".to_string(), UclValue::Integer(3)),
+            ]
+        );
+        // A configured base directory wins.
+        let mut p = Parser::new();
+        p.set_loader(loader.clone()).set_base_dir("/srv");
+        let v = p.parse_file("/etc/app/main.conf").unwrap();
+        assert_eq!(obj(&v)["b"], UclValue::Integer(5));
+        // A document given as bytes resolves against the loader's current directory.
+        let mut p = Parser::new();
+        p.set_loader(loader.clone());
+        let v = p.parse(b".include \"sub/part.conf\"").unwrap();
+        assert_eq!(obj(&v)["b"], UclValue::Integer(5));
+        // The same directory is `CURDIR` in macro argument lists (spec §9.2).
+        let mut loader = loader;
+        loader.add_file(
+            "/etc/app/args.conf",
+            ".include(key=\"$CURDIR\") \"leaf.conf\"\n",
+        );
+        let mut p = Parser::new();
+        p.set_loader(loader.clone());
+        let v = p.parse_file("/etc/app/args.conf").unwrap();
+        assert_eq!(obj(&obj(&v)["/etc/app"])["c"], UclValue::Integer(3));
+        let v = p
+            .parse(b".include(key=\"$CURDIR\") \"/etc/app/leaf.conf\"")
+            .unwrap();
+        assert_eq!(obj(&obj(&v)["/srv"])["c"], UclValue::Integer(3));
+    }
+
+    #[test]
+    fn the_default_loader_holds_no_files() {
+        // WORKLIST C5 decision 1: an include macro in input parsed by a default parser finds no
+        // file, as §9.4 describes for a missing file.
+        let e = parse(b"a = 1\n.include \"/etc/hosts\"").unwrap_err();
+        assert!(!e.is_stopped() && !e.is_unsupported(), "{e}");
+        let e = parse(b"a = 1\n.try_include \"/etc/hosts\"\nb = 2").unwrap_err();
+        assert!(e.is_stopped(), "{e}");
+        assert_eq!(obj(e.partial().unwrap()).keys().collect::<Vec<_>>(), ["a"]);
     }
 
     #[test]

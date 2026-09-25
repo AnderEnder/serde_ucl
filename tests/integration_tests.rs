@@ -1,13 +1,16 @@
 //! Integration tests with real-world UCL configuration scenarios
 //!
 //! These tests verify that the UCL parser works correctly with actual
-//! configuration files and scenarios found in real applications.
+//! configuration files and scenarios found in real applications. Every input here gives the same
+//! value in libucl (checked with the oracle in clean-room work item C5).
 
 use serde::Deserialize;
 use std::collections::HashMap;
-use ucl_lexer::from_str;
+use ucl_lexer::parse::ErrorKind;
+use ucl_lexer::{UclError, UclValue, from_str};
+
 #[test]
-fn test_large_configuration_performance() {
+fn test_large_configuration() {
     // Test performance with a large configuration file
     let mut large_config = String::from("{\n");
 
@@ -73,16 +76,7 @@ fn test_large_configuration_performance() {
 
     large_config.push_str("}\n");
 
-    // Measure parsing time
-    let start = std::time::Instant::now();
     let parsed: serde_json::Value = from_str(&large_config).expect("Failed to parse large config");
-    let duration = start.elapsed();
-
-    println!(
-        "Large config parsing: {} bytes in {:?}",
-        large_config.len(),
-        duration
-    );
 
     // Verify the structure was parsed correctly
     assert!(parsed.is_object());
@@ -94,20 +88,34 @@ fn test_large_configuration_performance() {
     assert!(obj.contains_key("service_500"));
     assert!(obj.contains_key("service_999"));
 
-    // Performance should be reasonable (less than 5 seconds for 1000 services)
-    assert!(
-        duration.as_secs() < 5,
-        "Large config should parse within 5 seconds"
-    );
+    // And their values: an unquoted `30s` is a time, read as seconds, and `512mb` an integer
+    // times 2^20 (spec §5.4); quoted values stay strings (§6).
+    for i in [0usize, 1, 500, 999] {
+        let service = &obj[&format!("service_{i}")];
+        assert_eq!(service["name"], format!("service-{i}"));
+        assert_eq!(service["port"], 8000 + i);
+        assert_eq!(service["enabled"], i % 2 == 0);
+        assert_eq!(service["timeout"], (30 + (i % 60)) as f64);
+        assert_eq!(service["memory_limit"], (512 + (i % 1024)) << 20);
+        assert_eq!(service["cpu_limit"], format!("{}m", 100 + (i % 400)));
+        assert_eq!(service["replicas"], 1 + (i % 5));
+        assert_eq!(
+            service["environment"]["DATABASE_URL"],
+            format!("postgresql://user:pass@db-{i}.example.com:5432/service_{i}")
+        );
+        assert_eq!(service["volumes"].as_array().unwrap().len(), 3);
+        assert_eq!(service["health_check"]["interval"], "30s");
+        assert_eq!(service["dependencies"][2], "auth-service");
+        assert_eq!(service["metrics"]["port"], 9000 + i);
+    }
 
-    // Calculate throughput
-    let throughput_mb_per_sec = (large_config.len() as f64 / 1_000_000.0) / duration.as_secs_f64();
-    println!("Throughput: {:.2} MB/s", throughput_mb_per_sec);
-
-    // Should achieve reasonable throughput
-    assert!(
-        throughput_mb_per_sec > 0.5,
-        "Should achieve at least 0.5 MB/s throughput"
+    // The unquoted time keeps its type in the parsed value (spec §5.4).
+    let value = ucl_lexer::parse::parse(large_config.as_bytes()).unwrap();
+    let service = value.as_object().unwrap()["service_0"].as_object().unwrap();
+    assert_eq!(service["timeout"], UclValue::Time(30.0));
+    assert_eq!(
+        service["health_check"].as_object().unwrap()["interval"].as_str(),
+        Some("30s")
     );
 }
 
@@ -1308,8 +1316,8 @@ fn test_real_world_monitoring_config() {
 }
 
 #[test]
-fn test_performance_with_deeply_nested_structures() {
-    // Test performance with very deeply nested configuration
+fn test_deeply_nested_structures() {
+    // A deeply nested configuration
     let mut config = String::new();
 
     // Create a deeply nested structure (20 levels deep)
@@ -1323,16 +1331,8 @@ fn test_performance_with_deeply_nested_structures() {
         config.push_str("}\n");
     }
 
-    let start = std::time::Instant::now();
     let parsed: serde_json::Value =
         from_str(&config).expect("Failed to parse deeply nested config");
-    let duration = start.elapsed();
-
-    println!(
-        "Deeply nested parsing: {} bytes in {:?}",
-        config.len(),
-        duration
-    );
 
     // Verify the structure
     assert!(parsed.is_object());
@@ -1346,9 +1346,6 @@ fn test_performance_with_deeply_nested_structures() {
     }
 
     assert_eq!(current["value"], "deep_value");
-
-    // Should handle deep nesting efficiently (under 1 second)
-    assert!(duration.as_secs() < 1, "Deep nesting should parse quickly");
 }
 
 #[test]
@@ -1390,6 +1387,12 @@ fn test_compatibility_with_existing_ucl_files() {
     let parsed: serde_json::Value =
         from_str(freebsd_pkg).expect("Failed to parse FreeBSD pkg format");
     assert!(parsed.is_object());
+    assert_eq!(parsed["name"], "pkg");
+    assert_eq!(parsed["abi"], "FreeBSD:13:amd64");
+    assert_eq!(parsed["flatsize"], 2097152);
+    assert_eq!(parsed["deps"]["libarchive"]["version"], "3.6.1,1");
+    assert_eq!(parsed["categories"], serde_json::json!(["ports-mgmt"]));
+    assert_eq!(parsed["options"]["DOCS"], "on");
 
     // Rspamd configuration format
     let rspamd_config = r#"
@@ -1429,13 +1432,22 @@ fn test_compatibility_with_existing_ucl_files() {
 
     // libucl rejects this input: its golden dump is an error
     // (tests/conformance/cases/migrated/integration_tests__compatibility_with_existing_ucl_files).
-    let result = from_str::<serde_json::Value>(rspamd_config);
-    assert!(result.is_err(), "libucl rejects this input, got {result:?}");
+    // `CONFDIR` is not registered, so the first `.include` names the file `$CONFDIR/common.conf`
+    // (spec §7.4, §9.4), which does not exist.
+    match from_str::<serde_json::Value>(rspamd_config) {
+        Err(UclError::Syntax(e)) => assert_eq!(
+            e.kind(),
+            &ErrorKind::FileNotFound {
+                path: "$CONFDIR/common.conf".into()
+            }
+        ),
+        other => panic!("libucl rejects this input, got {other:?}"),
+    }
 }
 
 #[test]
-fn test_memory_efficiency_with_large_arrays() {
-    // Test memory efficiency with large arrays
+fn test_large_array() {
+    // A large array
     let mut config = String::from("large_array = [\n");
 
     // Create a large array with 10,000 items
@@ -1445,15 +1457,7 @@ fn test_memory_efficiency_with_large_arrays() {
 
     config.push_str("]\n");
 
-    let start = std::time::Instant::now();
     let parsed: serde_json::Value = from_str(&config).expect("Failed to parse large array");
-    let duration = start.elapsed();
-
-    println!(
-        "Large array parsing: {} bytes in {:?}",
-        config.len(),
-        duration
-    );
 
     // Verify the array
     assert!(parsed.is_object());
@@ -1461,37 +1465,35 @@ fn test_memory_efficiency_with_large_arrays() {
     assert_eq!(array.len(), 10000);
     assert_eq!(array[0], "item_0");
     assert_eq!(array[9999], "item_9999");
-
-    // Should handle large arrays efficiently
-    let throughput_mb_per_sec = (config.len() as f64 / 1_000_000.0) / duration.as_secs_f64();
-    println!("Throughput: {:.2} MB/s", throughput_mb_per_sec);
-
-    assert!(
-        throughput_mb_per_sec > 1.0,
-        "Should achieve at least 1 MB/s for large arrays"
-    );
 }
-#[test]
 
-fn test_cpp_comments_lexing() {
-    // Test that C++ comments are properly lexed and skipped
+#[test]
+fn test_slash_slash_is_not_a_comment() {
+    // `//` is not a comment in UCL: `/` may start a key, so each `// text` line is an entry of
+    // the key `//` (spec §2.5; tests/conformance/cases/migrated/integration_tests__cpp_comments_*).
     let config = r#"
         // This is a C++ comment
         key1 = "value1";  // Inline C++ comment
         key2 = "value2";
     "#;
 
-    let result: Result<serde_json::Value, _> = from_str(config);
-    assert!(result.is_ok(), "Should parse config with C++ comments");
-
-    let parsed = result.unwrap();
+    let parsed: serde_json::Value = from_str(config).expect("parses");
     assert_eq!(parsed["key1"], "value1");
     assert_eq!(parsed["key2"], "value2");
+    let value = ucl_lexer::parse::parse(config.as_bytes()).unwrap();
+    let slashes: Vec<_> = value.as_object().unwrap().get_all("//").collect();
+    assert_eq!(
+        slashes,
+        [
+            &UclValue::String("This is a C++ comment".into()),
+            &UclValue::String("Inline C++ comment".into())
+        ]
+    );
 }
 
 #[test]
-fn test_cpp_comments_mixed_with_other_comments() {
-    // Test that C++ comments work alongside other comment types
+fn test_slash_slash_mixed_with_comments() {
+    // `#` and `/* */` are comments; `//` starts an entry (spec §2.1, §2.3, §2.5).
     let config = r#"
         // C++ style comment
         key1 = "value1";  // Inline C++ comment
@@ -1501,50 +1503,14 @@ fn test_cpp_comments_mixed_with_other_comments() {
         key3 = "value3";
     "#;
 
-    let result: Result<serde_json::Value, _> = from_str(config);
-    assert!(
-        result.is_ok(),
-        "Should parse config with mixed comment styles"
+    let parsed: serde_json::Value = from_str(config).expect("parses");
+    assert_eq!(
+        parsed,
+        serde_json::json!({
+            "//": ["C++ style comment", "Inline C++ comment"],
+            "key1": "value1",
+            "key2": "value2",
+            "key3": "value3",
+        })
     );
-
-    let parsed = result.unwrap();
-    assert_eq!(parsed["key1"], "value1");
-    assert_eq!(parsed["key2"], "value2");
-    assert_eq!(parsed["key3"], "value3");
-}
-
-#[test]
-fn test_cpp_comments_preservation() {
-    use ucl_lexer::lexer::{CommentType, LexerConfig, Token, UclLexer};
-
-    let config = r#"
-        // Header comment
-        {
-            "key": "value"  // Inline comment
-        }
-    "#;
-
-    let mut lexer_config = LexerConfig::default();
-    lexer_config.save_comments = true;
-    let mut lexer = UclLexer::with_config(config, lexer_config);
-
-    let mut cpp_comments = 0;
-    loop {
-        match lexer.next_token() {
-            Ok(Token::Eof) => break,
-            Ok(Token::Comment(_)) => {
-                // Check if this is a C++ style comment
-                let comments = lexer.comments();
-                if let Some(last_comment) = comments.last() {
-                    if last_comment.comment_type == CommentType::CppStyle {
-                        cpp_comments += 1;
-                    }
-                }
-            }
-            Ok(_) => {}
-            Err(e) => panic!("Lexer error: {:?}", e),
-        }
-    }
-
-    assert_eq!(cpp_comments, 2, "Should find 2 C++ style comments");
 }

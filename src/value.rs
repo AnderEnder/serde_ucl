@@ -1,4 +1,4 @@
-//! UCL value model (PLAN.md §2.2).
+//! UCL value model.
 //!
 //! The model follows libucl's object tree. A key in an object holds an [`Entry`] of one or more
 //! values: more than one is libucl's *implicit array* (`UCL_OBJECT_MULTIVALUE`), created when a

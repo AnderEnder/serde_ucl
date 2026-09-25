@@ -2,8 +2,11 @@
 //! glob patterns, search paths, and the input units that included files become.
 //!
 //! Paths are used as written. A relative path resolves against the base directory
-//! ([`Includes::base`]): the parser's base directory, or its loader's current directory. That
-//! holds inside included files too; `${CURDIR}` gives paths relative to the including file.
+//! ([`Includes::base`]): the parser's base directory; without one, the directory of the file
+//! given to `Parser::parse_file` (WORKLIST C5 decision 1), or for a document given as bytes the
+//! loader's current directory. That holds inside included files too; `${CURDIR}` gives paths
+//! relative to the including file. The base directory is also `CURDIR` in macro argument lists
+//! (spec §9.2).
 //!
 //! How a file that cannot be included is handled (oracle runs; spec §9.4, *Missing and unusable
 //! files*). `try` is the `try` parameter, true by default for `.try_include`:

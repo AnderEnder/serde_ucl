@@ -1,5 +1,10 @@
+//! Repeated keys: entries with several values ("implicit arrays", spec §8.2), and the
+//! settings that change them (§8.4, §8.5). Expected results are libucl's (checked with the
+//! oracle).
+
 use serde_json::Value;
-use ucl_lexer::from_str;
+use ucl_lexer::parse::{ErrorKind, Parser};
+use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue, from_str};
 
 #[cfg(test)]
 mod implicit_array_tests {
@@ -265,19 +270,42 @@ mod implicit_array_tests {
 
     #[test]
     fn test_duplicate_key_error_when_disabled() {
-        // Test error on duplicates when duplicate key handling is disabled
-        // Note: This test assumes there's a way to configure duplicate key behavior
         let config = r#"
             server = "server1"
             server = "server2"
         "#;
 
-        // With default settings (assuming implicit arrays are enabled)
+        // By default a repeated key holds several values (spec §8.2).
         let result: Value = from_str(config).expect("Should create array with default settings");
-        assert!(result["server"].is_array());
+        assert_eq!(result["server"], serde_json::json!(["server1", "server2"]));
+        let value = ucl_lexer::parse::parse(config.as_bytes()).unwrap();
+        assert_eq!(value.as_object().unwrap().entry("server").unwrap().len(), 2);
 
-        // Test would need to be extended if there's a way to disable duplicate key handling
-        // For now, we just verify the default behavior works
+        // With the `error` strategy any repeated key is an error (spec §8.4).
+        let mut parser = Parser::new();
+        parser.set_strategy(DuplicateStrategy::Error);
+        let err = parser.parse(config.as_bytes()).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            &ErrorKind::DuplicateKey {
+                key: "server".into()
+            }
+        );
+        assert_eq!(err.position().line, 3);
+
+        // With `no-implicit-arrays` the values are collected into one explicit array (spec §8.5).
+        let value = Parser::with_flags(ParserFlags::NO_IMPLICIT_ARRAYS)
+            .parse(config.as_bytes())
+            .unwrap();
+        let entry = value.as_object().unwrap().entry("server").unwrap();
+        assert_eq!(entry.len(), 1);
+        assert_eq!(
+            entry.first(),
+            &UclValue::Array(vec![
+                UclValue::String("server1".into()),
+                UclValue::String("server2".into())
+            ])
+        );
     }
 
     #[test]
@@ -327,13 +355,16 @@ mod implicit_array_tests {
             .as_array()
             .unwrap();
         assert_eq!(servers.len(), 4);
-        assert!(servers[0].as_str().unwrap().contains("10.0.1.10:3000"));
-        assert!(servers[3].as_str().unwrap().contains("backup"));
+        // An unquoted value runs to the end of the line (spec §4.1).
+        assert_eq!(servers[0], "10.0.1.10:3000 weight=3");
+        assert_eq!(servers[3], "10.0.1.13:3000 backup");
 
         // Verify listen ports array
         let listen = result["server"]["listen"].as_array().unwrap();
         assert_eq!(listen.len(), 2);
         assert_eq!(listen[0], 80);
+        // A number followed by text is a string (spec §5.5).
+        assert_eq!(listen[1], "443 ssl");
 
         // Verify server names array
         let server_names = result["server"]["server_name"].as_array().unwrap();
@@ -380,7 +411,7 @@ mod implicit_array_tests {
             # Backup server
             server = "backup.example.com"
             
-            // Another backup
+            # Another backup
             server = "backup2.example.com"
             
             /*

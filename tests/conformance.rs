@@ -1,20 +1,16 @@
-//! libucl conformance suite (PLAN.md P0.5).
+//! libucl conformance suite.
 //!
 //! Every case under `tests/conformance/` is parsed by this crate, and the result is compared with
 //! libucl's typed dump of the same input (`<case>.golden.json`, produced by
 //! `scripts/regen-golden.sh`). Expected values are never written by hand.
 //!
-//! Two parsers run every case:
-//!
-//! - the existing parser (`libucl_conformance`), with its known failures in
-//!   `tests/conformance/xfail.txt`. It cannot apply `.flags` files, so cases that have one fail;
-//! - the new parser core `ucl_lexer::parse` (`libucl_conformance_new_core`), with its known
-//!   failures in `tests/conformance/xfail-new.txt`. It applies each case's `.flags` file, and
-//!   gives the parser the case's directory as its base directory, so relative include paths
-//!   resolve as the oracle's do (spec §9.3) without changing the process's working directory.
-//!   A case is parsed as a file, which defines `FILENAME` and `CURDIR` from its path, unless its
-//!   `.flags` say `string-input` or `no-filevars`: then it is parsed as bytes, as the oracle
-//!   parses it.
+//! The parser `ucl_lexer::parse` runs every case (`libucl_conformance_new_core`), with its known
+//! failures in `tests/conformance/xfail-new.txt`. The runner applies each case's `.flags` file,
+//! and gives the parser the case's directory as its base directory, so relative include paths
+//! resolve as the oracle's do (spec §9.3) without changing the process's working directory. A
+//! case is parsed as a file, which defines `FILENAME` and `CURDIR` from its path, unless its
+//! `.flags` say `string-input` or `no-filevars`: then it is parsed as bytes, as the oracle parses
+//! it.
 //!
 //! Each xfail file lists cases one per line: `<case-id> <reason>`. The run fails when an unlisted
 //! case fails, and also when a listed case passes, so the lists can only shrink.
@@ -29,7 +25,7 @@
 //! comments attached to each value, as the oracle's does (`tests/conformance/README.md`): `"c"` for
 //! comments attached before the value, `"ca"` for those attached after it.
 //!
-//! A third test (`libucl_conformance_emitters`) compares the new core's output formats (spec §10,
+//! A second test (`libucl_conformance_emitters`) compares the new core's output formats (spec §10,
 //! `ucl_lexer::emit`) byte for byte with libucl's: for every case that parses, the config, JSON,
 //! compact JSON and YAML output with the golden files `<case>.<format>.golden`, the config output
 //! with saved comments with `<case>.config-comments.golden` for cases that save comments, and for
@@ -46,8 +42,8 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{CommentPlacement, Parser as CoreParser, PathSegment};
-use ucl_lexer::{DuplicateStrategy, MapVariableHandler, ParserFlags, UclParser, UclValue};
+use ucl_lexer::parse::{CommentPlacement, FsLoader, Parser as CoreParser, PathSegment};
+use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue};
 
 const CONFORMANCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance");
 
@@ -116,9 +112,10 @@ fn collect(dir: &Path, ext: &str, recursive: bool, out: &mut Vec<PathBuf>) {
 
 /// Dumps a crate value in the same schema as `tools/ucl-dump`: every value of a multi-value
 /// entry, times as `"time"`, and `"pri"` on any entry value whose priority is non-zero. The model
-/// keeps priorities only on entry values, which is where libucl's dumps have them.
-fn dump(value: &UclValue) -> J {
-    dump_node(value, 0, &mut Vec::new(), None)
+/// keeps priorities only on entry values, which is where libucl's dumps have them. With
+/// `comments`, also the saved comments attached to each value.
+fn dump(value: &UclValue, comments: Option<&CommentMap>) -> J {
+    dump_node(value, 0, &mut Vec::new(), comments)
 }
 
 /// Saved comments by value path: the dump key (`"c"` or `"ca"`) and the comment texts.
@@ -236,27 +233,6 @@ enum Parsed {
     Unsupported(String),
 }
 
-fn parse_with_crate(case: &Case) -> Result<Parsed, &'static str> {
-    let bytes = fs::read(&case.input).unwrap();
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return Err("non-utf8");
-    };
-    if !case.flags.is_empty() {
-        // No parser flags exist yet (PLAN.md P3.11 adds ParserFlags).
-        return Err("flags");
-    }
-    let mut vars = MapVariableHandler::new();
-    vars.insert("ABI".to_string(), "unknown".to_string());
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        let mut parser = UclParser::with_variable_handler(text, Box::new(vars));
-        match parser.parse_document() {
-            Ok(v) => Parsed::Value(dump(&v)),
-            Err(e) => Parsed::Rejected(e.to_string()),
-        }
-    }));
-    result.map_err(|_| "panic")
-}
-
 /// The settings a case's `.flags` file asks for (`tests/conformance/README.md`).
 #[derive(Default)]
 struct Setup {
@@ -334,6 +310,8 @@ fn run_new_core(
     setup: &Setup,
 ) -> (CoreParser, Result<UclValue, ucl_lexer::parse::Error>) {
     let mut parser = CoreParser::with_flags(setup.flags);
+    // The oracle reads the filesystem; a parser's default loader holds no files.
+    parser.set_loader(FsLoader::new());
     parser.set_base_dir(case.input.parent().expect("a case is in a directory"));
     parser.register_variable("ABI", "unknown");
     for (name, value) in &setup.vars {
@@ -373,7 +351,7 @@ fn parse_with_new_core(case: &Case) -> Result<Parsed, &'static str> {
         match result {
             Ok(v) => {
                 let comments = setup.dump_comments.then(|| comment_map(&parser));
-                Parsed::Value(dump_node(&v, 0, &mut Vec::new(), comments.as_ref()))
+                Parsed::Value(dump(&v, comments.as_ref()))
             }
             Err(e) if e.is_unsupported() => Parsed::Unsupported(e.to_string()),
             Err(e) => Parsed::Rejected(e.to_string()),
@@ -483,11 +461,6 @@ fn evaluate(case: &Case, parse: fn(&Case) -> Result<Parsed, &'static str>) -> Ou
 
     let actual = match parse(case) {
         Err(hint) => {
-            let hint = if hint == "non-utf8" {
-                "non-utf8, D2"
-            } else {
-                hint
-            };
             return Outcome::Fail {
                 hint,
                 detail: hint.to_string(),
@@ -547,11 +520,6 @@ fn load_xfail(file: &str) -> BTreeMap<String, String> {
 
 /// Serialises the panic-hook swap of the two tests, which cargo runs in parallel.
 static PANIC_HOOK: Mutex<()> = Mutex::new(());
-
-#[test]
-fn libucl_conformance() {
-    run_suite("existing parser", "xfail.txt", parse_with_crate);
-}
 
 #[test]
 fn libucl_conformance_new_core() {
@@ -708,7 +676,7 @@ fn two_pass_config(case: &Case) -> Result<String, String> {
         "the directory for case 14 must not hold 1.in"
     );
     let mut first = CoreParser::with_flags(ParserFlags::KEY_LOWERCASE);
-    first.set_base_dir(&base);
+    first.set_loader(FsLoader::new()).set_base_dir(&base);
     first.register_variable("ABI", "unknown");
     let value = match first.parse_file(&case.input) {
         Err(e) if e.is_stopped() => e.into_partial().expect("a stop keeps its result"),
@@ -716,7 +684,7 @@ fn two_pass_config(case: &Case) -> Result<String, String> {
     };
     let text = first.emitter(Format::Config).emit(&value);
     let mut second = CoreParser::with_flags(ParserFlags::KEY_LOWERCASE);
-    second.set_base_dir(&base);
+    second.set_loader(FsLoader::new()).set_base_dir(&base);
     let value = second
         .parse(text.as_bytes())
         .map_err(|e| format!("second pass: {e}"))?;

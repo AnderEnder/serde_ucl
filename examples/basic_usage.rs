@@ -1,16 +1,23 @@
-//! Basic usage example for the UCL lexer
+//! Basic usage: UCL text into Rust structs with serde.
 //!
-//! This example demonstrates how to use the UCL lexer to parse
-//! configuration files into Rust structs.
+//! Run with `cargo run --example basic_usage`.
 
 use serde::Deserialize;
+use ucl_lexer::parse::ErrorKind;
 use ucl_lexer::{UclError, from_str};
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize)]
+struct AppConfig {
+    server: ServerConfig,
+    database: DatabaseConfig,
+}
+
+#[derive(Debug, Deserialize)]
 struct ServerConfig {
     name: String,
     port: u16,
     debug: bool,
+    listen: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -21,52 +28,50 @@ struct DatabaseConfig {
     password: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct AppConfig {
-    server: ServerConfig,
-    database: DatabaseConfig,
+const CONFIG: &str = r#"
+# Application configuration
+server {
+    name = "my-app";
+    port = 8080;
+    debug = true;
+    listen = ["127.0.0.1", "::1"];
 }
 
-fn main() -> Result<(), UclError> {
-    // Example UCL configuration
-    let ucl_text = r#"
-        server {
-            name = "my-app"
-            port = 8080
-            debug = true
-        }
-        
-        database {
-            host = "localhost"
-            port = 5432
-            username = "admin"
-            password = "secret"
-        }
-    "#;
+# Separators and quotes are optional: `key value` and unquoted strings work too.
+database {
+    host localhost
+    port 5432
+    username = admin
+    password = "s3cret"
+}
+"#;
 
-    // This will fail for now since parsing isn't fully implemented
-    match from_str::<AppConfig>(ucl_text) {
-        Ok(config) => {
-            println!("Parsed configuration:");
-            println!(
-                "Server: {} on port {}",
-                config.server.name, config.server.port
-            );
-            println!(
-                "Database: {}:{}",
-                config.database.host, config.database.port
-            );
-            println!("Database user: {}", config.database.username);
-            println!(
-                "Database password length: {}",
-                config.database.password.len()
-            );
-        }
-        Err(e) => {
-            println!("Failed to parse configuration: {}", e);
-            println!("This is expected until parsing is fully implemented.");
-        }
-    }
+fn main() -> Result<(), UclError> {
+    let config: AppConfig = from_str(CONFIG)?;
+    println!("{config:#?}");
+
+    assert_eq!(config.server.name, "my-app");
+    assert_eq!(config.server.port, 8080);
+    assert!(config.server.debug);
+    assert_eq!(config.server.listen, ["127.0.0.1", "::1"]);
+    assert_eq!(config.database.host, "localhost");
+    assert_eq!(config.database.port, 5432);
+    assert_eq!(config.database.username, "admin");
+    assert_eq!(config.database.password.len(), 6);
+
+    // A document the parser rejects gives an error with the kind and position of the problem.
+    let broken = "server {\n    name = \"my-app\"\n    port = 8080\n";
+    let err = from_str::<AppConfig>(broken).unwrap_err();
+    println!("error: {err}");
+    let parse_error = err.parse_error().expect("a parse error");
+    assert_eq!(parse_error.kind(), &ErrorKind::UnterminatedObject);
+    let position = err.position().expect("parse errors have a position");
+    println!("at line {}, column {}", position.line, position.column);
+
+    // A document that parses but does not fit the struct is a serde error.
+    let err = from_str::<AppConfig>("server { name = x }").unwrap_err();
+    println!("error: {err}");
+    assert!(matches!(err, UclError::Serde(_)));
 
     Ok(())
 }

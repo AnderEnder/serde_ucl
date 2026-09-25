@@ -1,4 +1,8 @@
+//! NGINX-style syntax: keys without separators and named sections (spec §1, §3.4, §8.2).
+//! Expected results are libucl's (checked with the oracle).
+
 use serde_json::Value;
+use ucl_lexer::parse::ErrorKind;
 use ucl_lexer::{UclError, from_str};
 
 #[cfg(test)]
@@ -122,17 +126,32 @@ mod nginx_syntax_tests {
         assert_eq!(result["http"]["include"], "/etc/nginx/mime.types");
         assert_eq!(result["http"]["default_type"], "application/octet-stream");
 
-        // Verify upstream block
+        // A repeated key holds several values (spec §8.2); an unquoted value runs to the end of
+        // the line, spaces included (spec §4.1).
         let upstream = &result["http"]["upstream"]["app_servers"];
-        assert!(upstream["server"].is_array() || upstream["server"].is_string());
+        assert_eq!(
+            upstream["server"],
+            serde_json::json!([
+                "127.0.0.1:3000 weight=3",
+                "127.0.0.1:3001 weight=2",
+                "127.0.0.1:3002 weight=1"
+            ])
+        );
 
         // Verify server block
         let server = &result["http"]["server"];
         assert_eq!(server["listen"], 80);
-        assert!(server["server_name"].is_string());
+        assert_eq!(server["server_name"], "example.com www.example.com");
 
-        // Verify location blocks
-        assert!(server["location"].is_object());
+        // Each `location NAME { … }` is a named section (spec §3.4), and the two sections are two
+        // values of the key `location` (spec §8.2), so serde sees a sequence of two objects.
+        let locations = server["location"].as_array().expect("two values");
+        assert_eq!(locations.len(), 2);
+        assert_eq!(locations[0]["/"]["proxy_pass"], "http://app_servers");
+        assert_eq!(locations[0]["/"]["proxy_set_header"], "Host $host");
+        assert_eq!(locations[1]["/static/"]["alias"], "/var/www/static/");
+        // `30d` is a time of 30 days, read as seconds (spec §5.4).
+        assert_eq!(locations[1]["/static/"]["expires"], 30.0 * 86400.0);
     }
 
     #[test]
@@ -177,19 +196,15 @@ mod nginx_syntax_tests {
 
     #[test]
     fn test_nginx_syntax_error_handling() {
-        // Test error handling for malformed NGINX-style syntax
-        let invalid_configs = vec![
-            r#"server { listen }"#, // Missing value
-            r#"server { { }"#,      // Invalid nesting
-        ];
-
-        for config in invalid_configs {
-            let result: Result<Value, UclError> = from_str(config);
-            assert!(
-                result.is_err(),
-                "Should fail to parse invalid config: {}",
-                config
-            );
+        // A key without a value, and a `{` where a key must start, are errors (spec §1, §3).
+        for (config, expected) in [
+            ("server { listen }", ErrorKind::MissingValue),
+            ("server { { }", ErrorKind::InvalidKey { found: Some('{') }),
+        ] {
+            match from_str::<Value>(config) {
+                Err(UclError::Syntax(e)) => assert_eq!(e.kind(), &expected, "{config}"),
+                other => panic!("{config}: expected a parse error, got {other:?}"),
+            }
         }
     }
 }

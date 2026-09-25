@@ -1,10 +1,13 @@
 //! Real-world UCL configuration tests
 //!
 //! This module contains real-world UCL configurations from various projects
-//! to test compatibility with actual usage patterns.
+//! to test compatibility with actual usage patterns. Every input is also a conformance case
+//! (`tests/conformance/cases/migrated/real_world_ucl_configs__real_world_configs__*`); the
+//! expected results are libucl's.
 
-use serde_json::Value;
-use ucl_lexer::from_str;
+use serde_json::{Value, json};
+use ucl_lexer::parse::ErrorKind;
+use ucl_lexer::{UclError, from_str};
 
 #[cfg(test)]
 mod real_world_configs {
@@ -103,9 +106,15 @@ mod real_world_configs {
         "#;
 
         // libucl rejects this input: its golden dump is an error (tests/conformance/cases/migrated/
-        // real_world_ucl_configs__real_world_configs__test_nginx_real_config).
-        let result = from_str::<Value>(config);
-        assert!(result.is_err(), "libucl rejects this input, got {result:?}");
+        // real_world_ucl_configs__real_world_configs__test_nginx_real_config). The `log_format`
+        // string holds raw line breaks, which double quotes do not allow (spec §6.1).
+        match from_str::<Value>(config) {
+            Err(UclError::Syntax(e)) => {
+                assert_eq!(e.kind(), &ErrorKind::ControlCharacter { byte: b'\n' });
+                assert_eq!(e.position().line, 14);
+            }
+            other => panic!("libucl rejects this input, got {other:?}"),
+        }
     }
 
     #[test]
@@ -201,37 +210,43 @@ SCRIPT
             }
         "#;
 
-        let result = from_str::<Value>(config);
-        match result {
-            Ok(parsed) => {
-                println!("✅ FreeBSD pkg config parsed successfully");
+        let parsed: Value = from_str(config).expect("FreeBSD pkg config parses");
+        let obj = parsed.as_object().unwrap();
 
-                assert!(parsed.is_object());
-                let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["name"], "nginx");
+        assert_eq!(obj["version"], "1.20.1");
+        assert_eq!(obj["origin"], "www/nginx");
+        assert_eq!(obj["maintainer"], "demon@FreeBSD.org");
 
-                assert_eq!(obj["name"], "nginx");
-                assert_eq!(obj["version"], "1.20.1");
-                assert_eq!(obj["origin"], "www/nginx");
+        // Heredocs (spec §6.3): the content lines, without the line break before the terminator.
+        let desc = obj["desc"].as_str().unwrap();
+        assert!(desc.starts_with("Nginx (pronounced \"engine x\") is a free"));
+        assert!(desc.ends_with("configuration, and low resource consumption."));
+        assert_eq!(
+            obj["scripts"]["post-install"],
+            "#!/bin/sh\necho \"Nginx has been installed successfully.\"\n\
+             echo \"Configuration files are in /usr/local/etc/nginx/\"\n\
+             echo \"To start nginx: service nginx start\""
+        );
+        assert!(
+            obj["scripts"]["pre-install"]
+                .as_str()
+                .unwrap()
+                .starts_with("#!/bin/sh\nif ! pw groupshow www")
+        );
 
-                // Check heredoc description
-                let desc = obj["desc"].as_str().unwrap();
-                assert!(desc.contains("Nginx"));
-                assert!(desc.contains("high-performance"));
+        // Nested structures
+        assert_eq!(obj["deps"]["openssl"]["version"], "1.1.1k,1");
+        assert_eq!(obj["files"].as_object().unwrap().len(), 4);
+        assert_eq!(obj["directories"]["/var/log/nginx"], true);
+        assert_eq!(obj["options"]["HTTP_SSL"], true);
+        assert_eq!(obj["options"]["HTTP_STATUS"], false);
+        // A quoted number stays a string (spec §6).
+        assert_eq!(obj["annotations"]["build_timestamp"], "1625097600");
 
-                // Check nested structures
-                assert!(obj["deps"].is_object());
-                assert!(obj["files"].is_object());
-                assert!(obj["directories"].is_object());
-                assert!(obj["scripts"].is_object());
-                assert!(obj["options"].is_object());
-                assert!(obj["annotations"].is_object());
-
-                // Check arrays
-                assert!(obj["categories"].is_array());
-                assert!(obj["licenses"].is_array());
-            }
-            Err(e) => panic!("FreeBSD pkg config failed: {e}"),
-        }
+        // Arrays
+        assert_eq!(obj["categories"], json!(["www", "http"]));
+        assert_eq!(obj["licenses"], json!(["BSD2CLAUSE"]));
     }
 
     #[test]
@@ -358,41 +373,59 @@ SCRIPT
             }
         "#;
 
-        let result = from_str::<Value>(config);
-        match result {
-            Ok(parsed) => {
-                println!("✅ Rspamd config parsed successfully");
+        let parsed: Value = from_str(config).expect("Rspamd config parses");
+        let obj = parsed.as_object().unwrap();
 
-                assert!(parsed.is_object());
-                let obj = parsed.as_object().unwrap();
+        assert_eq!(obj["logging"]["log_buffer"], 32768);
+        assert_eq!(obj["logging"]["log_urls"], false);
+        assert_eq!(obj["options"]["filters"].as_array().unwrap().len(), 5);
+        assert_eq!(
+            obj["options"]["dns"]["nameserver"],
+            json!(["8.8.8.8", "1.1.1.1"])
+        );
+        assert_eq!(obj["modules"]["path"], "/usr/share/rspamd/lib/");
+        assert_eq!(obj["lua"], "/etc/rspamd/rspamd.lua");
 
-                assert!(obj["logging"].is_object());
-                assert!(obj["options"].is_object());
-                assert!(obj["modules"].is_object());
+        // `worker "normal" { … }` is the object `worker { normal { … } }`, and the three
+        // `worker` sections are three values of one key (spec §3.4, §8.2).
+        let workers = obj["worker"].as_array().unwrap();
+        assert_eq!(workers.len(), 3);
+        assert_eq!(workers[0]["normal"]["bind_socket"], "localhost:11333");
+        assert_eq!(
+            workers[1]["controller"]["secure_ip"],
+            json!(["127.0.0.1", "::1"])
+        );
+        // `$2` and the other references match no registered variable, so they stay (spec §7.4).
+        assert_eq!(
+            workers[1]["controller"]["password"],
+            "$2$rounds=12000$salt$hash"
+        );
+        assert_eq!(
+            workers[2]["rspamd_proxy"]["upstream"]["local"]["default"],
+            true
+        );
 
-                // Check worker configurations
-                if obj.contains_key("worker") {
-                    // Workers might be parsed as objects or arrays depending on implementation
-                    println!("Worker configuration found");
-                }
+        let metric = &obj["metric"]["default"];
+        assert_eq!(metric["actions"]["soft reject"], 10);
+        assert_eq!(metric["subject"], "***SPAM*** %s");
+        assert_eq!(
+            metric["group"],
+            json!([
+                {"header": {"weight": 1, "description": "Header-based checks"}},
+                {"content": {"weight": 1, "description": "Content-based checks"}}
+            ])
+        );
 
-                // Check metric configuration
-                if obj.contains_key("metric") {
-                    println!("Metric configuration found");
-                }
+        let bayes = &obj["classifier"]["bayes"];
+        assert_eq!(bayes["min_learns"], 200);
+        let statfiles = bayes["statfile"].as_array().unwrap();
+        assert_eq!(statfiles.len(), 2);
+        assert_eq!(statfiles[1]["symbol"], "BAYES_SPAM");
 
-                // Check classifier configuration
-                if obj.contains_key("classifier") {
-                    println!("Classifier configuration found");
-                }
-
-                // Check composites
-                if obj.contains_key("composites") {
-                    println!("Composites configuration found");
-                }
-            }
-            Err(e) => panic!("Rspamd config failed: {e}"),
-        }
+        assert_eq!(
+            obj["composites"]["SUSPICIOUS_RECIPS"],
+            "SUSPICIOUS_RECIPS & !WHITELIST_SPF"
+        );
     }
 
     #[test]
@@ -509,37 +542,38 @@ SCRIPT
             ssl_dh_parameters_length = 2048;
         "#;
 
-        let result = from_str::<Value>(config);
-        match result {
-            Ok(parsed) => {
-                println!("✅ Dovecot config parsed successfully");
+        let parsed: Value = from_str(config).expect("Dovecot config parses");
+        let obj = parsed.as_object().unwrap();
 
-                assert!(parsed.is_object());
-                let obj = parsed.as_object().unwrap();
+        // Arrays
+        assert_eq!(obj["protocols"], json!(["imap", "pop3", "lmtp"]));
+        assert_eq!(obj["listen"], json!(["*", "::"]));
+        assert_eq!(obj["login_trusted_networks"].as_array().unwrap().len(), 2);
+        assert_eq!(obj["auth_mechanisms"], json!(["plain", "login"]));
+        assert_eq!(obj["ssl_protocols"], json!(["!SSLv2", "!SSLv3"]));
 
-                // Check arrays
-                assert!(obj["protocols"].is_array());
-                assert!(obj["listen"].is_array());
-                assert!(obj["login_trusted_networks"].is_array());
-                assert!(obj["auth_mechanisms"].is_array());
-                assert!(obj["ssl_protocols"].is_array());
+        // Strings
+        assert_eq!(obj["base_dir"], "/var/run/dovecot/");
+        assert_eq!(obj["mail_location"], "maildir:~/Maildir");
+        assert_eq!(obj["mail_uid"], "vmail");
+        assert_eq!(obj["ssl_cert"], "</etc/ssl/certs/dovecot.pem");
+        assert_eq!(obj["ssl_dh_parameters_length"], 2048);
 
-                // Check string values
-                assert_eq!(obj["base_dir"], "/var/run/dovecot/");
-                assert_eq!(obj["mail_location"], "maildir:~/Maildir");
-                assert_eq!(obj["mail_uid"], "vmail");
+        // Named sections
+        let inbox = &obj["namespace"]["inbox"];
+        assert_eq!(inbox["separator"], "/");
+        assert_eq!(inbox["prefix"], "");
+        assert_eq!(inbox["mailbox"].as_array().unwrap().len(), 4);
+        assert_eq!(inbox["mailbox"][0]["Drafts"]["special_use"], "\\Drafts");
 
-                // Check nested objects
-                if obj.contains_key("namespace") {
-                    println!("Namespace configuration found");
-                }
-
-                if obj.contains_key("service") {
-                    println!("Service configuration found");
-                }
-            }
-            Err(e) => panic!("Dovecot config failed: {e}"),
-        }
+        let services = obj["service"].as_array().unwrap();
+        assert_eq!(services.len(), 4);
+        assert_eq!(services[0]["imap-login"]["process_limit"], 1000);
+        assert_eq!(
+            services[0]["imap-login"]["inet_listener"][1]["imaps"]["port"],
+            993
+        );
+        assert_eq!(services[3]["auth"]["user"], "$default_internal_user");
     }
 
     #[test]
@@ -627,32 +661,39 @@ SCRIPT
             }
         "#;
 
-        let result = from_str::<Value>(config);
-        match result {
-            Ok(parsed) => {
-                println!("✅ HAProxy config parsed successfully");
+        let parsed: Value = from_str(config).expect("HAProxy config parses");
+        let obj = parsed.as_object().unwrap();
 
-                assert!(parsed.is_object());
-                let obj = parsed.as_object().unwrap();
+        // Repeated keys hold several values (spec §8.2).
+        assert_eq!(obj["global"]["daemon"], true);
+        assert_eq!(
+            obj["global"]["stats"],
+            json!([
+                "socket /run/haproxy/admin.sock mode 660 level admin",
+                "timeout 30s"
+            ])
+        );
+        assert_eq!(obj["defaults"]["option"], json!(["httplog", "dontlognull"]));
+        assert_eq!(
+            obj["defaults"]["timeout"],
+            json!(["connect 5000", "client  50000", "server  50000"])
+        );
+        assert_eq!(obj["defaults"]["errorfile"].as_array().unwrap().len(), 7);
 
-                // Check main sections
-                assert!(obj["global"].is_object());
-                assert!(obj["defaults"].is_object());
-
-                // Check frontend/backend sections
-                if obj.contains_key("frontend") {
-                    println!("Frontend configuration found");
-                }
-
-                if obj.contains_key("backend") {
-                    println!("Backend configuration found");
-                }
-
-                if obj.contains_key("listen") {
-                    println!("Listen configuration found");
-                }
-            }
-            Err(e) => panic!("HAProxy config failed: {e}"),
-        }
+        // Named sections
+        let frontend = &obj["frontend"]["web_frontend"];
+        assert_eq!(frontend["redirect"], "scheme https if !{ ssl_fc }");
+        assert_eq!(frontend["acl"].as_array().unwrap().len(), 2);
+        let backends = obj["backend"].as_array().unwrap();
+        assert_eq!(backends.len(), 3);
+        assert_eq!(backends[1]["api_servers"]["balance"], "leastconn");
+        assert_eq!(
+            backends[2]["static_servers"]["server"],
+            json!([
+                "static1 192.168.1.30:80 check",
+                "static2 192.168.1.31:80 check"
+            ])
+        );
+        assert_eq!(obj["listen"]["stats"]["stats"].as_array().unwrap().len(), 4);
     }
 }

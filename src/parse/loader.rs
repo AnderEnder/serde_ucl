@@ -1,9 +1,10 @@
 //! Loaders: where the include macros and `.load` read files from (spec §9.3, §9.4, §9.6).
 //!
 //! The parser never touches the filesystem itself. It resolves relative paths against its base
-//! directory ([`super::Parser::set_base_dir`], or [`Loader::current_dir`] without one), and asks
-//! the loader to make a path canonical, to say what a path names, to read a file and to list a
-//! directory for glob patterns.
+//! directory ([`super::Parser::set_base_dir`]; without one, the directory of the file given to
+//! [`super::Parser::parse_file`], or [`Loader::current_dir`] for a document given as bytes),
+//! and asks the loader to make a path canonical, to say what a path names, to read a file and
+//! to list a directory for glob patterns.
 //!
 //! - [`FsLoader`] (Cargo feature `fs`, on by default) reads the real filesystem.
 //! - [`MemoryLoader`] serves files registered in memory.
@@ -27,9 +28,10 @@ pub enum FileKind {
 ///
 /// Every path a parser passes to a loader is absolute.
 pub trait Loader {
-    /// The directory that relative paths resolve against when the parser has no base directory
-    /// of its own. It is also `CURDIR` for a document given as bytes (spec §7.8) and for macro
-    /// argument lists (spec §9.2).
+    /// The directory that relative paths in a document given as bytes, and a relative path
+    /// given to [`super::Parser::parse_file`], resolve against when the parser has no base
+    /// directory of its own. It is then also `CURDIR` for a document given as bytes (spec §7.8)
+    /// and for macro argument lists in it (spec §9.2).
     fn current_dir(&self) -> io::Result<PathBuf>;
 
     /// `path` made canonical: absolute, with `.` and `..` components and symbolic links resolved
@@ -47,8 +49,10 @@ pub trait Loader {
     fn read_dir(&self, path: &Path) -> io::Result<Vec<String>>;
 }
 
-/// Reads files from the filesystem with `std::fs`. Relative paths resolve against the process's
-/// working directory unless the parser has a base directory.
+/// Reads files from the filesystem with `std::fs`. Its current directory is the process's
+/// working directory: without a base directory, relative paths in a document given as bytes
+/// resolve against it, while those in a file given to [`super::Parser::parse_file`] resolve
+/// against that file's directory.
 #[cfg(feature = "fs")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FsLoader;

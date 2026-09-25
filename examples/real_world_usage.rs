@@ -1,13 +1,24 @@
 //! Real-World Usage Examples
 //!
 //! This example demonstrates practical, real-world usage patterns for UCL
-//! configuration in various application scenarios.
+//! configuration in various application scenarios: a microservice, a CI/CD pipeline, a game
+//! server and an IoT device.
+//!
+//! Variables (spec §7): `$NAME` and `${NAME}` expand to registered variables; a variable
+//! handler is asked for braced references to names that are not registered. UCL has no
+//! `${NAME:-default}` form, so defaults are registered values or come from the handler, and
+//! expansion never turns a value into a number or boolean (spec §7.2): numeric and boolean
+//! settings are written as literals. A reference nothing resolves stays as written, as the
+//! `${...}` placeholders of the CI/CD pipeline do.
+//!
+//! Run with `cargo run --example real_world_usage`.
 
 #![allow(dead_code)]
 
 use serde::Deserialize;
 use std::collections::HashMap;
-use ucl_lexer::{EnvironmentVariableHandler, from_str, from_str_with_variables};
+use ucl_lexer::parse::ParserBuilder;
+use ucl_lexer::{from_str, from_str_with_variables, from_value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Real-World UCL Usage Examples");
@@ -37,14 +48,15 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         service {
             name = "auth-service"
             version = "2.1.0"
-            environment = "${ENVIRONMENT:-development}"
-            instance_id = "${HOSTNAME}-${PID}"
+            environment = "${ENVIRONMENT}"
+            # Registered variables expand anywhere in a string.
+            instance_id = "$HOSTNAME-$PID"
         }
         
         # HTTP server configuration
         http {
-            host = "${HTTP_HOST:-0.0.0.0}"
-            port = ${HTTP_PORT:-8080}
+            host = "${HTTP_HOST}"
+            port = 8080
             
             # Request handling
             max_request_size = 10mb
@@ -53,9 +65,9 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             
             # TLS configuration
             tls {
-                enabled = ${TLS_ENABLED:-false}
-                cert_file = "${TLS_CERT_FILE:-/etc/ssl/certs/service.crt}"
-                key_file = "${TLS_KEY_FILE:-/etc/ssl/private/service.key}"
+                enabled = false
+                cert_file = "${TLS_CERT_FILE}"
+                key_file = "${TLS_KEY_FILE}"
                 protocols = ["TLSv1.2", "TLSv1.3"]
             }
         }
@@ -65,7 +77,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             # Primary database
             primary {
                 url = "${DATABASE_URL}"
-                pool_size = ${DB_POOL_SIZE:-20}
+                pool_size = 20
                 max_lifetime = 30min
                 idle_timeout = 10min
                 connection_timeout = 5s
@@ -73,21 +85,21 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             
             # Read replicas for scaling
             replicas = [
-                "${DB_REPLICA_1_URL:-}",
-                "${DB_REPLICA_2_URL:-}"
+                "${DB_REPLICA_1_URL}",
+                "${DB_REPLICA_2_URL}"
             ]
             
             # Migration settings
             migrations {
-                auto_migrate = ${AUTO_MIGRATE:-false}
+                auto_migrate = false
                 migration_timeout = 5min
             }
         }
         
         # Redis for caching and sessions
         redis {
-            url = "${REDIS_URL:-redis://localhost:6379/0}"
-            pool_size = ${REDIS_POOL_SIZE:-10}
+            url = "${REDIS_URL}"
+            pool_size = 10
             timeout = 2s
             
             # Key prefixes for different data types
@@ -104,7 +116,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             algorithm = "HS256"
             access_token_ttl = 15min
             refresh_token_ttl = 7d
-            issuer = "${JWT_ISSUER:-auth-service}"
+            issuer = "${JWT_ISSUER}"
         }
         
         # Rate limiting
@@ -113,10 +125,10 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             
             # Different limits for different endpoints
             limits {
-                login = { requests = 5, window = 1min }
-                register = { requests = 3, window = 5min }
-                password_reset = { requests = 2, window = 1h }
-                default = { requests = 100, window = 1min }
+                login = { window = 1min, requests = 5 }
+                register = { window = 5min, requests = 3 }
+                password_reset = { window = 1h, requests = 2 }
+                default = { window = 1min, requests = 100 }
             }
         }
         
@@ -131,10 +143,10 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             
             # Distributed tracing
             tracing {
-                enabled = ${TRACING_ENABLED:-false}
-                jaeger_endpoint = "${JAEGER_ENDPOINT:-http://localhost:14268/api/traces}"
+                enabled = false
+                jaeger_endpoint = "${JAEGER_ENDPOINT}"
                 service_name = "auth-service"
-                sample_rate = ${TRACE_SAMPLE_RATE:-0.1}
+                sample_rate = 0.1
             }
             
             # Health checks
@@ -172,7 +184,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
             }
             
             session_security {
-                secure_cookies = ${SECURE_COOKIES:-true}
+                secure_cookies = true
                 same_site = "Strict"
                 csrf_protection = true
             }
@@ -342,24 +354,63 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         csrf_protection: bool,
     }
 
-    // Set up environment variables for demonstration
-    unsafe {
-        std::env::set_var("ENVIRONMENT", "production");
-        std::env::set_var(
+    // The deployment's settings, as an orchestrator would pass them in the process environment.
+    // A real service would read `std::env::var(name)` in the handler, as `from_str_with_env`
+    // does; the map keeps this example independent of the environment it runs in.
+    let deployment: HashMap<&str, &str> = [
+        ("ENVIRONMENT", "production"),
+        (
             "DATABASE_URL",
             "postgresql://auth:secret@db.internal:5432/auth_db",
-        );
-        std::env::set_var("JWT_SECRET", "super-secret-jwt-key");
-        std::env::set_var("EMAIL_SERVICE_URL", "https://api.sendgrid.com/v3");
-        std::env::set_var("EMAIL_API_KEY", "SG.xxx");
-        std::env::set_var("SMS_SERVICE_URL", "https://api.twilio.com/2010-04-01");
-        std::env::set_var("SMS_API_KEY", "AC123xxx");
-    }
-
-    let config: MicroserviceConfig =
-        from_str_with_variables(config_text, Box::new(EnvironmentVariableHandler))?;
+        ),
+        (
+            "DB_REPLICA_1_URL",
+            "postgresql://auth@replica1.internal/auth_db",
+        ),
+        (
+            "DB_REPLICA_2_URL",
+            "postgresql://auth@replica2.internal/auth_db",
+        ),
+        ("JWT_SECRET", "super-secret-jwt-key"),
+        ("EMAIL_SERVICE_URL", "https://api.sendgrid.com/v3"),
+        ("EMAIL_API_KEY", "SG.xxx"),
+        ("SMS_SERVICE_URL", "https://api.twilio.com/2010-04-01"),
+        ("SMS_API_KEY", "AC123xxx"),
+    ]
+    .into();
+    // What the handler answers for names the deployment leaves out.
+    let defaults: HashMap<&str, &str> = [
+        ("HTTP_HOST", "0.0.0.0"),
+        ("TLS_CERT_FILE", "/etc/ssl/certs/service.crt"),
+        ("TLS_KEY_FILE", "/etc/ssl/private/service.key"),
+        ("REDIS_URL", "redis://localhost:6379/0"),
+        ("JWT_ISSUER", "auth-service"),
+        ("JAEGER_ENDPOINT", "http://localhost:14268/api/traces"),
+    ]
+    .into();
+    let mut parser = ParserBuilder::new()
+        .with_variables([("HOSTNAME", "auth-7f9c"), ("PID", "4242")])
+        // Each handler reference is a whole string: libucl substitutes a handler's value
+        // reliably only there (spec §7.7).
+        .with_variable_handler(move |name| {
+            deployment
+                .get(name)
+                .or_else(|| defaults.get(name))
+                .map(|value| value.to_string())
+        })
+        .build();
+    let config: MicroserviceConfig = from_value(parser.parse(config_text.as_bytes())?)?;
 
     {
+        assert_eq!(config.service.environment, "production");
+        assert_eq!(config.service.instance_id, "auth-7f9c-4242");
+        assert_eq!(config.http.host, "0.0.0.0");
+        assert_eq!(config.http.port, 8080);
+        assert!(!config.http.tls.enabled);
+        assert_eq!(config.redis.url, "redis://localhost:6379/0");
+        assert_eq!(config.database.replicas.len(), 2);
+        assert_eq!(config.jwt.issuer, "auth-service");
+        assert_eq!(config.jwt.refresh_token_ttl, 7.0 * 86_400.0);
         assert!(!config.service.instance_id.is_empty());
         assert!(config.http.max_request_size > 0);
         assert!(config.http.timeout >= 0.0);
@@ -367,7 +418,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         assert!(config.http.tls.protocols.len() >= 1);
         assert!(!config.http.tls.cert_file.is_empty());
         assert!(!config.http.tls.key_file.is_empty());
-        assert!(config.database.migrations.auto_migrate || !config.database.migrations.auto_migrate);
+        assert!(!config.database.migrations.auto_migrate);
         assert!(config.database.migrations.migration_timeout >= 0.0);
         assert!(config.database.primary.max_lifetime >= 0.0);
         assert!(config.database.primary.idle_timeout >= 0.0);
@@ -380,7 +431,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         assert!(config.jwt.refresh_token_ttl > 0.0);
         assert!(!config.jwt.issuer.is_empty());
         assert!(config.rate_limiting.limits.contains_key("login"));
-        assert!(config.observability.metrics.enabled || !config.observability.metrics.enabled);
+        assert!(config.observability.metrics.enabled);
         assert!(!config.observability.metrics.endpoint.is_empty());
         assert!(config.observability.metrics.interval >= 0.0);
         assert!(config.observability.tracing.sample_rate >= 0.0);
@@ -388,7 +439,7 @@ fn demo_microservice_config() -> Result<(), Box<dyn std::error::Error>> {
         assert!(!config.external_services.email_service.url.is_empty());
         assert!(!config.external_services.sms_service.url.is_empty());
         assert!(config.security.password_policy.min_length > 0);
-        assert!(config.security.session_security.csrf_protection || true);
+        assert!(config.security.session_security.csrf_protection);
     }
 
     println!("Microservice configuration loaded:");
@@ -1045,7 +1096,9 @@ fn demo_game_server_config() -> Result<(), Box<dyn std::error::Error>> {
                 network_warning_threshold = 90.0
                 
                 # Tick performance
-                tick_time_warning = 16ms  # 60 FPS = 16.67ms per tick
+                # 60 FPS = 16.67ms per tick. A comment after a suffix needs its own line:
+                # `16ms  # ...` would be the string "16ms" (spec §5.5).
+                tick_time_warning = 16ms
                 tick_time_critical = 20ms
             }
             
@@ -1520,9 +1573,9 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
             # Cellular backup (if available)
             cellular {
                 enabled = false
-                apn = "${CELLULAR_APN:-}"
-                username = "${CELLULAR_USER:-}"
-                password = "${CELLULAR_PASS:-}"
+                apn = "$CELLULAR_APN"
+                username = "$CELLULAR_USER"
+                password = "$CELLULAR_PASS"
                 
                 # Fallback settings
                 fallback_enabled = true
@@ -1537,7 +1590,7 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
                 
                 # Security
                 require_pairing = true
-                pin_code = "${BT_PIN:-1234}"
+                pin_code = "$BT_PIN"
             }
         }
         
@@ -1575,7 +1628,7 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
             mqtt {
                 enabled = true
                 broker = "${MQTT_BROKER}"
-                port = ${MQTT_PORT:-1883}
+                port = 1883
                 username = "${MQTT_USER}"
                 password = "${MQTT_PASS}"
                 
@@ -1646,7 +1699,7 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
                 
                 # Token-based auth (alternative)
                 token_refresh_interval = 1h
-                token_endpoint = "${TOKEN_ENDPOINT:-}"
+                token_endpoint = "$TOKEN_ENDPOINT"
             }
             
             # Firmware updates
@@ -1738,9 +1791,14 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
     #[derive(Debug, Deserialize)]
     struct SensorConfig {
         enabled: bool,
-        unit: String,
-        precision: f64,
-        range: SensorRange,
+        /// The motion sensor has no unit, precision or range.
+        #[serde(default)]
+        unit: Option<String>,
+        #[serde(default)]
+        precision: Option<f64>,
+        #[serde(default)]
+        range: Option<SensorRange>,
+        #[serde(default)]
         calibration_offset: f64,
         sample_rate: f64,
         #[serde(default)]
@@ -1949,21 +2007,26 @@ fn demo_iot_device_config() -> Result<(), Box<dyn std::error::Error>> {
         remote_log_access: bool,
     }
 
-    // Set up environment variables for demonstration
-    unsafe {
-        std::env::set_var("DEVICE_ID", "sensor-001-abc123");
-        std::env::set_var("WIFI_SSID", "IoT-Network");
-        std::env::set_var("WIFI_PASSWORD", "secure-password");
-        std::env::set_var("CLOUD_ENDPOINT", "https://iot.example.com/api/v1");
-        std::env::set_var("API_KEY", "iot-api-key-123");
-        std::env::set_var("DEVICE_TOKEN", "device-token-456");
-        std::env::set_var("MQTT_BROKER", "mqtt.example.com");
-        std::env::set_var("MQTT_USER", "device-001");
-        std::env::set_var("MQTT_PASS", "mqtt-password");
-    }
-
-    let config: IoTDeviceConfig =
-        from_str_with_variables(config_text, Box::new(EnvironmentVariableHandler))?;
+    // The device's provisioning data, registered as variables: registered variables expand
+    // anywhere in a string, such as the MQTT topics. Empty values stand for settings this
+    // device does not use.
+    let provisioning = [
+        ("DEVICE_ID", "sensor-001-abc123"),
+        ("WIFI_SSID", "IoT-Network"),
+        ("WIFI_PASSWORD", "secure-password"),
+        ("CLOUD_ENDPOINT", "https://iot.example.com/api/v1"),
+        ("API_KEY", "iot-api-key-123"),
+        ("DEVICE_TOKEN", "device-token-456"),
+        ("MQTT_BROKER", "mqtt.example.com"),
+        ("MQTT_USER", "device-001"),
+        ("MQTT_PASS", "mqtt-password"),
+        ("CELLULAR_APN", ""),
+        ("CELLULAR_USER", ""),
+        ("CELLULAR_PASS", ""),
+        ("BT_PIN", "1234"),
+        ("TOKEN_ENDPOINT", ""),
+    ];
+    let config: IoTDeviceConfig = from_str_with_variables(config_text, provisioning)?;
 
     println!("IoT device configuration loaded:");
     println!("  Device: {} ({})", config.device.name, config.device.id);

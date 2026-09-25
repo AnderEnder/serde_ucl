@@ -1,0 +1,176 @@
+# Changelog
+
+All notable changes to this crate are recorded here.
+
+## Unreleased
+
+This release replaces the parser with one that reads UCL as libucl does, adds output in libucl's
+formats and serde serialization, and removes the old lexer, parser and extension API. It is not
+compatible with 0.1.0: read the sections below before upgrading. The full format rules are in
+`docs/spec/` in the repository.
+
+### Text input never reads files
+
+**Breaking.** A document given as text has no file access by default. This applies to
+`from_str`, `from_slice`, `from_reader`, `UclDeserializer::new`, `UclDeserializer::from_slice`,
+`parse::parse`, and any `parse::Parser` that keeps its default loader: in every build, that loader
+is an empty `parse::MemoryLoader`, which holds no files. In such a document:
+
+- `.include` finds no file: it fails with `ErrorKind::FileNotFound`, or with `try=true` does
+  nothing;
+- `.try_include` stops the parse: the serde entry points return `UclError::Stopped`, and
+  `Parser::parse` an error for which `parse::Error::is_stopped` is true. Its
+  `parse::Error::partial` holds the entries parsed before the macro;
+- `.load` (feature `load`) fails with `ErrorKind::FileNotFound`, and with `try=true` does
+  nothing;
+- `Parser::parse_file` fails as well, because the default loader holds no file to read.
+
+Only `from_file` (feature `fs`, on by default) reads the filesystem without being asked to. It
+resolves relative include paths against the directory of the file it was given, also inside the
+files that one includes; a base directory set on the parser takes precedence. libucl resolves them
+against the process's working directory instead.
+
+To let a document given as text read files, give its parser a filesystem loader, and preferably a
+base directory:
+
+```rust
+use ucl_lexer::parse::{FsLoader, ParserBuilder};
+
+let mut parser = ParserBuilder::new()
+    .with_loader(FsLoader::new()) // or Parser::set_loader
+    .with_base_dir("/etc/myapp")
+    .build();
+let config: Config = ucl_lexer::from_value(parser.parse(text.as_bytes())?)?;
+```
+
+With `FsLoader` and no base directory, relative paths in text input, and `$CURDIR`, resolve
+against the process's working directory.
+
+### Breaking API changes
+
+Removed:
+
+- The modules `ucl_lexer::lexer` and `ucl_lexer::parser`, with everything in them, and their
+  re-exports from the crate root: `UclLexer`, `LexerConfig`, `StreamingUclLexer`,
+  `StringFormat`, `Token`, `streaming_lexer_from_file`, `streaming_lexer_from_reader`,
+  `UclParser`, `UclParserBuilder`, `ParserConfig`, `DuplicateKeyBehavior`, the
+  `VariableHandler` trait, `VariableContext`, `MapVariableHandler`,
+  `EnvironmentVariableHandler`, `ChainedVariableHandler`, `ParsingHooks`, `NumberSuffixHandler`,
+  `StringPostProcessor`, `ValidationHook`, `UclPlugin`, `PluginConfig`, `PluginRegistry`,
+  `ConfigValidationPlugin`, `CssUnitsPlugin`, `PathProcessingPlugin`, `CustomUnitSuffixHandler`,
+  `PathNormalizationProcessor` and `SchemaValidationHook`.
+- In `error`: `LexError`, `ParseError`, `Span`, `ErrorContext` and `EnhancedError` (and their
+  root re-exports); the variants `UclError::Lex` and `UclError::Parse`; the methods
+  `UclError::with_source_context`, `UclError::format_with_context`, `Position::advance` and
+  `Position::advance_by`; the variants `SerdeError::TypeMismatch`, `SerdeError::MissingField` and
+  `SerdeError::UnknownField`, which were never produced.
+- In `de`: `from_str_with_config`, `from_str_with_config_and_variables`,
+  `UclDeserializer::with_lexer_config` and `UclDeserializer::with_variable_handler`. Parser
+  settings are now made with `parse::ParserBuilder`; pass the parser to
+  `UclDeserializer::from_parser`, or parse to a `UclValue` and call `from_value`.
+
+Changed:
+
+- `from_str_with_variables(text, variables)` takes `(name, value)` pairs (any
+  `IntoIterator<Item = (K, V)>` with `K, V: Into<String>`), registered in order, instead of a
+  boxed handler.
+- `from_str_with_map` registers the map's names in descending byte order, which puts every name
+  before the names that are prefixes of it, so an unbraced `$NAME` takes the longest matching
+  name.
+- `from_str_with_env` asks the environment only for braced references: `${HOME}` is expanded,
+  `$HOME` is left as written.
+- A variable handler is a closure `FnMut(&str) -> Option<String>`, installed with
+  `ParserBuilder::with_variable_handler` or `Parser::set_variable_handler`. It is asked only for
+  braced references `${NAME}` whose name is not registered, never for `$NAME`. If it returns
+  `None`, the reference stays as written.
+- `UclDeserializer::from_parser(parser, input)` takes a `parse::Parser` and the input bytes;
+  `UclDeserializer::parser` and `parser_mut` return that `parse::Parser`.
+- A document the parser rejects is `UclError::Syntax(parse::Error)`, with its `kind()` (a
+  `parse::ErrorKind`), its `position()` and, for an error inside an included file, that
+  `file()`. `UclError::Stopped` is new (see above). Error messages have new wording.
+- A `Position` has a 1-based line and column, the column counted in characters, and a 0-based
+  byte offset. Only a line feed starts a new line; a carriage return is counted as a character.
+
+Added:
+
+- `parse`: the parser. `Parser` and `ParserBuilder` (also `Parser::builder`) set parser flags
+  (`ParserFlags`), the duplicate-key strategy (`DuplicateStrategy`) and priority, registered
+  variables, a variable handler, the loader (`Loader`, `MemoryLoader`, and `FsLoader` with
+  feature `fs`) and a base directory. The parser can save comments and attach them to values.
+  `parse::parse` parses bytes with default settings.
+- Macros: `.include` and `.try_include` with their parameters and glob patterns, `.priority`,
+  `.inherit`, and `.load` behind the `load` feature (off by default). An unknown macro is an
+  error.
+- `emit`: output in libucl's four formats, the config format, JSON, compact JSON and YAML, byte
+  for byte as libucl writes them. Saved comments appear in config output only when asked for
+  (`Emitter::with_comments`).
+- serde serialization: `to_string` (config format), `to_json_string`, `to_json_string_compact`,
+  `to_yaml_string`, `to_writer` and `to_value`, and `Serialize` and `Deserialize` for `UclValue`
+  and `UclObject`. The output reads back, in this crate and in libucl, as exactly the value
+  written, floats included. JSON output is valid JSON: a time is written as its number of
+  seconds, and a NaN or infinite float or time cannot be written as JSON
+  (`SerdeError::Unrepresentable`, also used for other values that have no form in a format).
+- `time` serializes `Duration` as well as deserializing it.
+- `from_slice`, `from_reader`, `from_file` (feature `fs`) and `from_value`; `from_value`,
+  `from_str_with_env` and `from_str_with_map` are also re-exported from the crate root.
+  `UclDeserializer::from_slice`.
+- In the value model: `Placement` (also at the crate root), `UclObject::insert_slot_placed`,
+  `UclObject::get_index`, `UclObject::get_index_mut`, `UclObject::index_of`,
+  `UclObject::rename_key` and `Entry::value_at_mut`.
+- `UclError::parse_error` and `UclError::position`.
+- Cargo features `fs` (default) and `load`.
+
+### Behaviour changes
+
+Parsing now follows libucl. Documents that the old parser read may parse differently or fail:
+
+- `//` does not start a comment: `// text` is the key `//` with the value `text`. Comments are
+  `#` and `/* … */`.
+- An unquoted value runs to the end of the line, a `,`, a `;` or a comment, spaces included:
+  `k = 1 2 3` is the string `"1 2 3"`.
+- A number with a suffix followed by a space is a string: in `timeout = 30s # comment` the value
+  is `"30s"`, while `timeout = 30s` is a time.
+- `null` is recognised in lowercase only; `NULL` and `Null` are strings. Likewise `inf` and
+  `nan`: `Inf` and `NaN` are strings.
+- `\u` takes exactly four hex digits; `\u{…}` is an error. An escape that is not defined drops
+  the backslash (`"\q"` is `"q"`). A raw TAB inside a double-quoted string is an error.
+- A heredoc's terminator name consists of uppercase letters (`<<EOF`); `<<eof` does not start a
+  heredoc.
+- `key name { … }` nests: `a b { c = 1 }` is `a { b { c = 1 } }`.
+- A repeated key keeps every value. Deserializing such a key into a field that is not a sequence
+  fails with "invalid type: sequence"; use a `Vec` field, `DuplicateStrategy::Rewrite`, or
+  priorities to keep one value.
+- Variable expansion always produces a string: with `PORT` set to `8080`, `port = $PORT` is the
+  string `"8080"`. There is no `${NAME:-default}` form; it stays as written.
+- `$FILENAME` and `$CURDIR` are defined. For text input, `FILENAME` is `undef` and `CURDIR` is the
+  base directory, or without one the loader's current directory: `/` for the default loader, the
+  process's working directory for `FsLoader`. For a file, they are its canonical path and its
+  directory, and registered variables of the same names do not override them. The
+  `NO_FILEVARS` flag turns them off for text input. Like other registered names, they also match
+  the start of a longer unbraced reference: `$CURDIRx` is `/x` for text input.
+- Keys and strings must be valid UTF-8, including strings built from `\u` escapes of surrogate
+  code points: anything else is `ErrorKind::InvalidUtf8`. Comments may hold any bytes. libucl
+  accepts such bytes.
+- Signatures are never verified: `.includes`, and `sign=true` on any include macro, fail with an
+  "unsupported" error (`parse::Error::is_unsupported`); `sign=false` is accepted.
+- URLs are never fetched: `.include(url=true)` of a path containing `://` fails with
+  `ErrorKind::UrlNotSupported`, and with `try=true` is skipped. Without `url=true` such a path is
+  an ordinary path.
+- Limits: containers nest at most 1024 deep (`parse::MAX_NESTING`), included files 16 deep
+  (`parse::MAX_INCLUDE_DEPTH`) and macro argument documents 64 deep
+  (`parse::MAX_ARGUMENT_DEPTH`; libucl sets no limit there). The old lexer's configurable limits
+  are gone.
+- Deserializing into a borrowed `&str` field is not supported and fails with "expected a
+  borrowed string"; use `String` or `Cow<str>`.
+
+### Removed features, examples and benches
+
+- Features: the streaming lexer and the token API, the plugin and hook system (plugins, number
+  suffix handlers, string post-processors, validation hooks), the configurable lexer limits,
+  source-context error formatting, and the syntax extensions listed above (`//` comments,
+  `\u{…}` escapes, `${NAME:-default}`).
+- Examples: `cpp_comments_demo`, `extensibility_demo` and `performance_comparison`. The other
+  examples are rewritten on the new API.
+- Benches: `lexer_benchmarks`, `parser_benchmarks`, `zero_copy_benchmarks`,
+  `memory_efficiency_benchmarks` and `ucl_compatibility_benchmarks`, replaced by
+  `parse_benchmarks`, `emit_benchmarks` and `serde_benchmarks`.

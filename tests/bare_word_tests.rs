@@ -1,70 +1,25 @@
+//! Unquoted values (spec §4): extent, keywords, numbers and strings. Expected results are
+//! libucl's (spec §4, checked with the oracle).
+
 use serde_json::Value;
-use ucl_lexer::{UclError, from_str};
+use ucl_lexer::parse::{self, ErrorKind};
+use ucl_lexer::{UclError, UclValue, from_str};
 
 #[cfg(test)]
 mod bare_word_tests {
     use super::*;
 
-    fn assert_infinite(value: &Value, positive: bool) {
-        if let Some(f) = value.as_f64() {
-            assert!(f.is_infinite(), "Expected infinite float, got {:?}", value);
-            assert_eq!(
-                f.is_sign_positive(),
-                positive,
-                "Unexpected infinity sign for {:?}",
-                value
-            );
-            return;
-        }
-
-        if value.is_null() {
-            // serde_json cannot represent non-finite numbers; null indicates special float
-            return;
-        }
-
-        if let Some(s) = value.as_str() {
-            let normalized = s.trim().to_ascii_lowercase();
-            if positive {
-                assert!(
-                    normalized == "inf" || normalized == "infinity",
-                    "Expected positive infinity representation, got {:?}",
-                    value
-                );
-            } else {
-                assert!(
-                    normalized == "-inf" || normalized == "-infinity",
-                    "Expected negative infinity representation, got {:?}",
-                    value
-                );
-            }
-            return;
-        }
-
-        panic!("Unexpected representation for infinity: {:?}", value);
+    /// The value of `key` in the root object of `config`, as the new core parses it.
+    fn value_of(config: &str, key: &str) -> UclValue {
+        let root = parse::parse(config.as_bytes()).expect("parses");
+        root.as_object().expect("an object")[key].clone()
     }
 
-    fn assert_nan(value: &Value) {
-        if let Some(f) = value.as_f64() {
-            assert!(f.is_nan(), "Expected NaN float, got {:?}", value);
-            return;
+    fn error_kind(config: &str) -> ErrorKind {
+        match from_str::<Value>(config) {
+            Err(UclError::Syntax(e)) => e.kind().clone(),
+            other => panic!("{config:?}: expected a parse error, got {other:?}"),
         }
-
-        if value.is_null() {
-            // serde_json represents NaN as null to preserve JSON compatibility
-            return;
-        }
-
-        if let Some(s) = value.as_str() {
-            assert_eq!(
-                s.trim().to_ascii_lowercase(),
-                "nan",
-                "Expected 'nan' string, got {:?}",
-                value
-            );
-            return;
-        }
-
-        panic!("Unexpected representation for NaN: {:?}", value);
     }
 
     #[test]
@@ -90,7 +45,7 @@ mod bare_word_tests {
 
     #[test]
     fn test_boolean_keyword_conversion() {
-        // Test boolean keywords converted to boolean values
+        // Boolean keywords are ASCII case-insensitive (spec §4.5).
         let config = r#"
             flag1 = true
             flag2 = false
@@ -98,7 +53,7 @@ mod bare_word_tests {
             flag4 = no
             flag5 = on
             flag6 = off
-            
+
             # Test case variations
             flag7 = True
             flag8 = False
@@ -127,7 +82,7 @@ mod bare_word_tests {
 
     #[test]
     fn test_null_keyword_conversion() {
-        // Test null keyword converted to null value
+        // `null` is lowercase only; `NULL` and `Null` are strings (spec §4.5).
         let config = r#"
             value1 = null
             value2 = NULL
@@ -136,13 +91,14 @@ mod bare_word_tests {
 
         let result: Value = from_str(config).expect("Should parse null keywords");
         assert_eq!(result["value1"], Value::Null);
-        assert_eq!(result["value2"], Value::Null);
-        assert_eq!(result["value3"], Value::Null);
+        assert_eq!(result["value2"], "NULL");
+        assert_eq!(result["value3"], "Null");
     }
 
     #[test]
     fn test_special_float_values() {
-        // Test special float values (inf, -inf, nan)
+        // `inf` and `nan` are lowercase-only keywords; `infinity`, `-inf`, `-infinity`, `NaN` and
+        // `NAN` are strings (spec §4.5).
         let config = r#"
             positive_infinity = inf
             positive_infinity2 = infinity
@@ -153,65 +109,57 @@ mod bare_word_tests {
             not_a_number3 = NAN
         "#;
 
-        let result: Value = from_str(config).expect("Should parse special float values");
-
-        // Check infinity values
-        assert_infinite(&result["positive_infinity"], true);
-        assert_infinite(&result["positive_infinity2"], true);
-
-        assert_infinite(&result["negative_infinity"], false);
-        assert_infinite(&result["negative_infinity2"], false);
-
-        // Check NaN values
-        assert_nan(&result["not_a_number"]);
-        assert_nan(&result["not_a_number2"]);
-        assert_nan(&result["not_a_number3"]);
+        assert_eq!(
+            value_of(config, "positive_infinity"),
+            UclValue::Float(f64::INFINITY)
+        );
+        assert!(matches!(
+            value_of(config, "not_a_number"),
+            UclValue::Float(f) if f.is_nan()
+        ));
+        for (key, text) in [
+            ("positive_infinity2", "infinity"),
+            ("negative_infinity", "-inf"),
+            ("negative_infinity2", "-infinity"),
+            ("not_a_number2", "NaN"),
+            ("not_a_number3", "NAN"),
+        ] {
+            assert_eq!(
+                value_of(config, key),
+                UclValue::String(text.into()),
+                "{key}"
+            );
+        }
     }
 
     #[test]
-    fn test_bare_word_validation_errors() {
-        // Test bare words with special characters require quoting
-        let invalid_configs = vec![
-            (r#"key = hello world"#, "Spaces should require quotes"),
-            (
-                r#"key = hello@world"#,
-                "Special characters should require quotes",
-            ),
-            (
-                r#"key = hello#world"#,
-                "Hash character should require quotes",
-            ),
-            (r#"key = hello{world"#, "Braces should require quotes"),
-            (r#"key = hello}world"#, "Braces should require quotes"),
-            (r#"key = hello[world"#, "Brackets should require quotes"),
-            (r#"key = hello]world"#, "Brackets should require quotes"),
-            (r#"key = hello,world"#, "Comma should require quotes"),
-            (r#"key = hello;world"#, "Semicolon should require quotes"),
-        ];
-
-        for (config, description) in invalid_configs {
-            let result: Result<Value, UclError> = from_str(config);
-            // These should either fail or be parsed in a specific way
-            // The exact behavior depends on implementation
-            match result {
-                Ok(val) => {
-                    // If it parses, it should be as a string or have some reasonable interpretation
-                    assert!(val.is_object(), "{}: {}", description, config);
-                }
-                Err(error) => {
-                    // If it fails, error should be helpful
-                    let error_msg = error.to_string();
-                    assert!(
-                        error_msg.contains("quote")
-                            || error_msg.contains("invalid")
-                            || error_msg.contains("bare"),
-                        "{}: Error should mention quoting: {}",
-                        description,
-                        error_msg
-                    );
-                }
-            }
+    fn test_bare_word_extent() {
+        // An unquoted value runs to a terminator, `#` or an unmatched closing bracket; spaces,
+        // `@` and balanced or unclosed opening brackets are part of it (spec §4.1, §4.2).
+        for (config, expected) in [
+            ("key = hello world", "hello world"),
+            ("key = hello@world", "hello@world"),
+            ("key = hello@domain.com", "hello@domain.com"),
+            ("key = hello#world", "hello"),
+            ("key = hello#comment", "hello"),
+            ("key = hello{world", "hello{world"),
+            ("key = hello[world", "hello[world"),
+        ] {
+            let result: Value = from_str(config).expect(config);
+            assert_eq!(result["key"], expected, "{config}");
         }
+        // An unmatched `}` or `]` ends the value and closes nothing (spec §4.2).
+        assert_eq!(
+            error_kind("key = hello}world"),
+            ErrorKind::UnmatchedClose { found: '}' }
+        );
+        assert_eq!(
+            error_kind("key = hello]world"),
+            ErrorKind::UnmatchedClose { found: ']' }
+        );
+        // `,` and `;` end the value; the word after them is a key without a value (spec §4.1).
+        assert_eq!(error_kind("key = hello,world"), ErrorKind::MissingValue);
+        assert_eq!(error_kind("key = hello;world"), ErrorKind::MissingValue);
     }
 
     #[test]
@@ -222,19 +170,19 @@ mod bare_word_tests {
                 listen 80
                 server_name example.com
                 root /var/www
-                
+
                 location / {
                     try_files $uri $uri/ =404
                     proxy_pass http://backend
                 }
             }
-            
+
             array_with_bare_words = [
                 production,
                 staging,
                 development
             ]
-            
+
             mixed_array = [
                 "quoted string",
                 bare_word,
@@ -269,7 +217,7 @@ mod bare_word_tests {
 
     #[test]
     fn test_bare_word_vs_quoted_string_distinction() {
-        // Test distinction between bare words and quoted strings
+        // Quoted strings are never keywords or numbers (spec §4.5, §6).
         let config = r#"
             bare_true = true
             quoted_true = "true"
@@ -317,10 +265,8 @@ mod bare_word_tests {
         assert_eq!(result["mixed_case"], "HelloWorld");
         assert_eq!(result["single_char"], "a");
         assert_eq!(result["empty_like"], "");
-
-        // number_prefix behavior depends on implementation
-        // It might be parsed as a number or string
-        assert!(result["number_prefix"].is_string() || result["number_prefix"].is_number());
+        // Digits followed by letters that are not a suffix: a string (spec §5.5).
+        assert_eq!(result["number_prefix"], "123abc");
     }
 
     #[test]
@@ -331,12 +277,12 @@ mod bare_word_tests {
             bool_true = true
             bool_false = false
             null_value = null
-            
+
             # These should be treated as strings when quoted
             string_true = "true"
             string_false = "false"
             string_null = "null"
-            
+
             # Test ambiguous cases
             word_true = True
             word_false = False
@@ -355,11 +301,10 @@ mod bare_word_tests {
         assert_eq!(result["string_false"], "false");
         assert_eq!(result["string_null"], "null");
 
-        // Case variations should also be converted (if implementation supports it)
-        // The exact behavior may vary
-        assert!(result["word_true"].is_boolean() || result["word_true"].is_string());
-        assert!(result["word_false"].is_boolean() || result["word_false"].is_string());
-        assert!(result["word_null"].is_null() || result["word_null"].is_string());
+        // Booleans are case-insensitive, `null` is lowercase only (spec §4.5).
+        assert_eq!(result["word_true"], true);
+        assert_eq!(result["word_false"], false);
+        assert_eq!(result["word_null"], "Null");
     }
 
     #[test]
@@ -384,40 +329,9 @@ mod bare_word_tests {
         assert_eq!(result["version"], "v1.2.3");
         assert_eq!(result["mixed"], "abc123");
 
-        // Hex and scientific notation depend on implementation
-        assert!(result["hex_like"].is_string() || result["hex_like"].is_number());
-        assert!(result["scientific"].is_string() || result["scientific"].is_number());
-    }
-
-    #[test]
-    fn test_bare_word_error_suggestions() {
-        // Test that error messages provide helpful suggestions
-        let potentially_problematic_configs = vec![
-            r#"key = hello world"#,      // Space in bare word
-            r#"key = hello@domain.com"#, // Email-like
-            r#"key = hello#comment"#,    // Hash character
-        ];
-
-        for config in potentially_problematic_configs {
-            let result: Result<Value, UclError> = from_str(config);
-            match result {
-                Ok(_) => {
-                    // If it parses successfully, that's fine too
-                }
-                Err(error) => {
-                    let error_msg = error.to_string();
-                    // Error should provide helpful guidance
-                    assert!(
-                        error_msg.contains("quote")
-                            || error_msg.contains("\"")
-                            || error_msg.contains("bare")
-                            || error_msg.contains("invalid"),
-                        "Error should provide helpful suggestion: {}",
-                        error_msg
-                    );
-                }
-            }
-        }
+        // Hexadecimal integers are ints, exponents floats (spec §5.1, §5.2).
+        assert_eq!(value_of(config, "hex_like"), UclValue::Integer(0xabc));
+        assert_eq!(value_of(config, "scientific"), UclValue::Float(1e10));
     }
 
     #[test]

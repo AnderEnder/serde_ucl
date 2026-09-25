@@ -1,14 +1,24 @@
+//! Heredoc strings (spec §6.3). Expected results are libucl's (spec §6.3, checked with the
+//! oracle).
+
 use serde_json::Value;
+use ucl_lexer::parse::ErrorKind;
 use ucl_lexer::{UclError, from_str};
 
 #[cfg(test)]
 mod heredoc_tests {
     use super::*;
 
+    fn error_kind(config: &str) -> ErrorKind {
+        match from_str::<Value>(config) {
+            Err(UclError::Syntax(e)) => e.kind().clone(),
+            other => panic!("{config:?}: expected a parse error, got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_heredoc_with_leading_whitespace_terminator() {
-        // Per SPEC.md line 346: terminator with leading whitespace is NOT valid
-        // It should be treated as content, not a terminator
+        // An indented terminator is content (spec §6.3, `heredoc_indented_terminator_is_content`).
         let config = r#"
             content = <<EOF
             This is line 1
@@ -28,8 +38,8 @@ EOF
 
     #[test]
     fn test_heredoc_with_trailing_whitespace_terminator() {
-        // Per SPEC.md line 346: terminator with trailing whitespace is NOT valid
-        // It should be treated as content, not a terminator. We need to add a proper terminator.
+        // NAME followed by spaces is not a terminator, so it is content (spec §6.3); a proper
+        // terminator follows.
         let config = "content = <<EOF\nThis is line 1\nThis is line 2\nEOF   \nEOF\n";
 
         let result: Value =
@@ -43,8 +53,7 @@ EOF
 
     #[test]
     fn test_heredoc_with_both_leading_and_trailing_whitespace() {
-        // Per SPEC.md line 346: terminator with both leading and trailing whitespace is NOT valid
-        // It should be treated as content, not a terminator. We need to add a proper terminator.
+        // Leading and trailing whitespace: content too (spec §6.3); a proper terminator follows.
         let config =
             "content = <<DELIMITER\nLine 1 content\nLine 2 content\n    DELIMITER   \nDELIMITER\n";
 
@@ -59,7 +68,7 @@ EOF
 
     #[test]
     fn test_heredoc_partial_terminator_matches() {
-        // Test heredoc content with lines that partially match terminator. Per SPEC, terminator must be on its own line.
+        // Test heredoc content with lines that partially match terminator. The terminator line is NAME alone (spec §6.3).
         let config = "content = <<END\nThis line contains END but not as terminator\nAnother line with END in the middle\nENDING is not the terminator\nEND_SUFFIX is not the terminator\nPREFIX_END is not the terminator\nEND\n";
 
         let result: Value = from_str(config).expect("Should handle partial terminator matches");
@@ -76,13 +85,21 @@ EOF
 
     #[test]
     fn test_heredoc_with_crlf_line_endings() {
-        // Test heredoc with CRLF line endings
-        let config = "content = <<EOF\r\nLine 1\r\nLine 2\r\nEOF\r\n";
-
-        let result: Value = from_str(config).expect("Should parse heredoc with CRLF line endings");
-        let content = result["content"].as_str().unwrap();
-        assert!(content.contains("Line 1"));
-        assert!(content.contains("Line 2"));
+        // CR LF directly after the opener means it is not a heredoc: `<<EOF` is an unquoted
+        // value, and the lines after it do not parse (spec §6.3, `heredoc_crlf_opener_error`).
+        for config in [
+            "content = <<EOF\r\nLine 1\r\nLine 2\r\nEOF\r\n",
+            "content = <<EOF\r\nLine 1 with CRLF\nLine 2 with LF\r\nLine 3 with CRLF\nEOF\r\n",
+        ] {
+            assert!(
+                matches!(from_str::<Value>(config), Err(UclError::Syntax(_))),
+                "{config:?}"
+            );
+        }
+        // After an LF opener, CR has no special meaning in the content (spec §6.3,
+        // `heredoc_crlf_content`).
+        let result: Value = from_str("content = <<EOF\nLine 1\r\nLine 2\r\nEOF\n").unwrap();
+        assert_eq!(result["content"], "Line 1\r\nLine 2\r");
     }
 
     #[test]
@@ -97,19 +114,6 @@ EOF
     }
 
     #[test]
-    fn test_heredoc_with_mixed_line_endings() {
-        // Test heredoc with mixed CRLF and LF line endings
-        let config =
-            "content = <<EOF\r\nLine 1 with CRLF\nLine 2 with LF\r\nLine 3 with CRLF\nEOF\r\n";
-
-        let result: Value = from_str(config).expect("Should parse heredoc with mixed line endings");
-        let content = result["content"].as_str().unwrap();
-        assert!(content.contains("Line 1 with CRLF"));
-        assert!(content.contains("Line 2 with LF"));
-        assert!(content.contains("Line 3 with CRLF"));
-    }
-
-    #[test]
     fn test_heredoc_unterminated_error() {
         // Test heredoc error when terminator is not found
         let config = r#"
@@ -118,23 +122,12 @@ EOF
             It should cause an error
         "#;
 
-        let result: Result<Value, UclError> = from_str(config);
-        assert!(result.is_err(), "Should fail for unterminated heredoc");
-
-        let error = result.unwrap_err();
-        let error_msg = error.to_string();
-        assert!(
-            error_msg.contains("EOF")
-                || error_msg.contains("terminator")
-                || error_msg.contains("heredoc"),
-            "Error should mention terminator or heredoc: {}",
-            error_msg
-        );
+        assert_eq!(error_kind(config), ErrorKind::UnterminatedHeredoc);
     }
 
     #[test]
     fn test_heredoc_with_custom_terminators() {
-        // Test heredoc with various custom terminators. Per SPEC, terminators must be on their own line.
+        // Test heredoc with various custom terminators. The terminator line is NAME alone (spec §6.3).
         let config = "sql_query = <<SQL\nSELECT * FROM users\nWHERE active = true\nORDER BY created_at DESC\nSQL\n\nhtml_content = <<HTML\n<div class=\"container\">\n    <h1>Hello World</h1>\n    <p>This is a paragraph.</p>\n</div>\nHTML\n\nscript_content = <<SCRIPT\n#!/bin/bash\necho \"Hello World\"\nexit 0\nSCRIPT\n";
 
         let result: Value =
@@ -155,7 +148,7 @@ EOF
 
     #[test]
     fn test_heredoc_preserves_internal_whitespace() {
-        // Test that heredoc preserves internal whitespace and indentation. Per SPEC, terminator must be on its own line.
+        // Test that heredoc preserves internal whitespace and indentation. The terminator line is NAME alone (spec §6.3).
         let config = "formatted_text = <<TEXT\n    This line has leading spaces\nThis line has no leading spaces\n        This line has many leading spaces\n\tThis line has a tab\nTEXT\n";
 
         let result: Value =
@@ -187,28 +180,32 @@ EOF
 
     #[test]
     fn test_heredoc_empty_content() {
-        // Test heredoc with empty content. Per SPEC, terminator must be on its own line with no leading whitespace.
-        let config = "empty_content = <<EOF\nEOF\n";
-
-        let result: Value = from_str(config).expect("Should parse empty heredoc");
-        let content = result["empty_content"].as_str().unwrap();
-        assert!(content.is_empty() || content.trim().is_empty());
+        // An empty heredoc cannot be written: the first line after the opener is always
+        // content, so `EOF` there is content and no terminator follows (spec §6.3, *Quirk*,
+        // `heredoc_empty_error`). One blank line gives the empty string
+        // (`heredoc_blank_line_content`).
+        assert_eq!(
+            error_kind("empty_content = <<EOF\nEOF\n"),
+            ErrorKind::UnterminatedHeredoc
+        );
+        let result: Value = from_str("empty_content = <<EOF\n\nEOF\n").unwrap();
+        assert_eq!(result["empty_content"], "");
     }
 
     #[test]
     fn test_heredoc_with_only_whitespace_lines() {
-        // Test heredoc containing only whitespace lines. Per SPEC, terminator must be on its own line.
+        // Test heredoc containing only whitespace lines. The terminator line is NAME alone (spec §6.3).
         let config = "whitespace_content = <<EOF\n\n    \n\t\nEOF\n";
 
         let result: Value = from_str(config).expect("Should parse heredoc with whitespace lines");
-        let content = result["whitespace_content"].as_str().unwrap_or("");
-        // Content should preserve the whitespace lines
-        assert!(content.contains('\n'));
+        // Whitespace and line breaks are kept; the line break before the terminator is not
+        // content (spec §6.3).
+        assert_eq!(result["whitespace_content"], "\n    \n\t");
     }
 
     #[test]
     fn test_heredoc_terminator_case_sensitivity() {
-        // Test that heredoc terminators are case-sensitive. Per SPEC, terminator must be on its own line.
+        // Test that heredoc terminators are case-sensitive. The terminator line is NAME alone (spec §6.3).
         let config = "content = <<EOF\nThis is the content\neof should not terminate\nEof should not terminate\neOf should not terminate\nEOF\n";
 
         let result: Value = from_str(config).expect("Should handle case-sensitive terminators");
@@ -219,29 +216,28 @@ EOF
     }
 
     #[test]
-    fn test_heredoc_with_special_characters_in_terminator() {
-        // Test heredoc with special characters in terminator. Per SPEC, terminators must be on their own line.
+    fn test_heredoc_names_are_uppercase_letters_only() {
+        // NAME is uppercase ASCII letters: with `_` or digits after `<<`, the text is an
+        // ordinary unquoted value (spec §6.3).
+        for (config, expected) in [
+            ("k = <<END_OF_DATA\n", "<<END_OF_DATA"),
+            ("k = <<MARKER123\n", "<<MARKER123"),
+        ] {
+            let result: Value = from_str(config).unwrap();
+            assert_eq!(result["k"], expected);
+        }
+        // So the lines after such an opener are read as entries, and a line holding only the
+        // would-be terminator is a key without a value.
         let config = "content1 = <<END_OF_DATA\nSome content here\nEND_OF_DATA\n\ncontent2 = <<MARKER123\nMore content here\nMARKER123\n";
-
-        let result: Value =
-            from_str(config).expect("Should parse terminators with special characters");
-        assert!(
-            result["content1"]
-                .as_str()
-                .unwrap()
-                .contains("Some content here")
-        );
-        assert!(
-            result["content2"]
-                .as_str()
-                .unwrap()
-                .contains("More content here")
-        );
+        assert!(matches!(
+            from_str::<Value>(config),
+            Err(UclError::Syntax(_))
+        ));
     }
 
     #[test]
     fn test_multiple_heredocs_in_same_config() {
-        // Test multiple heredocs in the same configuration. Per SPEC, terminators must be on their own line.
+        // Test multiple heredocs in the same configuration. The terminator line is NAME alone (spec §6.3).
         let config = "first = <<FIRST\nContent of first heredoc\nFIRST\n\nsecond = <<SECOND\nContent of second heredoc\nSECOND\n\nthird = <<THIRD\nContent of third heredoc\nTHIRD\n";
 
         let result: Value = from_str(config).expect("Should parse multiple heredocs");
@@ -266,41 +262,23 @@ EOF
     }
 
     #[test]
-    fn test_heredoc_error_messages() {
-        // Test that heredoc errors provide clear messages with expected terminator
-        let configs_and_terminators = vec![
-            (
-                r#"content = <<MISSING
-            This heredoc is missing its terminator"#,
-                "MISSING",
-            ),
-            (
-                r#"content = <<CUSTOM_TERM
-            Another unterminated heredoc"#,
-                "CUSTOM_TERM",
-            ),
-        ];
-
-        for (config, expected_terminator) in configs_and_terminators {
-            let result: Result<Value, UclError> = from_str(config);
-            assert!(result.is_err(), "Should fail for config: {}", config);
-
-            let error = result.unwrap_err();
-            let error_msg = error.to_string();
-            assert!(
-                error_msg.contains(expected_terminator)
-                    || error_msg.contains("terminator")
-                    || error_msg.contains("heredoc"),
-                "Error should mention expected terminator '{}': {}",
-                expected_terminator,
-                error_msg
-            );
-        }
+    fn test_heredoc_unterminated_names() {
+        // A heredoc without its terminator line is an error (spec §6.3).
+        let config = r#"content = <<MISSING
+            This heredoc is missing its terminator"#;
+        assert_eq!(error_kind(config), ErrorKind::UnterminatedHeredoc);
+        // `<<CUSTOM_TERM` is not a heredoc opener (`_` is not allowed in NAME), so the document
+        // parses: an unquoted value, then an entry on the next line (spec §6.3, oracle).
+        let config = r#"content = <<CUSTOM_TERM
+            Another unterminated heredoc"#;
+        let result: Value = from_str(config).unwrap();
+        assert_eq!(result["content"], "<<CUSTOM_TERM");
+        assert_eq!(result["Another"], "unterminated heredoc");
     }
 
     #[test]
     fn test_heredoc_in_nested_structures() {
-        // Test heredoc within nested objects and arrays. Per SPEC, terminator must be on its own line.
+        // Test heredoc within nested objects and arrays. The terminator line is NAME alone (spec §6.3).
         let config = "database = {\n    migrations = [\n        {\n            name = \"create_users\"\n            sql = <<SQL\nCREATE TABLE users (\n    id SERIAL PRIMARY KEY,\n    name VARCHAR(255) NOT NULL\n);\nSQL\n        }\n    ]\n}\n";
 
         let result: Value = from_str(config).expect("Should parse heredoc in nested structures");

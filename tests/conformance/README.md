@@ -11,8 +11,8 @@ None of them is written by hand.
   file is a case. The `*.inc` files and `include_dir/` are included by the cases. The `*.res` files
   are libucl's config output, produced by the two passes of spec §10.9; the emitter runner compares
   them (see *Running*).
-- `cases/review/` holds the 30 cases behind REVIEW.md.
-- `cases/additions/` holds the 53 cases behind PLAN.md §5.
+- `cases/review/` holds 30 cases from the initial compatibility review.
+- `cases/additions/` holds 53 cases added with the first implementation plan.
 - `cases/errors/` holds inputs libucl rejects.
 - `cases/spec/NN-topic/` holds the cases cited by the behaviour spec in `docs/spec/`, one directory
   per spec section. `cases/spec/09-macros/files/` and `cases/spec/08-duplicates/files/` hold files

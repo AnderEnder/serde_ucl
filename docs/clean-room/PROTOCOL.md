@@ -51,7 +51,8 @@ code or hints.
 - libucl source files (`*.c`, `*.h`, build files) anywhere: `target/libucl-oracle/libucl/`, any
   other clone, GitHub source views, and copies in search results or mirrors.
 - `REVIEW.md`, `PLAN.md` and `PROGRESS.md`. They were written by the oracle side and contain
-  references to libucl internals.
+  references to libucl internals. Since C5 they are kept only on branch `quarantine/oracle-notes`,
+  not in the working tree.
 - Branches under `quarantine/`.
 - Git history of `src/` before commit `ef8007e`: no `git log -p`, `git show` or `git diff` against
   earlier commits for `src/` paths. Earlier revisions of `src/value.rs` contain the removed code

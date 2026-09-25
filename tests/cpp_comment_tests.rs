@@ -1,130 +1,144 @@
+//! `//` is not a comment in UCL (spec §2.5). `/` may start a key, so a line `// text` is the
+//! entry `"//" = "text"`; after a quoted value a `/` is a missing delimiter, an error (§1.3);
+//! after an unquoted value `// text` is part of the value (§4.1). Inside quoted strings `//` is
+//! ordinary text. Expected results are libucl's (spec §2.5, checked with the oracle).
+
 use serde_json::{Value, json};
-use ucl_lexer::lexer::{CommentType, LexerConfig, Token, UclLexer};
-use ucl_lexer::{UclError, from_str};
+use ucl_lexer::parse::{ErrorKind, Parser};
+use ucl_lexer::{ParserFlags, UclError, UclValue, from_str};
 
-#[cfg(test)]
-mod cpp_comment_tests {
-    use super::*;
+fn error_kind(config: &str) -> ErrorKind {
+    match from_str::<Value>(config) {
+        Err(UclError::Syntax(e)) => e.kind().clone(),
+        other => panic!("expected a parse error for {config:?}, got {other:?}"),
+    }
+}
 
-    #[test]
-    fn test_single_line_cpp_comments() {
-        // Test // comment syntax treats rest of line as comment
-        let config = r#"
+#[test]
+fn test_slash_slash_lines_are_entries() {
+    let config = r#"
             // This is a C++ style comment
             key1 = "value1"
             // Another comment
             key2 = "value2"
-            
+
             // Comments can have various content: symbols !@#$%^&*()
             key3 = "value3"
         "#;
 
-        let result: Value = from_str(config).expect("Should parse C++ style comments");
-        assert_eq!(result["key1"], "value1");
-        assert_eq!(result["key2"], "value2");
-        assert_eq!(result["key3"], "value3");
+    let result: Value = from_str(config).expect("Should parse // lines as entries");
+    assert_eq!(result["key1"], "value1");
+    assert_eq!(result["key2"], "value2");
+    assert_eq!(result["key3"], "value3");
+    // The three lines are values of the key `//`; `#` ends the third (spec §2.2).
+    assert_eq!(
+        result["//"],
+        json!([
+            "This is a C++ style comment",
+            "Another comment",
+            "Comments can have various content: symbols !@"
+        ])
+    );
+}
+
+#[test]
+fn test_slash_slash_after_a_quoted_value_is_an_error() {
+    // spec §1.3: a quoted value must be followed by whitespace, a comment, a terminator or a
+    // closing bracket.
+    for config in [
+        "key1 = \"value1\"  // This is an inline comment",
+        "key1 = \"value1\"  // First comment // Second comment // Third comment",
+        "key1 = \"value1\"  // Comment\nkey2 = \"value2\"",
+        "key1 = \"value1\"  // Comment\r\nkey2 = \"value2\"",
+        "key2 = \"value2\" //",
+        "key2 = \"value2\"  // Inline with Unicode: 中文 русский العربية",
+        r#"key = "value" / // Not a comment"#,
+        r#"key = "value" /// Triple slash"#,
+    ] {
+        assert_eq!(
+            error_kind(config),
+            ErrorKind::MissingDelimiter { found: '/' },
+            "{config}"
+        );
     }
+}
 
-    #[test]
-    fn test_inline_cpp_comments() {
-        // Test // appears inline with other content
-        let config = r#"
-            key1 = "value1"  // This is an inline comment
-            key2 = 42        // Number with comment
-            key3 = true      // Boolean with comment
-            array = [1, 2, 3] // Array with comment
-        "#;
+#[test]
+fn test_slash_slash_after_an_unquoted_value_is_part_of_it() {
+    // spec §4.1: an unquoted value runs to the end of the line.
+    let result: Value = from_str("key2 = 42        // Number with comment").unwrap();
+    assert_eq!(result["key2"], "42        // Number with comment");
+    let result: Value = from_str("key = value // trailing").unwrap();
+    assert_eq!(result["key"], "value // trailing");
+}
 
-        let result: Value = from_str(config).expect("Should parse inline C++ comments");
-        assert_eq!(result["key1"], "value1");
-        assert_eq!(result["key2"], 42);
-        assert_eq!(result["key3"], true);
-        assert_eq!(result["array"], json!([1, 2, 3]));
-    }
-
-    #[test]
-    fn test_mixed_comment_styles() {
-        // Test hash, C++, and multi-line comments together
-        let config = r#"
+#[test]
+fn test_mixed_comment_styles() {
+    // `#` and `/* */` are comments; the `//` line is an entry.
+    let config = r#"
             # Hash comment
             key1 = "value1"
-            
+
             // C++ style comment
             key2 = "value2"  # Inline hash comment
-            
+
             /*
              * Multi-line comment
              * with multiple lines
              */
-            key3 = "value3"  // Inline C++ comment
-            
-            key4 = "value4"  /* Inline multi-line */ // And C++ comment
+            key3 = "value3"
         "#;
 
-        let result: Value = from_str(config).expect("Should parse mixed comment styles");
-        assert_eq!(result["key1"], "value1");
-        assert_eq!(result["key2"], "value2");
-        assert_eq!(result["key3"], "value3");
-        assert_eq!(result["key4"], "value4");
-    }
+    let result: Value = from_str(config).expect("Should parse mixed comment styles");
+    assert_eq!(result["key1"], "value1");
+    assert_eq!(result["//"], "C++ style comment");
+    assert_eq!(result["key2"], "value2");
+    assert_eq!(result["key3"], "value3");
 
-    #[test]
-    fn test_cpp_comments_in_strings_ignored() {
-        // Test // inside quoted strings is treated as literal text
-        let config = r#"
+    // A block comment after a quoted value counts as a terminator (spec §2.4), so the `//` after
+    // it starts the next entry.
+    let result: Value =
+        from_str("key4 = \"value4\"  /* Inline multi-line */ // And C++ comment").unwrap();
+    assert_eq!(result["key4"], "value4");
+    assert_eq!(result["//"], "And C++ comment");
+}
+
+#[test]
+fn test_slash_slash_in_strings_is_text() {
+    let config = r#"
             url = "http://example.com/path"
             comment_text = "This // is not a comment"
             path = "/path/to//file"
             regex = "pattern//with//slashes"
+            bare = http://example.com/x//y
         "#;
 
-        let result: Value = from_str(config).expect("Should treat // in strings as literal");
-        assert_eq!(result["url"], "http://example.com/path");
-        assert_eq!(result["comment_text"], "This // is not a comment");
-        assert_eq!(result["path"], "/path/to//file");
-        assert_eq!(result["regex"], "pattern//with//slashes");
-    }
+    let result: Value = from_str(config).expect("Should treat // in strings as literal");
+    assert_eq!(result["url"], "http://example.com/path");
+    assert_eq!(result["comment_text"], "This // is not a comment");
+    assert_eq!(result["path"], "/path/to//file");
+    assert_eq!(result["regex"], "pattern//with//slashes");
+    assert_eq!(result["bare"], "http://example.com/x//y");
+}
 
-    #[test]
-    fn test_multiple_cpp_comments_same_line() {
-        // Test multiple // on same line - everything after first // is comment
-        let config = r#"
-            key1 = "value1"  // First comment // Second comment // Third comment
-            key2 = "value2"  // Comment with // double slashes // in it
-        "#;
+#[test]
+fn test_slash_slash_line_endings() {
+    // CR LF ends the value of a `//` entry like LF does.
+    let result: Value = from_str("key1 = \"value1\"\n// Comment\r\nkey2 = \"value2\"").unwrap();
+    assert_eq!(result["key1"], "value1");
+    assert_eq!(result["//"], "Comment");
+    assert_eq!(result["key2"], "value2");
+}
 
-        let result: Value = from_str(config).expect("Should handle multiple // on same line");
-        assert_eq!(result["key1"], "value1");
-        assert_eq!(result["key2"], "value2");
-    }
-
-    #[test]
-    fn test_cpp_comments_with_different_line_endings() {
-        // Test C++ comments work with both CRLF and LF line endings
-        let config_lf = "key1 = \"value1\"  // Comment\nkey2 = \"value2\"";
-        let config_crlf = "key1 = \"value1\"  // Comment\r\nkey2 = \"value2\"";
-
-        let result_lf: Value = from_str(config_lf).expect("Should parse C++ comments with LF");
-        let result_crlf: Value =
-            from_str(config_crlf).expect("Should parse C++ comments with CRLF");
-
-        assert_eq!(result_lf["key1"], "value1");
-        assert_eq!(result_lf["key2"], "value2");
-        assert_eq!(result_crlf["key1"], "value1");
-        assert_eq!(result_crlf["key2"], "value2");
-    }
-
-    #[test]
-    fn test_cpp_comments_in_objects_and_arrays() {
-        // Test C++ comments within object and array structures
-        let config = r#"
+#[test]
+fn test_slash_slash_in_objects_and_arrays() {
+    let config = r#"
             object = {
                 // Comment inside object
-                key1 = "value1"  // Inline comment
+                key1 = "value1"
                 key2 = "value2"
-                // Another comment
             }
-            
+
             array = [
                 // Comment in array
                 "item1",  // Comment after item
@@ -133,111 +147,63 @@ mod cpp_comment_tests {
             ]
         "#;
 
-        let result: Value = from_str(config).expect("Should parse C++ comments in structures");
-        assert_eq!(result["object"]["key1"], "value1");
-        assert_eq!(result["object"]["key2"], "value2");
-        assert_eq!(result["array"][0], "item1");
-        assert_eq!(result["array"][1], "item2");
-    }
+    let result: Value = from_str(config).expect("Should parse // lines in structures");
+    assert_eq!(result["object"]["//"], "Comment inside object");
+    assert_eq!(result["object"]["key1"], "value1");
+    assert_eq!(result["object"]["key2"], "value2");
+    // In an array, each `//` text is an unquoted element (spec §4.1).
+    assert_eq!(
+        result["array"],
+        json!([
+            "// Comment in array",
+            "item1",
+            "// Comment after item",
+            "item2",
+            "// Final comment"
+        ])
+    );
+}
 
-    #[test]
-    fn test_comment_preservation_functionality() {
-        // Test comment preservation when enabled
-        let config = r#"
-            // Header comment
-            key1 = "value1"  // Inline comment
-            # Hash comment
-            key2 = "value2"
-        "#;
+#[test]
+fn test_only_hash_and_block_comments_are_saved() {
+    // spec §12.5: with `save-comments`, `#` comments are saved; a `//` line is an entry.
+    let config = "// Header comment\nkey1 = \"value1\"\n# Hash comment\nkey2 = \"value2\"\n";
+    let mut parser = Parser::with_flags(ParserFlags::SAVE_COMMENTS);
+    let value = parser.parse(config.as_bytes()).expect("parses");
+    let root = value.as_object().unwrap();
+    assert_eq!(root["//"], UclValue::String("Header comment".into()));
+    let texts: Vec<&str> = parser.comments().iter().map(|c| c.text.as_str()).collect();
+    assert_eq!(texts, ["# Hash comment"]);
+}
 
-        // Test that parsing succeeds regardless of comment preservation setting
-        let result: Value = from_str(config).expect("Should parse with comment preservation");
-        assert!(result.is_object(), "Top-level value should be an object");
-
-        // Verify that comments are collected when preservation is enabled
-        let mut lexer_config = LexerConfig::default();
-        lexer_config.save_comments = true;
-        let mut lexer = UclLexer::with_config(config, lexer_config);
-
-        loop {
-            match lexer.next_token().expect("Lexer should produce tokens") {
-                Token::Eof => break,
-                _ => {}
-            }
-        }
-
-        let comments = lexer.comments();
-        assert_eq!(comments.len(), 3, "Should collect all comment styles");
-
-        assert_eq!(comments[0].comment_type, CommentType::CppStyle);
-        assert!(comments[0].text.contains("Header comment"));
-
-        assert_eq!(comments[1].comment_type, CommentType::CppStyle);
-        assert!(comments[1].text.contains("Inline comment"));
-
-        assert_eq!(comments[2].comment_type, CommentType::SingleLine);
-        assert!(comments[2].text.contains("Hash comment"));
-    }
-
-    #[test]
-    fn test_cpp_comments_edge_cases() {
-        // Test edge cases for C++ comment parsing
-        let config = r#"
+#[test]
+fn test_slash_slash_edge_cases() {
+    let config = r#"
             // Comment at start of file
             key1 = "value1"
-            
-            key2 = "value2" //
-            key3 = "value3" // 
-            
+
             // Comment with only slashes: ////
             key4 = "value4"
-            
+
+            // Comment with emoji: 🚀 and Unicode: αβγ
             // Comment at end of file
         "#;
 
-        let result: Value = from_str(config).expect("Should handle C++ comment edge cases");
-        assert_eq!(result["key1"], "value1");
-        assert_eq!(result["key2"], "value2");
-        assert_eq!(result["key3"], "value3");
-        assert_eq!(result["key4"], "value4");
-    }
-
-    #[test]
-    fn test_cpp_comments_with_unicode() {
-        // Test C++ comments containing Unicode characters
-        let config = r#"
-            // Comment with emoji: 🚀 and Unicode: αβγ
-            key1 = "value1"
-            
-            key2 = "value2"  // Inline with Unicode: 中文 русский العربية
-        "#;
-
-        let result: Value = from_str(config).expect("Should parse C++ comments with Unicode");
-        assert_eq!(result["key1"], "value1");
-        assert_eq!(result["key2"], "value2");
-    }
-
-    #[test]
-    fn test_cpp_comment_error_handling() {
-        // Test that malformed comment-like syntax is handled gracefully
-        let configs = vec![
-            r#"key = "value" / // Not a comment"#, // Single slash before //
-            r#"key = "value" /// Triple slash"#,   // Triple slash
-        ];
-
-        for config in configs {
-            // These should either parse successfully or fail gracefully
-            let result: Result<Value, UclError> = from_str(config);
-            // The exact behavior depends on implementation, but should not panic
-            match result {
-                Ok(val) => {
-                    // If it parses, verify basic structure
-                    assert!(val.is_object());
-                }
-                Err(_) => {
-                    // If it fails, that's also acceptable for malformed input
-                }
-            }
-        }
-    }
+    let result: Value = from_str(config).expect("Should parse // edge cases");
+    assert_eq!(result["key1"], "value1");
+    assert_eq!(result["key4"], "value4");
+    assert_eq!(
+        result["//"],
+        json!([
+            "Comment at start of file",
+            "Comment with only slashes: ////",
+            "Comment with emoji: 🚀 and Unicode: αβγ",
+            "Comment at end of file"
+        ])
+    );
+    // `//` alone on a line is a key without a value.
+    assert_eq!(
+        error_kind("//\n"),
+        ErrorKind::InvalidKey { found: Some('\n') }
+    );
 }

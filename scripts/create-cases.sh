@@ -1,5 +1,5 @@
 #!/bin/sh
-# Recreates, byte for byte, the oracle cases used in REVIEW.md and PLAN.md.
+# Recreates, byte for byte, the oracle cases under cases/review/ and cases/additions/.
 # Usage: sh create-cases.sh <dest-dir>
 set -e
 DEST=${1:?usage: create-cases.sh <dest-dir>}

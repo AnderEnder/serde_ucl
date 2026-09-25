@@ -895,3 +895,397 @@
     the `C4c:` commit after them, which records these commits here.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-23 — Role: implementation team. Item: C5, the cut-over. **Stopped after an exposure;
+  not completed, nothing committed.**
+  - Exposure to `src/lexer.rs` contents (the C5 brief forbids opening `src/lexer.rs` and
+    `src/parser.rs`): a recursive grep for the names of the crate's entry points, run over `src/`
+    without excluding the two files, printed three lines of `src/lexer.rs`: the signatures of the
+    two streaming-lexer entry points that `src/lib.rs` re-exports, and one line of the body of
+    one of them. A later `grep -c` over the two files printed only match counts. Nothing from
+    them is used in the new code; both functions were to be deleted in this item.
+  - Exposure to forbidden inputs (fork porting `tests/integration_tests.rs` and
+    `tests/performance_tests.rs`): after both files were ported and verified, a grep for the
+    name of the renamed test file ran over the whole worktree and printed one line of
+    `PROGRESS.md` and three lines of `PLAN.md`: planning and process notes about how the
+    `cases/migrated/` inputs were captured and about the handling of three test and example
+    files. None of the lines names libucl internals. All code of that fork was written before
+    the grep; afterwards it wrote only its notes under `target/c5/` and a note here, which this
+    entry replaces because it reproduced the lines.
+  - Exposure of the session lead (the participant writing this entry): the fork's report and
+    its note here reproduced those lines, and the lead read them. `PLAN.md`, `PROGRESS.md` and
+    `REVIEW.md` are tracked files in the worktree root, so any search over `.` reaches them;
+    later participants must search explicit directories only. The lead stopped at that point
+    and afterwards wrote only this record and stop messages to the forks still running.
+  - State of the worktree at the stop, all uncommitted:
+    1. Written by the lead before the exposure: `src/parse/builder.rs` (new, `ParserBuilder`),
+       the cut-over of `src/de.rs` (`from_str`, `from_slice`, `from_reader`, `from_file` and
+       `UclDeserializer` on the new core; the old `from_str_with_*` functions left on the old
+       parser as a transition), `src/parse/mod.rs` (the builder, `Parser::builder`,
+       `read_file`/`parse_read_file`, module docs), `src/error.rs` (`UclError::parse_error`,
+       `UclError::position`), `src/lib.rs` (crate docs, re-exports), and new benches
+       `benches/common/mod.rs`, `benches/parse_benchmarks.rs`, `benches/emit_benchmarks.rs`,
+       `benches/serde_benchmarks.rs` (not yet run, not in `Cargo.toml`).
+    2. A temporary input-recording hook in `src/parse/mod.rs`, between `C5-PROBE-HOOK begin`
+       and `C5-PROBE-HOOK end`. It must be removed and never committed.
+    3. Completed by forks that were not exposed: `tests/bare_word_tests.rs`,
+       `tests/heredoc_tests.rs`, `tests/nginx_syntax_tests.rs`, `tests/implicit_array_tests.rs`
+       (notes in `target/c5/notes/A.md`); `tests/unicode_escape_tests.rs`,
+       `tests/cpp_comment_tests.rs`, `tests/real_world_ucl_configs.rs` (notes in
+       `target/c5/notes/B.md`); `tests/integration_tests.rs` and `tests/performance_tests.rs`
+       renamed to `tests/generated_documents.rs` (fork C, code written before its exposure;
+       notes in `target/c5/notes/C.md`).
+    4. Stopped mid-edit by the lead's stop message; nothing below was reviewed. Each of the
+       three example forks reports that it searched no path outside its files, `docs/spec/`,
+       `src/emit/`, `src/parse/facts.rs` and the oracle, and opened no forbidden file.
+       - Rewritten, built and run with exit 0: `examples/basic_usage.rs`,
+         `examples/complete_ucl_syntax.rs`, `examples/web_server_config.rs`,
+         `examples/framework_integration.rs`, `examples/nginx_style_framework_integration.rs`.
+       - Rewritten, then one literal changed and not rebuilt: `examples/number_parsing.rs`.
+       - Rewritten, not built or run: `examples/advanced_features.rs`,
+         `examples/real_world_configurations.rs`.
+       - Unchanged (still on the old API): `examples/configuration_management.rs`,
+         `examples/real_world_usage.rs`.
+       - Not run through `rustfmt`; the README descriptions for `examples/README.md` were not
+         written. Scratch oracle inputs are under `target/c5/ex-D/`, `target/c5/ex-E/` and
+         `target/c5/ex-F/`.
+    5. Tooling under `target/c5/`: a differential probe crate (`target/c5/probe`) comparing the
+       new core's typed dump with the oracle's on inputs the hook records, and a crate that
+       writes the bench documents (`target/c5/benchgen`).
+  - Inputs consulted before the stop: `docs/spec/` at `spec-v7` (README, §7), `docs/clean-room/`
+    (PROTOCOL, WORKLIST, QUESTIONS, LOG), `tests/conformance/README.md` and `tests/conformance.rs`,
+    the crate's own code other than the two old files, tests, examples and benches, and black-box
+    runs of `target/libucl-oracle/ucl-dump`.
+  - Attestation: I did not read libucl source code. I was exposed to the forbidden inputs
+    recorded above, as described.
+- 2026-09-23 — Role: session lead (oracle side). Item: C5 handover after the exposure above.
+  - Decision: the uncommitted work listed in items 1, 3 and 4 of the entry above stands. Per
+    PROTOCOL.md only code written after an exposure is quarantined; the lead and fork C wrote
+    their code before their exposures, the other forks were not exposed, and the exposed lines
+    were process notes about test capture, not libucl internals. The participant is replaced by a
+    new implementer, who reviews that work before committing it.
+  - `target/c5/notes/C.md` was written by fork C after its exposure and was removed from the
+    worktree unread by the implementation team.
+  - `REVIEW.md`, `PLAN.md` and `PROGRESS.md` are removed from the working tree and kept only on
+    branch `quarantine/oracle-notes`, so that searches of the tree cannot reach them. References
+    to them in `scripts/`, `tools/`, `tests/conformance/README.md` and `PROTOCOL.md` are
+    reworded; references in `src/` and `tests/*.rs` are left to the implementer.
+  - `.claude/agents/clean-implementer.md` gains a search rule (named directories only, old
+    implementation excluded) and a rule that sub-agents receive the forbidden list verbatim.
+- 2026-09-25 — Role: implementation team (new participant, replacing the implementer of the
+  stopped C5 session). Item: C5a, the public API, tests, examples and benches on the new core,
+  finishing the stopped session's uncommitted work (WORKLIST C5, project decision 1).
+  - Inputs consulted: `docs/spec/` at `spec-v7` (checked identical to the tag; README
+    *Divergences decided by the project*, §5.5, §6.1, §6.3, §7, §9.6, §12.3, §12.6);
+    `docs/clean-room/` (PROTOCOL, WORKLIST with the C5 decision, QUESTIONS, the two C5 entries of
+    this log); `target/c5/notes/A.md` and `B.md`; `tests/conformance/README.md`, case file names
+    and golden files; the serde corpus; the crate's own code other than `src/lexer.rs` and
+    `src/parser.rs`, including `git show` of `src/de.rs` at `HEAD` (after `ef8007e`) and of the test,
+    example and bench files at `cb51df2`; black-box runs of `target/libucl-oracle/ucl-dump`
+    (typed dump, `-e config|config-comments|json|json-compact|yaml`, `-C`, `-H`, `-I`, `-l`,
+    `-T`, `-s`, `-v`) on inputs under `target/c5a/`; Rust, serde and criterion documentation.
+    Not used: `target/c5/probe-C.txt`, `target/c5/rec-C`, anything under `/tmp` or
+    `/private/tmp`. Searches named `src/` (always excluding `lexer.rs` and `parser.rs`), `tests/`,
+    `examples/`, `benches/`, `docs/spec/`, `docs/clean-room/` and `target/c5*` only.
+  - Tooling: `target/c5/probe` (the differential probe of the stopped session) and
+    `target/c5/benchgen`. The recording hook was removed from `src/parse/mod.rs` before any
+    commit and saved to `target/c5/probe-hook.txt`; it was applied to the working tree twice,
+    only to record the inputs of the test and example runs, and removed right after each run
+    (checked with `grep` before every commit). Compiler output was filtered to drop every line
+    that names `src/lexer.rs` or `src/parser.rs`; `cargo fmt` changed neither file (checked with
+    `git status`, no diff).
+  - Two incidents, neither an exposure of source text: (1) changing the signature of
+    `from_str_with_variables` broke two call sites inside the old modules' inline tests; the
+    errors were counted, never displayed, and located by bisecting on the count, which showed
+    that the old tests call `crate::from_str_with_variables(text, Box<handler>)`; a test-only
+    stand-in keeps them compiling. (2) One `cargo test` listing, filtered on the word "error",
+    printed the names of two inline tests of the old lexer (test names only, from the test
+    harness); later filters also drop lines naming the old modules.
+  - Review of the inherited work, and what was wrong:
+    1. `src/de.rs` and `src/parse/mod.rs`: the serde entry points parsed with a parser whose
+       default loader was the filesystem loader, so text input read files, against decision 1;
+       `from_file` resolved includes against the working directory, not the file's directory;
+       the module docs recommended `disable-macro` for untrusted input. The old `from_str_with_*`
+       functions still ran on the old parser.
+    2. Doc examples: three failed. `lib.rs` and `ParserBuilder` combined `disable-macro` with
+       variables, which that flag disables (§12.6); `lib.rs` put `# comments` after `30s` and
+       `512kb`, which makes those values strings (§5.5).
+    3. `lib.rs` still re-exported the old lexer, parser, plugins, hooks and handler types.
+    4. Examples: `advanced_features` failed an assertion (the column of a raw line break);
+       `complete_ucl_syntax`, `real_world_configurations` and `web_server_config` described the
+       filesystem loader as the default, and `web_server_config`'s comment on relative include
+       paths no longer held. `configuration_management` and `real_world_usage` were not ported;
+       both relied on `${NAME:-default}` and on dotted keys as overrides, which UCL lacks, and
+       `real_world_usage` also on `window = 1min }` (a string in libucl, §5.5) and a struct that
+       did not fit its document.
+    5. Tests: `unicode_escape_tests.rs` cited `"ὤ0"` for an input `"ὠ0"`; otherwise the
+       ported files held. Every input they parse was recorded and compared with the oracle: 137
+       same, 1 different (the non-UTF-8 divergence, `emoji_pair`).
+    6. Benches: correct; the documents they generate were checked with the oracle (4 same; the
+       500-deep one is too deep for the probe's JSON reader and was checked directly).
+  - Public API after C5a: `from_str`, `from_slice`, `from_reader`, `from_file` (feature `fs`),
+    `from_str_with_variables`, `from_str_with_map`, `from_str_with_env`, `from_value`,
+    `UclDeserializer` (`new`, `from_slice`, `from_parser`, `parser`, `parser_mut`), `parse::Parser`
+    and `parse::ParserBuilder` (`Parser::builder`), the loaders, `UclError` with `parse_error` and
+    `position`, the emitters and serializers as before. `lexer` and `parser` are
+    `#[doc(hidden)]`, kept only for the old conformance runner; the library builds without them
+    (checked by removing the two module declarations, with and without default features).
+    Old error types (`LexError`, `ParseError`, `Span`, `ErrorContext`, `EnhancedError`,
+    `UclError::Lex`, `UclError::Parse`, `with_source_context`) are `#[doc(hidden)]`.
+  - Decision 1: a parser's default loader is an empty `MemoryLoader` in every build; `from_str`,
+    `from_slice`, `from_reader`, `UclDeserializer::new` and `parse::parse` therefore read no
+    files. `from_file` uses `FsLoader`; without a configured base directory, relative include
+    paths in a file given to `Parser::parse_file` resolve against that file's directory, also
+    inside included files; that directory is then also `CURDIR` in macro argument lists (§9.2),
+    where libucl uses the working directory. Nested includes are anchored to the directory of the
+    file given to the parser, not of the including file: the decision says "the file's
+    directory", and §9.3 never resolves against an including file; the tests pin this reading.
+    Text input opts in with `ParserBuilder::with_loader(FsLoader::new())`. `CURDIR` of text input
+    is the base directory or the loader's current directory (`/`).
+    Tested in `tests/api_tests.rs` (`text_input_reads_no_files`, `text_input_loads_no_files`,
+    `file_variables_of_text_input`, `from_file_resolves_includes_against_the_file_directory`)
+    and `src/parse/mod.rs`. The conformance runners set `FsLoader` explicitly.
+  - Tests, per file (test functions before → after):
+    - `tests/bare_word_tests.rs` 12 → 11, `heredoc_tests.rs` 17 → 16, `nginx_syntax_tests.rs`
+      8 → 8, `implicit_array_tests.rs` 13 → 13: as in `target/c5/notes/A.md` (vague "either"
+      assertions replaced with libucl's results; message-wording checks replaced with error
+      kinds; `//` line in an input replaced with `#`), reviewed.
+    - `tests/unicode_escape_tests.rs` 11 → 12, `cpp_comment_tests.rs` 11 → 9,
+      `real_world_ucl_configs.rs` 5 → 5: as in `target/c5/notes/B.md` (`\u{…}` and `//` comments
+      are not UCL: their parse assertions became error or entry assertions; old-lexer comment
+      types deleted), reviewed; one comment corrected.
+    - `tests/integration_tests.rs` 10 → 9: ported: the large-configuration, deeply-nested and
+      large-array tests without their timing and throughput assertions, with the values checked;
+      FreeBSD pkg values asserted; the rspamd document's error is `FileNotFound` for
+      `$CONFDIR/common.conf`; the two C++-comment tests assert `//` entries. Deleted:
+      `test_cpp_comments_preservation` (old-lexer comment types, C++ comments).
+    - `tests/performance_tests.rs` (9) → `tests/generated_documents.rs` (5): wall-clock and
+      throughput assertions deleted; the small, medium, large and scaling tests became one test
+      of generated documents of several sizes with every value checked; string-heavy,
+      number-heavy and deeply nested documents checked value by value. Deleted: the old lexer's
+      token-count test and the streaming-lexer comparison.
+    - `tests/extensibility_tests.rs` (25) deleted: plugins, hooks, suffix handlers, string
+      processors, validation hooks and `VariableContext` have no libucl counterpart. The
+      handler tests were ported to `tests/api_tests.rs` (`variable_handlers`: registered
+      variables win, braced references only, refusal keeps the text, handlers chained as
+      closures; `from_str_with_env_reads_braced_references_only`), checked with the oracle's
+      `-H` handler.
+    - `tests/api_tests.rs` (new, 13): entry points, decision 1, `from_file` errors with the
+      included file's name and position, non-UTF-8, borrowed `&str` fields, readers, the
+      document deserializer, `from_str_with_variables`/`_map`/`_env`, handlers.
+    - `tests/conformance.rs`: the new-core and emitter runners set `FsLoader`; the old runner
+      imports from the hidden module; stale references removed. Counts unchanged.
+    - `src/error_tests.rs` 13 → 8: kept the `Position` test; ported, corrected to libucl:
+      surrogate escapes are `InvalidUtf8`, TAB in double quotes is an error while 0x1F and DEL
+      are allowed (§6.1), `\q` gives `q`, `123e`, `0x`, `1e+` and a 2000-digit run are strings
+      (§5.5, §5.8), `@` as a key is an error but as a value a string, unterminated string and
+      comment, heredoc NAME rules. Deleted: `LexerConfig` limits (string length, tokens, comment
+      length, nesting depth 3; libucl has none, the core's nesting limit is tested in
+      `src/parse/mod.rs`), lexer recovery and number-format validation (lexer internals), and
+      the assertion that `<<⏎content⏎` is an error, which libucl gives and the core does not
+      (QUESTIONS.md #55).
+    - `src/de.rs` 24 → 23: the two old error tests merged into one on kinds and positions;
+      variable, environment and convenience tests ported to the new functions; the lexer-config
+      test became `test_parser_settings_are_honoured` (`no-time`).
+    - `src/parse/mod.rs` 20 → 23: decision-1 tests, `CURDIR` of text input; the file-variables
+      test split so the filesystem part is `fs`-gated.
+  - Examples (all build, run with exit 0, and the inputs they parse agree with the oracle: 51
+    same, 0 different, 7 handler inputs checked by hand): kept and corrected `basic_usage`,
+    `complete_ucl_syntax`, `number_parsing`, `web_server_config`, `framework_integration`,
+    `nginx_style_framework_integration`, `real_world_configurations`, `advanced_features`;
+    rewritten `configuration_management` (layers by include priority, variables and a handler
+    with fallbacks, validation, reload diff); ported `real_world_usage` (registered variables
+    and a handler instead of `${NAME:-default}`, literals for numbers and booleans, fixed
+    document/struct mismatches). Deleted `cpp_comments_demo` (C++ comments),
+    `extensibility_demo` (plugins, hooks), `performance_comparison` (streaming lexer).
+    `examples/README.md` rewritten. `CLAUDE.md` still names `performance_comparison`; left for
+    the project owner.
+  - Benches: deleted `lexer_benchmarks`, `parser_benchmarks`, `zero_copy_benchmarks`,
+    `memory_efficiency_benchmarks`, `ucl_compatibility_benchmarks`; wired `parse_benchmarks`,
+    `emit_benchmarks`, `serde_benchmarks`; `benches/README.md` rewritten. One run
+    (`cargo bench`, rustc 1.98.1, Apple M4 Max, median of 30 samples):
+
+    | Group | Time | Throughput |
+    | --- | --- | --- |
+    | parse/config/10 (5.1 KB) | 66.7 µs | 73.2 MiB/s |
+    | parse/config/100 | 693.6 µs | 69.5 MiB/s |
+    | parse/config/1000 (510 KB) | 7.35 ms | 66.2 MiB/s |
+    | parse/config-100-flags/save-comments | 1.144 ms | 42.2 MiB/s |
+    | parse/config-100-flags/no-implicit-arrays | 728.5 µs | 66.2 MiB/s |
+    | parse/config-100-flags/key-lowercase | 695.8 µs | 69.3 MiB/s |
+    | parse/json/100 (14 KB) | 298.2 µs | 45.2 MiB/s |
+    | parse/json/1000 | 3.115 ms | 44.4 MiB/s |
+    | parse/nested/10 | 3.84 µs | 19.9 MiB/s |
+    | parse/nested/500 (4.4 KB) | 1.088 ms | 3.9 MiB/s |
+    | parse/variables/1000 | 1.172 ms | 76.0 MiB/s |
+    | emit/config-1000/config | 5.747 ms | 81.1 MiB/s (output) |
+    | emit/config-1000/json | 4.204 ms | 136.7 MiB/s (output) |
+    | emit/config-1000/json-compact | 4.156 ms | 68.3 MiB/s (output) |
+    | emit/config-1000/yaml | 6.747 ms | 69.9 MiB/s (output) |
+    | serde/deserialize-1000/from_str | 8.139 ms | 59.8 MiB/s |
+    | serde/deserialize-1000/from_value | 774.4 µs | 628.7 MiB/s |
+    | serde/serialize-1000/to_string | 2.611 ms | 181.3 MiB/s (output) |
+    | serde/serialize-1000/to_json_string | 2.667 ms | 214.7 MiB/s (output) |
+    | serde/serialize-1000/to_json_string_compact | 3.036 ms | 92.8 MiB/s (output) |
+    | serde/serialize-1000/to_yaml_string | 5.519 ms | 85.1 MiB/s (output) |
+    | serde/to_value-1000 | 1.849 ms | – |
+
+    Deep nesting costs far more per byte than flat input (nested/500 against nested/10); not
+    investigated in C5a.
+  - Stale references to the oracle-side planning documents removed from `src/de.rs`,
+    `src/value.rs` and `tests/conformance.rs`; none remain in `src/` (old files excluded) or
+    `tests/*.rs`.
+  - Left for C5b: delete `src/lexer.rs`, `src/parser.rs`, their module declarations and the
+    test-only `old_api_for_old_tests` in `src/lib.rs`; the old error types listed above and their
+    tests in `src/error.rs`; the old runner in `tests/conformance.rs` and `xfail.txt`; write
+    `CHANGELOG.md` from the notes below.
+  - CHANGELOG notes (breaking and behaviour changes of C5):
+    1. **No file access from text input.** `from_str`, `from_slice`, `from_reader`,
+       `UclDeserializer::new`/`from_slice`, `parse::parse` and any `Parser` left with its default
+       loader read no files: `.include` of any path is a missing-file error, `.try_include` a
+       silent stop (`UclError::Stopped`), `.load` an error or, with `try=true`, nothing. A
+       default `Parser::parse_file` finds no file either. Opt in with
+       `ParserBuilder::with_loader(FsLoader::new())` or `Parser::set_loader`. `Parser::new()`'s
+       loader was the filesystem loader under feature `fs`; it is now always empty.
+    2. **`from_file`** reads from the filesystem and resolves relative include paths against the
+       file's directory, also inside included files (libucl uses the process's working
+       directory); a configured base directory takes precedence.
+    3. **`$FILENAME` and `$CURDIR`** are defined (spec §7.8): for text input `undef` and the
+       base directory, or `/` without one (never the process's working directory); for a file,
+       its canonical path and directory, which registered variables cannot override. As
+       registered names they also match unbraced prefixes (`$CURDIRx` → `/x`). `no-filevars`
+       turns them off for text input.
+    4. **The variable handler sees only braced references** `${NAME}` whose name is not
+       registered (§7.7); `$NAME` never reaches it. It is a closure
+       `FnMut(&str) -> Option<String>` (`ParserBuilder::with_variable_handler`); the
+       `VariableHandler` trait and `MapVariableHandler`, `EnvironmentVariableHandler`,
+       `ChainedVariableHandler`, `VariableContext` are gone. `from_str_with_env` expands
+       `${HOME}` but leaves `$HOME`. There is no `${NAME:-default}` form, and expansion never
+       produces a number or boolean (§7.2).
+    5. **Non-UTF-8 input is an error**: keys and strings must be valid UTF-8
+       (`ErrorKind::InvalidUtf8`), including strings made invalid by `\u` escapes of surrogates;
+       comments may hold any bytes. libucl accepts such bytes.
+    6. **Borrowed `&str` fields** are not supported: values are owned, and a `&'a str` target
+       fails with "invalid type: string …, expected a borrowed string". Use `String` or
+       `Cow<str>`.
+    7. API: `from_str_with_variables` takes `(name, value)` pairs, registered in order, instead
+       of a boxed handler; `from_str_with_map` registers longest name first; `from_str_with_config`
+       and `from_str_with_config_and_variables` are removed (use `ParserBuilder` with
+       `UclDeserializer::from_parser` or `from_value`); `UclDeserializer::with_lexer_config` and
+       `with_variable_handler` are removed and `from_parser` takes a `parse::Parser` and the
+       input; the root no longer re-exports the lexer, tokens, the streaming lexer, `UclParser`,
+       `ParserConfig`, `DuplicateKeyBehavior`, `UclParserBuilder`, plugins, hooks, handler types,
+       `LexError`, `ParseError` or `Span`. Added: `from_slice`, `from_reader`, `from_file`,
+       `parse::ParserBuilder`, `Parser::builder`, `UclError::parse_error`, `UclError::position`.
+       Parse errors are `UclError::Syntax` with an `ErrorKind`, a position and, for an included
+       file, its path; `UclError::Lex` and `UclError::Parse` are no longer produced.
+    8. Syntax now follows libucl (docs/spec): `//` is not a comment; `\u{…}` is an error;
+       `NULL` and `Null` are strings; `inf` and `nan` are lowercase only; a heredoc NAME is
+       uppercase letters; a suffixed number followed by a space is a string; unquoted values run
+       to the end of the line; `key name { }` sections nest; repeated keys keep every value;
+       unknown escapes drop the backslash; TAB in double quotes is an error; macros run; the old
+       lexer's configurable limits are gone (nesting is limited to 1024).
+    9. Removed examples and benches listed above.
+  - Result: `cargo test` passes (lib 366, doc 14, integration files as above). Conformance: new
+    core 1389 of 1393 (4 listed divergences), emitters 1037 of 1041, old parser 505 of 1393,
+    all unchanged; `xfail-new.txt` and `xfail-emit.txt` unchanged. `cargo build --examples
+    --benches`, `cargo check --no-default-features`, `cargo check --features load` and
+    `cargo doc --no-deps` succeed.
+  - Questions: #55 (§6.3, a heredoc with an empty NAME whose content no empty line follows
+    before the end of input).
+  - Commits: `7a3e3f8`, `b77cdfe`, `6fc5050`, `58100af` (this entry, `cargo fmt`), and the
+    `C5a:` commit after it (loader, include and base-directory docs for decision 1, a test of
+    `CURDIR` in macro argument lists, this line).
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: implementation team. Item: C5b, deletion of the old implementation,
+  retirement of the old conformance runner, `CHANGELOG.md` (WORKLIST C5, project decision 1).
+  - Inputs consulted: `docs/spec/` (checked identical to `spec-v7`; no section needed);
+    `docs/clean-room/` (PROTOCOL, WORKLIST C5, this log's first section and the C5a entry with
+    its CHANGELOG notes); `tests/conformance/README.md` (runner section), `xfail-new.txt`,
+    `xfail-emit.txt` and the header of `xfail.txt` before deleting it; the crate's own code
+    other than the two old files; `git show` of `src/lib.rs`, `src/de.rs` and `src/error.rs` at
+    `cb51df2`, of `src/lib.rs` and the public items of `src/value.rs` and `src/time.rs` at
+    `ef8007e`, of `Cargo.toml` at `ef8007e`, and the names of the `src/` files added in
+    `ef8007e..HEAD` (all at or after `ef8007e`), for the lists of removed and added API;
+    `README.md` and `CLAUDE.md`, searched by file name for stale lines; runs of a scratch crate
+    (`target/c5b/check`) that checks every behaviour the CHANGELOG states. No oracle runs.
+    Searches named `src/` (excluding `lexer.rs` and `parser.rs` while they existed), `tests/`,
+    `examples/`, `benches/`, `docs/clean-room/`, `target/c5b/` and the files above only.
+  - Search-rule breach: before the deletion, one command piped both old files into `grep -c`
+    for six patterns (three dependency names, three feature names). It printed six counts, all
+    0, and no line of either file. The counts were not used: dependency and feature use was
+    established from the other files and from the clean build after the deletion. Also, a
+    `git show ef8007e --stat` printed the file name of `PLAN.md` with a line count, not its
+    content.
+  - Method: `git rm src/lexer.rs src/parser.rs` without opening either file, then what the
+    compiler and searches of the other files pointed to. Diffs of the deletion commit were viewed
+    only with `--stat` or with pathspecs naming other files.
+  - Removed:
+    - `src/lexer.rs`, `src/parser.rs` (streaming lexer, plugins, hooks), their hidden module
+      declarations and the test-only `old_api_for_old_tests` in `src/lib.rs`
+      (`from_str_with_variables` is now re-exported in every build).
+    - `src/error.rs`: `Span`, `ErrorContext`, `EnhancedError`, `LexError`, `ParseError`,
+      `UclError::Lex`, `UclError::Parse`, `From<ParseError> for UclError`,
+      `UclError::with_source_context`, `UclError::format_with_context`; `Position::advance` and
+      `advance_by` (no users; a carriage return reset their column, which the parser's
+      positions do not); `SerdeError::TypeMismatch`, `MissingField`, `UnknownField` (never
+      constructed). Tests: `error.rs` 7 → 2, `src/error_tests.rs` 8 → 7.
+    - `tests/conformance.rs`: `libucl_conformance`, `parse_with_crate`, the old-parser import and
+      the `non-utf8, D2` hint; `dump` now takes the comment map and serves the new core.
+      `tests/conformance/xfail.txt` deleted.
+    - Stale comments: `tests/generated_documents.rs` header; the `fs` feature comment in
+      `Cargo.toml` now names `from_file`.
+  - Kept after review: `UclValue::is_time` and `value_mut`, the only public functions without a
+    user in the crate (value-model accessors); the features `std`, `save-comments` and
+    `strict-unicode`, which no `#[cfg]` uses (C6); the `description` in `Cargo.toml`, which
+    still says "lexer and parser" (Cargo metadata, C6); the words "UCL lexer" inside a generated
+    test document's string. `docs/clean-room/` mentions the old files only in records (this
+    log, `reviews/`), work-item goals (WORKLIST) and PROTOCOL's forbidden-input rule, which
+    still binds their history.
+  - Public API after C5b: modules `de`, `emit`, `error`, `parse`, `ser`, `time`, `value`; at the
+    root `from_str`, `from_slice`, `from_reader`, `from_file` (feature `fs`),
+    `from_str_with_variables`, `from_str_with_map`, `from_str_with_env`, `from_value`,
+    `UclDeserializer`, `to_string`, `to_json_string`, `to_json_string_compact`,
+    `to_yaml_string`, `to_writer`, `to_value`, `UclError` (`Serde`, `Io`, `Syntax`, `Stopped`;
+    `parse_error`, `position`), `Position`, and the value model (`UclValue`, `UclObject`,
+    `UclArray`, `Entry`, `Slot`, `Values`, `Placement`, `DuplicateStrategy`,
+    `DuplicateKeyError`, `ParserFlags`); `error::SerdeError` (`Custom`, `Unrepresentable`).
+  - `CHANGELOG.md`: written from the C5a notes, each claim checked with the scratch crate
+    (default features and `load`). Its baseline is the public API at `ef8007e` and `cb51df2`
+    (`src/` history before `ef8007e`, and so 0.1.0 itself, is forbidden); the value model and
+    `time` were compared item by item and signature by signature between `ef8007e` and `HEAD`:
+    additions only. Corrections to the notes: text input with `FsLoader` and no
+    base directory resolves relative paths and `CURDIR` against the process's working
+    directory; `.load` without feature `load` is an "unsupported" error even with `try=true`;
+    an unquoted value ends at a line end, `,`, `;` or comment, not only at the line end; a
+    repeated key fails to deserialize into a scalar field; `parse::VariableHandler` still exists
+    as the closure type, so the entry names the removed trait; a default `Parser::parse_file`
+    fails with `ErrorKind::Io`; `.include(try=true)` of a missing file does nothing, so
+    `.include` is not an error in every form. Migration snippets compiled in the scratch crate.
+  - Stale lines in files this item does not own: `tests/conformance/README.md` 49–50 (`xfail.txt`
+    and the existing parser), 72 ("three tests"), 74–76 (`libucl_conformance`, "does the same");
+    `CLAUDE.md` 44 (the two old files "are being replaced"), 88 (`performance_comparison`);
+    `README.md` 8, 15–17, 59, 62, 122–204 (variable-handler types, `UclLexer`, `LexerConfig`,
+    the streaming lexer, `UclParser` and hooks with `src/parser.rs` line references), 213,
+    217–218, 272, 301, 326–330, 340–354, 386, 393, 453. `scripts/` and `tools/` are outside the
+    directories this item may search and were not checked for `xfail.txt`.
+  - Result: `cargo test` passes: 295 tests (lib 166, was 366 with the old modules' 194 inline
+    tests; integration 115; doc 14). Conformance: new core 1389 of 1393, emitters 1037 of 1041,
+    unchanged; `xfail-new.txt` and `xfail-emit.txt` unchanged, four justified divergences each.
+    `cargo build --examples --benches`, `cargo check --no-default-features`,
+    `cargo check --features load` and `cargo doc --no-deps` succeed without warnings.
+    `cargo clippy --all-targets --keep-going`: 5 warnings (`src/parse/number.rs:15`,
+    `src/parse/mod.rs:1044`, `tests/conformance.rs:197`,
+    `examples/configuration_management.rs:257`, `examples/real_world_usage.rs:418`) and 2 errors
+    of the deny-by-default `approx_constant` lint (`tests/bare_word_tests.rs:326`,
+    `tests/implicit_array_tests.rs:111`), which stop clippy for those two targets; left for C6.
+  - Questions: none.
+  - Commits: `fc7f529`, `009b1d6`, `6db4123`, `fe85dbc`, `e0a6ea4` (this entry), `cfb196c`
+    (CHANGELOG corrections, the baseline note), and the `C5b:` commit that records this line.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md. I breached the search rule once, as recorded above, without
+    reading any content of the two old files.
+- 2026-09-25 — Role: session lead (oracle side). Item: C5b review.
+  - The C5b search-rule breach (a `grep -c` over the two old files for six dependency and feature
+    names, printing six zero counts and no text) is not an exposure: no content of either file
+    was shown and the result was not used. No action beyond this record.

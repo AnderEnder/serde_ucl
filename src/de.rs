@@ -1,10 +1,11 @@
 //! Serde deserializer.
 //!
-//! UCL text is parsed into a [`UclValue`] tree, and one value deserializer maps that tree onto
-//! serde. [`from_value`] deserializes a tree, such as one from the new parser core
-//! ([`crate::parse`]); the document-level [`UclDeserializer`] and [`from_str`] parse with the
-//! existing parser and hand the result to the same value deserializer, so the document and
-//! every nested value follow the same rules:
+//! UCL text is parsed by the parser core ([`crate::parse`]) into a [`UclValue`](crate::UclValue)
+//! tree, and one value deserializer maps that tree onto serde. [`from_str`], [`from_slice`],
+//! [`from_reader`] and [`from_file`] parse with a default [`Parser`]; [`from_value`] deserializes
+//! a tree that a parser with other settings produced; [`UclDeserializer`] is the document-level
+//! `serde::Deserializer`. All of them follow the same rules, for the document and for every
+//! nested value:
 //!
 //! | UCL | serde |
 //! | --- | --- |
@@ -19,11 +20,34 @@
 //! | key into an integer, `bool`, `char` or float target | the key's text parsed as one |
 //! | string, or array of integers 0–255, into bytes | the bytes |
 //!
+//! Values are owned: a target that borrows from the input, such as a `&str` field, is an error
+//! (`invalid type: string "…", expected a borrowed string`); use `String` or `Cow<str>`.
+//!
 //! `Deserialize for UclValue` keeps what the table flattens: from this crate's deserializer, a
 //! time stays a time and an entry with several values keeps them all, so
 //! `from_value::<UclValue>(v)` gives `v` back, apart from priorities and the marks of values
 //! that `.inherit` copied or `no-implicit-arrays` collected. From any other deserializer it
 //! takes what that format offers; integers above `i64::MAX` are an error.
+//!
+//! # Parsing
+//!
+//! A default [`Parser`] has no flags, no registered variables and no variable handler, and runs
+//! the macros of spec §9. It reads no files (WORKLIST C5 decision 1): for text given to
+//! [`from_str`], [`from_slice`], [`from_reader`] or [`UclDeserializer::new`], an `.include`,
+//! `.try_include` or `.load` finds no file and behaves as §9.4 and §9.6 describe for a missing
+//! file. `FILENAME` is `undef` and `CURDIR` is `/` there (§7.8).
+//!
+//! [`from_file`] reads the file and its includes from the filesystem. Relative include paths
+//! resolve against the file's directory, also inside included files; `FILENAME` and `CURDIR`
+//! are the file's canonical path and its directory.
+//!
+//! [`from_str_with_variables`] and [`from_str_with_map`] register variables for `$NAME` and
+//! `${NAME}` references (spec §7); [`from_str_with_env`] installs a variable handler that reads
+//! the environment, which is asked for braced references `${NAME}` only (§7.7).
+//!
+//! To read files for text input, or to change any other setting, build a [`Parser`] (see
+//! [`crate::parse::ParserBuilder`]) and deserialize with [`UclDeserializer::from_parser`], or
+//! parse to a [`UclValue`](crate::UclValue) and use [`from_value`].
 
 mod value;
 
@@ -31,59 +55,65 @@ use value::ValueDeserializer;
 pub use value::from_value;
 
 use crate::error::UclError;
-use crate::lexer::LexerConfig;
-use crate::parser::{
-    EnvironmentVariableHandler, MapVariableHandler, UclParser, UclParserBuilder, VariableHandler,
-};
-use crate::value::UclValue;
-use serde::de::{self, Deserialize, Visitor};
+use crate::parse::{Parser, ParserBuilder};
+use serde::de::{self, Deserialize, DeserializeOwned, Visitor};
+use std::collections::HashMap;
+use std::io;
+#[cfg(feature = "fs")]
+use std::path::Path;
 
-/// Deserializes UCL text: parses the document, then deserializes the resulting value.
+/// Deserializes a UCL document: parses it with its [`Parser`], then deserializes the value.
+///
+/// ```
+/// use serde::Deserialize;
+/// use ucl_lexer::UclDeserializer;
+/// use ucl_lexer::parse::Parser;
+///
+/// #[derive(Deserialize)]
+/// struct Config {
+///     name: String,
+/// }
+///
+/// let mut parser = Parser::new();
+/// parser.register_variable("APP", "demo");
+/// let config = Config::deserialize(UclDeserializer::from_parser(parser, b"name = $APP"))?;
+/// assert_eq!(config.name, "demo");
+/// # Ok::<(), ucl_lexer::UclError>(())
+/// ```
 pub struct UclDeserializer<'a> {
-    parser: UclParser<'a>,
-    value: Option<UclValue>,
+    parser: Parser,
+    input: &'a [u8],
 }
 
 impl<'a> UclDeserializer<'a> {
-    /// Creates a new deserializer from UCL text
+    /// A deserializer for UCL text, with a default [`Parser`].
     pub fn new(input: &'a str) -> Self {
-        Self::from_parser(UclParser::new(input))
+        Self::from_slice(input.as_bytes())
     }
 
-    /// Creates a deserializer with custom lexer configuration
-    pub fn with_lexer_config(input: &'a str, config: LexerConfig) -> Self {
-        Self::from_parser(UclParser::with_lexer_config(input, config))
+    /// A deserializer for UCL bytes, with a default [`Parser`].
+    pub fn from_slice(input: &'a [u8]) -> Self {
+        Self::from_parser(Parser::new(), input)
     }
 
-    /// Creates a deserializer with a variable handler
-    pub fn with_variable_handler(input: &'a str, handler: Box<dyn VariableHandler>) -> Self {
-        Self::from_parser(UclParser::with_variable_handler(input, handler))
+    /// A deserializer that parses `input` with `parser`.
+    pub fn from_parser(parser: Parser, input: &'a [u8]) -> Self {
+        Self { parser, input }
     }
 
-    /// Creates a deserializer from an existing parser
-    pub fn from_parser(parser: UclParser<'a>) -> Self {
-        Self {
-            parser,
-            value: None,
-        }
-    }
-
-    /// Returns a reference to the underlying parser
-    pub fn parser(&self) -> &UclParser<'a> {
+    /// The parser.
+    pub fn parser(&self) -> &Parser {
         &self.parser
     }
 
-    /// Returns a mutable reference to the underlying parser
-    pub fn parser_mut(&mut self) -> &mut UclParser<'a> {
+    /// The parser, for changing its settings before deserializing.
+    pub fn parser_mut(&mut self) -> &mut Parser {
         &mut self.parser
     }
 
-    /// Parses the document unless a value is already present.
+    /// Parses the document.
     fn into_value(mut self) -> Result<ValueDeserializer, UclError> {
-        let value = match self.value.take() {
-            Some(value) => value,
-            None => self.parser.parse_document()?,
-        };
+        let value = self.parser.parse(self.input)?;
         Ok(ValueDeserializer::new(value))
     }
 }
@@ -140,126 +170,174 @@ impl<'de> de::Deserializer<'de> for UclDeserializer<'de> {
     }
 }
 
-/// Convenience function to deserialize UCL text into a Rust type
+/// Deserializes a `T` from UCL text, parsed with a default [`Parser`].
+///
+/// ```
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct Server {
+///     port: u16,
+///     timeout: f64,
+/// }
+///
+/// let server: Server = ucl_lexer::from_str("port = 8080\ntimeout = 1.5min")?;
+/// assert_eq!((server.port, server.timeout), (8080, 90.0));
+/// # Ok::<(), ucl_lexer::UclError>(())
+/// ```
 pub fn from_str<'a, T>(s: &'a str) -> Result<T, UclError>
 where
     T: Deserialize<'a>,
 {
-    T::deserialize(UclDeserializer::new(s))
+    from_slice(s.as_bytes())
 }
 
-/// Convenience function to deserialize UCL text with variable expansion
-pub fn from_str_with_variables<'a, T>(
+/// Deserializes a `T` from UCL bytes, parsed with a default [`Parser`]. Keys and strings must be
+/// valid UTF-8, or the parse fails with [`crate::parse::ErrorKind::InvalidUtf8`]; comments may
+/// hold any bytes.
+pub fn from_slice<'a, T>(v: &'a [u8]) -> Result<T, UclError>
+where
+    T: Deserialize<'a>,
+{
+    T::deserialize(UclDeserializer::from_slice(v))
+}
+
+/// Deserializes a `T` from the UCL document `reader` holds, read to its end and parsed with a
+/// default [`Parser`]. A read failure is [`UclError::Io`].
+pub fn from_reader<T>(mut reader: impl io::Read) -> Result<T, UclError>
+where
+    T: DeserializeOwned,
+{
+    let mut input = Vec::new();
+    reader.read_to_end(&mut input)?;
+    from_slice(&input)
+}
+
+/// Deserializes a `T` from the UCL file at `path`, read from the filesystem.
+///
+/// The file is parsed with a default [`Parser`] whose loader is [`crate::parse::FsLoader`], as
+/// [`Parser::parse_file`] parses it: a relative `path` resolves against the process's working
+/// directory; relative paths in the file's include macros, and in the files they include,
+/// resolve against the file's directory (WORKLIST C5 decision 1); `FILENAME` and `CURDIR` are the
+/// file's canonical path and its directory. A failure to read the file itself is
+/// [`UclError::Io`]; a failure in an included file is a parse error whose
+/// [`file`](crate::parse::Error::file) names it.
+#[cfg(feature = "fs")]
+pub fn from_file<T>(path: impl AsRef<Path>) -> Result<T, UclError>
+where
+    T: DeserializeOwned,
+{
+    let mut parser = Parser::new();
+    parser.set_loader(crate::parse::FsLoader::new());
+    let (canonical, input) = parser
+        .read_file(path.as_ref())
+        .map_err(|(path, e)| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+    from_value(parser.parse_read_file(canonical, &input)?)
+}
+
+/// Deserializes a `T` from UCL text, parsed with a default [`Parser`] on which `variables` are
+/// registered, for `$NAME` and `${NAME}` references (spec §7). Otherwise as [`from_str`].
+///
+/// Variables are registered in iteration order, and that order decides between names that are
+/// prefixes of one another in unbraced references: `$NAME` takes the first registered name that
+/// is a prefix of the text after `$` (spec §7.4). Registering a name again changes its value but
+/// not its place.
+///
+/// ```
+/// let value: serde_json::Value = ucl_lexer::from_str_with_variables(
+///     "url = \"https://${HOST}:$PORT/\"",
+///     [("HOST", "example.org"), ("PORT", "8443")],
+/// )?;
+/// assert_eq!(value["url"], "https://example.org:8443/");
+/// # Ok::<(), ucl_lexer::UclError>(())
+/// ```
+pub fn from_str_with_variables<'a, T, I, K, V>(s: &'a str, variables: I) -> Result<T, UclError>
+where
+    T: Deserialize<'a>,
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<String>,
+    V: Into<String>,
+{
+    let parser = ParserBuilder::new().with_variables(variables).build();
+    T::deserialize(UclDeserializer::from_parser(parser, s.as_bytes()))
+}
+
+/// [`from_str_with_variables`] with the variables of a map. A `HashMap` has no order, so they
+/// are registered in descending byte order of their names, which puts every name before the
+/// names that are prefixes of it: an unbraced reference `$NAME` takes the longest registered
+/// name that matches (spec §7.4). Use [`from_str_with_variables`] to choose the order.
+pub fn from_str_with_map<'a, T>(
     s: &'a str,
-    handler: Box<dyn VariableHandler>,
+    variables: HashMap<String, String>,
 ) -> Result<T, UclError>
 where
     T: Deserialize<'a>,
 {
-    T::deserialize(UclDeserializer::with_variable_handler(s, handler))
+    let mut variables: Vec<(String, String)> = variables.into_iter().collect();
+    variables.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    from_str_with_variables(s, variables)
 }
 
-/// Convenience function to deserialize UCL text with custom lexer configuration
-pub fn from_str_with_config<'a, T>(s: &'a str, config: LexerConfig) -> Result<T, UclError>
-where
-    T: Deserialize<'a>,
-{
-    T::deserialize(UclDeserializer::with_lexer_config(s, config))
-}
-
-/// Convenience function to deserialize UCL text with both custom config and variables
-pub fn from_str_with_config_and_variables<'a, T>(
-    s: &'a str,
-    config: LexerConfig,
-    handler: Box<dyn VariableHandler>,
-) -> Result<T, UclError>
-where
-    T: Deserialize<'a>,
-{
-    let parser = UclParserBuilder::new(s)
-        .with_lexer_config(config)
-        .with_variable_handler(handler)
-        .build()?;
-    T::deserialize(UclDeserializer::from_parser(parser))
-}
-
-/// Convenience function to deserialize UCL text using environment variables
+/// Deserializes a `T` from UCL text, parsed with a default [`Parser`] whose variable handler
+/// reads the process's environment. Otherwise as [`from_str`].
+///
+/// The handler is asked only for braced references `${NAME}` whose name is not registered
+/// (spec §7.7): `"${HOME}"` becomes the value of `HOME`, while an unbraced `$HOME` stays as
+/// written, as does a braced reference to a variable that is not set or not valid Unicode. The
+/// file variables `FILENAME` and `CURDIR` (§7.8) are registered, so they are never read from the
+/// environment.
 pub fn from_str_with_env<'a, T>(s: &'a str) -> Result<T, UclError>
 where
     T: Deserialize<'a>,
 {
-    from_str_with_variables(s, Box::new(EnvironmentVariableHandler))
+    let parser = ParserBuilder::new()
+        .with_variable_handler(environment_variable)
+        .build();
+    T::deserialize(UclDeserializer::from_parser(parser, s.as_bytes()))
 }
 
-/// Convenience function to deserialize UCL text using a map of variables
-pub fn from_str_with_map<'a, T>(
-    s: &'a str,
-    variables: std::collections::HashMap<String, String>,
-) -> Result<T, UclError>
-where
-    T: Deserialize<'a>,
-{
-    from_str_with_variables(s, Box::new(MapVariableHandler::from_map(variables)))
+/// The value of the environment variable `name`, if it is set, valid Unicode, and `name` can be
+/// an environment variable's name at all.
+fn environment_variable(name: &str) -> Option<String> {
+    if name.is_empty() || name.contains(['=', '\0']) {
+        return None;
+    }
+    std::env::var(name).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::ParseError;
+    use crate::parse::ErrorKind;
+    use crate::value::UclValue;
     use serde::Deserialize;
     use std::collections::HashMap;
 
-    /// A document-level deserializer over a prepared value (no parsing).
-    fn with_value(value: UclValue) -> UclDeserializer<'static> {
-        UclDeserializer {
-            parser: UclParser::new(""),
-            value: Some(value),
+    /// The value deserializer over a prepared value (no parsing).
+    fn with_value(value: UclValue) -> ValueDeserializer {
+        ValueDeserializer::new(value)
+    }
+
+    /// The kind and the line and column of a parse error.
+    fn parse_error(input: &str) -> (ErrorKind, usize, usize) {
+        match from_str::<serde_json::Value>(input).unwrap_err() {
+            UclError::Syntax(e) => (e.kind().clone(), e.position().line, e.position().column),
+            other => panic!("expected a parse error, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_lex_errors_surface_as_lex_with_their_position() {
-        // Lex errors used to reach callers as `SerdeError::Custom` strings, or as
-        // `ParseError::InvalidObject` with the position reset to 1:1 (REVIEW.md §5.4).
-        let err = from_str::<serde_json::Value>("\nkey = \"unterminated").unwrap_err();
-        match err {
-            UclError::Lex(crate::error::LexError::UnterminatedString { position }) => {
-                // The opening quote
-                assert_eq!((position.line, position.column), (2, 7));
-            }
-            other => panic!("expected UnterminatedString, got {other:?}"),
-        }
-
-        let err = from_str::<serde_json::Value>("a = 1\nb = 0xZZ").unwrap_err();
-        match err {
-            UclError::Lex(crate::error::LexError::InvalidNumber { position, .. }) => {
-                assert_eq!(position.line, 2);
-            }
-            other => panic!("expected InvalidNumber, got {other:?}"),
-        }
-
-        let err = from_str::<serde_json::Value>("key = @@@").unwrap_err();
-        match err {
-            UclError::Lex(crate::error::LexError::UnexpectedCharacter {
-                character,
-                position,
-            }) => {
-                assert_eq!(character, '@');
-                assert_eq!((position.line, position.column), (1, 7));
-            }
-            other => panic!("expected UnexpectedCharacter, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_errors_stay_typed() {
-        let err = from_str::<serde_json::Value>("a = [1, 2").unwrap_err();
-        match err {
-            UclError::Parse(ParseError::UnexpectedToken { position, .. }) => {
-                assert_eq!((position.line, position.column), (1, 10));
-            }
-            other => panic!("expected ParseError::UnexpectedToken, got {other:?}"),
-        }
+    fn test_parse_errors_keep_kind_and_position() {
+        // The opening quote.
+        assert_eq!(
+            parse_error("\nkey = \"unterminated"),
+            (ErrorKind::UnterminatedString, 2, 7)
+        );
+        assert_eq!(parse_error("a = [1, 2").0, ErrorKind::UnterminatedArray);
+        assert_eq!(
+            parse_error("a = 1\nb = 2\n}"),
+            (ErrorKind::UnmatchedClose { found: '}' }, 3, 1)
+        );
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -285,7 +363,7 @@ mod tests {
         assert_eq!(from_str::<SignedField>("v = -30.0").unwrap().v, -30);
         assert_eq!(from_str::<SignedField>("v = 30").unwrap().v, 30);
 
-        // Anything else is an error instead of a truncated or saturated value (REVIEW.md §5.5).
+        // Anything else is an error instead of a truncated or saturated value.
         for input in [
             "v = 30.7",
             "v = 1e300",
@@ -357,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_option_enum_and_newtype_fields() {
-        // Each of these failed for struct fields before P2.2: the value deserializer sent
+        // Each of these once failed for struct fields: the value deserializer sent
         // `option`, `enum` and `newtype_struct` to `deserialize_any`.
         let parsed: Fields =
             from_str("maybe = 30; nothing = null; level = \"info\"; port = 8080").unwrap();
@@ -627,28 +705,52 @@ mod tests {
 
     #[test]
     fn test_variable_expansion() {
+        // Registered variables expand in braced and unbraced references (spec §7.3, §7.4).
         let mut variables = HashMap::new();
         variables.insert("name".to_string(), "World".to_string());
-
         let parsed: HashMap<String, String> =
-            from_str_with_map(r#"{ greeting = "Hello ${name}!" }"#, variables).unwrap();
-        assert_eq!(parsed.get("greeting"), Some(&"Hello World!".to_string()));
+            from_str_with_map(r#"{ greeting = "Hello ${name}! $name." }"#, variables).unwrap();
+        assert_eq!(parsed["greeting"], "Hello World! World.");
+
+        // Registration order decides between names that are prefixes of one another (§7.4).
+        let parse = |variables: Vec<(&str, &str)>| {
+            from_str_with_variables::<HashMap<String, String>, _, _, _>("v = \"$ABC\"", variables)
+                .unwrap()
+                .remove("v")
+                .unwrap()
+        };
+        assert_eq!(parse(vec![("AB", "1"), ("ABC", "2")]), "1C");
+        assert_eq!(parse(vec![("ABC", "2"), ("AB", "1")]), "2");
+        // From a map, the longest matching name wins whatever the map's order.
+        let map: HashMap<String, String> = [("AB", "1"), ("ABC", "2"), ("A", "0")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let parsed: HashMap<String, String> =
+            from_str_with_map("v = \"$ABC $ABD $AX\"", map).unwrap();
+        assert_eq!(parsed["v"], "2 1D 0X");
     }
 
     #[test]
     fn test_environment_variables() {
+        // The handler reads the environment for braced references only (spec §7.7).
         unsafe {
             std::env::set_var("TEST_UCL_VAR", "test_value");
         }
-        let result: Result<HashMap<String, String>, _> =
-            from_str_with_env(r#"{ env_value = "${TEST_UCL_VAR}" }"#);
+        let result: Result<HashMap<String, String>, _> = from_str_with_env(
+            r#"{ braced = "${TEST_UCL_VAR}", unbraced = "$TEST_UCL_VAR", unset = "${TEST_UCL_UNSET_VAR}", odd = "${} ${A=B}" }"#,
+        );
         unsafe {
             std::env::remove_var("TEST_UCL_VAR");
         }
-        assert_eq!(
-            result.unwrap().get("env_value"),
-            Some(&"test_value".to_string())
-        );
+        let result = result.unwrap();
+        assert_eq!(result["braced"], "test_value");
+        assert_eq!(result["unbraced"], "$TEST_UCL_VAR");
+        assert_eq!(result["unset"], "${TEST_UCL_UNSET_VAR}");
+        assert_eq!(result["odd"], "${} ${A=B}");
+        // The file variables are registered, so the environment cannot override them (§7.8).
+        let result: HashMap<String, String> = from_str_with_env("f = \"${FILENAME}\"").unwrap();
+        assert_eq!(result["f"], "undef");
     }
 
     #[test]
@@ -688,8 +790,10 @@ mod tests {
             age: 25,
         };
         assert_eq!(from_str::<TestStruct>(ucl).unwrap(), expected);
+        assert_eq!(from_slice::<TestStruct>(ucl.as_bytes()).unwrap(), expected);
+        assert_eq!(from_reader::<TestStruct>(ucl.as_bytes()).unwrap(), expected);
         assert_eq!(
-            from_str_with_config::<TestStruct>(ucl, LexerConfig::default()).unwrap(),
+            from_str_with_variables::<TestStruct, _, &str, &str>(ucl, []).unwrap(),
             expected
         );
         assert_eq!(
@@ -700,37 +804,39 @@ mod tests {
     }
 
     #[test]
-    fn test_config_and_variables_honours_the_lexer_config() {
-        // The `LexerConfig` argument used to be ignored.
-        let vars = || {
-            let mut vars = MapVariableHandler::new();
-            vars.insert("N".into(), "x".into());
-            Box::new(vars)
+    fn test_parser_settings_are_honoured() {
+        // A parser's settings apply through the document-level deserializer: with `no-time`
+        // a time suffix leaves a string (spec §12.3).
+        let parse = |parser: Parser| {
+            serde_json::Value::deserialize(UclDeserializer::from_parser(
+                parser,
+                b"t = 10s\nv = \"${N}\"",
+            ))
+            .unwrap()
         };
-        let config = LexerConfig {
-            allow_time_suffixes: false,
-            ..LexerConfig::default()
-        };
-        let with_default: Result<serde_json::Value, _> = from_str_with_config_and_variables(
-            "t = 10s\nv = \"${N}\"",
-            LexerConfig::default(),
-            vars(),
-        );
-        let with_config: Result<serde_json::Value, _> =
-            from_str_with_config_and_variables("t = 10s\nv = \"${N}\"", config, vars());
-        let with_default = with_default.unwrap();
+        let with_default = parse(ParserBuilder::new().with_variable("N", "x").build());
         assert_eq!(with_default["t"], 10.0);
         assert_eq!(with_default["v"], "x");
-        assert_ne!(
-            with_config.ok().map(|v| v["t"].clone()),
-            Some(serde_json::json!(10.0))
+        let with_flags = parse(
+            ParserBuilder::new()
+                .with_flags(crate::ParserFlags::NO_TIME)
+                .with_variable("N", "x")
+                .build(),
         );
+        assert_eq!(with_flags["t"], "10s");
+        assert_eq!(with_flags["v"], "x");
     }
 
     #[test]
     fn test_deserializer_methods() {
         let mut deserializer = UclDeserializer::new("test");
-        let _parser_ref = deserializer.parser();
-        let _parser_mut = deserializer.parser_mut();
+        assert!(deserializer.parser().flags().is_empty());
+        deserializer
+            .parser_mut()
+            .set_flags(crate::ParserFlags::KEY_LOWERCASE);
+        assert_eq!(
+            deserializer.parser().flags(),
+            crate::ParserFlags::KEY_LOWERCASE
+        );
     }
 }
