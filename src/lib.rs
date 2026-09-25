@@ -51,11 +51,12 @@
 //!
 //! ## Parser settings
 //!
-//! Parser flags, duplicate-key strategies, priorities, variables, a variable handler and the
-//! loader that include macros read files from are settings of [`parse::Parser`], set with its
-//! setters or with [`parse::ParserBuilder`]. A parser reads files only through a loader that
-//! holds them, such as [`parse::FsLoader`]. Parse to a [`UclValue`], then deserialize it with
-//! [`from_value`]:
+//! Parser flags, duplicate-key strategies, priorities, variables, a variable handler, the
+//! loader that include macros read files from, their search directories and an input size limit
+//! are settings of [`parse::Parser`], set with its setters or with [`parse::ParserBuilder`]. A
+//! parser reads files only through a loader that holds them, such as [`parse::FsLoader`]. There
+//! is no input limit by default, as in libucl; see [`parse::Parser::set_max_input_bytes`]. Parse
+//! to a [`UclValue`], then deserialize it with [`from_value`]:
 //!
 //! ```rust
 //! use serde::Deserialize;
@@ -94,6 +95,34 @@
 //! assert_eq!(e.kind(), &ErrorKind::UnterminatedString);
 //! assert_eq!((e.position().line, e.position().column), (2, 5));
 //! ```
+//!
+//! A document that parses but does not fit the target type is [`UclError::Deserialize`]. Its
+//! [`error::DeserializeError`] has serde's error, the path of the value it is about, and where
+//! that value was written, in the document or in the included file it came from, also when the
+//! duplicate rules merged or moved it or `.inherit` copied it. [`UclError::position`] and
+//! [`UclError::file`] give the position of both kinds:
+//!
+//! ```rust
+//! #[derive(Debug, serde::Deserialize)]
+//! struct Config {
+//!     #[allow(dead_code)]
+//!     port: u16,
+//! }
+//!
+//! let err = ucl_lexer::from_str::<Config>("# the port\nport = http").unwrap_err();
+//! let position = err.position().unwrap();
+//! assert_eq!((position.line, position.column), (2, 8));
+//! assert_eq!(
+//!     err.to_string(),
+//!     "Deserialization error: invalid type: string \"http\", expected u16 at port (line 2, column 8)"
+//! );
+//! ```
+//!
+//! The text functions find the path and position only when deserialization fails, by parsing and
+//! deserializing a second time, so they cost nothing while it succeeds. To use other parser
+//! settings and keep positions, deserialize with [`UclDeserializer::from_parser`], which records
+//! paths as it goes. [`from_value`] records nothing: its errors have neither a path nor a
+//! position. [`de`] describes this in full.
 //!
 //! ## Writing
 //!

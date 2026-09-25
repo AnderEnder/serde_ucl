@@ -30,7 +30,39 @@ use super::loader::{FileKind, Loader};
 use super::macros::{MacroCall, MacroKind, priority_bits};
 use super::{Error, ErrorKind, MAX_INCLUDE_DEPTH};
 use crate::value::{DuplicateStrategy, UclValue};
+use std::cell::Cell;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+/// The input limit of one parse ([`super::Parser::set_max_input_bytes`]) and the bytes read so
+/// far, the document included. The include state of the document and those of its macro
+/// argument documents share it, so that files read from argument documents count too.
+#[derive(Debug)]
+pub(crate) struct Budget {
+    limit: Option<u64>,
+    used: Cell<u64>,
+}
+
+impl Budget {
+    /// A budget of `limit` bytes of which the document, `document` bytes long, has used its
+    /// share.
+    pub(crate) fn new(limit: Option<u64>, document: usize) -> Rc<Self> {
+        Rc::new(Self {
+            limit,
+            used: Cell::new(document as u64),
+        })
+    }
+}
+
+/// A file read through [`Includes::read`].
+pub(crate) enum Read {
+    Bytes(Vec<u8>),
+    /// Its bytes would take the parse past its input limit.
+    TooLarge {
+        limit: u64,
+    },
+}
 
 /// The include state of one parse.
 pub(crate) struct Includes<'l> {
@@ -39,28 +71,64 @@ pub(crate) struct Includes<'l> {
     /// (project decision 6).
     pub(crate) base: PathBuf,
     /// The `path` list in effect: set by any include macro, it stays for the rest of the parse
-    /// (spec §9.4, *Signatures, URLs and search paths*).
+    /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
+    /// ([`super::Parser::set_search_path`]).
     search: Option<Vec<String>>,
+    /// The parser's search path, which macro argument documents start with.
+    default_search: Option<Vec<String>>,
     /// The canonical path of each open input unit, the main document first; `None` for a
     /// document given as bytes.
     files: Vec<Option<PathBuf>>,
+    budget: Rc<Budget>,
 }
 
 impl<'l> Includes<'l> {
-    /// The state for a parse of the document `main` (`None`: given as bytes).
-    pub(crate) fn new(loader: &'l dyn Loader, base: PathBuf, main: Option<PathBuf>) -> Self {
+    /// The state for a parse of the document `main` (`None`: given as bytes), with the parser's
+    /// search path `search`.
+    pub(crate) fn new(
+        loader: &'l dyn Loader,
+        base: PathBuf,
+        main: Option<PathBuf>,
+        search: Option<Vec<String>>,
+        budget: Rc<Budget>,
+    ) -> Self {
         Self {
             loader,
             base,
-            search: None,
+            search: search.clone(),
+            default_search: search,
             files: vec![main],
+            budget,
         }
     }
 
-    /// The state for a macro argument document, which is parsed as if a new parser were given
-    /// it as bytes (spec §9.2).
+    /// The state for a macro argument document, which is parsed as if a new parser with the same
+    /// settings were given it as bytes (spec §9.2): the parser's search path is in effect there,
+    /// not a `path` list of the document that holds the macro.
     pub(crate) fn for_arguments(&self) -> Includes<'l> {
-        Includes::new(self.loader, self.base.clone(), None)
+        Includes::new(
+            self.loader,
+            self.base.clone(),
+            None,
+            self.default_search.clone(),
+            Rc::clone(&self.budget),
+        )
+    }
+
+    /// Reads the file at `path`, a canonical path, through the loader, and counts its bytes
+    /// against the input limit. Without a limit, the loader reads it whole.
+    pub(crate) fn read(&self, path: &Path) -> io::Result<Read> {
+        let Some(limit) = self.budget.limit else {
+            return self.loader.read(path).map(Read::Bytes);
+        };
+        let left = limit.saturating_sub(self.budget.used.get());
+        let bytes = self.loader.read_limited(path, left)?;
+        let len = bytes.len() as u64;
+        if len > left {
+            return Ok(Read::TooLarge { limit });
+        }
+        self.budget.used.set(self.budget.used.get() + len);
+        Ok(Read::Bytes(bytes))
     }
 
     fn resolve(&self, path: &str) -> PathBuf {
@@ -324,8 +392,15 @@ impl Core<'_, '_, '_, '_> {
                 request.at,
             ));
         }
-        let Ok(bytes) = loader.read(&canonical) else {
-            return unusable(self, not_a_file());
+        let bytes = match self.includes.read(&canonical) {
+            Ok(Read::Bytes(bytes)) => bytes,
+            // Not softened by `try` or `.try_include`: the limit is not about the file being
+            // missing or unusable.
+            Ok(Read::TooLarge { limit }) => {
+                let path = Some(shown.to_owned());
+                return Err(self.error(ErrorKind::InputTooLarge { limit, path }, request.at));
+            }
+            Err(_) => return unusable(self, not_a_file()),
         };
         let key = key.or_else(|| request.prefix.then(|| prefix_key(&canonical)));
         self.include_unit(&bytes, &canonical, request, key)?;
@@ -390,12 +465,17 @@ impl Core<'_, '_, '_, '_> {
             Err(_) => Err(not_found()),
             Ok(canonical) => match loader.kind(&canonical) {
                 None => Err(not_found()),
-                Some(FileKind::File) => loader.read(&canonical).map_err(|_| not_a_file()),
+                Some(FileKind::File) => self.includes.read(&canonical).map_err(|_| not_a_file()),
                 Some(_) => Err(not_a_file()),
             },
         };
         let bytes = match read {
-            Ok(bytes) => bytes,
+            Ok(Read::Bytes(bytes)) => bytes,
+            // `try` does not soften the input limit.
+            Ok(Read::TooLarge { limit }) => {
+                let path = Some(path.clone());
+                return Err(self.error(ErrorKind::InputTooLarge { limit, path }, call.value_at));
+            }
             Err(_) if try_ => return Ok(()),
             Err(kind) => return Err(self.error(kind, call.value_at)),
         };
@@ -436,13 +516,19 @@ impl Core<'_, '_, '_, '_> {
             .as_object_mut()
             .expect("macros are read inside objects")
             .insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
-        if multiline
-            && self.facts.is_some()
+        let locating = self
+            .facts
+            .as_ref()
+            .is_some_and(super::OutputFacts::records_locations);
+        if (multiline || locating)
             && let Some(node) =
                 self.facts_node_below(&[crate::parse::PathSegment::Key { key, index: 0 }])
         {
             let facts = self.facts.as_mut().expect("checked above");
-            facts.update(node, |f| f.multiline = true);
+            if multiline {
+                facts.update(node, |f| f.multiline = true);
+            }
+            facts.locate(node, call.value_at, Some(call.at));
         }
         Ok(())
     }
@@ -1278,6 +1364,266 @@ mod tests {
         );
         assert!(run(&files, ".include(path=[], try=true) \"g/a.inc\"").is_err());
         assert_eq!(ok(".include(path=\"p1\") \"g/a.inc\""), ["ga"]);
+    }
+
+    #[test]
+    fn search_path_set_on_the_parser() {
+        // The parser's list is in effect from the start, as a `path` list given to an earlier
+        // include macro would be (spec §9.4): each input behaves as it does after such a macro.
+        let files = [
+            ("/c/g/a.inc", "ga = 1\n"),
+            ("/c/p1/pa.inc", "pa = 1\n"),
+            ("/c/p2/pa.inc", "pb = 1\n"),
+            ("/c/p2/pc.inc", "pc = 1\n"),
+            ("/c/p2/abs/x.inc", "px = 1\n"),
+            ("/abs/x.inc", "ax = 1\n"),
+            ("/c/prio.conf", "priority = 3\n"),
+            ("/c/p1/prio.conf", "priority = 5\n"),
+        ];
+        let with_list = |dirs: &[&str], input: &str| {
+            let mut parser = parser(&files, ParserFlags::DEFAULT);
+            parser.set_search_path(dirs.iter().copied());
+            assert_eq!(parser.search_path().map(<[String]>::len), Some(dirs.len()));
+            parser.parse(input.as_bytes())
+        };
+        let outcome = |result: Result<UclValue, Error>| match result {
+            Ok(v) => Ok(keys(&v)),
+            Err(e) => Err((e.kind().clone(), e.is_stopped())),
+        };
+        for (dirs, input, expected) in [
+            // .include: the first directory decides.
+            (&["p1", "p2"][..], ".include \"pa.inc\"", Some(vec!["pa"])),
+            (&["p1", "p2"], ".include \"pc.inc\"", None),
+            (
+                &["p1", "p2"],
+                ".include(try=true) \"pc.inc\"\nk = 1",
+                Some(vec!["k"]),
+            ),
+            // .try_include searches, and a file found nowhere is an error, not a stop.
+            (&["p1", "p2"], ".try_include \"pc.inc\"", Some(vec!["pc"])),
+            (&["p1"], ".try_include \"zz.inc\"", None),
+            // Globs are expanded in every directory; the last one must match.
+            (
+                &["p1", "p2"],
+                ".include(glob=true) \"p*.inc\"",
+                Some(vec!["pa", "pb", "pc"]),
+            ),
+            (&["p2", "p1"], ".include(glob=true) \"pc*.inc\"", None),
+            // Absolute paths are tried below the directories too.
+            (&["p2"], ".include \"/abs/x.inc\"", Some(vec!["px"])),
+        ] {
+            let in_document = format!(
+                ".include(path=[{}], try=true) \"none.inc\"\n{input}",
+                dirs.iter()
+                    .map(|d| format!("{d:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let set = outcome(with_list(dirs, input));
+            assert_eq!(
+                set,
+                outcome(run(&files, &in_document)),
+                "{dirs:?} {input:?}"
+            );
+            match expected {
+                Some(keys) => assert_eq!(set, Ok(keys.iter().map(|k| k.to_string()).collect())),
+                None => assert!(
+                    set.is_err_and(|(_, stopped)| !stopped),
+                    "{dirs:?} {input:?}"
+                ),
+            }
+        }
+        // An empty list makes every include an error.
+        let e = with_list(&[], ".include(try=true) \"g/a.inc\"").unwrap_err();
+        assert!(matches!(e.kind(), ErrorKind::FileNotFound { .. }), "{e}");
+        // A `path` parameter replaces the list for the rest of the parse.
+        let v = with_list(
+            &["p1"],
+            ".include(path=[\"p2\"]) \"pa.inc\"\n.include \"pc.inc\"",
+        );
+        assert_eq!(keys(&v.unwrap()), ["pb", "pc"]);
+        // Without a list, paths resolve against the base directory as before.
+        let mut parser = parser(&files, ParserFlags::DEFAULT);
+        parser.set_search_path(["p1"]).clear_search_path();
+        assert_eq!(
+            keys(&parser.parse(b".include \"g/a.inc\"").unwrap()),
+            ["ga"]
+        );
+        // Macro argument documents start with the parser's list, not with a `path` list of the
+        // document holding the macro.
+        let v = with_list(&["p1"], ".priority(.include \"prio.conf\");\na = 1").unwrap();
+        assert_eq!(obj(&v).entry("a").unwrap().slots()[0].priority(), 5);
+        let v = run(
+            &files,
+            ".include(path=[\"p1\"], try=true) \"none.inc\"\n.priority(.include \"prio.conf\");\na = 1",
+        )
+        .unwrap();
+        assert_eq!(obj(&v).entry("a").unwrap().slots()[0].priority(), 3);
+    }
+
+    /// `.load` does not use the parser's search path (spec §9.6).
+    #[cfg(feature = "load")]
+    #[test]
+    fn load_ignores_the_search_path() {
+        let files = [("/c/g/a.inc", "text"), ("/c/p1/g/a.inc", "other")];
+        let mut parser = parser(&files, ParserFlags::DEFAULT);
+        parser.set_search_path(["p1"]);
+        let v = parser.parse(b".load(key=\"k\") \"g/a.inc\"").unwrap();
+        assert_eq!(obj(&v)["k"].as_str(), Some("text"));
+    }
+
+    /// The kind's limit and path, and the error's offset, for an input limit error.
+    fn too_large(result: Result<UclValue, Error>) -> Option<(u64, Option<String>, usize)> {
+        let e = result.err()?;
+        match e.kind() {
+            ErrorKind::InputTooLarge { limit, path } => {
+                Some((*limit, path.clone(), e.position().offset))
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn input_limit() {
+        let files = [
+            ("/c/a.inc", "a = 1\n"),
+            ("/c/g/x.inc", "x = 1\n"),
+            ("/c/g/y.inc", "y = 22\n"),
+            ("/c/prio.conf", "priority = 3\n"),
+        ];
+        let with_limit = |limit: u64, input: &str| {
+            let mut parser = parser(&files, ParserFlags::DEFAULT);
+            parser.set_max_input_bytes(Some(limit));
+            assert_eq!(parser.max_input_bytes(), Some(limit));
+            parser.parse(input.as_bytes())
+        };
+        let len = |s: &str| s.len() as u64;
+        // The document alone.
+        assert!(with_limit(5, "k = 1").is_ok());
+        assert_eq!(too_large(with_limit(4, "k = 1")), Some((4, None, 0)));
+        // The document and the files it includes, together; at the macro that goes over.
+        let input = "k = 1\n.include \"a.inc\"";
+        let total = len(input) + len("a = 1\n");
+        assert!(with_limit(total, input).is_ok());
+        let over = Some((total - 1, Some("a.inc".to_string()), 15));
+        assert_eq!(too_large(with_limit(total - 1, input)), over);
+        // Neither `try=true` nor `.try_include` softens it.
+        for input in [
+            "k = 1\n.include(try=true) \"a.inc\"",
+            "k = 1\n.try_include \"a.inc\"",
+        ] {
+            let total = len(input) + len("a = 1\n");
+            assert!(with_limit(total, input).is_ok(), "{input}");
+            let found = too_large(with_limit(total - 1, input));
+            assert_eq!(
+                found.map(|(_, p, _)| p),
+                Some(Some("a.inc".into())),
+                "{input}"
+            );
+        }
+        // A file included twice counts twice, and every match of a glob counts.
+        let twice = ".include \"a.inc\"\n.include \"a.inc\"";
+        assert!(with_limit(len(twice) + 12, twice).is_ok());
+        assert!(too_large(with_limit(len(twice) + 11, twice)).is_some());
+        let glob = ".include(glob=true) \"g/*.inc\"";
+        let total = len(glob) + len("x = 1\n") + len("y = 22\n");
+        assert!(with_limit(total, glob).is_ok());
+        let found = too_large(with_limit(total - 1, glob)).unwrap();
+        assert_eq!(found.1.as_deref(), Some("/c/g/y.inc"));
+        // Files read from macro argument documents count too.
+        let args = ".priority(.include \"prio.conf\");\na = 1";
+        let total = len(args) + len("priority = 3\n");
+        assert!(with_limit(total, args).is_ok());
+        assert!(too_large(with_limit(total - 1, args)).is_some());
+        // Without a limit, nothing changes.
+        let mut parser = parser(&files, ParserFlags::DEFAULT);
+        assert_eq!(parser.max_input_bytes(), None);
+        assert!(parser.parse(twice.as_bytes()).is_ok());
+        // A document read by `parse_file` counts its own bytes.
+        let mut parser = parser_with_limit(&files, 5);
+        assert!(too_large(parser.parse_file("/c/a.inc")).is_some());
+        let mut parser = parser_with_limit(&files, 6);
+        assert!(parser.parse_file("/c/a.inc").is_ok());
+    }
+
+    fn parser_with_limit(files: &[(&str, &str)], limit: u64) -> Parser {
+        let mut parser = parser(files, ParserFlags::DEFAULT);
+        parser.set_max_input_bytes(Some(limit));
+        parser
+    }
+
+    /// With a limit, files are read through `Loader::read_limited`, asked for at most the bytes
+    /// the parse has left.
+    #[test]
+    fn input_limit_reads_files_limited() {
+        use crate::parse::{FileKind, Loader};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        struct Recording(MemoryLoader, Rc<RefCell<Vec<Option<u64>>>>);
+        impl Loader for Recording {
+            fn current_dir(&self) -> std::io::Result<std::path::PathBuf> {
+                self.0.current_dir()
+            }
+            fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
+                self.0.canonicalize(path)
+            }
+            fn kind(&self, path: &Path) -> Option<FileKind> {
+                self.0.kind(path)
+            }
+            fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+                self.1.borrow_mut().push(None);
+                self.0.read(path)
+            }
+            fn read_dir(&self, path: &Path) -> std::io::Result<Vec<String>> {
+                self.0.read_dir(path)
+            }
+            fn read_limited(&self, path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
+                self.1.borrow_mut().push(Some(limit));
+                self.0.read_limited(path, limit)
+            }
+        }
+        let mut files = MemoryLoader::new();
+        files.add_file("/c/big.inc", "x".repeat(1 << 20));
+        files.add_file("/c/main.conf", ".include \"big.inc\"");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut parser = Parser::new();
+        parser
+            .set_loader(Recording(files, Rc::clone(&calls)))
+            .set_base_dir("/c")
+            .set_max_input_bytes(Some(100));
+        assert!(too_large(parser.parse_file("main.conf")).is_some());
+        let document = ".include \"big.inc\"".len() as u64;
+        assert_eq!(*calls.borrow(), [Some(100), Some(100 - document)]);
+        parser.set_max_input_bytes(None);
+        calls.borrow_mut().clear();
+        assert!(parser.parse(b"a = 1").is_ok());
+        assert!(parser.parse_file("main.conf").is_err());
+        assert_eq!(*calls.borrow(), [None, None]);
+    }
+
+    /// `.load` counts against the limit, and `try=true` does not soften it.
+    #[cfg(feature = "load")]
+    #[test]
+    fn input_limit_counts_load() {
+        let files = [("/c/t.txt", "0123456789")];
+        for input in [
+            ".load(key=\"k\") \"t.txt\"",
+            ".load(key=\"k\", try=true) \"t.txt\"",
+        ] {
+            let total = input.len() as u64 + 10;
+            assert!(
+                parser_with_limit(&files, total)
+                    .parse(input.as_bytes())
+                    .is_ok()
+            );
+            let found = too_large(parser_with_limit(&files, total - 1).parse(input.as_bytes()));
+            assert_eq!(
+                found.map(|(_, p, _)| p),
+                Some(Some("t.txt".into())),
+                "{input}"
+            );
+        }
     }
 
     #[test]

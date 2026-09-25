@@ -659,8 +659,8 @@ impl Core<'_, '_, '_, '_> {
             // The copy's key is spelled as the copied value's key was.
             let spelling = subtree
                 .iter()
-                .find(|(rest, _)| rest.is_empty())
-                .and_then(|(_, f)| f.key_spelling.clone())
+                .find(|(rest, _, _)| rest.is_empty())
+                .and_then(|(_, f, _)| f.key_spelling.clone())
                 .unwrap_or_else(|| key.clone());
             facts.graft(node, subtree);
             facts.update(node, |f| {

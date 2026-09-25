@@ -232,10 +232,16 @@ fn errors_keep_kind_and_position() {
     );
     assert!(err.to_string().contains("line 2, column 5"), "{err}");
 
-    // Errors from serde itself carry no position.
+    // Deserialization errors carry the position of their value: here the document, at its
+    // start, which is not in an included file.
     let err = from_str::<u32>("a = 1").unwrap_err();
-    assert!(matches!(err, UclError::Serde(_)));
-    assert!(err.position().is_none());
+    let UclError::Deserialize(e) = &err else {
+        panic!("{err:?}")
+    };
+    assert!(e.path().is_empty());
+    let position = err.position().unwrap();
+    assert_eq!((position.line, position.column, position.offset), (1, 1, 0));
+    assert_eq!(err.file(), None);
 }
 
 #[test]

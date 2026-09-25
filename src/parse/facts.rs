@@ -7,9 +7,17 @@
 //! assumes for a value without facts are stored, so a document without single-quoted strings,
 //! heredocs or escaped keys records nothing. When the duplicate rules of §8 move or replace
 //! values, the parser updates the tree the same way it does the paths of comments.
+//!
+//! The same tree can also record where each value was written ([`Location`]), for the
+//! positions of deserialization errors. Only a parse run to find such a position records them
+//! ([`OutputFacts::locating`]): then every value has a node, and the locations move with the
+//! nodes when values are moved, replaced or copied, as the facts do.
 
 use super::PathSegment;
+use super::error::position_at;
 use super::tree::Children;
+use crate::error::Position;
+use std::path::{Path, PathBuf};
 
 /// What the output formats need to know about one value beyond the value itself (spec §10.1).
 ///
@@ -55,6 +63,45 @@ struct Node {
     children: Children,
 }
 
+/// Where a value was written: in which input unit (0 for the document given to the parser, see
+/// [`Locations`]), at which byte offset its text starts, and where the key of an entry's value
+/// starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Location {
+    unit: usize,
+    value: usize,
+    key: Option<usize>,
+}
+
+/// The locations of a parse that records them: where each node's value was written, by node,
+/// the files included, in the order they were opened, after the document itself, and the unit
+/// being parsed. Kept apart from the nodes, so that a parse that records no locations pays
+/// nothing for them.
+#[derive(Debug, Clone, Default)]
+struct Locations {
+    /// The location of node `n` is `at[n]`; nodes past the end have none.
+    at: Vec<Option<Location>>,
+    /// The canonical path and the bytes of each included file; unit `n` is `files[n - 1]`.
+    files: Vec<(PathBuf, Vec<u8>)>,
+    current: usize,
+}
+
+impl Locations {
+    fn get(&self, node: NodeId) -> Option<Location> {
+        self.at.get(node).copied().flatten()
+    }
+
+    fn set(&mut self, node: NodeId, at: Option<Location>) {
+        if self.at.len() <= node {
+            if at.is_none() {
+                return;
+            }
+            self.at.resize(node + 1, None);
+        }
+        self.at[node] = at;
+    }
+}
+
 /// The output facts of a parsed document, by value path: what [`crate::emit::Emitter`] needs to
 /// write the document as libucl does (spec §10.1). [`super::Parser::output_facts`] gives those of
 /// the last parse.
@@ -65,15 +112,22 @@ pub struct OutputFacts {
     nodes: Vec<Node>,
     /// The number of nodes in the tree whose facts are not the default.
     recorded: usize,
+    /// Set when the locations of values are recorded.
+    locations: Option<Box<Locations>>,
 }
 
 pub(crate) type ValuePath = Vec<PathSegment>;
+
+/// The facts and locations of a value and of everything inside it, with paths relative to it
+/// ([`OutputFacts::subtree`]).
+pub(crate) type Subtree = Vec<(ValuePath, ValueFacts, Option<Location>)>;
 
 impl Default for OutputFacts {
     fn default() -> Self {
         Self {
             nodes: vec![Node::default()],
             recorded: 0,
+            locations: None,
         }
     }
 }
@@ -135,6 +189,91 @@ impl OutputFacts {
 
     pub(crate) fn clear(&mut self) {
         *self = Self::default();
+    }
+
+    /// No facts, and the locations of values are to be recorded.
+    pub(crate) fn locating() -> Self {
+        Self {
+            locations: Some(Box::default()),
+            ..Self::default()
+        }
+    }
+
+    /// Whether the locations of values are recorded.
+    pub(crate) fn records_locations(&self) -> bool {
+        self.locations.is_some()
+    }
+
+    /// Whether moving or replacing values must update the tree: some fact is recorded, or
+    /// locations are.
+    pub(crate) fn tracks_moves(&self) -> bool {
+        self.recorded > 0 || self.locations.is_some()
+    }
+
+    /// Records that the value at `node` was written at byte `value` of the current input unit,
+    /// with its key at byte `key`. Does nothing unless locations are recorded.
+    pub(crate) fn locate(&mut self, node: NodeId, value: usize, key: Option<usize>) {
+        if let Some(locations) = &mut self.locations {
+            let at = Location {
+                unit: locations.current,
+                value,
+                key,
+            };
+            locations.set(node, Some(at));
+        }
+    }
+
+    /// The included file `file`, whose bytes are `src`, becomes the current input unit. Returns
+    /// the unit it replaces, for [`OutputFacts::leave_unit`].
+    pub(crate) fn enter_unit(&mut self, file: &Path, src: &[u8]) -> usize {
+        let Some(locations) = &mut self.locations else {
+            return 0;
+        };
+        locations.files.push((file.to_path_buf(), src.to_vec()));
+        std::mem::replace(&mut locations.current, locations.files.len())
+    }
+
+    /// Goes back to the input unit `unit` after an included file.
+    pub(crate) fn leave_unit(&mut self, unit: usize) {
+        if let Some(locations) = &mut self.locations {
+            locations.current = unit;
+        }
+    }
+
+    /// Where the value at `path` was written, as a position in its input unit and that unit's
+    /// file (`None` for the document, whose bytes are `document`); with `key`, where its key
+    /// was written, if it has one. A value without a location of its own, such as one the
+    /// recording parse did not produce, gets that of the nearest value around it that has one.
+    pub(crate) fn position_of(
+        &self,
+        path: &[PathSegment],
+        key: bool,
+        document: &[u8],
+    ) -> Option<(Position, Option<PathBuf>)> {
+        let locations = self.locations.as_ref()?;
+        let mut node = ROOT;
+        let mut found = locations.get(ROOT).map(|at| (at, path.is_empty()));
+        for (depth, segment) in path.iter().enumerate() {
+            let Some(child) = self.nodes[node].children.get(segment) else {
+                break;
+            };
+            node = child;
+            if let Some(at) = locations.get(node) {
+                found = Some((at, depth + 1 == path.len()));
+            }
+        }
+        let (at, exact) = found?;
+        let offset = match at.key {
+            Some(key_at) if key && exact => key_at,
+            _ => at.value,
+        };
+        match at.unit {
+            0 => Some((position_at(document, offset), None)),
+            unit => {
+                let (file, src) = locations.files.get(unit - 1)?;
+                Some((position_at(src, offset), Some(file.clone())))
+            }
+        }
     }
 
     /// The facts recorded at `node`, if any.
@@ -227,7 +366,8 @@ impl OutputFacts {
     }
 
     /// Entry `key` of the object at `object` became a `NO_IMPLICIT_ARRAYS` collection: its first
-    /// `count` values are now the first elements of the array that is its only value.
+    /// `count` values are now the first elements of the array that is its only value. The
+    /// array's location is that of its first element.
     pub(crate) fn collected(&mut self, object: NodeId, key: &str, count: usize) {
         let moved: Vec<(usize, NodeId)> = (0..count)
             .filter_map(|index| {
@@ -240,6 +380,10 @@ impl OutputFacts {
         }
         let array = self.nodes.len();
         self.nodes.push(Node::default());
+        if let Some(locations) = &mut self.locations {
+            let at = locations.get(moved[0].1);
+            locations.set(array, at);
+        }
         let first = PathSegment::Key {
             key: key.to_owned(),
             index: 0,
@@ -251,8 +395,9 @@ impl OutputFacts {
         }
     }
 
-    /// The facts of the value at `from` and of everything inside it, with paths relative to it.
-    pub(crate) fn subtree(&self, from: &[PathSegment]) -> Vec<(ValuePath, ValueFacts)> {
+    /// The facts and locations of the value at `from` and of everything inside it, with paths
+    /// relative to it.
+    pub(crate) fn subtree(&self, from: &[PathSegment]) -> Subtree {
         let Some(node) = self.node_at(from) else {
             return Vec::new();
         };
@@ -260,8 +405,9 @@ impl OutputFacts {
         let mut stack = vec![(node, Vec::new())];
         while let Some((node, path)) = stack.pop() {
             let n = &self.nodes[node];
-            if !n.facts.is_default() {
-                facts.push((path.clone(), n.facts.clone()));
+            let at = self.locations.as_ref().and_then(|l| l.get(node));
+            if !n.facts.is_default() || at.is_some() {
+                facts.push((path.clone(), n.facts.clone(), at));
             }
             for (segment, child) in n.children.iter() {
                 let mut path = path.clone();
@@ -273,10 +419,13 @@ impl OutputFacts {
     }
 
     /// Records `facts`, a [`OutputFacts::subtree`], below the value at `to`.
-    pub(crate) fn graft(&mut self, to: NodeId, facts: Vec<(ValuePath, ValueFacts)>) {
-        for (rest, f) in facts {
+    pub(crate) fn graft(&mut self, to: NodeId, facts: Subtree) {
+        for (rest, f, at) in facts {
             let node = self.descend_or_insert(to, &rest);
             self.set(node, f);
+            if let (Some(locations), Some(_)) = (&mut self.locations, at) {
+                locations.set(node, at);
+            }
         }
     }
 }
@@ -313,6 +462,54 @@ mod tests {
         facts.update(a, |f| f.key_quoted = None);
         assert!(facts.is_empty());
         assert_eq!(facts, OutputFacts::new());
+    }
+
+    #[test]
+    fn locations() {
+        let document = b"a = 1\nb {\n  c = x\n}";
+        let mut facts = OutputFacts::locating();
+        assert!(facts.tracks_moves() && facts.records_locations());
+        facts.locate(ROOT, 0, None);
+        let b = facts.child_or_insert(ROOT, &key("b", 0));
+        facts.locate(b, 8, Some(6));
+        let c = facts.child_or_insert(b, &key("c", 0));
+        facts.locate(c, 16, Some(12));
+        fn line_col(facts: &OutputFacts, path: &[PathSegment], on_key: bool) -> (usize, usize) {
+            let (p, file) = facts
+                .position_of(path, on_key, b"a = 1\nb {\n  c = x\n}")
+                .unwrap();
+            assert_eq!(file, None);
+            (p.line, p.column)
+        }
+        assert_eq!(line_col(&facts, &[], false), (1, 1));
+        assert_eq!(line_col(&facts, &[key("b", 0), key("c", 0)], false), (3, 7));
+        assert_eq!(line_col(&facts, &[key("b", 0), key("c", 0)], true), (3, 3));
+        // A value without a location of its own: the nearest one around it, never its key.
+        assert_eq!(line_col(&facts, &[key("b", 0), key("d", 0)], true), (2, 3));
+        assert_eq!(line_col(&facts, &[key("z", 0)], false), (1, 1));
+        // A collection array is where its first value was; a graft carries locations.
+        facts.collected(b, "c", 1);
+        assert_eq!(line_col(&facts, &[key("b", 0), key("c", 0)], false), (3, 7));
+        let copied = facts.subtree(&[key("b", 0)]);
+        let e = facts.child_or_insert(ROOT, &key("e", 0));
+        facts.graft(e, copied);
+        let inner = [key("e", 0), key("c", 0), PathSegment::Index(0)];
+        assert_eq!(line_col(&facts, &inner, false), (3, 7));
+        // Locations of an included file are positions in that file.
+        let before = facts.enter_unit(Path::new("/i.conf"), b"\n  k = v");
+        let k = facts.child_or_insert(ROOT, &key("k", 0));
+        facts.locate(k, 7, Some(3));
+        facts.leave_unit(before);
+        let (p, file) = facts.position_of(&[key("k", 0)], false, document).unwrap();
+        assert_eq!(
+            ((p.line, p.column), file),
+            ((2, 7), Some(PathBuf::from("/i.conf")))
+        );
+        // Without locations, nothing is recorded and nothing is found.
+        let mut plain = OutputFacts::new();
+        assert!(!plain.tracks_moves());
+        plain.locate(ROOT, 3, None);
+        assert_eq!(plain.position_of(&[], false, document), None);
     }
 
     #[test]

@@ -163,12 +163,17 @@ fn deepest() -> Vec<(&'static str, String)> {
     documents
 }
 
-/// Asserts that `result` is the error for nesting past `MAX_SERDE_NESTING`.
+/// Asserts that `result` is the error for nesting past `MAX_SERDE_NESTING`: of serialization, or
+/// of deserialization.
 fn assert_too_deep<T>(result: Result<T, UclError>, what: &str) {
     match result {
         Err(UclError::Serde(SerdeError::TooDeep { limit })) => {
             assert_eq!(limit, MAX_SERDE_NESTING, "{what}")
         }
+        Err(UclError::Deserialize(e)) => match e.error() {
+            SerdeError::TooDeep { limit } => assert_eq!(*limit, MAX_SERDE_NESTING, "{what}"),
+            other => panic!("{what}: expected TooDeep, got {other}"),
+        },
         Err(other) => panic!("{what}: expected TooDeep, got {other}"),
         Ok(_) => panic!("{what}: expected TooDeep, got a value"),
     }

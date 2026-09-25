@@ -1,10 +1,15 @@
 //! serde throughput: deserializing UCL into a typed struct, and serializing it in each format.
 //! Deserialization is measured in input bytes per second, serialization in output bytes.
+//!
+//! `serde/deserialize-error-1000` measures a document whose last value does not fit the type:
+//! `from_str` then parses and deserializes a second time to find the value's path and position,
+//! which `from_value` does not.
 
 mod common;
 
 use common::Config;
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use serde::Deserialize;
 use std::hint::black_box;
 use std::time::Duration;
 use ucl_lexer::UclValue;
@@ -17,12 +22,40 @@ fn bench_deserialize(c: &mut Criterion) {
     group.bench_function("from_str", |b| {
         b.iter(|| ucl_lexer::from_str::<Config>(black_box(&input)).unwrap())
     });
+    // The document-level deserializer, which records the paths of errors as it goes.
+    group.bench_function("UclDeserializer", |b| {
+        b.iter(|| Config::deserialize(ucl_lexer::UclDeserializer::new(black_box(&input))).unwrap())
+    });
     // Deserialize a parsed value only.
     let value = ucl_lexer::parse::parse(input.as_bytes()).unwrap();
     group.bench_function("from_value", |b| {
         b.iter_batched(
             || value.clone(),
             |value| ucl_lexer::from_value::<Config>(value).unwrap(),
+            BatchSize::LargeInput,
+        )
+    });
+    group.finish();
+}
+
+fn bench_deserialize_error(c: &mut Criterion) {
+    let input = common::config(1000);
+    // The last service's `ratio` is a string.
+    let at = input.rfind("ratio = ").unwrap();
+    let end = at + input[at..].find('\n').unwrap();
+    let input = format!("{}ratio = zero{}", &input[..at], &input[end..]);
+    let err = ucl_lexer::from_str::<Config>(&input).unwrap_err();
+    assert!(err.position().is_some(), "{err}");
+    let mut group = c.benchmark_group("serde/deserialize-error-1000");
+    group.throughput(Throughput::Bytes(input.len() as u64));
+    group.bench_function("from_str", |b| {
+        b.iter(|| ucl_lexer::from_str::<Config>(black_box(&input)).unwrap_err())
+    });
+    let value = ucl_lexer::parse::parse(input.as_bytes()).unwrap();
+    group.bench_function("from_value", |b| {
+        b.iter_batched(
+            || value.clone(),
+            |value| ucl_lexer::from_value::<Config>(value).unwrap_err(),
             BatchSize::LargeInput,
         )
     });
@@ -81,6 +114,6 @@ criterion_group! {
         .sample_size(30)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = bench_deserialize, bench_serialize, bench_nested
+    targets = bench_deserialize, bench_deserialize_error, bench_serialize, bench_nested
 }
 criterion_main!(benches);

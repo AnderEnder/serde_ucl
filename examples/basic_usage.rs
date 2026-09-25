@@ -68,10 +68,15 @@ fn main() -> Result<(), UclError> {
     let position = err.position().expect("parse errors have a position");
     println!("at line {}, column {}", position.line, position.column);
 
-    // A document that parses but does not fit the struct is a serde error.
+    // A document that parses but does not fit the struct is a deserialization error, with the
+    // path and the position of the value it is about: here the object that lacks a field.
     let err = from_str::<AppConfig>("server { name = x }").unwrap_err();
     println!("error: {err}");
-    assert!(matches!(err, UclError::Serde(_)));
+    assert!(matches!(err, UclError::Deserialize(_)));
+    let position = err
+        .position()
+        .expect("deserialization errors have a position");
+    assert_eq!((position.line, position.column), (1, 8));
 
     Ok(())
 }

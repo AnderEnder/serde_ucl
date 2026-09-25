@@ -44,6 +44,18 @@ pub trait Loader {
     /// The contents of the regular file at `path`.
     fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
 
+    /// The contents of the regular file at `path` if it holds at most `limit` bytes; if it holds
+    /// more, any part of it longer than `limit` bytes, such as its first `limit + 1` bytes. A
+    /// parser with an input limit ([`super::Parser::set_max_input_bytes`]) reads files with it,
+    /// so that a large file is not read whole only to be rejected.
+    ///
+    /// The default reads the whole file with [`Loader::read`]; [`FsLoader`] and
+    /// [`MemoryLoader`] stop after `limit + 1` bytes.
+    fn read_limited(&self, path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+        let _ = limit;
+        self.read(path)
+    }
+
     /// The names of the entries of the directory at `path`, in any order, without `.` and `..`.
     /// Names that are not valid UTF-8 may be left out. Used to expand glob patterns (spec §9.4).
     fn read_dir(&self, path: &Path) -> io::Result<Vec<String>>;
@@ -88,6 +100,15 @@ impl Loader for FsLoader {
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         std::fs::read(path)
+    }
+
+    fn read_limited(&self, path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
@@ -243,14 +264,22 @@ impl Loader for MemoryLoader {
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.read_limited(path, u64::MAX)
+    }
+
+    fn read_limited(&self, path: &Path, limit: u64) -> io::Result<Vec<u8>> {
         let path = self.normalise(path);
-        self.files.get(&path).cloned().ok_or_else(|| {
-            if self.dirs.contains(&path) {
-                io::Error::other(format!("{}: is a directory", path.display()))
-            } else {
-                not_found(&path)
+        match self.files.get(&path) {
+            Some(bytes) => {
+                let len = usize::try_from(limit.saturating_add(1)).unwrap_or(usize::MAX);
+                Ok(bytes[..bytes.len().min(len)].to_vec())
             }
-        })
+            None if self.dirs.contains(&path) => Err(io::Error::other(format!(
+                "{}: is a directory",
+                path.display()
+            ))),
+            None => Err(not_found(&path)),
+        }
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
@@ -291,6 +320,11 @@ mod tests {
         );
         assert!(m.canonicalize(Path::new("/a/x")).is_err());
         assert_eq!(m.read(Path::new("/a/b/c.conf")).unwrap(), b"x = 1");
+        let limited = |limit| m.read_limited(Path::new("/a/b/c.conf"), limit).unwrap();
+        assert_eq!(limited(5), b"x = 1");
+        assert_eq!(limited(2), b"x =");
+        assert_eq!(limited(u64::MAX), b"x = 1");
+        assert!(m.read_limited(Path::new("/a/b"), 2).is_err());
         assert!(m.read(Path::new("/a/b")).is_err());
         let mut names = m.read_dir(Path::new("/a")).unwrap();
         names.sort();
@@ -308,5 +342,16 @@ mod tests {
         assert_eq!(fs.kind(&here.join("src")), Some(FileKind::Directory));
         assert_eq!(fs.kind(&here.join("no such file")), None);
         assert!(fs.read_dir(here).unwrap().iter().any(|n| n == "Cargo.toml"));
+        let cargo = fs.read(&here.join("Cargo.toml")).unwrap();
+        assert_eq!(
+            fs.read_limited(&here.join("Cargo.toml"), 9).unwrap(),
+            cargo[..10]
+        );
+        assert_eq!(
+            fs.read_limited(&here.join("Cargo.toml"), cargo.len() as u64)
+                .unwrap(),
+            cargo
+        );
+        assert!(fs.read_limited(&here.join("no such file"), 9).is_err());
     }
 }

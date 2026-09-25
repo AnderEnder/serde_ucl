@@ -20,7 +20,9 @@
 //! [`Parser::set_loader`] or [`ParserBuilder::with_loader`]. Relative paths resolve against the
 //! parser's base directory ([`Parser::set_base_dir`]); without one, against the directory of the
 //! file given to [`Parser::parse_file`], or for a document given as bytes against the loader's
-//! current directory. They never resolve against the directory of an included file (§9.3).
+//! current directory. They never resolve against the directory of an included file (§9.3). A list
+//! of search directories set with [`Parser::set_search_path`] is in effect from the start of a
+//! parse, as a `path` parameter of an earlier include macro would be (§9.4).
 //!
 //! Where libucl stops parsing silently at a `.try_include` that finds no usable file, or at an
 //! `.include` of a glob pattern that matches nothing (§9.4), the parser returns an error of kind
@@ -149,11 +151,15 @@ pub struct Parser {
     handler: Option<Box<VariableHandler>>,
     loader: Box<dyn Loader>,
     base_dir: Option<PathBuf>,
+    search_path: Option<Vec<String>>,
+    max_input_bytes: Option<u64>,
     comments: Vec<Comment>,
     attached: comments::CommentGroups,
     /// [`Parser::attached_comments`], written out from `attached` when first asked for.
     attached_paths: OnceCell<Vec<AttachedComments>>,
     facts: OutputFacts,
+    /// The variable handler's answers in the last parse, in the order it was asked.
+    handler_answers: Vec<Option<String>>,
 }
 
 impl Default for Parser {
@@ -171,6 +177,8 @@ impl fmt::Debug for Parser {
             .field("variables", &self.variables)
             .field("handler", &self.handler.is_some())
             .field("base_dir", &self.base_dir)
+            .field("search_path", &self.search_path)
+            .field("max_input_bytes", &self.max_input_bytes)
             .field("comments", &self.comments.len())
             .field("attached", &self.attached.len())
             .finish()
@@ -192,10 +200,13 @@ impl Parser {
             handler: None,
             loader,
             base_dir: None,
+            search_path: None,
+            max_input_bytes: None,
             comments: Vec::new(),
             attached: comments::CommentGroups::default(),
             attached_paths: OnceCell::new(),
             facts: OutputFacts::new(),
+            handler_answers: Vec::new(),
         }
     }
 
@@ -281,6 +292,93 @@ impl Parser {
         self.base_dir.as_deref()
     }
 
+    /// Sets the search directories of the include macros: at the start of every parse they are
+    /// in effect as a `path` list given to an earlier include macro would be (spec §9.4,
+    /// *Signatures, URLs and search paths*). The default is no list.
+    ///
+    /// While a list is in effect, `.include`, `.try_include` and `.includes` look for a file at
+    /// `DIR/PATH` for each directory `DIR` in order, also when `PATH` is absolute; relative
+    /// results resolve against the base directory ([`Parser::set_base_dir`]). `.include` uses the
+    /// first directory only: a file missing there is an error, or with `try=true` skipped.
+    /// `.try_include` uses the first directory that has the file, and a file found in none is an
+    /// error, not a silent stop. With `glob=true` the pattern is expanded in every directory. An
+    /// empty list makes every include an error. A `path` parameter in the document replaces the
+    /// list for the rest of the parse; `.load` does not use it (§9.6). Macro argument documents
+    /// (§9.2) start with this list too. Each directory is text, as in the `path` parameter.
+    ///
+    /// ```
+    /// use ucl_lexer::parse::{MemoryLoader, ParserBuilder};
+    ///
+    /// let mut files = MemoryLoader::new();
+    /// files.add_file("/usr/share/app/defaults.conf", "workers = 4\n");
+    /// files.add_file("/etc/app/local.conf", "workers = 8\n");
+    /// let mut parser = ParserBuilder::new()
+    ///     .with_loader(files)
+    ///     .with_search_path(["/etc/app", "/usr/share/app"])
+    ///     .build();
+    /// // `.try_include` takes the first directory that has the file.
+    /// let value = parser.parse(b".try_include \"defaults.conf\"\n.try_include \"local.conf\"")?;
+    /// let workers: Vec<i64> = value.as_object().unwrap().get_all("workers")
+    ///     .filter_map(|v| v.as_integer())
+    ///     .collect();
+    /// assert_eq!(workers, [4, 8]);
+    /// # Ok::<(), ucl_lexer::parse::Error>(())
+    /// ```
+    pub fn set_search_path<I, S>(&mut self, dirs: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.search_path = Some(dirs.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Removes the search directories set with [`Parser::set_search_path`].
+    pub fn clear_search_path(&mut self) -> &mut Self {
+        self.search_path = None;
+        self
+    }
+
+    /// The search directories set with [`Parser::set_search_path`], if any.
+    pub fn search_path(&self) -> Option<&[String]> {
+        self.search_path.as_deref()
+    }
+
+    /// Sets the most bytes one parse reads: the document, given as bytes or read by
+    /// [`Parser::parse_file`], and every file that `.include`, `.try_include` and `.load` read for
+    /// it, together. A file included twice counts twice; macro argument documents are part of
+    /// the document and do not count again. Going over the limit fails the parse with
+    /// [`ErrorKind::InputTooLarge`], whatever `try=true` or `.try_include` say, at the start of
+    /// the document or at the macro whose file goes over it. Files are read through
+    /// [`Loader::read_limited`], so a file far larger than the limit is not read whole.
+    ///
+    /// `None`, the default, sets no limit: libucl reads documents and included files of any size
+    /// (spec §11.2, where limits are opt-in settings). Set a limit for input from untrusted
+    /// sources.
+    ///
+    /// ```
+    /// use ucl_lexer::parse::{ErrorKind, MemoryLoader, ParserBuilder};
+    ///
+    /// let mut files = MemoryLoader::new();
+    /// files.add_file("/big.conf", "x = \"".to_string() + &"a".repeat(1000) + "\"\n");
+    /// let mut parser = ParserBuilder::new()
+    ///     .with_loader(files)
+    ///     .with_max_input_bytes(512)
+    ///     .build();
+    /// assert!(parser.parse(b"small = 1").is_ok());
+    /// let err = parser.parse(b".include \"/big.conf\"").unwrap_err();
+    /// assert!(matches!(err.kind(), ErrorKind::InputTooLarge { limit: 512, .. }));
+    /// ```
+    pub fn set_max_input_bytes(&mut self, limit: Option<u64>) -> &mut Self {
+        self.max_input_bytes = limit;
+        self
+    }
+
+    /// The input limit set with [`Parser::set_max_input_bytes`], if any.
+    pub fn max_input_bytes(&self) -> Option<u64> {
+        self.max_input_bytes
+    }
+
     /// Comments saved by the last parse under [`ParserFlags::SAVE_COMMENTS`], in the order they
     /// were read, included files among them. A comment's position is in the input it was read
     /// from.
@@ -329,10 +427,21 @@ impl Parser {
     /// ([`Parser::set_base_dir`]), or without one the loader's current directory, which is `/`
     /// for the default loader. Registered variables of the same names override them.
     pub fn parse(&mut self, input: &[u8]) -> Result<UclValue, Error> {
+        let unit = self.bytes_unit();
+        self.run(input, unit)
+    }
+
+    /// How a document given as bytes is parsed: against the base directory, with its file
+    /// variables unless `NO_FILEVARS` is set.
+    fn bytes_unit(&self) -> Unit {
         let base = self.base();
         let filevars = (!self.flags.contains(ParserFlags::NO_FILEVARS))
             .then(|| ("undef".to_string(), base.to_string_lossy().into_owned()));
-        self.run(input, base, filevars, None)
+        Unit {
+            base,
+            filevars,
+            main: None,
+        }
     }
 
     /// Reads the file at `path` through the loader and parses it. A relative `path` resolves
@@ -370,7 +479,11 @@ impl Parser {
             Ok(canonical) => canonical,
             Err(e) => return Err((path, e)),
         };
-        match self.loader.read(&canonical) {
+        let read = match self.max_input_bytes {
+            Some(limit) => self.loader.read_limited(&canonical, limit),
+            None => self.loader.read(&canonical),
+        };
+        match read {
             Ok(input) => Ok((canonical, input)),
             Err(e) => Err((path, e)),
         }
@@ -383,6 +496,13 @@ impl Parser {
         canonical: PathBuf,
         input: &[u8],
     ) -> Result<UclValue, Error> {
+        let unit = self.file_unit(canonical);
+        self.run(input, unit)
+    }
+
+    /// How the file whose canonical path is `canonical` is parsed: against the base directory or
+    /// the file's directory, with the file variables of the file.
+    fn file_unit(&self, canonical: PathBuf) -> Unit {
         let dir = canonical
             .parent()
             .map(Path::to_path_buf)
@@ -392,24 +512,21 @@ impl Parser {
             canonical.to_string_lossy().into_owned(),
             dir.to_string_lossy().into_owned(),
         ));
-        self.run(input, base, filevars, Some(canonical))
+        Unit {
+            base,
+            filevars,
+            main: Some(canonical),
+        }
     }
 
-    /// `filevars` are `FILENAME` and `CURDIR`, if defined; `main` is the canonical path of a
-    /// document read from a file.
-    fn run(
-        &mut self,
-        input: &[u8],
-        base: PathBuf,
-        filevars: Option<(String, String)>,
-        main: Option<PathBuf>,
-    ) -> Result<UclValue, Error> {
-        let from_file = main.is_some();
-        // Lookup order (spec §7.1): the file variables first, then the registered ones.
+    /// The variables of a parse of `unit`, in lookup order (spec §7.1): the file variables
+    /// first, then the registered ones.
+    fn variables(&self, unit: &Unit) -> Vec<(String, String)> {
+        let from_file = unit.main.is_some();
         let mut variables: IndexMap<String, String> = IndexMap::new();
-        if let Some((filename, curdir)) = filevars {
-            variables.insert("FILENAME".to_string(), filename);
-            variables.insert("CURDIR".to_string(), curdir);
+        if let Some((filename, curdir)) = &unit.filevars {
+            variables.insert("FILENAME".to_string(), filename.clone());
+            variables.insert("CURDIR".to_string(), curdir.clone());
         }
         for (name, value) in &self.variables {
             let is_filevar = name == "FILENAME" || name == "CURDIR";
@@ -418,22 +535,54 @@ impl Parser {
             }
             variables.insert(name.clone(), value.clone());
         }
+        variables.into_iter().collect()
+    }
+
+    fn settings(&self) -> core::Settings {
+        core::Settings {
+            flags: self.flags,
+            priority: self.priority,
+            strategy: self.strategy,
+        }
+    }
+
+    /// Parses `input` as `unit`. The variable handler's answers are recorded, so that
+    /// [`Parser::locate`] can give them again.
+    fn run(&mut self, input: &[u8], unit: Unit) -> Result<UclValue, Error> {
+        if let Some(limit) = self.max_input_bytes
+            && input.len() as u64 > limit
+        {
+            let kind = ErrorKind::InputTooLarge { limit, path: None };
+            return Err(Error::new(kind, Position::new()));
+        }
+        let variables = self.variables(&unit);
         self.comments.clear();
         self.attached = comments::CommentGroups::default();
         self.attached_paths = OnceCell::new();
         self.facts.clear();
-        let settings = core::Settings {
-            flags: self.flags,
-            priority: self.priority,
-            strategy: self.strategy,
-        };
-        let variables: Vec<(String, String)> = variables.into_iter().collect();
+        self.handler_answers.clear();
+        let settings = self.settings();
+        let answers = &mut self.handler_answers;
+        let mut recording = self.handler.as_deref_mut().map(|handler| {
+            move |name: &str| {
+                let answer = handler(name);
+                answers.push(answer.clone());
+                answer
+            }
+        });
         let mut expander = vars::Expander::new(
             variables,
-            self.handler.as_deref_mut(),
+            recording.as_mut().map(|h| h as &mut vars::Handler<'_>),
             !self.flags.contains(ParserFlags::DISABLE_MACRO),
         );
-        let mut includes = include::Includes::new(&*self.loader, base, main);
+        let budget = include::Budget::new(self.max_input_bytes, input.len());
+        let mut includes = include::Includes::new(
+            &*self.loader,
+            unit.base,
+            unit.main,
+            self.search_path.clone(),
+            budget,
+        );
         let sink = self
             .flags
             .contains(ParserFlags::SAVE_COMMENTS)
@@ -449,6 +598,83 @@ impl Parser {
             sink,
             Some(&mut self.facts),
         )
+    }
+
+    /// Parses `source`, the input of the last parse, again with the same settings, recording
+    /// where each value was written: the result, and the locations, which
+    /// [`OutputFacts::position_of`] reads. `None` if the document no longer parses.
+    ///
+    /// The locations follow values as the duplicate rules of spec §8 move, merge and replace them
+    /// and `.inherit` copies them (§9.7). The loader is asked for the included files again. The
+    /// variable handler is not called: its answers from the last parse are given again, in the
+    /// same order. Saved comments and output facts of the last parse are kept.
+    pub(crate) fn parse_located(&mut self, source: &Source<'_>) -> Option<(UclValue, OutputFacts)> {
+        let (input, unit) = match source {
+            Source::Bytes(input) => (*input, self.bytes_unit()),
+            #[cfg(feature = "fs")]
+            Source::File { canonical, input } => (*input, self.file_unit(canonical.clone())),
+        };
+        let variables = self.variables(&unit);
+        let mut answers = self.handler_answers.iter();
+        let mut replay = move |_: &str| answers.next().cloned().flatten();
+        let mut expander = vars::Expander::new(
+            variables,
+            self.handler
+                .is_some()
+                .then_some(&mut replay as &mut vars::Handler<'_>),
+            !self.flags.contains(ParserFlags::DISABLE_MACRO),
+        );
+        let budget = include::Budget::new(self.max_input_bytes, input.len());
+        let mut includes = include::Includes::new(
+            &*self.loader,
+            unit.base,
+            unit.main,
+            self.search_path.clone(),
+            budget,
+        );
+        let mut facts = OutputFacts::locating();
+        let result = core::parse_document(
+            input,
+            self.settings(),
+            &mut expander,
+            &mut includes,
+            None,
+            Some(&mut facts),
+        );
+        match result {
+            Ok(value) => Some((value, facts)),
+            Err(e) if e.is_stopped() => Some((e.into_partial()?, facts)),
+            Err(_) => None,
+        }
+    }
+}
+
+/// How one document is parsed: the directory relative paths resolve against, `FILENAME` and
+/// `CURDIR` if defined, and for a document read from a file its canonical path.
+struct Unit {
+    base: PathBuf,
+    filevars: Option<(String, String)>,
+    main: Option<PathBuf>,
+}
+
+/// The input of a parse, for [`Parser::parse_located`].
+pub(crate) enum Source<'a> {
+    /// A document given as bytes ([`Parser::parse`]).
+    Bytes(&'a [u8]),
+    /// The contents of the file whose canonical path is `canonical`
+    /// ([`Parser::parse_read_file`]), for [`crate::from_file`].
+    #[cfg(feature = "fs")]
+    File { canonical: PathBuf, input: &'a [u8] },
+}
+
+impl Source<'_> {
+    /// The document's bytes.
+    pub(crate) fn input(&self) -> &[u8] {
+        match self {
+            Source::Bytes(input) => input,
+            #[cfg(feature = "fs")]
+            Source::File { input, .. } => input,
+        }
     }
 }
 

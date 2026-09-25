@@ -1,12 +1,14 @@
 //! Variable expansion (spec §7).
 
-use super::VariableHandler;
+/// A variable handler as the expander calls it: [`super::VariableHandler`], or a closure of the
+/// parser around it.
+pub(crate) type Handler<'a> = dyn FnMut(&str) -> Option<String> + 'a;
 
 /// Expands `$NAME`, `${NAME}` and `$$` in string values.
 pub(crate) struct Expander<'a> {
     /// Registered variables in lookup order (spec §7.1).
     variables: Vec<(String, String)>,
-    handler: Option<&'a mut VariableHandler>,
+    handler: Option<&'a mut Handler<'a>>,
     enabled: bool,
 }
 
@@ -20,7 +22,7 @@ const FILE_VARS: [&str; 2] = ["FILENAME", "CURDIR"];
 impl<'a> Expander<'a> {
     pub(crate) fn new(
         variables: Vec<(String, String)>,
-        handler: Option<&'a mut VariableHandler>,
+        handler: Option<&'a mut Handler<'a>>,
         enabled: bool,
     ) -> Self {
         Self {

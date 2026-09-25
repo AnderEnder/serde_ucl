@@ -114,6 +114,24 @@ impl ParserBuilder {
         self
     }
 
+    /// Sets the search directories of the include macros, in effect from the start of every
+    /// parse as a `path` list would be ([`Parser::set_search_path`], spec §9.4).
+    pub fn with_search_path<I, S>(mut self, dirs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.parser.set_search_path(dirs);
+        self
+    }
+
+    /// Sets the most bytes one parse reads, the document and the files its macros read together
+    /// ([`Parser::set_max_input_bytes`]). The default is no limit.
+    pub fn with_max_input_bytes(mut self, limit: u64) -> Self {
+        self.parser.set_max_input_bytes(Some(limit));
+        self
+    }
+
     /// The parser.
     pub fn build(self) -> Parser {
         self.parser
@@ -139,9 +157,13 @@ mod tests {
             .with_variable_handler(|name| (name == "H").then(|| "h".to_string()))
             .with_loader(loader)
             .with_base_dir("/cfg")
+            .with_search_path(["/cfg"])
+            .with_max_input_bytes(1000)
             .build();
         assert_eq!(parser.flags(), ParserFlags::KEY_LOWERCASE);
         assert_eq!(parser.base_dir(), Some(std::path::Path::new("/cfg")));
+        assert_eq!(parser.search_path(), Some(&["/cfg".to_string()][..]));
+        assert_eq!(parser.max_input_bytes(), Some(1000));
         let v = parser
             .parse(b"K = \"$AB ${C} ${H}\"\nk = 2\n.include \"part.conf\"")
             .unwrap();

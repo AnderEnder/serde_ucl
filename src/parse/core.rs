@@ -81,7 +81,7 @@ fn parse_unit(
     expander: &mut Expander<'_>,
     includes: &mut Includes<'_>,
     sink: Option<CommentSink<'_>>,
-    facts_sink: Option<&mut OutputFacts>,
+    mut facts_sink: Option<&mut OutputFacts>,
     depth: usize,
 ) -> Result<UclValue, Error> {
     let mut core = Core {
@@ -91,7 +91,8 @@ fn parse_unit(
         expander,
         includes,
         notes: sink.as_ref().map(|_| Notes::new()),
-        facts: facts_sink.as_ref().map(|_| OutputFacts::new()),
+        // The sink starts empty; it may be set to record locations (`OutputFacts::locating`).
+        facts: facts_sink.as_deref_mut().map(std::mem::take),
         uppercase_keys: false,
         root: UclValue::Null,
         frames: Vec::new(),
@@ -1020,12 +1021,13 @@ impl Core<'_, '_, '_, '_> {
     /// (QUESTIONS.md #27).
     ///
     /// Then the value's output facts are recorded (spec §10.1): `origin`, and the key as written
-    /// for this value.
+    /// for this value; and, when locations are recorded, `at`, where the value was written.
     fn insert(
         &mut self,
         key: &mut Key,
         value: UclValue,
         origin: Origin,
+        at: usize,
     ) -> Result<Placement, Error> {
         let written = self.match_key_case(key);
         let Settings {
@@ -1035,7 +1037,8 @@ impl Core<'_, '_, '_, '_> {
         } = self.settings;
         // `read_key` has already lowercased the key where §12.1 asks for it.
         flags.remove(ParserFlags::KEY_LOWERCASE);
-        let track = self.notes.is_some() || self.facts.as_ref().is_some_and(|f| !f.is_empty());
+        let track =
+            self.notes.is_some() || self.facts.as_ref().is_some_and(OutputFacts::tracks_moves);
         let object = self
             .current()
             .as_object_mut()
@@ -1115,19 +1118,21 @@ impl Core<'_, '_, '_, '_> {
                 in_place,
                 normal_layout,
             };
-            self.record_facts(key, written.as_deref(), placement, facts);
+            self.record_facts(key, written.as_deref(), placement, facts, at);
         }
         Ok(placement)
     }
 
     /// Records the output facts of a value just placed under `key` (spec §10.1). `written` is
-    /// the key as written for the value when it differs from `key`, the entry's key.
+    /// the key as written for the value when it differs from `key`, the entry's key. When
+    /// locations are recorded, the value's is `at`, and its key's where `key` starts.
     fn record_facts(
         &mut self,
         key: &Key,
         written: Option<&str>,
         placement: Placement,
         placed: PlacedFacts,
+        at: usize,
     ) {
         let spelling = written.unwrap_or(&key.name);
         let key_spelling = (spelling != key.name).then(|| spelling.to_owned());
@@ -1153,8 +1158,12 @@ impl Core<'_, '_, '_, '_> {
         };
         let has_value_facts = placed.origin.has_string_facts() || placed.normal_layout;
         let has_key_facts = keyed && (key_spelling.is_some() || key_quoted.is_some());
-        let stale = placed.in_place && self.facts.as_ref().is_some_and(|f| !f.is_empty());
-        if !has_value_facts && !has_key_facts && !stale {
+        let stale = placed.in_place && self.facts.as_ref().is_some_and(OutputFacts::tracks_moves);
+        let locating = self
+            .facts
+            .as_ref()
+            .is_some_and(OutputFacts::records_locations);
+        if !has_value_facts && !has_key_facts && !stale && !locating {
             return;
         }
         let Some(node) = self.facts_node_below(&step.segments()) else {
@@ -1173,6 +1182,7 @@ impl Core<'_, '_, '_, '_> {
                 f.key_quoted = key_quoted;
             }
         });
+        facts.locate(node, at, Some(key.at));
     }
 
     /// Entry `key` of the current object has just become a `NO_IMPLICIT_ARRAYS` collection
@@ -1297,12 +1307,19 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
-    /// Opens a new object or array under `key` in the current object.
-    fn open_in_object(&mut self, mut key: Key, kind: Kind, close: Close) -> Result<(), Error> {
+    /// Opens a new object or array under `key` in the current object. `at` is where it was
+    /// written: its bracket, or the name of a section (§3.4).
+    fn open_in_object(
+        &mut self,
+        mut key: Key,
+        kind: Kind,
+        close: Close,
+        at: usize,
+    ) -> Result<(), Error> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, self.pos));
         }
-        let placement = self.insert(&mut key, Self::empty(kind), Origin::default())?;
+        let placement = self.insert(&mut key, Self::empty(kind), Origin::default(), at)?;
         let path = self.placed_path(&key.name, placement);
         let home = match placement {
             Placement::Slot(slot) => self.take_out(
@@ -1333,13 +1350,15 @@ impl Core<'_, '_, '_, '_> {
         self.push_frame(kind, close, home, path, key.at)
     }
 
-    /// Opens a new object or array as the next element of the current array.
-    fn open_in_array(&mut self, kind: Kind, close: Close) -> Result<(), Error> {
+    /// Opens a new object or array as the next element of the current array, written with its
+    /// bracket at `bracket`.
+    fn open_in_array(&mut self, kind: Kind, close: Close, bracket: usize) -> Result<(), Error> {
         let at = self.pos;
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
         }
         let index = self.push_element(Self::empty(kind));
+        self.element_facts(index, Origin::default(), bracket);
         let path = self.element_path(index);
         self.created(path.clone());
         let home = Home::Attached(Step::Element(index), Self::empty(kind));
@@ -1354,6 +1373,28 @@ impl Core<'_, '_, '_, '_> {
             .expect("elements are parsed inside arrays");
         array.push(value);
         array.len() - 1
+    }
+
+    /// Records the output facts of element `index` of the current array, written at `at`: a
+    /// string's origin (spec §10.1) and, when locations are recorded, `at`.
+    fn element_facts(&mut self, index: usize, origin: Origin, at: usize) {
+        let Some(facts) = &self.facts else {
+            return;
+        };
+        if !origin.has_string_facts() && !facts.records_locations() {
+            return;
+        }
+        let Some(node) = self.facts_node_below(&[PathSegment::Index(index)]) else {
+            return;
+        };
+        let facts = self.facts.as_mut().expect("checked above");
+        if origin.has_string_facts() {
+            facts.update(node, |f| {
+                f.single_quoted = origin.single_quoted;
+                f.multiline = origin.multiline;
+            });
+        }
+        facts.locate(node, at, None);
     }
 
     fn element_path(&self, index: usize) -> Option<PathRef> {
@@ -1423,10 +1464,14 @@ impl Core<'_, '_, '_, '_> {
             Some(b'{') => (Kind::Object, Close::Brace),
             _ => (Kind::Object, Close::Eof),
         };
+        let root_at = if close == Close::Eof { 0 } else { self.pos };
         if close != Close::Eof {
             self.pos += 1;
         }
         self.root = Self::empty(kind);
+        if let Some(facts) = &mut self.facts {
+            facts.locate(facts::ROOT, root_at, None);
+        }
         self.push_frame(kind, close, Home::Root, Some(PathRef::root()), self.pos)?;
         if close == Close::Eof {
             // Where the first key of an unbraced root could start (§2.2, *Quirk*).
@@ -1454,6 +1499,7 @@ impl Core<'_, '_, '_, '_> {
     ) -> Result<(), Error> {
         let cursor = self.notes.as_mut().map(|n| n.suspend(self.src));
         let outer_run = self.tracking();
+        let outer_unit = self.facts.as_mut().map(|f| f.enter_unit(file, input));
         let mut inner = Core {
             src: input,
             pos: 0,
@@ -1482,6 +1528,9 @@ impl Core<'_, '_, '_, '_> {
         self.uppercase_keys = inner.uppercase_keys;
         self.notes = inner.notes;
         self.facts = inner.facts;
+        if let (Some(facts), Some(unit)) = (&mut self.facts, outer_unit) {
+            facts.leave_unit(unit);
+        }
         self.recent = inner.recent;
         if let (Some(notes), Some(cursor)) = (&mut self.notes, cursor) {
             notes.resume(input, cursor);
@@ -1659,7 +1708,8 @@ impl Core<'_, '_, '_, '_> {
                 (name, element)
             }
         };
-        let tracked = self.notes.is_some() || self.facts.as_ref().is_some_and(|f| !f.is_empty());
+        let tracked =
+            self.notes.is_some() || self.facts.as_ref().is_some_and(OutputFacts::tracks_moves);
         if let Some(len) = moved_from
             && tracked
         {
@@ -1684,6 +1734,29 @@ impl Core<'_, '_, '_, '_> {
             // QUESTIONS.md #51).
             let facts = self.facts.as_mut().expect("checked above");
             facts.update(node, |f| f.key_quoted = Some(false));
+        }
+        if self
+            .facts
+            .as_ref()
+            .is_some_and(OutputFacts::records_locations)
+        {
+            // The containers the macro creates were written where the macro was.
+            let entry = PathSegment::Key {
+                key: key.clone(),
+                index: 0,
+            };
+            if found.is_none()
+                && let Some(node) = self.facts_node_below(std::slice::from_ref(&entry))
+            {
+                let facts = self.facts.as_mut().expect("checked above");
+                facts.locate(node, at, Some(at));
+            }
+            if let Some(index) = element
+                && let Some(node) = self.facts_node_below(&[entry, PathSegment::Index(index)])
+            {
+                let facts = self.facts.as_mut().expect("checked above");
+                facts.locate(node, at, None);
+            }
         }
         let entry_path = self.placed_path(&key, Placement::Slot(0));
         let entry_step = Step::Entry { key, slot: 0 };
@@ -1900,25 +1973,17 @@ impl Core<'_, '_, '_, '_> {
         match self.peek() {
             Some(b'{') => {
                 self.pos += 1;
-                self.open_in_array(Kind::Object, Close::Brace)
+                self.open_in_array(Kind::Object, Close::Brace, self.pos - 1)
             }
             Some(b'[') => {
                 self.pos += 1;
-                self.open_in_array(Kind::Array, Close::Bracket)
+                self.open_in_array(Kind::Array, Close::Bracket, self.pos - 1)
             }
             _ => {
+                let at = self.pos;
                 let (value, quoted, origin) = self.scalar()?;
                 let index = self.push_element(value);
-                if origin.has_string_facts()
-                    && self.facts.is_some()
-                    && let Some(node) = self.facts_node_below(&[PathSegment::Index(index)])
-                {
-                    let facts = self.facts.as_mut().expect("checked above");
-                    facts.update(node, |f| {
-                        f.single_quoted = origin.single_quoted;
-                        f.multiline = origin.multiline;
-                    });
-                }
+                self.element_facts(index, origin, at);
                 let path = self.element_path(index);
                 self.created(path);
                 self.after_value(quoted)
@@ -2132,7 +2197,8 @@ impl Core<'_, '_, '_, '_> {
             } else {
                 Close::Section
             };
-            self.open_in_object(name, Kind::Object, close)?;
+            let at = name.at;
+            self.open_in_object(name, Kind::Object, close, at)?;
             opened += 1;
             if after_break {
                 // A line break after a separator that follows a name: the next name may come on
@@ -2218,7 +2284,8 @@ impl Core<'_, '_, '_, '_> {
                 self.created(path);
                 return Ok(());
             }
-            let placement = self.insert(&mut key, UclValue::Null, Origin::default())?;
+            let at = key.at;
+            let placement = self.insert(&mut key, UclValue::Null, Origin::default(), at)?;
             let path = self.placed_path(&key.name, placement);
             self.created(path);
             return Ok(());
@@ -2243,15 +2310,16 @@ impl Core<'_, '_, '_, '_> {
         match self.peek() {
             Some(b'{') => {
                 self.pos += 1;
-                self.open_in_object(key, Kind::Object, Close::Brace)
+                self.open_in_object(key, Kind::Object, Close::Brace, self.pos - 1)
             }
             Some(b'[') => {
                 self.pos += 1;
-                self.open_in_object(key, Kind::Array, Close::Bracket)
+                self.open_in_object(key, Kind::Array, Close::Bracket, self.pos - 1)
             }
             _ => {
+                let at = self.pos;
                 let (value, quoted, origin) = self.scalar()?;
-                let placement = self.insert(&mut key, value, origin)?;
+                let placement = self.insert(&mut key, value, origin, at)?;
                 let path = self.placed_path(&key.name, placement);
                 self.created(path);
                 self.after_value(quoted)

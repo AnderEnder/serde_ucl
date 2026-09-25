@@ -1646,3 +1646,126 @@
     the spec. `CLAUDE.md` names `tests/stack_depth.rs` and `tests/features/`; the
     clean-implementer agent embeds it.
   - The C7 grep naming `.` was rejected by the shell before it ran; not an exposure.
+- 2026-09-25 — Role: implementation team. Item: C8a (deserialization error positions, input
+  limit, default search directories, emitter readback test).
+  - Inputs consulted: `docs/clean-room/` (PROTOCOL, WORKLIST C8, QUESTIONS, the C7 entries of this
+    log); `docs/spec/` at HEAD, which `git diff --stat spec-v9 HEAD -- docs/spec/` shows equal to
+    `spec-v9`: README, §3.1, §7.2, §7.5, §9.4 (*Signatures, URLs and search paths*), §10.1–§10.8,
+    §11; the conformance suite (cases, golden files, `tests/conformance.rs`,
+    `tests/conformance/README.md`); `scripts/regen-golden.sh` (only its flag-to-option mapping,
+    to run the oracle) and `scripts/ci.sh`; the crate's own files; serde's API as the crate uses
+    it. `rg`/`grep` ran on `src/`, `tests/`, `examples/`, `benches/`, `docs/spec/`,
+    `docs/clean-room/`, `target/c8a/`, `scripts/`, and on single named files of the crate
+    (`README.md`, `CHANGELOG.md`, `Cargo.toml`, `CLAUDE.md` at HEAD). Git: `git log --oneline`,
+    `git tag`, `git show --stat cf800e8` (WORKLIST only), commit subjects of
+    `tests/conformance/README.md`, `git show cf800e8:src/de/value.rs` (HEAD at the start of the
+    session, after `ef8007e`) to bisect a slowdown, and `git archive` of `cf800e8` and `3da31c4`
+    (a commit of this session) into `target/c8a/` for A/B benchmarks; no file of those trees was
+    opened, and they were deleted afterwards. The tooling showed me the worktree's current
+    `CLAUDE.md` once; the main checkout's initial git status listed the names
+    `PLAN.md` and `REVIEW.md`, which I did not open. Background command output that the tooling
+    wrote under `/private/tmp` was not opened; every log I read is under `target/c8a/`.
+  - Black-box oracle runs: 14 runs of `target/libucl-oracle/ucl-dump -F` in
+    `target/c8a/scratch/rb/`: libucl's own golden output (config, JSON, YAML) of
+    `time_suffix_overflow_infinite`, `floats_boundaries` and `floats_exact_decimal_expansion`
+    (9 runs: `-inf` reads back as the string `"-inf"`; the 309-character `%f` output of −1e300
+    reads back as a string), of `time_subnormal_through_ms` and `min_normal` (config, JSON: 4
+    runs, rejected), and one input with the `%f` outputs of ±1e117 to ±1e120 (the `-` is not
+    counted: 127 characters without it read back as a string).
+  - Item 4, readback test: `libucl_conformance_readback` in `tests/conformance.rs`. For every
+    case the crate parses (1040), the output in each of the four formats is parsed again with
+    nothing registered (no variables, no handler, `no-filevars`, so by §7.5 nothing expands) and
+    compared with the value written by a comparator that allows only the §10.8 losses: times as
+    floats, bytes written `\uFFFD` as U+FFFD, float precision by the row of §10.3 (expected value
+    from Rust's `{:.1}`, `{:.14e}` and `{:.6}`, checked against the spec's tie examples), a `%f`
+    output of 127 or more characters as a string, the rejection of the smallest normal float's
+    `%.15g` output, JSON and YAML multi-value entries as arrays with the first-array loss of
+    §10.7, the empty key as `null`, values of different spellings under separate keys in config,
+    and no priorities, comments or marks. Keys written bare that cannot be read bare make an
+    output unreadable, and may read back as anything, only when each such key is in one of the
+    §10.8 categories (`;}#,`, a first byte that cannot start a key, the empty key, a key that a
+    macro or a collection makes bare); any other such key is a difference. A mutation check
+    (reading back with `key-lowercase`) makes 39–45 outputs per format fail. Result per format
+    [same value, unreadable, rejected float, pending]: config [1022, 11, 2, 5], JSON and compact
+    JSON [1033, 0, 2, 5], YAML [1024, 9, 2, 5]. The 5 pending cases (all four formats) are in
+    `READBACK_PENDING` with QUESTIONS.md #57 (−∞ is written `-inf`, which reads back as a string:
+    `time_infinite_in_json_form`, `time_suffix_overflow_infinite`, `floats_boundaries`) and #58
+    ((a) the 127-character rule does not count the `-`: `floats_exact_decimal_expansion`; (b) the
+    `%.15g` output of a subnormal time is rejected, which the bullet names only for the smallest
+    normal float: `time_subnormal_through_ms`). The oracle reads the golden files the same way,
+    so these are spec gaps, not crate bugs.
+  - Item 3, search directories: `Parser::set_search_path`, `clear_search_path`, `search_path`,
+    `ParserBuilder::with_search_path`. The list starts every parse as a `path` list would (§9.4),
+    also in macro argument documents (my choice: a parser setting, like the loader and base
+    directory, which argument documents keep; a document's own `path` list does not reach them,
+    as before). Directories are text, as in `path`. Tests mirror each in-document `path=` case.
+  - Item 2, input limit: `Parser::set_max_input_bytes`, `max_input_bytes`,
+    `ParserBuilder::with_max_input_bytes`, `ErrorKind::InputTooLarge { limit, path }`, and
+    `Loader::read_limited` (default: `read`; `FsLoader` and `MemoryLoader` stop after `limit + 1`
+    bytes). One budget per parse for the document and every file `.include`, `.try_include` and
+    `.load` read, repeats and glob matches counted, shared with macro argument documents; not
+    softened by `try=true` or `.try_include`. Default: no limit, as libucl, whose limits are
+    opt-in (§11.2); documented in the README, the crate docs and the setter.
+  - Item 1, error positions. API: `UclError::Deserialize(error::DeserializeError)` for every
+    deserialization error (`UclError::Serde` is left for serialization);
+    `DeserializeError::{error, into_error, path, at_key, position, file}`; `UclError::file`;
+    `UclError::position` covers it. Design, final: the value deserializer has two variants
+    (`ValueDeserializer<const PATHS: bool>`). Without paths it is the code of `cf800e8`. With
+    paths, each map and sequence access puts its step in front of an error as it returns (the
+    values of a multi-value entry become `Key { key, index }`, a single value read as a sequence
+    adds no step, an array read as a map uses `Index`), keys are lent to the target and kept for
+    the path, and an owned-string map key gets a copy. The text entry points (`from_str`,
+    `from_slice`, `from_reader`, `from_file`, `from_str_with_*`) deserialize without paths; only
+    when that fails do they parse the document again in a locating mode and deserialize the
+    target again with paths, and they use the second error, with its path and position, only if
+    its message equals the first's (a target that fails differently, or not at all, leaves the
+    first error without them). `UclDeserializer`, which cannot run its visitor twice,
+    deserializes with paths and then locates. `from_value` deserializes without paths and gives
+    neither path nor position. Locating mode: the output-facts tree records a location (input
+    unit, value offset, key offset) for every value in a side vector, and the operations that
+    keep facts with their values (replacement, `no-implicit-arrays` collection, the merge scalar
+    quirk, `.inherit` copies, included units) move the locations; the first value of a merged
+    container keeps its place; a value with no location of its own gets the nearest around it.
+    The second parse asks the loader for included files again and gives the variable handler's
+    answers from the first parse instead of calling it (the first parse records them). Costs
+    when nothing fails: no per-value memory (value model unchanged, `UclError` 96 bytes, facts
+    nodes unchanged), a copy of each variable-handler answer, and for `UclDeserializer` only,
+    the path-recording pass. Benchmarks, A/B against `cf800e8` built in its own target
+    directory, run back to back (criterion, 30 samples, medians): every `parse/*` group within
+    −3.9% to +0.6%; `serde/deserialize-1000/from_str` 5886 → 5811 µs, `from_value` 768 → 752 µs;
+    `UclDeserializer` 6008 µs in the same run (+3.4% over `from_str`); serialization groups
+    within noise (−2.8% to −0.6%, and −13.9% for `nested-mixed-1000/to_string`, whose code is
+    unchanged). Error path (new group `serde/deserialize-error-1000`, the last service's `ratio`
+    wrong): `from_str` 14.56 ms, about 2.5 times its success path; `from_value` 964 µs.
+  - Benchmark history, for the record: the first design recorded paths in every run (`fee6801`).
+    Against a baseline saved at the start of the session it showed `from_value` +15.8% and
+    `from_str` +2.5%. I then wrongly concluded that this was machine drift: my A/B runs of the
+    archived `cf800e8` shared the worktree's target directory, and `git archive` gives files the
+    commit time as mtime, so cargo reused the worktree's bench binary ("Finished in 0.04s") and
+    both sides were the new code. With a separate target directory the regression was real
+    (`from_value` 763 → 884 µs). Bisecting (`git show cf800e8:src/de/value.rs` in the current
+    tree: 748 µs) put the whole cost in the deserializer's path recording, spread over key
+    copies, per-entry error checks and per-entry state, and no variant recorded paths for less
+    than 10–20% of `from_value`'s time; hence the final design, in `bb7cca2`.
+  - Tests: `tests/error_positions.rs` (scalars in every form, nesting, elements,
+    missing fields at the object or section name, the document, multi-value entries, sequences of
+    one, arrays and values as maps, unknown fields and bad map keys at the key, enums, priorities,
+    merged objects and arrays, the merge quirk, collections, `key-lowercase` renames, included
+    files at depth, `duplicate="merge"` and `key=` includes, `.inherit` copies from the document
+    and from an included file, `TooDeep`, `from_value` without path, `UclDeserializer` with path
+    and position, a target that fails differently the second time, a stateful handler asked
+    once, every text entry point, `from_file` with an include; 15 tests); unit tests for
+    locations in the facts tree, the limit, the loaders' limited reads and search directories.
+    `tests/api_tests.rs` and `tests/stack_depth.rs` updated for the new variant; three examples
+    and the README assert positions.
+  - Results: `cargo test` 350 tests in 17 binaries; conformance unchanged: new core 1393 of 1397,
+    emitters 1040 of 1044, `xfail-new.txt` and `xfail-emit.txt` unchanged; the readback test as
+    above. `scripts/ci.sh` passes with Rust 1.98.1 and with 1.88.0 at `3c0393f`.
+  - For the lead: `CLAUDE.md` says the conformance target runs two tests; it now runs three
+    (`tests/conformance/README.md` is updated). I did not edit `CLAUDE.md`. `CHANGELOG.md`: the
+    additions and the changed error variant are in the unpublished 0.2.0 section.
+  - Questions: #57, #58.
+  - Commits: `0e98c29`, `e4f790e`, `3da31c4`, `fee6801`, `9dd9b66`, `bb7cca2`, `d36d5a6`,
+    `f80a3a5`, `3c0393f`, and the `C8a:` commit that adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

@@ -59,6 +59,27 @@
 //! To read files for text input, or to change any other setting, build a [`Parser`] (see
 //! [`crate::parse::ParserBuilder`]) and deserialize with [`UclDeserializer::from_parser`], or
 //! parse to a [`UclValue`](crate::UclValue) and use [`from_value`].
+//!
+//! # Errors
+//!
+//! A value that does not fit its target is [`UclError::Deserialize`]. The text entry points
+//! ([`from_str`], [`from_slice`], [`from_reader`], [`from_file`], the `from_str_with_*`
+//! functions) give its [`DeserializeError`](crate::error::DeserializeError) the path of the value
+//! from the root and where the value was written, with its file when it came from an included
+//! one. They record nothing while deserialization succeeds. When it fails, they parse the
+//! document again with the same parser, recording where each value was written and following
+//! values as the duplicate rules move, merge and replace them and `.inherit` copies them, and
+//! deserialize the target again from that result, recording the path of an error. They use that
+//! second error when it is the same error as the first; a target that fails differently the
+//! second time, or not at all, leaves the first error without a path or position. So on failure
+//! the target's `Deserialize` runs twice, and the second parse asks the loader for the included
+//! files again (a file that changed in between can move the position, or lose it); it does not
+//! call the variable handler, but gives its answers from the first parse again.
+//!
+//! [`UclDeserializer`] cannot run its visitor a second time, so it records paths while it
+//! deserializes, which costs time also when nothing fails; when it fails, it parses the document
+//! again to find the position. [`from_value`] consumes its value and records nothing: its errors
+//! have neither a path nor a position.
 
 mod value;
 
@@ -91,7 +112,7 @@ pub(crate) fn enter(depth: usize) -> Result<usize, UclError> {
 }
 
 use crate::error::UclError;
-use crate::parse::{Parser, ParserBuilder};
+use crate::parse::{Parser, ParserBuilder, Source};
 use serde::de::{self, Deserialize, DeserializeOwned, Visitor};
 use std::collections::HashMap;
 use std::io;
@@ -146,23 +167,96 @@ impl<'a> UclDeserializer<'a> {
     pub fn parser_mut(&mut self) -> &mut Parser {
         &mut self.parser
     }
+}
 
-    /// Parses the document.
-    fn into_value(mut self) -> Result<ValueDeserializer, UclError> {
-        let value = self.parser.parse(self.input)?;
-        Ok(ValueDeserializer::new(value))
+/// `error`, from deserializing with paths the result of the last parse of `parser`, whose input
+/// was `source`: a [`UclError::Deserialize`] gets the position of the value it is about, from
+/// [`Parser::parse_located`].
+#[cold]
+#[inline(never)]
+fn locate(parser: &mut Parser, source: &Source<'_>, error: UclError) -> UclError {
+    let mut error = error.in_document();
+    if let UclError::Deserialize(e) = &mut error
+        && let Some((_, facts)) = parser.parse_located(source)
+    {
+        let (path, key) = e.locate_request();
+        if let Some((position, file)) = facts.position_of(path, key, source.input()) {
+            e.set_position(position, file);
+        }
+    }
+    error
+}
+
+/// Parses `input` with `parser` and deserializes a `T` from the result, as the text entry
+/// points do ([`deserialize_parsed`]).
+fn deserialize_bytes<'de, T: Deserialize<'de>>(
+    mut parser: Parser,
+    input: &[u8],
+) -> Result<T, UclError> {
+    let value = parser.parse(input)?;
+    deserialize_parsed(&mut parser, &Source::Bytes(input), value)
+}
+
+/// Deserializes a `T` from `value`, the result of the last parse of `parser`, whose input was
+/// `source`. Nothing is recorded for an error while this succeeds; when it fails, see
+/// [`explain`].
+fn deserialize_parsed<'de, T: Deserialize<'de>>(
+    parser: &mut Parser,
+    source: &Source<'_>,
+    value: crate::value::UclValue,
+) -> Result<T, UclError> {
+    T::deserialize(ValueDeserializer::<false>::new(value))
+        .map_err(|e| explain::<T>(parser, source, e))
+}
+
+/// `error`, from [`deserialize_parsed`], with the path and position of its value: the document
+/// is parsed again, recording where values were written (`Parser::parse_located`), and a `T` is
+/// deserialized again from that result, recording paths. The second run's error is used when it
+/// is the same error; otherwise `error` is returned without a path.
+#[cold]
+#[inline(never)]
+fn explain<'de, T: Deserialize<'de>>(
+    parser: &mut Parser,
+    source: &Source<'_>,
+    error: UclError,
+) -> UclError {
+    let error = error.in_document();
+    let UclError::Deserialize(first) = &error else {
+        return error;
+    };
+    let message = first.error().to_string();
+    let Some((value, facts)) = parser.parse_located(source) else {
+        return error;
+    };
+    match T::deserialize(ValueDeserializer::<true>::new(value)).map(drop) {
+        Err(again) => match again.in_document() {
+            UclError::Deserialize(mut e) if e.error().to_string() == message => {
+                let (path, key) = e.locate_request();
+                if let Some((position, file)) = facts.position_of(path, key, source.input()) {
+                    e.set_position(position, file);
+                }
+                UclError::Deserialize(e)
+            }
+            _ => error,
+        },
+        Ok(()) => error,
     }
 }
 
-/// Forwards each `Deserializer` method of `UclDeserializer` to the value deserializer.
+/// Forwards each `Deserializer` method of `UclDeserializer` to the value deserializer, after
+/// parsing the document. The visitor cannot be run twice, so this deserializer records paths as
+/// it goes; an error of deserialization gets the position of its value.
 macro_rules! forward_to_value {
     ($($method:ident($($arg:ident: $ty:ty),*))*) => {
         $(
-            fn $method<V>(self, $($arg: $ty,)* visitor: V) -> Result<V::Value, UclError>
+            fn $method<V>(mut self, $($arg: $ty,)* visitor: V) -> Result<V::Value, UclError>
             where
                 V: Visitor<'de>,
             {
-                self.into_value()?.$method($($arg,)* visitor)
+                let value = self.parser.parse(self.input)?;
+                ValueDeserializer::<true>::new(value)
+                    .$method($($arg,)* visitor)
+                    .map_err(|e| locate(&mut self.parser, &Source::Bytes(self.input), e))
             }
         )*
     };
@@ -235,7 +329,7 @@ pub fn from_slice<'a, T>(v: &'a [u8]) -> Result<T, UclError>
 where
     T: Deserialize<'a>,
 {
-    T::deserialize(UclDeserializer::from_slice(v))
+    deserialize_bytes(Parser::new(), v)
 }
 
 /// Deserializes a `T` from the UCL document `reader` holds, read to its end and parsed with a
@@ -268,7 +362,12 @@ where
     let (canonical, input) = parser
         .read_file(path.as_ref())
         .map_err(|(path, e)| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
-    from_value(parser.parse_read_file(canonical, &input)?)
+    let value = parser.parse_read_file(canonical.clone(), &input)?;
+    let source = Source::File {
+        canonical,
+        input: &input,
+    };
+    deserialize_parsed(&mut parser, &source, value)
 }
 
 /// Deserializes a `T` from UCL text, parsed with a default [`Parser`] on which `variables` are
@@ -295,7 +394,7 @@ where
     V: Into<String>,
 {
     let parser = ParserBuilder::new().with_variables(variables).build();
-    T::deserialize(UclDeserializer::from_parser(parser, s.as_bytes()))
+    deserialize_bytes(parser, s.as_bytes())
 }
 
 /// [`from_str_with_variables`] with the variables of a map. A `HashMap` has no order, so they
@@ -329,7 +428,7 @@ where
     let parser = ParserBuilder::new()
         .with_variable_handler(environment_variable)
         .build();
-    T::deserialize(UclDeserializer::from_parser(parser, s.as_bytes()))
+    deserialize_bytes(parser, s.as_bytes())
 }
 
 /// The value of the environment variable `name`, if it is set, valid Unicode, and `name` can be
@@ -350,7 +449,7 @@ mod tests {
     use std::collections::HashMap;
 
     /// The value deserializer over a prepared value (no parsing).
-    fn with_value(value: UclValue) -> ValueDeserializer {
+    fn with_value(value: UclValue) -> ValueDeserializer<true> {
         ValueDeserializer::new(value)
     }
 

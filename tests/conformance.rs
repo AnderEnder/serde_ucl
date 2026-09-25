@@ -32,10 +32,17 @@
 //! upstream cases the config output of the two passes of spec §10.9 with the `.res` file. Its
 //! known failures are in `tests/conformance/xfail-emit.txt`, one entry per case.
 //!
+//! A third test (`libucl_conformance_readback`) reads the new core's output back: for every case
+//! that parses, the output in each of the four formats must parse again to the same value, apart
+//! from the losses spec §10.8 lists. Differences that §10.8 does not list are held in
+//! `READBACK_PENDING`, each with the question in `docs/clean-room/QUESTIONS.md` that asks about it.
+//!
 //! Set `UCL_CONFORMANCE_REPORT=1` (with `-- --nocapture`) to print every failing case with the
-//! first point where the two dumps, or the two outputs, differ, and a suggested xfail reason.
+//! first point where the two dumps, or the two outputs, differ, and a suggested xfail reason; the
+//! readback test also prints every difference and every output it lets through as unreadable.
 
 use serde_json::{Value as J, json};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::panic::{self, AssertUnwindSafe};
@@ -841,6 +848,570 @@ fn libucl_conformance_emitters() {
     assert!(
         problems.is_empty(),
         "conformance problems (emitters):\n{}",
+        problems.join("\n")
+    );
+}
+
+// ----- reading output back (spec §10.8) -----------------------------------------------------
+
+/// Differences found by `libucl_conformance_readback` that §10.8 does not list, each with the
+/// question that asks about it: `(case, formats, reason)`. libucl reads its own golden output
+/// files the same way (checked with the oracle). Like the xfail files, the list may only shrink:
+/// an entry whose difference is gone fails the test.
+const READBACK_PENDING: &[(&str, &[&str], &str)] = &[
+    (
+        "cases/spec/05-numbers/time_infinite_in_json_form",
+        &ALL_FORMATS,
+        "QUESTIONS.md #57: -inf reads back as a string",
+    ),
+    (
+        "cases/spec/05-numbers/time_suffix_overflow_infinite",
+        &ALL_FORMATS,
+        "QUESTIONS.md #57: -inf reads back as a string",
+    ),
+    (
+        "cases/spec/10-output/floats_boundaries",
+        &ALL_FORMATS,
+        "QUESTIONS.md #57: -inf reads back as a string",
+    ),
+    (
+        "cases/spec/10-output/floats_exact_decimal_expansion",
+        &ALL_FORMATS,
+        "QUESTIONS.md #58 (a): a long negative %f output reads back as a string",
+    ),
+    (
+        "cases/spec/05-numbers/time_subnormal_through_ms",
+        &ALL_FORMATS,
+        "QUESTIONS.md #58 (b): the %.15g output of a subnormal time is rejected",
+    ),
+];
+
+/// The labels of the four formats of spec §10.
+const ALL_FORMATS: [&str; 4] = ["config", "json", "json-compact", "yaml"];
+
+/// What reading a format's output back must give for one value, apart from the losses of §10.8.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Written {
+    Config,
+    /// JSON and compact JSON, which differ only in whitespace.
+    Json,
+    Yaml,
+}
+
+impl Written {
+    fn of(format: Format) -> Written {
+        match format {
+            Format::Config => Written::Config,
+            Format::Yaml => Written::Yaml,
+            _ => Written::Json,
+        }
+    }
+}
+
+/// How a float or a time reads back from its output (spec §10.3, §10.8).
+enum FloatBack {
+    /// A float with these bits, or NaN.
+    Float(f64),
+    /// A `%f` output of 127 or more characters without a leading `-` reads back as that string
+    /// (§10.8, `cases/spec/05-numbers/float_max`).
+    Text(String),
+    /// A `%.15g` output below the normal range, which reading rejects. §10.8 lists this for the
+    /// smallest normal float (`readback_fifteen_digit_min_normal_error`) and no other value.
+    BelowNormal,
+}
+
+/// The float that the output of `v` reads back as. Rust's `{:.6}` and `{:.14e}` round the exact
+/// decimal value of the double, ties to even, as the C conversions of §10.3 do.
+fn float_back(v: f64) -> FloatBack {
+    if !v.is_finite() {
+        return FloatBack::Float(v);
+    }
+    let t = v.trunc();
+    let int_range = -2_147_483_648.0..=2_147_483_647.0;
+    if v == t && int_range.contains(&v) {
+        // `%.1f`: exact.
+        FloatBack::Float(v)
+    } else if int_range.contains(&t) && (v - t).abs() < 1e-7 {
+        // `%.15g`: 15 significant digits.
+        let x: f64 = format!("{v:.14e}").parse().expect("a float");
+        if x.abs() < f64::MIN_POSITIVE {
+            FloatBack::BelowNormal
+        } else {
+            FloatBack::Float(x)
+        }
+    } else {
+        // `%f`: 6 decimals.
+        let text = format!("{v:.6}");
+        if !text.starts_with('-') && text.len() >= 127 {
+            FloatBack::Text(text)
+        } else {
+            FloatBack::Float(text.parse().expect("a float"))
+        }
+    }
+}
+
+/// `s` with each byte that the JSON form writes as `�` replaced by U+FFFD (spec §10.2,
+/// §10.8): 0x00–0x1F other than LF, CR, TAB, BS, FF and VT, and DEL.
+fn replacement_form(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' | '\u{b}' => c,
+            '\0'..='\u{1f}' | '\u{7f}' => '\u{FFFD}',
+            c => c,
+        })
+        .collect()
+}
+
+/// A byte that may start a bare key (spec §3.1).
+fn bare_key_start(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'/' || b == b'_' || b >= 0x80
+}
+
+/// A key that reads back as itself when written bare (spec §3.1).
+fn reads_bare(key: &str) -> bool {
+    let mut bytes = key.bytes();
+    bytes.next().is_some_and(bare_key_start)
+        && bytes.all(|b| bare_key_start(b) || b == b'-' || b == b'.')
+}
+
+/// The keys of an output that make it unreadable, each with the §10.8 bullet that lists it or,
+/// if none does, `None`.
+type UnreadableKeys = Vec<(String, Option<&'static str>)>;
+
+/// A value expected where the output is read back, and its path in the value written.
+type Expected<'v> = (Cow<'v, UclValue>, Vec<PathSegment>);
+
+/// The outcome of each format's readback for one case, or why there is none.
+type CaseReadback = Result<Vec<(&'static str, ReadbackOutcome)>, String>;
+
+/// Compares a parsed value with what its output in one format read back as, allowing only the
+/// losses §10.8 lists.
+struct Readback<'a> {
+    written: Written,
+    facts: &'a ucl_lexer::parse::OutputFacts,
+    /// Differences that §10.8 does not list.
+    diffs: Vec<String>,
+    /// Keys written bare that cannot be read bare (§10.8), found while walking the value.
+    unreadable: UnreadableKeys,
+    /// The value holds the smallest normal float, whose `%.15g` output reading rejects (§10.8).
+    below_normal: bool,
+}
+
+impl<'a> Readback<'a> {
+    fn new(written: Written, facts: &'a ucl_lexer::parse::OutputFacts) -> Self {
+        Self {
+            written,
+            facts,
+            diffs: Vec::new(),
+            unreadable: Vec::new(),
+            below_normal: false,
+        }
+    }
+
+    /// The key of the value at `path` as the output writes it: its spelling (§10.1), and
+    /// whether it is quoted.
+    fn written_key(&self, key: &str, path: &[PathSegment]) -> (String, bool) {
+        let facts = self.facts.get(path);
+        let spelling = facts
+            .and_then(|f| f.key_spelling.clone())
+            .unwrap_or_else(|| key.to_string());
+        let quoted = facts
+            .and_then(|f| f.key_quoted)
+            .unwrap_or_else(|| ucl_lexer::emit::key_needs_quoting(&spelling));
+        (spelling, quoted)
+    }
+
+    /// Records the key of the value at `path` if the output writes it bare but it cannot be read
+    /// bare, with the §10.8 bullet that lists it.
+    fn check_key(&mut self, spelling: &str, quoted: bool, path: &[PathSegment]) {
+        if quoted || reads_bare(spelling) || self.written == Written::Json {
+            return;
+        }
+        let listed = if spelling.is_empty() {
+            if self.written == Written::Yaml {
+                // Written `null`, which reads back as the key "null" (§10.1, §10.8).
+                return;
+            }
+            Some("the empty key")
+        } else if spelling.contains([';', '}', '#', ',']) {
+            Some("a quirk key of §10.1, with `;`, `}`, `#` or `,`")
+        } else if !bare_key_start(spelling.as_bytes()[0]) {
+            Some("a key that does not begin with a byte a bare key may begin with")
+        } else if self.facts.get(path).and_then(|f| f.key_quoted) == Some(false) {
+            // Only macros and `no-implicit-arrays` collections make a key bare that fact 3
+            // would quote (spec §10.1).
+            Some(
+                "a key created by `.include` with `key` or `prefix`, or of an array built from repeated keys",
+            )
+        } else {
+            None
+        };
+        self.unreadable.push((spelling.to_string(), listed));
+    }
+
+    /// Finds, in the value at `path`, the keys that make the output unreadable and the floats
+    /// that reading rejects.
+    fn scan(&mut self, value: &UclValue, path: &mut Vec<PathSegment>) {
+        match value {
+            UclValue::Object(object) => {
+                for (key, entry) in object {
+                    for (index, value) in entry.values().enumerate() {
+                        path.push(PathSegment::Key {
+                            key: key.clone(),
+                            index,
+                        });
+                        if index == 0 || self.written == Written::Config {
+                            let (spelling, quoted) = self.written_key(key, path);
+                            self.check_key(&spelling, quoted, path);
+                        }
+                        self.scan(value, path);
+                        path.pop();
+                    }
+                }
+            }
+            UclValue::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    path.push(PathSegment::Index(index));
+                    self.scan(item, path);
+                    path.pop();
+                }
+            }
+            UclValue::Float(v) | UclValue::Time(v)
+                if matches!(float_back(*v), FloatBack::BelowNormal) && *v == f64::MIN_POSITIVE =>
+            {
+                self.below_normal = true;
+            }
+            _ => {}
+        }
+    }
+
+    /// The key that a key written as `spelling` reads back as.
+    fn key_back(&self, spelling: &str) -> String {
+        if spelling.is_empty() && self.written != Written::Config {
+            "null".to_string()
+        } else {
+            replacement_form(spelling)
+        }
+    }
+
+    fn diff(&mut self, path: &[PathSegment], what: String) {
+        self.diffs.push(format!("at {}: {what}", path_text(path)));
+    }
+
+    fn compare(&mut self, original: &UclValue, back: &UclValue, path: &mut Vec<PathSegment>) {
+        match (original, back) {
+            (UclValue::Object(o), UclValue::Object(b)) => self.compare_objects(o, b, path),
+            (UclValue::Array(o), UclValue::Array(b)) => self.compare_arrays(o, b, path),
+            (UclValue::Integer(o), UclValue::Integer(b)) if o == b => {}
+            (UclValue::Boolean(o), UclValue::Boolean(b)) if o == b => {}
+            (UclValue::Null, UclValue::Null) => {}
+            (UclValue::String(o), UclValue::String(b)) if o == b || replacement_form(o) == *b => {}
+            (UclValue::Float(v) | UclValue::Time(v), _) => match (float_back(*v), back) {
+                (FloatBack::Float(x), UclValue::Float(y))
+                    if (x.is_nan() && y.is_nan()) || x.to_bits() == y.to_bits() => {}
+                (FloatBack::Text(t), UclValue::String(s)) if t == *s => {}
+                _ => self.diff(path, format!("{original:?} read back as {back:?}")),
+            },
+            _ => self.diff(path, format!("{original:?} read back as {back:?}")),
+        }
+    }
+
+    fn compare_arrays(&mut self, o: &[UclValue], b: &[UclValue], path: &mut Vec<PathSegment>) {
+        if o.len() != b.len() {
+            self.diff(
+                path,
+                format!("{} elements read back as {}", o.len(), b.len()),
+            );
+        }
+        for (index, (o, b)) in o.iter().zip(b).enumerate() {
+            path.push(PathSegment::Index(index));
+            self.compare(o, b, path);
+            path.pop();
+        }
+    }
+
+    fn compare_objects(
+        &mut self,
+        o: &ucl_lexer::UclObject,
+        b: &ucl_lexer::UclObject,
+        path: &[PathSegment],
+    ) {
+        // The keys values are read back under, in order, each with the values expected there
+        // and their paths.
+        let mut expected: Vec<(String, Vec<Expected<'_>>)> = Vec::new();
+        for (key, entry) in o {
+            let at = |index: usize| {
+                let mut at = path.to_vec();
+                at.push(PathSegment::Key {
+                    key: key.clone(),
+                    index,
+                });
+                at
+            };
+            let mut wanted = Vec::new();
+            match self.written {
+                // One line per value, each with its own key: values written with different
+                // spellings read back under separate keys (§10.1, §10.8).
+                Written::Config => {
+                    for (index, value) in entry.values().enumerate() {
+                        let (spelling, _) = self.written_key(key, &at(index));
+                        wanted.push((self.key_back(&spelling), Cow::Borrowed(value), at(index)));
+                    }
+                }
+                // The entry once, with the key of its first value (§10.1). Several values are an
+                // explicit array, of which only a first value that is an array remains (§10.7).
+                Written::Json | Written::Yaml => {
+                    let (spelling, _) = self.written_key(key, &at(0));
+                    let value = if entry.len() == 1 || entry.first().is_array() {
+                        Cow::Borrowed(entry.first())
+                    } else {
+                        Cow::Owned(UclValue::Array(entry.values().cloned().collect()))
+                    };
+                    wanted.push((self.key_back(&spelling), value, at(0)));
+                }
+            }
+            for (key_back, value, at) in wanted {
+                match expected.iter_mut().find(|(k, _)| *k == key_back) {
+                    Some((_, values)) => values.push((value, at)),
+                    None => expected.push((key_back, vec![(value, at)])),
+                }
+            }
+        }
+        for (key, values) in &expected {
+            let Some(entry) = b.entry(key) else {
+                self.diff(path, format!("key {key:?} is missing"));
+                continue;
+            };
+            if entry.len() != values.len() {
+                self.diff(
+                    path,
+                    format!(
+                        "key {key:?}: {} values read back as {}",
+                        values.len(),
+                        entry.len()
+                    ),
+                );
+            }
+            for ((value, at), back) in values.iter().zip(entry.values()) {
+                self.compare(value, back, &mut at.clone());
+            }
+        }
+        for key in b.keys() {
+            if !expected.iter().any(|(k, _)| k == key) {
+                self.diff(path, format!("key {key:?} was not written"));
+            }
+        }
+    }
+}
+
+/// A value path for messages: keys in the JSON form joined by `.`, `#n` for value `n` of a
+/// multi-value entry, `[n]` for array elements.
+fn path_text(path: &[PathSegment]) -> String {
+    if path.is_empty() {
+        return "the root".to_string();
+    }
+    let mut text = String::new();
+    for segment in path {
+        match segment {
+            PathSegment::Key { key, index } => {
+                if !text.is_empty() {
+                    text.push('.');
+                }
+                text.push_str(&format!("{key:?}"));
+                if *index > 0 {
+                    text.push_str(&format!("#{index}"));
+                }
+            }
+            PathSegment::Index(index) => text.push_str(&format!("[{index}]")),
+        }
+    }
+    text
+}
+
+/// How the output of one case in one format read back.
+enum ReadbackOutcome {
+    /// The same value, apart from the losses §10.8 lists for values.
+    Same,
+    /// Unreadable, because of keys that §10.8 lists as making the output unreadable.
+    UnreadableKeys(Vec<String>),
+    /// Rejected, because of the smallest normal float, whose `%.15g` output lies below the normal
+    /// range (§10.8).
+    BelowNormal,
+    /// Differences that §10.8 does not list.
+    Differs(Vec<String>),
+}
+
+/// Emits a case's value in `format` and reads the output back with a parser that expands
+/// nothing: no registered variables, no handler, and `no-filevars` (spec §7.5: without a
+/// replacement, `$$` stays as written).
+fn read_back(parser: &CoreParser, value: &UclValue, format: Format) -> ReadbackOutcome {
+    let text = parser.emitter(format).emit(value);
+    let back = CoreParser::with_flags(ParserFlags::NO_FILEVARS).parse(text.as_bytes());
+    let mut readback = Readback::new(Written::of(format), parser.output_facts());
+    readback.scan(value, &mut Vec::new());
+    let unlisted: Vec<String> = readback
+        .unreadable
+        .iter()
+        .filter(|(_, listed)| listed.is_none())
+        .map(|(key, _)| format!("key {key:?} is written bare and cannot be read bare"))
+        .collect();
+    let listed: Vec<String> = readback
+        .unreadable
+        .iter()
+        .filter_map(|(key, listed)| listed.map(|why| format!("{key:?}: {why}")))
+        .collect();
+    if !unlisted.is_empty() {
+        return ReadbackOutcome::Differs(unlisted);
+    }
+    match back {
+        // Keys listed in §10.8 make the output unreadable: whatever reading gives is allowed.
+        Err(_) if !listed.is_empty() => ReadbackOutcome::UnreadableKeys(listed),
+        Err(_) if readback.below_normal => ReadbackOutcome::BelowNormal,
+        Err(e) => ReadbackOutcome::Differs(vec![format!("reading the output fails: {e}")]),
+        Ok(back) => {
+            readback.compare(value, &back, &mut Vec::new());
+            if readback.diffs.is_empty() {
+                ReadbackOutcome::Same
+            } else if !listed.is_empty() {
+                ReadbackOutcome::UnreadableKeys(listed)
+            } else {
+                ReadbackOutcome::Differs(readback.diffs)
+            }
+        }
+    }
+}
+
+/// For every case that parses, the output in each format of spec §10 reads back as the same
+/// value, apart from the losses §10.8 lists: times become floats, bytes written `\uFFFD` become
+/// U+FFFD, floats keep the precision of their conversion (§10.3) and a `%f` output of 127 or more
+/// characters becomes a string, the `%.15g` output of the smallest normal float is rejected, keys written
+/// bare that cannot be read bare make the output unreadable, values of a multi-value entry
+/// written with different spellings read back under separate keys in the config format, JSON
+/// and YAML write a multi-value entry as an explicit array (only a first value that is an array,
+/// §10.7) and the empty key as `null`, and priorities, saved comments and marks are not written.
+/// The output is read with nothing registered, so no string expands. Other differences are in
+/// `READBACK_PENDING` with the question that asks about them.
+#[test]
+fn libucl_conformance_readback() {
+    let cases = discover();
+    let report = std::env::var_os("UCL_CONFORMANCE_REPORT").is_some();
+    let outcomes: Vec<(&Case, CaseReadback)> = {
+        let _guard = PANIC_HOOK.lock().unwrap_or_else(|e| e.into_inner());
+        let hook = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        let outcomes = cases
+            .iter()
+            .filter_map(|case| {
+                let setup = setup(case);
+                let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    let (parser, result) = run_new_core(case, &setup);
+                    let value = result.ok()?;
+                    Some(
+                        OUTPUT_FORMATS
+                            .iter()
+                            .map(|(label, format)| (*label, read_back(&parser, &value, *format)))
+                            .collect(),
+                    )
+                }));
+                match result {
+                    Ok(None) => None,
+                    Ok(Some(outcomes)) => Some((case, Ok(outcomes))),
+                    Err(_) => Some((case, Err("panic".to_string()))),
+                }
+            })
+            .collect();
+        panic::set_hook(hook);
+        outcomes
+    };
+
+    assert_eq!(ALL_FORMATS, OUTPUT_FORMATS.map(|(label, _)| label));
+    let known: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
+    let mut pending: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+    let mut problems = Vec::new();
+    for (id, labels, reason) in READBACK_PENDING {
+        if !known.contains(id) {
+            problems.push(format!("READBACK_PENDING lists unknown case '{id}'"));
+        }
+        for label in *labels {
+            if pending.insert((id, label), reason).is_some() {
+                problems.push(format!("READBACK_PENDING lists '{id}' {label} twice"));
+            }
+        }
+    }
+    let mut counts: BTreeMap<&str, [usize; 4]> = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    for (case, outcome) in &outcomes {
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                problems.push(format!("{}: {e}", case.id));
+                continue;
+            }
+        };
+        for (label, outcome) in outcome {
+            let count = counts.entry(label).or_default();
+            let diffs = match outcome {
+                ReadbackOutcome::Same => {
+                    count[0] += 1;
+                    continue;
+                }
+                ReadbackOutcome::UnreadableKeys(keys) => {
+                    count[1] += 1;
+                    if report {
+                        println!(
+                            "UNREADABLE(readback) {} {label}: {}",
+                            case.id,
+                            keys.join("; ")
+                        );
+                    }
+                    continue;
+                }
+                ReadbackOutcome::BelowNormal => {
+                    count[2] += 1;
+                    if report {
+                        println!("REJECTED(readback) {} {label}", case.id);
+                    }
+                    continue;
+                }
+                ReadbackOutcome::Differs(diffs) => {
+                    count[3] += 1;
+                    diffs
+                }
+            };
+            if report {
+                println!(
+                    "FAIL(readback) {} {label}\n    {}",
+                    case.id,
+                    diffs.join("\n    ")
+                );
+            }
+            let key = (case.id.as_str(), *label);
+            seen.insert(key);
+            if !pending.contains_key(&key) {
+                problems.push(format!(
+                    "{} {label}: the output reads back differently, in a way §10.8 does not list\n    {}",
+                    case.id,
+                    diffs.join("\n    ")
+                ));
+            }
+        }
+    }
+    for key in pending.keys() {
+        if !seen.contains(key) {
+            problems.push(format!(
+                "{} {} now reads back as §10.8 says: remove it from READBACK_PENDING",
+                key.0, key.1
+            ));
+        }
+    }
+    println!(
+        "conformance (readback): {} cases parse; per format [same value, unreadable keys (§10.8), \
+         rejected float (§10.8), other differences]: {counts:?}",
+        outcomes.len()
+    );
+    assert!(
+        problems.is_empty(),
+        "conformance problems (readback):\n{}",
         problems.join("\n")
     );
 }

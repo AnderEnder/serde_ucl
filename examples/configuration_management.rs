@@ -358,7 +358,8 @@ fn validation() {
     ] {
         let err = from_str::<Server>(text).unwrap_err();
         println!("  {what}: {err}");
-        assert!(matches!(err, UclError::Serde(_)), "{what}");
+        assert!(matches!(err, UclError::Deserialize(_)), "{what}");
+        assert!(err.position().is_some(), "{what}");
     }
 
     // A document that fits the struct but breaks a rule across fields.

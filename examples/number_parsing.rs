@@ -200,6 +200,9 @@ fn serde_targets() -> Result<(), UclError> {
     }
     let err = from_str::<Retries>("retries = 2.5").unwrap_err();
     println!("retries = 2.5 -> {err}");
-    assert!(matches!(err, UclError::Serde(_)));
+    assert!(matches!(err, UclError::Deserialize(_)));
+    // The error names the value and where it was written.
+    let position = err.position().expect("a position");
+    assert_eq!((position.line, position.column), (1, 11));
     Ok(())
 }

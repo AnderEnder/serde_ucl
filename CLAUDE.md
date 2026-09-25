@@ -146,10 +146,12 @@ cargo doc --open
 
 ## Testing
 
-- Conformance: `cargo test --test conformance` runs two tests. `libucl_conformance_new_core`
+- Conformance: `cargo test --test conformance` runs three tests. `libucl_conformance_new_core`
   compares the parse of every case in `tests/conformance/` with its `<case>.golden.json`;
   `libucl_conformance_emitters` compares the output of every parsed case in each format, byte for
-  byte, with libucl's. Known failures are listed in `tests/conformance/xfail-new.txt` and
+  byte, with libucl's; `libucl_conformance_readback` parses each output again and compares the
+  value, allowing only the losses spec §10.8 lists (others are in `READBACK_PENDING`, each with
+  its question). Known failures are listed in `tests/conformance/xfail-new.txt` and
   `xfail-emit.txt` with a reason; they hold only justified divergences, may only shrink, and a
   listed case that passes fails the run. `tests/conformance/README.md` describes the layout.
 - Golden files come only from libucl, through `scripts/regen-golden.sh` (git, CMake and a C

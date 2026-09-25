@@ -90,6 +90,20 @@ Changed:
   `file()`. `UclError::Stopped` is new (see above). Error messages have new wording.
 - A `Position` has a 1-based line and column, the column counted in characters, and a 0-based
   byte offset. Only a line feed starts a new line; a carriage return is counted as a character.
+- A document that parses but does not fit the target type is the new
+  `UclError::Deserialize(error::DeserializeError)`, not `UclError::Serde`, which is left for
+  serialization. The error has serde's error (`DeserializeError::error`), the path of the value
+  it is about (`path`, as `parse::PathSegment`s; `at_key` for an error about a key, such as an
+  unknown field) and, from `from_str`, `from_slice`, `from_reader`, `from_file`, the
+  `from_str_with_*` functions and `UclDeserializer`, where the value was written (`position`, and
+  `file` for a value from an included file), also for values merged by the duplicate rules or
+  copied by `.inherit`. `UclError::position` returns it. `from_value` gives neither a path nor a
+  position. `SerdeError::TooDeep` of deserialization comes inside `UclError::Deserialize`. The
+  text functions record nothing while deserialization succeeds: when it fails, they parse the
+  document again, recording where values were written, and deserialize the target a second time,
+  recording the path; the second parse asks the loader for included files again but gives the
+  variable handler's answers from the first parse instead of asking it. `UclDeserializer`, which
+  cannot run its visitor twice, records paths as it deserializes.
 
 Added:
 
@@ -123,7 +137,18 @@ Added:
 - In the value model: `Placement` (also at the crate root), `UclObject::insert_slot_placed`,
   `UclObject::get_index`, `UclObject::get_index_mut`, `UclObject::index_of`,
   `UclObject::rename_key` and `Entry::value_at_mut`.
-- `UclError::parse_error` and `UclError::position`.
+- `UclError::parse_error`, `UclError::position` and `UclError::file`.
+- Search directories for the include macros: `ParserBuilder::with_search_path`,
+  `Parser::set_search_path`, `Parser::clear_search_path` and `Parser::search_path`. The list is
+  in effect from the start of every parse, as a `path` list given to an earlier include would be
+  (spec §9.4), and in macro argument documents too.
+- An input limit: `ParserBuilder::with_max_input_bytes`, `Parser::set_max_input_bytes` and
+  `Parser::max_input_bytes` cap the bytes one parse reads, the document and the files that
+  `.include`, `.try_include` and `.load` read for it together. Going over it is the new
+  `parse::ErrorKind::InputTooLarge`, which `try=true` and `.try_include` do not soften. The
+  default is no limit, as in libucl. `Loader::read_limited`, with a default that calls
+  `Loader::read`, lets a loader stop reading a file once it is over the limit; `FsLoader` and
+  `MemoryLoader` do.
 - Cargo features `fs` (default) and `load`.
 
 ### Behaviour changes

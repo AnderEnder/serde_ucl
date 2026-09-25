@@ -204,6 +204,11 @@ pub enum ErrorKind {
     Unsupported { feature: String },
     /// The input file could not be read.
     Io { message: String },
+    /// The document, or the document and the files that its macros read (`.include`,
+    /// `.try_include`, `.load`), hold more bytes than the parser's input limit
+    /// ([`crate::parse::Parser::set_max_input_bytes`]). `path` is the file that went over it,
+    /// or `None` for the document itself.
+    InputTooLarge { limit: u64, path: Option<String> },
 }
 
 impl fmt::Display for ErrorKind {
@@ -308,6 +313,20 @@ impl fmt::Display for ErrorKind {
             ),
             ErrorKind::Unsupported { feature } => write!(f, "{feature} is not supported"),
             ErrorKind::Io { message } => write!(f, "cannot read input: {message}"),
+            ErrorKind::InputTooLarge { limit, path: None } => {
+                write!(
+                    f,
+                    "the document holds more than the input limit of {limit} bytes"
+                )
+            }
+            ErrorKind::InputTooLarge {
+                limit,
+                path: Some(path),
+            } => write!(
+                f,
+                "reading '{path}' goes over the input limit of {limit} bytes for the document \
+                 and the files it reads"
+            ),
         }
     }
 }

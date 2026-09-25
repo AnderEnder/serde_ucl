@@ -322,6 +322,12 @@ fn main() -> Result<(), ucl_lexer::UclError> {
 }
 ```
 
+The include macros can search a list of directories, which the `path` parameter of an include
+sets for the rest of the document. `ParserBuilder::with_search_path` (or `Parser::set_search_path`)
+puts such a list in effect from the start of every parse: `.include "x.conf"` then reads
+`DIR/x.conf` from the first directory, and `.try_include "x.conf"` from the first directory that
+has the file. A `path` parameter in the document replaces the list; `.load` does not use it.
+
 Where libucl ends a parse without an error message, at a `.try_include` that finds no usable file
 or an `.include` of a glob pattern that matches nothing, the crate returns `UclError::Stopped`
 (for `Parser::parse`, an error for which `parse::Error::is_stopped` is true). The error holds what
@@ -396,8 +402,12 @@ fn main() -> Result<(), ucl_lexer::parse::Error> {
 Every function returns `UclError`. A document the parser rejects is `UclError::Syntax`, whose
 `parse::Error` has a kind (`parse::ErrorKind`), the position where the error was found (1-based
 line and column, 0-based byte offset) and, for an error inside an included file, that file. A
-document that parses but does not fit the target type is `UclError::Serde`, and a failure to
-read input is `UclError::Io`:
+document that parses but does not fit the target type is `UclError::Deserialize`: its
+`error::DeserializeError` has serde's error, the path of the value it is about, and the position
+where that value was written, in the document or in the included file it came from (also for
+values that were merged, or copied by `.inherit`). `UclError::position` and `UclError::file` give
+the position of either kind. A failure to read input is `UclError::Io`, and a value that cannot
+be serialized `UclError::Serde`:
 
 ```rust
 use serde::Deserialize;
@@ -419,12 +429,26 @@ fn main() {
         other => panic!("{other:?}"),
     }
 
-    match ucl_lexer::from_str::<Config>("port = 70000") {
-        Err(UclError::Serde(e)) => eprintln!("{e}"),
+    match ucl_lexer::from_str::<Config>("# ports\nport = 70000") {
+        Err(UclError::Deserialize(e)) => {
+            let position = e.position().unwrap();
+            assert_eq!((position.line, position.column), (2, 8));
+            // invalid value: integer `70000`, expected u16 at port (line 2, column 8)
+            eprintln!("{e}");
+        }
         other => panic!("{other:?}"),
     }
 }
 ```
+
+The text functions (`from_str`, `from_slice`, `from_reader`, `from_file`, `from_str_with_*`) give
+the path and position at no cost while deserialization succeeds: when it fails, they parse the
+document again, recording where values were written, and deserialize the target again, recording
+the path. That second parse asks the loader for the included files again, so a file changed in
+between can move the position; the variable handler is not asked again. To use other parser
+settings and still get positions, deserialize through `UclDeserializer::from_parser(parser,
+input)`, which records paths as it goes, at some cost also when nothing fails. `from_value`
+records nothing, and its errors have neither a path nor a position.
 
 ## Limits
 
@@ -439,8 +463,13 @@ fn main() {
 - serde deserializes into, and serializes from, every other type by recursion through its serde
   impls, so there the nesting is limited to 128 maps and sequences, the outermost included
   (`MAX_SERDE_NESTING`, the limit `serde_json` also uses). Deeper nesting fails with
-  `SerdeError::TooDeep`. A value that the target skips, such as an unknown field, does not count.
+  `SerdeError::TooDeep`, inside `UclError::Deserialize` when deserializing. A value that the target skips, such as an unknown field, does not count.
 - Keys and strings must be valid UTF-8; libucl accepts other bytes.
+- There is no limit on the size of the input by default, as in libucl. For input from untrusted
+  sources, `ParserBuilder::with_max_input_bytes(n)` (or `Parser::set_max_input_bytes`) caps the
+  bytes one parse reads: the document and every file its `.include`, `.try_include` and `.load`
+  read, together. Going over it fails with `parse::ErrorKind::InputTooLarge`, also under
+  `try=true` and in `.try_include`, and files are read no further than needed to tell.
 
 ## Cargo features
 

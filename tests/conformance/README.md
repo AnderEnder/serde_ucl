@@ -71,7 +71,7 @@ None of them is written by hand.
     cargo test --test conformance
     UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture   # per-case detail
 
-The test target has two tests, each with its own known-failure list:
+The test target has three tests, each with its own known-failure list:
 
 - `libucl_conformance_new_core` parses every case with the crate's parser and compares the result
   with `<case>.golden.json`.
@@ -82,6 +82,15 @@ The test target has two tests, each with its own known-failure list:
   §10.9 and compares the result with the `.res` file. A case that parses without error but has no
   output golden files fails the run. The report line gives the number of matching outputs per
   format.
+- `libucl_conformance_readback` takes every case that the crate parses, writes the result in each
+  format with the crate's emitters, and parses the output again with nothing registered (no
+  variables, no handler, `no-filevars`). The value read back must equal the value written, apart
+  from the losses spec §10.8 lists; an output that §10.8 says is unreadable (keys written bare that
+  cannot be read bare) may read back as anything. Differences that §10.8 does not list are held in
+  `READBACK_PENDING` in `tests/conformance.rs`, per case and format, each with the question in
+  `docs/clean-room/QUESTIONS.md` that asks about it. The report line gives, per format, the
+  outputs that read back as the same value, those let through as unreadable, those rejected for a
+  float, and the pending ones.
 
 A run fails when a case fails without an entry in its list, and also when a listed case passes.
 So the lists can only shrink; remove an entry as soon as its case passes.

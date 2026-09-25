@@ -145,3 +145,35 @@ README, crate docs, `CLAUDE.md`, Cargo metadata, license files and CI.
 2. The test `load_needs_its_feature` runs in `scripts/ci.sh`: the crate's dev-dependency on itself
    currently turns `load` on for every test build.
 3. The version becomes `0.2.0`, since this release breaks the 0.1.0 API (pre-1.0 semver).
+
+## C8 — Remaining API and tooling items
+
+Items from the original review that are still open after C7. C8a needs no new spec; C8b waits for
+the spec release that specifies several inputs and registered macros; C8c is tooling.
+
+### C8a
+
+1. Deserialization errors from `from_str`, `from_slice`, `from_reader` and `from_file` carry the
+   position of the offending value, and its file for included input, as syntax errors do.
+2. An optional parser setting caps the bytes read per document and in total across includes.
+   Going over it is an error of its own kind. The default is documented.
+3. The parser builder can set a list of search directories that include macros use from the
+   start, as a `path` list already in effect would (§9.4).
+4. For every conformance case that parses, emitting in each of the four formats and parsing the
+   output again gives the same value, apart from the losses §10.8 lists; one test checks this.
+
+### C8b
+
+1. A parser can take several inputs in turn (bytes or files), each with its own priority and
+   duplicate strategy, and produce one result, as the spec describes for several inputs.
+2. An application can register its own macros by name through the parser builder, as the spec
+   describes for registered macros. Names that are neither built in nor registered stay errors.
+
+### C8c
+
+1. A manually triggered workflow takes a libucl commit, regenerates every golden file at it and
+   publishes the diff for review.
+2. A fuzz target, outside `cargo test`, compares the crate's parse result with the oracle's on
+   generated inputs, seeded from the conformance cases.
+3. `tests/scaling.rs` stays the only timing-based test and says so; the test-profile opt-level
+   override is documented as a speed choice.
