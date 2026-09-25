@@ -26,6 +26,8 @@ example `key-lowercase` is `ParserFlags::KEY_LOWERCASE` and `no-filevars` is
 | An error or silent stop inside an included file when the same macro still has files to read: a glob of `.try_include`, or a search path with directories left (§9.4) | crashes | an error fails the document; a silent stop ends the parse | libucl's behaviour is a crash | none (libucl crashes) |
 | An included file that starts with `[` (§9.4) | reads on and may stop or crash | error at the `[` | libucl's behaviour is undefined | none (undefined in libucl) |
 | A `}` in an included file that closes an object that is an array element of the including document (§9.4) | reads keys into the array and crashes | parsing goes on inside the array | libucl's behaviour is a crash | none (libucl crashes) |
+| Text that a registered macro has parsed in place and that starts with `[` followed by more, other than `[1]` and `[]` (§13.2) | writes the value after the `[` over the most recent value, or over the root | error at the `[`, as for an included file | libucl's behaviour is undefined | none (undefined) |
+| Strings that hold a NUL byte, copied by `.inherit` (§9.7) | the copy keeps the length, but its bytes after the first NUL depend on memory contents | copied exactly | libucl's behaviour is undefined | `cases/spec/09-macros/inherit_copies_key_with_nul` (keys, which libucl copies exactly) |
 | A silent stop (§9.4, *Missing and unusable files*): `.try_include` of a missing file and similar | reports failure with no message and keeps the partial result | `UclError::Stopped` / `parse::ErrorKind::Stopped`, with the partial result available from the error | an application must be able to tell a stop from success | `cases/spec/09-macros/try_include_missing_stops_parsing` (partial result compared) |
 | A registered macro handler that fails (§13.2) | a handler can only succeed or fail; a failure is a silent stop with no message | a handler can stop silently (`MacroError::stop()`, reported as a stop) or fail with its own message (`MacroError::new`, `parse::ErrorKind::MacroFailed`) | an application must be able to say why its macro failed | `tests/inputs_and_macros.rs`: `handlers_fail_with_a_stop_or_a_message` |
 | A later input that starts with `{` after a zero-byte first input (§13.1) | crashes | error, as for any later input with content there | libucl's behaviour is a crash | `tests/inputs_and_macros.rs`: `only_the_first_input_sets_up_the_root` |
@@ -116,6 +118,30 @@ A parser that reads several inputs in turn keeps libucl's behaviour where they j
   (`cases/spec/13-inputs/joins_stopped_include_again_is_self_inclusion_error`).
 - A text input goes on in the file of the input before it, so after a file input it cannot
   include that file (`cases/spec/13-inputs/joins_text_input_continues_file_input_self_include_error`).
+
+### Specified, not yet reproduced
+
+`spec-v12` specifies these quirks; the crate does not follow them yet, and their cases are held in
+`tests/conformance/pending/`:
+
+- Inside an argument document, a macro whose own ARGUMENTS are rejected runs without them, its
+  VALUE starting right after the `)`; the rejection is not an error (§9.2;
+  `cases/spec/09-macros/macro_args_nested_rejected_dropped`).
+- In ARGUMENTS, a `"` after a `\` outside quotes begins a quoted part (§9.2;
+  `cases/spec/09-macros/macro_args_backslash_quote_opens_quoted_part`).
+- A `(` that is the last byte of its unit is a macro's VALUE, not its ARGUMENTS (§9.2;
+  `cases/spec/09-macros/macro_paren_last_byte_is_value`).
+- A NUL byte in a braced VALUE ends a path or a priority, and an empty priority before it is 0
+  (§9.2; `cases/spec/09-macros/macro_value_nul_ends_include_path`,
+  `cases/spec/09-macros/macro_value_nul_first_priority_zero`).
+- `<<` followed by uppercase letters up to the end of a unit of four or more bytes is an error
+  (§6.3; `cases/spec/06-strings/heredoc_opener_cut_by_end_error`).
+- After an entry, a VT or FF makes a last-byte `#` an error (§2.2;
+  `cases/spec/02-comments/hash_last_byte_after_formfeed_after_entry_error`).
+- An included file or text parsed in place that is only a `{` or `[` adds nothing and takes no
+  brace over (§9.4; `cases/spec/09-macros/include_only_open_brace_takes_nothing_over`).
+- A copy of the root that a registered context macro adds keeps the first input's priority
+  (§13.2; `cases/spec/13-inputs/macro_registered_ctx_copy_keeps_root_priority`).
 
 ## Not supported
 

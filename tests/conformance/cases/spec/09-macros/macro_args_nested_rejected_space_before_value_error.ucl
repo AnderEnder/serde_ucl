@@ -1,0 +1,2 @@
+.priority(.include(x) "files/a.inc"; priority=3);
+a 1

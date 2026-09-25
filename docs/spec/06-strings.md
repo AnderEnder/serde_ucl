@@ -127,7 +127,15 @@ text is an ordinary unquoted value. What follows then usually does not parse:
 `<<eod⏎x⏎eod`, `<<EOD ⏎…`, `<<EOD\r⏎…` are errors (`heredoc_lowercase_error`,
 `heredoc_space_after_opener_error`, `heredoc_crlf_opener_error`, `cases/additions/a31_heredoc_crlf`).
 **Quirk:** fewer than four bytes from `<<` to the end of input also gives an unquoted value:
-`a = <<E` at end of input → `"<<E"` (`heredoc_short_input_is_string`).
+`a = <<E` at end of input → `"<<E"` (`heredoc_short_input_is_string`). **Quirk:** with four or
+more, `<<` followed by uppercase letters only, up to the end of the unit (the input, an included
+file, an argument document or text parsed in place), is an error: `k = <<EO` and `k <<AA` at the
+end of input, and `.priority(k = <<EOD) 1`, whose argument document ends there
+(`heredoc_opener_cut_by_end_error`, `heredoc_opener_cut_by_end_two_letters_error`,
+`heredoc_opener_cut_by_end_in_arguments_error`). Any other byte before the end makes it an ordinary
+unquoted value again: `k = <<EO␠` at the end of input → `"<<EO"`; `<<AB1`, `<<Ab`, `[<<EOD]` and
+`<<EO;` give `"<<AB1"`, `"<<Ab"`, `["<<EOD"]` and `"<<EO"` (`heredoc_opener_then_space_at_end_is_string`,
+`heredoc_opener_not_all_uppercase_is_string`).
 
 A string from a heredoc keeps that origin for config output (§10.5).
 `libucl/basic/heredoc_eod` is a double-quoted string that contains `EOD` lines; it shows the

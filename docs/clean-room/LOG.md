@@ -1996,3 +1996,24 @@
     entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-25 — Role: spec team. Item: C0 v12, `spec-v12`.
+  - Answers QUESTIONS #60–#69 (differential-fuzzer findings of C8c) and reviews the three crate
+    fixes C8c made from its reading of the spec.
+  - Inputs: libucl source at the pinned commit (the argument parser and macro state, heredoc
+    opener detection, the separator scan after a value, key-start handling, object copying, the
+    include, load and priority handlers) and black-box runs of `target/libucl-oracle/ucl-dump`.
+  - Spec changes, behaviour only: §2.2 (VT/FF after an entry; `#` after a macro directly after a
+    comment), §6.3 (an opener cut by the end of its unit), §7.6 (example for `\$ABI\u\$`), §8.7
+    and §13.2 (the root's priority in a context macro's copy), §9.2 (a rejected argument document
+    inside an argument document; a last-byte `(`; `\"` in ARGUMENTS; NUL bytes in VALUE), §9.3,
+    §9.5, §9.4 (a unit that is only its leading bracket), §9.7 and §13.2 (Uncertain: NUL bytes in
+    copied strings, keys of collected arrays in `.seen` copies; bracket-leading text in place).
+  - The three C8c fixes are confirmed against libucl: glob backslash quoting before `/`
+    (`include_glob_backslash_before_slash`), a last-byte `#` after a macro only a comment when it
+    directly follows a comment (`hash_last_byte_after_macro_*`), and `$` escaping decided on the
+    text as written (`backslash_dollar_unicode_escape_then_escaped_dollar`).
+  - Cases: 47 new; 18 in `cases/spec/` pass on the crate, 29 the crate fails are held in
+    `tests/conformance/pending/` with a README. Golden files regenerated twice; no existing golden
+    file changed. `scripts/ci.sh` passes at both commits.
+  - Commits: `b778847` (cases, pending), `736575e` (spec, QUESTIONS, COMPATIBILITY; tag
+    `spec-v12`), and this entry. The spec contains behaviour only.

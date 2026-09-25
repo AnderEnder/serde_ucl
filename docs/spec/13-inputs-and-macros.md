@@ -274,6 +274,17 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   the entries they have so far, also when the macro stands in an included file
   (`macro_registered_context_is_root`, `macro_registered_context_in_included_file`). `.inherit`
   (§9.7) is the built-in context macro.
+- **The root's priority.** The root carries the priority of the input that created it, the first
+  (§13.1); `.priority` does not change it. §8.7 says this priority has no effect on the result,
+  but it goes with a copy of the root: the copy that the test macro `.ctx` adds (below) has that
+  priority, as its own entries keep theirs. With the first input at priority 3, `a = 1⏎.ctx c` →
+  `ctx: { a: int 1 @3 } @3`, and `.priority 7⏎a = 1⏎.ctx c` → `a: int 1 @7`,
+  `ctx: { a: int 1 @7 } @3`; with the first input at priority 0 and `.ctx c` in a later input at
+  priority 5, the copy has priority 0 (`macro_registered_ctx_copy_keeps_root_priority`,
+  `macro_registered_ctx_copy_priority_not_from_priority_macro`,
+  `macro_registered_ctx_copy_priority_of_first_input`). The object `.seen` adds is new and has
+  priority 0, and so is the copy of ARGUMENTS in it, whose root comes from an argument document
+  (priority 0, §9.2).
 
 ### What the handler can do
 
@@ -293,6 +304,15 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   `macro_registered_text_array_error`, `macro_registered_text_incomplete_error`,
   `macro_registered_text_empty`, `macro_registered_text_holds_macro`,
   `macro_registered_text_counts_as_unit_ok`, `macro_registered_text_counts_as_unit_error`).
+  Text that is nothing but a `{` or `[`, whitespace before it allowed, adds nothing and takes no
+  brace over, as for an included file (§9.4, **quirk**): `a = 1⏎.emit "{"⏎b = 2` →
+  `{ a: int 1, b: int 2 }`, and `o { .emit "{" }` leaves `o` closed by its own `}`
+  (`macro_registered_text_only_open_brace`, `macro_registered_text_only_open_bracket`). Text that
+  starts with `[` and holds more is an error for `[1]` and `[]` (`macro_registered_text_array_error`).
+  **Uncertain (undefined in libucl)** for other such text: libucl writes the value after the `[`
+  over the most recent value, or over the root when there is none (`.emit "[1"` alone gives the
+  result `int 1`), and reads the rest in the enclosing object. The project may report an error at
+  the `[`, as it does for an included file (§9.4).
   Unlike an included file, it takes the priority and the duplicate strategy in effect in the input
   that holds the macro, `.priority` included, and it sets no file variables
   (`macro_registered_text_takes_input_priority`, `macro_registered_text_takes_input_strategy`;
@@ -325,6 +345,17 @@ several scalar values keeps them all. `.seen(o = {x = 1}, o = {y = 2}) "v"` give
 `macro_registered_ctx_copies_first_container_value`, `macro_registered_seen_keeps_scalar_values`).
 This is a property of the test macros, not of what a handler receives: a handler receives the
 ARGUMENTS and the root complete.
+
+**Uncertain (undefined in libucl).** Two details of these copies depend on memory contents in
+libucl:
+
+- Under `no-implicit-arrays`, the array that collects a repeated name in ARGUMENTS (§8.5) keeps
+  the length of its key in `.seen`'s copy but not its bytes; the oracle machine gives NUL bytes,
+  `.seen(n = 1; n = 2) "v"` → `args: { "\u0000": [int 1, int 2] }`. Copies of the root keep such
+  keys, as `.inherit` does (`macro_registered_ctx_keeps_collection_key`).
+- A copied string that holds a NUL byte loses the bytes after it (§9.7).
+
+The conformance runner's test macros may copy keys and strings exactly.
 
 Under `registered-priority-override` the oracle also registers the handler of `.seen` under the
 name `priority`, after the built-in macros. The conformance runner needs the same four macros,

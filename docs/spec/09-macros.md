@@ -200,13 +200,26 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
 
 - The text runs from `(` to the matching `)`. Parentheses inside double-quoted parts do not count
   toward the balance: `.priority(p="(") 1⏎k = 1` → `{ k: int 1 @1 }` (`macro_args_paren_in_quotes`).
-  As in block comments (§2.3), a `"` directly after a `\` never begins or ends a quoted part, even
-  when that `\` follows another `\`: `.priority(p="a\") 1⏎k = 1`, `.priority(p="a\\") 1` and
-  `.priority(p="\\") 1` never balance. Single quotes do not protect:
+  **Quirk.** Outside a quoted part, every `"` begins one, also directly after a `\`, unlike in block
+  comments (§2.3): `.priority(p=1 \"a) b") 1⏎a = 1` → `a: int 1 @1`, because the `)` after `a` is
+  inside the quoted part that `\"` began, and the text ends at the last `)`; a registered macro
+  given `.seen(k=\"x)") v` receives `k` = `"x)"` with its quotes (§4.7 decodes `\"`)
+  (`macro_args_backslash_quote_opens_quoted_part`,
+  `cases/spec/13-inputs/macro_registered_args_backslash_quote_opens_quoted_part`). Inside a quoted
+  part, a `"` directly after a `\` does not end it, even when that `\` follows another `\`:
+  `.priority(p="a\") 1⏎k = 1`, `.priority(p="a\\") 1` and `.priority(p="\\") 1` never balance. Single quotes do not protect:
   `.priority(p='(') 1⏎k = 1` does not balance either (`macro_args_escaped_quote_error`,
   `macro_args_backslash_pair_quote_error`, `macro_args_single_quotes_do_not_protect_error`).
   Unbalanced parentheses take the rest of the input, which is then an error
-  (`macro_unbalanced_args_error`).
+  (`macro_unbalanced_args_error`). **Quirk.** A `(` that is the last byte of its unit (the input,
+  an included file, an argument document or text parsed in place) does not begin ARGUMENTS: it is
+  the VALUE, and the macro runs without ARGUMENTS. `a = 1⏎.try_include(` stops silently with
+  `{ a: int 1 }`, since the file `(` is missing (§9.4); `.priority(` is an error, since `(` is not a
+  priority; a registered macro receives the VALUE `(` (§13.2) (`macro_paren_last_byte_is_value`,
+  `macro_paren_last_byte_priority_error`,
+  `cases/spec/13-inputs/macro_registered_paren_last_byte_is_value`). With any byte after the `(`,
+  the rule above holds: `a = 1⏎.try_include(␠` is an error
+  (`macro_paren_then_space_unbalanced_error`).
 - The text between the parentheses is parsed as a separate UCL document with the same parser
   flags, priority 0 and the `append` strategy, as if it were given as a string to a new parser.
   **Quirk.** So the application's variables and handler are not available there: `$ABI` stays as
@@ -215,7 +228,32 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   with `no-filevars` neither exists: `.include(key="$FILENAME") …` nests under the key `undef`, or
   under `$FILENAME` with the flag (`macro_args_filename_is_undef`, `macro_args_filename_no_filevars`).
   A syntax error in the arguments is an error: `.include(x) "files/a.inc"`
-  (`macro_args_parse_error`). `()` is allowed (`include_empty_args`).
+  (`macro_args_parse_error`). `()` is allowed (`include_empty_args`). So is any other rejection of
+  the argument document, below: an error of a macro inside it, or a silent stop there. This holds
+  for a macro in the document, in a file it includes, in text parsed in place (§13.2) and in a
+  later input (§13.1): `.include "files/v12/args_bad.inc"`, where the file holds
+  `.priority(x) 1⏎b = 1`, is an error (`include_file_with_rejected_args_error`).
+- **Quirk: a rejected argument document inside an argument document.** When the macro stands
+  inside an argument document, or in a file that an argument document includes, the rejection of
+  its own ARGUMENTS is not an error. The macro runs without ARGUMENTS, and its VALUE begins at the
+  byte directly after the closing `)`: nothing is skipped there, neither whitespace nor comments,
+  and *VALUE* (below) then reads it as usual.
+  - `.priority(.priority(x) 1; priority=3);⏎a 1` → `a: int 1 @3`: the inner VALUE is ` 1`, which
+    §9.5 reads as 1, and the outer macro finds `priority=3` (`macro_args_nested_rejected_dropped`).
+    The same holds for any rejection there: an unknown macro, `.priority(.foo 1) 1`, and a silent
+    stop, `.priority(.try_include "missing") 1`, in place of `.priority(x) 1`
+    (`macro_args_nested_unknown_macro_dropped`, `macro_args_nested_stop_dropped`); and a file
+    included from the argument document, `.priority(.include "files/v12/args_bad.inc";
+    priority=3);` → `@3` (`macro_args_nested_rejected_in_included_file`).
+  - Because nothing is skipped, the VALUE's form depends on the byte after `)`:
+    `.priority(.include(x)"files/a.inc"; priority=3);` includes the file into the argument
+    document, while `.priority(.include(x) "files/a.inc"; priority=3);` is an error, since the
+    VALUE is then the bare ` "files/a.inc"`, a missing file; `.priority(.priority(x); priority=3);`
+    is an error too, since the VALUE is empty and there is no `priority` parameter
+    (`macro_args_nested_rejected_value_after_paren`,
+    `macro_args_nested_rejected_space_before_value_error`,
+    `macro_args_nested_rejected_no_value_error`). Such an error rejects the enclosing argument
+    document, and at the document level that is an error as above.
 - Everything in this specification applies inside that document, macros included:
   `.priority(.priority 3⏎priority = 2);⏎a = 1` → `a: int 1 @2`;
   `.priority(d { priority = 3 }; .inherit "d");⏎a = 1` → `a: int 1 @3`; an unknown macro there
@@ -292,6 +330,21 @@ Variables are expanded in the value, in all three forms, by the rules of §7
 (`macro_value_variables`, `include_curdir`). Because escapes are not decoded, a backslash has no
 effect on expansion: `.include "\$ABI.inc"` names the file `\unknown.inc`.
 
+**Quirk: a NUL byte in VALUE.** Only the braced form can hold one (a bare value ends at NUL, and a
+quoted one rejects it as a raw control byte). What a macro does with it depends on the macro:
+
+- A path ends at the first NUL: `.include {files/a.inc<NUL>zzz}` includes `files/a.inc`, and so
+  for `.try_include`, `.includes` and `.load` (§9.3; `macro_value_nul_ends_include_path`,
+  `macro_value_nul_ends_load_path`).
+- A priority (§9.5) is read from the part before the first NUL: `.priority {3<NUL>x}` sets 3. An
+  empty part there counts as 0 without an error, and the VALUE is not empty, so it wins over the
+  parameter: `.priority {<NUL>}` and `.priority(priority=4) {<NUL>}` set priority 0
+  (`macro_value_nul_ends_priority`, `macro_value_nul_first_priority_zero`,
+  `macro_value_nul_first_priority_zero_wins_over_args`).
+- `.inherit` (§9.7) uses every byte, so `.inherit {d<NUL>zz}` names the key `d<NUL>zz` and fails
+  when there is none (`macro_value_nul_kept_by_inherit_error`), and a registered macro receives
+  every byte (§13.2; `cases/spec/13-inputs/macro_registered_value_nul_kept`).
+
 After VALUE, whitespace, line breaks and `;` are skipped, and the next entry may start right there,
 on the same line: `.include "files/a.inc"k = 1`, `.include "files/a.inc";; # c⏎k = 1`
 (`include_then_keys`, `macro_value_then_entry_without_space`,
@@ -300,6 +353,10 @@ on the same line: `.include "files/a.inc"k = 1`, `.include "files/a.inc";; # c�
 byte of the input is an error there, with or without whitespace before it: `.priority 1#`,
 `a = 1⏎.priority 1⏎ #` (`macro_value_then_last_byte_hash_error`,
 `macro_value_then_newline_last_byte_hash_error`, `cases/spec/02-comments/hash_last_byte_after_macro_error`).
+Only a `#` directly after a comment is a comment there, as where the first key of the root would
+start (§2.2): `.priority 3;#⏎#` → `{}`, but `.priority 3;#⏎ #` is an error
+(`cases/spec/02-comments/hash_last_byte_after_macro_directly_after_comment`,
+`cases/spec/02-comments/hash_last_byte_after_macro_comment_then_space_error`).
 
 A value on a following line is taken as the value even when it was meant as an entry:
 `.priority⏎a = 1` is an error, because `a = 1` is not a priority (`priority_missing_value_error`).
@@ -309,7 +366,7 @@ above.
 
 ## 9.3 File paths
 
-The path is used as written. A relative path resolves against the **process's current working
+The path is used as written, up to its first NUL byte if it has one (§9.2, *VALUE*). A relative path resolves against the **process's current working
 directory**, not the directory of the including file, and that holds inside included files too:
 a file included as `files/v4/sub/rel.inc` that says `.include "files/a.inc"` includes
 `files/a.inc` of the working directory (`include_relative_path_from_included_file`). Use
@@ -380,6 +437,17 @@ an **error** (`include_array_root_error`). **Uncertain (undefined in libucl):** 
 stop at that `[`; it reads on, so that a silent stop in the file can come first, and a file such
 as `[ { a = 1 } ]` crashes it. The project reports the error at the `[`. A `{` after a comment group and a blank line is an
 error too, as for the main document (`include_comment_blank_line_brace_error`).
+
+**Quirk: a file that ends right after its leading bracket.** When that `{` or `[` is the last byte
+of the file, with nothing but whitespace before it, nothing is taken over and nothing is checked:
+the file adds nothing, and the object where the macro stands keeps its own brace. With the file
+`{`, `a = 1⏎.include "…"⏎b = 2` → `{ a: int 1, b: int 2 }`, and
+`x { .include "…"⏎b = 2 }⏎c = 3` → `{ x: { b: int 2 }, c: int 3 }`; the same with the file `⏎{`
+and with the file `[` (`include_only_open_brace_adds_nothing`,
+`include_only_open_brace_takes_nothing_over`, `include_newline_then_open_brace_adds_nothing`,
+`include_only_open_bracket_adds_nothing`). With any byte after the `{`, even a space, the brace is
+taken over as below: with the file `{␠`, the second example puts `c` into `x`. Text parsed in
+place (§13.2) follows the same rule.
 
 **Quirk: braces around an included file.** A `{` where a bracketed root would start does not
 create an object. The entries still go into the object where the macro stands
@@ -761,6 +829,10 @@ stands: `a { .priority 3⏎b = 1 }⏎c = 1` gives both `b` and `c` priority 3
   `priority_trailing_space_before_semicolon_error`, `priority_in_braces_trailing_space_error`,
   `priority_braces_value_trailing_space_error`). End the value directly with a line break or
   `;`, and put a comment on its own line.
+- **Quirk.** The text ends at its first NUL byte, which only a braced VALUE can hold (§9.2): what
+  follows the NUL is not read, and an empty text before it counts as 0 rather than as an error,
+  so `.priority {<NUL>}` sets 0 (`macro_value_nul_ends_priority`,
+  `macro_value_nul_first_priority_zero`).
 - The number is first limited to the 64-bit signed range, then taken modulo 16 (§8.3):
   `17` → 1, `-1` → 15, `99999999999999999999` → 15 (limited to 2⁶³−1),
   `-9223372036854775809` → 0 (limited to −2⁶³) (`priority_value_range`).
@@ -884,6 +956,11 @@ Cases: `libucl/basic/load`.
   `libucl/basic/18`).
 - Copies keep the facts that config output uses (§10.1), for example a single-quoted origin
   (`cases/spec/10-output/inherit_copies_keep_output_facts`).
+- Keys are copied byte for byte, NUL bytes included: `d { "k\u0000z" = 1 }⏎e { .inherit "d" }`
+  gives `e` the key `k<NUL>z` (`inherit_copies_key_with_nul`). **Uncertain (undefined in
+  libucl):** a copied string that holds a NUL byte keeps its length, but its bytes after the
+  first NUL depend on memory contents. On the oracle machine they come out as NUL bytes: `d { a = "\u0000x" }⏎e { .inherit "d" }` gives `e.a` = `"\u0000\u0000"`, and
+  `"x\u0000yz"` gives `"x\u0000\u0000\u0000"`. The project copies the bytes as they are.
 - The copy is shallow at the entry level. A later explicit `a { … }` replaces an inherited `a`
   entirely (`inherit_is_shallow`).
 - **Quirk.** With `replace=true`, every entry is copied even when the key exists. The copied values

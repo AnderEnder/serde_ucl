@@ -101,7 +101,12 @@ The same holds for unquoted values: `$ABI$$x` → `"unknown$x"`, `$$x` → `"$$x
   - a `$` after an escaped backslash is not escaped: `\\$ABI` → `"\\unknown"`;
   - every `$` as written counts, also one that a `\u` escape consumes or drops (§4.8):
     `\$ABI\u$000` → `"unknown\u0000"`, `\$ABI\u$` → `"unknownu"`
-    (`backslash_dollar_counts_dollar_in_unicode_escape`).
+    (`backslash_dollar_counts_dollar_in_unicode_escape`);
+  - whether a `$` is written as `\$` is decided on the text as written, where a `\` and the byte
+    after it always go together: in `\$ABI\u\$` every `$` has its own `\`, so nothing is
+    expanded, and decoding then gives `"$ABIu$"` (§4.8 drops the `\` after a short `\u`); in
+    `\$ABI\u$` the second `$` has none, so `"unknownu"`
+    (`backslash_dollar_unicode_escape_then_escaped_dollar`).
 
 ## 7.7 Variable handler
 

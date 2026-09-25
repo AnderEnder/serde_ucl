@@ -31,7 +31,21 @@ space, makes it an ordinary comment: `⏎#⏎` and `⏎# ` → `{}`
 
 The same holds where the next entry should start after a macro, whatever came before the macro:
 `.priority 1⏎ #` and `a = 1⏎.priority 1⏎ #` are errors, and so is `.priority 1#`, with no space
-(`hash_last_byte_after_macro_error`, §9.2).
+(`hash_last_byte_after_macro_error`, §9.2). A comment before the `#` helps only when the `#`
+follows it directly: `.priority 3;#⏎#` → `{}`, `.priority 3;#⏎ #` is an error
+(`hash_last_byte_after_macro_directly_after_comment`,
+`hash_last_byte_after_macro_comment_then_space_error`).
+
+**Quirk: VT and FF after an entry.** After an entry, the whitespace before the next one may hold
+spaces, tabs, line breaks, separators and comments, and a last-byte `#` there is an ordinary
+comment (above). A VT or FF ends that: from the VT or FF on, the place is the one where the first
+key of the root would start, and a last-byte `#` after it is an error unless it directly follows a
+comment. `a {}<FF>#`, `a = 1;<VT>#`, `a = 1⏎<FF>⏎#` and `a {b 1}<FF>/**/␠#` are errors
+(`hash_last_byte_after_formfeed_after_entry_error`, `hash_last_byte_after_vt_after_separator_error`,
+`hash_last_byte_after_formfeed_newline_error`, `hash_last_byte_after_formfeed_comment_space_error`),
+while `a {}⇥#` and `a {}<FF>/* c */#` → `{ a: {} }` (`hash_last_byte_after_tab_after_entry`,
+`hash_last_byte_after_formfeed_directly_after_comment`). After an unquoted value the VT or FF is
+still part of the value (§4), so `a = 1<FF>#` → `{ a: "1\f" }`.
 
 A `#` ends an unquoted value immediately, even with no space before it: `a = x#y` →
 `{ a: "x" }`; `b = 1#2` → `{ b: int 1 }` (`hash_ends_unquoted_value`,

@@ -208,7 +208,9 @@ Priorities matter only for the values held directly under a key, where §8.3 to 
 Two other priorities appear in the conformance dumps but have **no observable effect**: they are
 never compared, never change a result, and never appear in any output format (§10):
 
-- the priority of the document's root object (`chunk_priority`, where the root carries priority 5);
+- the priority of the document's root object (`chunk_priority`, where the root carries priority 5).
+  A copy of the root that a registered context macro adds keeps it, and there it shows (§13.2,
+  *The root's priority*);
 - the priority of each element of an explicit array. Elements keep the priority of the unit they
   came from (`priority_applies_to_containers`, `strategy_merge_arrays_ignore_priority`,
   `nia_priorities_compared_first`), but merging into an array (§8.4) and collecting under
