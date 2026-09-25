@@ -253,6 +253,23 @@ pub(super) fn find_key(object: &UclObject, name: &str, ignore_case: bool) -> Opt
     })
 }
 
+/// Whether the rejection `error` of an argument document is dropped when the macro stands inside
+/// an argument document (§9.2, *Quirk*): any rejection by the format rules, a macro's error and a
+/// silent stop included. The errors of the project's divergences and limits (spec README,
+/// *Divergences decided by the project*), which libucl does not have, stay errors, and so does a
+/// read error.
+fn rejection_is_dropped(error: &Error) -> bool {
+    !matches!(
+        error.kind(),
+        ErrorKind::InvalidUtf8
+            | ErrorKind::Unsupported { .. }
+            | ErrorKind::ArgumentsTooDeep { .. }
+            | ErrorKind::NestingTooDeep { .. }
+            | ErrorKind::InputTooLarge { .. }
+            | ErrorKind::Io { .. }
+    )
+}
+
 /// A macro's name as read: a macro the application registered, which replaces a built-in one
 /// of the same name (§13.2), or a built-in one.
 enum Named {
@@ -268,6 +285,8 @@ impl Core<'_, '_, '_, '_> {
     /// - A known NAME followed by whitespace, then at most one group of comments that follow
     ///   each other directly, then the end of input, is ignored.
     /// - After ARGUMENTS, the end of input (after the same skipping) is an error.
+    /// - A `(` that is the last byte of the unit is the VALUE, not ARGUMENTS.
+    /// - Inside an argument document, a macro whose ARGUMENTS are rejected runs without them.
     pub(super) fn macro_entry(&mut self) -> Result<(), Error> {
         let at = self.pos;
         if self.settings.flags.contains(ParserFlags::DISABLE_MACRO) {
@@ -295,16 +314,30 @@ impl Core<'_, '_, '_, '_> {
         };
         self.pos = name_end;
         self.macro_gap()?;
-        let args = if self.peek() == Some(b'(') {
+        // A `(` that is the last byte of the unit does not begin ARGUMENTS: it is the VALUE
+        // (§9.2, *Quirk*).
+        let args = if self.peek() == Some(b'(') && self.pos + 1 < self.src.len() {
             let open = self.pos;
             let end = self.macro_arguments_end(open)?;
-            let args = self.macro_arguments(open, end)?;
-            self.pos = end;
-            self.macro_gap()?;
-            if self.peek().is_none() {
-                return Err(self.error(ErrorKind::MissingValue, self.pos));
+            match self.macro_arguments(open, end) {
+                Ok(args) => {
+                    self.pos = end;
+                    self.macro_gap()?;
+                    if self.peek().is_none() {
+                        return Err(self.error(ErrorKind::MissingValue, self.pos));
+                    }
+                    Some(args)
+                }
+                Err(e) if self.depth > 0 && rejection_is_dropped(&e) => {
+                    // Inside an argument document, or a file one includes, a rejected argument
+                    // document is not an error: the macro runs without ARGUMENTS, and its VALUE
+                    // begins directly after the `)`, nothing skipped (§9.2, *Quirk: a rejected
+                    // argument document inside an argument document*).
+                    self.pos = end;
+                    None
+                }
+                Err(e) => return Err(e),
             }
-            Some(args)
         } else if self.peek().is_none() {
             return Ok(());
         } else {
@@ -370,15 +403,17 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// The offset after the `)` that matches the `(` at `open`. Parentheses between double
-    /// quotes do not count (§9.2); as in block comments (§2.3), a `"` directly after a `\` does
-    /// not begin or end a quoted part.
+    /// quotes do not count (§9.2). Outside a quoted part every `"` begins one, also directly
+    /// after a `\`, unlike in block comments (§2.3); inside, a `"` directly after a `\` does not
+    /// end it (§9.2, *Quirk*).
     fn macro_arguments_end(&self, open: usize) -> Result<usize, Error> {
         let mut depth = 0usize;
         let mut in_quotes = false;
         let mut i = open;
         while let Some(&b) = self.src.get(i) {
             match b {
-                b'"' if self.src[i - 1] != b'\\' => in_quotes = !in_quotes,
+                b'"' if !in_quotes => in_quotes = true,
+                b'"' if self.src[i - 1] != b'\\' => in_quotes = false,
                 b'(' if !in_quotes => depth += 1,
                 b')' if !in_quotes => {
                     depth -= 1;
@@ -398,7 +433,8 @@ impl Core<'_, '_, '_, '_> {
     /// a document given as bytes (`FILENAME` is `undef`), none under `NO_FILEVARS`. It may
     /// include files, as a new parser would, and knows only the built-in macros (§13.2). Errors
     /// report positions in the enclosing input, unless they are in a file it includes; a silent
-    /// stop there makes the macro fail. Returns the document's root.
+    /// stop there makes the macro fail. The caller drops such a rejection inside an argument
+    /// document ([`rejection_is_dropped`]). Returns the document's root.
     fn macro_arguments(&mut self, open: usize, end: usize) -> Result<UclValue, Error> {
         if self.depth + 1 >= MAX_ARGUMENT_DEPTH {
             return Err(self.error(
@@ -464,8 +500,10 @@ impl Core<'_, '_, '_, '_> {
         let root = registered
             .context
             .then(|| self.filled_copy(&[]).unwrap_or(UclValue::Null));
+        let root_priority = self.root_priority;
         let (outcome, text_error) = {
-            let mut call = HandlerCall::new(self, name, value, args, root.as_ref(), at);
+            let root = root.as_ref().map(|root| (root, root_priority));
+            let mut call = HandlerCall::new(self, name, value, args, root, at);
             let outcome = (registered.handler)(&mut call);
             (outcome, call.take_text_error())
         };
@@ -549,7 +587,8 @@ impl Core<'_, '_, '_, '_> {
     // ----- .priority (§9.5) ----------------------------------------------------------------
 
     /// Sets the priority of the values that follow in the current input unit. An empty VALUE
-    /// takes the int parameter `priority` instead.
+    /// takes the int parameter `priority` instead. The text ends at the VALUE's first NUL byte,
+    /// and an empty text before that NUL is 0 (§9.5, *Quirk*).
     fn priority_macro(&mut self, call: &MacroCall) -> Result<(), Error> {
         let n = if call.value.is_empty() {
             call.args
@@ -557,8 +596,11 @@ impl Core<'_, '_, '_, '_> {
                 .int("priority")
                 .ok_or_else(|| self.error(ErrorKind::InvalidPriority, call.at))?
         } else {
-            decimal_integer(&call.value)
-                .ok_or_else(|| self.error(ErrorKind::InvalidPriority, call.value_at))?
+            match call.value.split(|&b| b == 0).next().unwrap_or_default() {
+                [] => 0,
+                text => decimal_integer(text)
+                    .ok_or_else(|| self.error(ErrorKind::InvalidPriority, call.value_at))?,
+            }
         };
         self.settings.priority = priority_bits(n);
         Ok(())
@@ -746,7 +788,13 @@ impl Core<'_, '_, '_, '_> {
 }
 
 impl Host for Core<'_, '_, '_, '_> {
-    fn add_entry(&mut self, key: String, value: UclValue, at: usize) -> Result<(), MacroError> {
+    fn add_entry(
+        &mut self,
+        key: String,
+        value: UclValue,
+        priority: u8,
+        at: usize,
+    ) -> Result<(), MacroError> {
         if self.open_containers() == 0 {
             return Err(MacroError::new(
                 "no object is open to add entries to: the root has closed",
@@ -766,11 +814,11 @@ impl Host for Core<'_, '_, '_, '_> {
             .expect("macros are read inside objects");
         let index = match object.entry_mut(&key) {
             Some(entry) => {
-                entry.push_slot(Slot::new(value, 0));
+                entry.push_slot(Slot::new(value, priority));
                 entry.len() - 1
             }
             None => {
-                object.insert_entry(key.clone(), Entry::from_slot(Slot::new(value, 0)));
+                object.insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
                 0
             }
         };
@@ -823,6 +871,17 @@ mod tests {
 
     fn kind(input: &str) -> ErrorKind {
         parse(input.as_bytes()).expect_err(input).kind().clone()
+    }
+
+    /// A parser whose loader holds `files`.
+    fn parser_with(files: &[(&str, &str)]) -> Parser {
+        let mut loader = crate::parse::MemoryLoader::new();
+        for (path, contents) in files {
+            loader.add_file(path, *contents);
+        }
+        let mut parser = Parser::new();
+        parser.set_loader(loader);
+        parser
     }
 
     /// The priorities of the values of `key`.
@@ -1037,6 +1096,97 @@ mod tests {
             kind(".priority(PRIORITY=2);a = 1"),
             ErrorKind::InvalidPriority
         );
+    }
+
+    #[test]
+    fn rejected_argument_documents_inside_argument_documents_are_dropped() {
+        // spec §9.2, *Quirk: a rejected argument document inside an argument document*: the
+        // macro runs without ARGUMENTS, its VALUE starting directly after the `)`.
+        for input in [
+            ".priority(.priority(x) 1; priority=3);\na 1",
+            ".priority(.priority(()) 1; priority=3);\na 1",
+            ".priority(.priority(a = {) 1; priority=3);\na 1",
+            ".priority(.priority(.foo 1) 1; priority=3);\na 1",
+            ".priority(.priority(priority=x=) 1; priority=3);\na 1",
+            ".priority(.priority(.try_include \"missing\") 1; priority=3);\na 1",
+            ".priority(priority=3; .priority(x) 1);\na 1",
+            ".priority(.priority(.priority(x) 1) 2; priority=3);\na 1",
+            ".priority(.priority(.priority z) 1; priority=3);\na 1",
+            ".priority(.priority(x){2}; priority=3);\na 1",
+            ".priority(.include(x)\"f\"; priority=3);\na 1",
+            ".priority(.include \"bad\"; priority=3);\na 1",
+        ] {
+            let v = parser_with(&[("f", "x = 1"), ("bad", ".priority(x) 1\nb = 1")])
+                .parse(input.as_bytes())
+                .unwrap_or_else(|e| panic!("{input:?}: {e}"));
+            assert_eq!(priorities(obj(&v), "a"), [3], "{input:?}");
+        }
+        // Nothing is skipped before the VALUE, which may then be an error; such an error
+        // rejects the enclosing argument document, an error at the document level.
+        for input in [
+            ".priority(.include(x) \"f\"; priority=3);\na 1",
+            ".priority(.priority(x); priority=3);\na 1",
+            ".priority(.priority(x)\n1; priority=3);\na 1",
+            ".priority(.priority(x)/* c */ 1; priority=3);\na 1",
+            ".priority(.try_include(x)\"missing\"; priority=3);\na 1",
+            ".priority(.include \"unbalanced\"; priority=3);\na 1",
+        ] {
+            let result = parser_with(&[("f", "x = 1"), ("unbalanced", ".priority(x\nb = 1\n")])
+                .parse(input.as_bytes());
+            assert!(result.is_err(), "{input:?}");
+        }
+        // At the document level, and in a file it includes, the rejection is an error.
+        assert_eq!(kind(".priority(x) 1\na = 1"), ErrorKind::MissingValue);
+        let e = parser_with(&[("bad", ".priority(x) 1\nb = 1")])
+            .parse(b".include \"bad\"")
+            .unwrap_err();
+        assert_eq!(e.kind(), &ErrorKind::MissingValue);
+        // The project's limits stay errors.
+        let deep = format!(
+            ".priority(.priority({}priority=1{}) 1; priority=3);\na 1",
+            ".priority(".repeat(MAX_ARGUMENT_DEPTH),
+            ") 1".repeat(MAX_ARGUMENT_DEPTH)
+        );
+        assert_eq!(
+            kind(&deep),
+            ErrorKind::ArgumentsTooDeep {
+                limit: MAX_ARGUMENT_DEPTH
+            }
+        );
+    }
+
+    #[test]
+    fn a_last_byte_paren_is_the_value() {
+        // spec §9.2, *Quirk*: a `(` that is the last byte of its unit is the VALUE.
+        let e = parse(b"a = 1\n.try_include(").unwrap_err();
+        assert!(e.is_stopped(), "{e}");
+        assert_eq!(obj(e.partial().unwrap()).len(), 1);
+        let e = parse(b"a { .try_include(").unwrap_err();
+        assert!(e.is_stopped(), "{e}");
+        assert_eq!(kind(".priority("), ErrorKind::InvalidPriority);
+        for input in [
+            ".try_include( ",
+            ".try_include(\n",
+            ".try_include((",
+            ".try_include(x",
+        ] {
+            assert_eq!(kind(input), ErrorKind::UnterminatedArguments, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn backslash_quote_in_arguments() {
+        // spec §9.2, *Quirk*: outside a quoted part every `"` begins one, also after `\`;
+        // inside, a `"` after `\` does not end it.
+        let v = parse(b".priority(p=1 \\\"a) b\") 1\na = 1").unwrap();
+        assert_eq!(priorities(obj(&v), "a"), [1]);
+        for input in [
+            ".priority(p=\"a\\\") 1\nk = 1",
+            ".priority(p=\"a\\\\\") 1",
+            ".priority(p=\"\\\\\") 1",
+        ] {
+            assert_eq!(kind(input), ErrorKind::UnterminatedArguments, "{input:?}");
+        }
     }
 
     #[test]
@@ -1425,5 +1575,32 @@ mod tests {
         for bad in ["", " ", "x", "0x10", "+", "- 3", "+-3", "3 ", "3\x0b", "3a"] {
             assert_eq!(read(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_nul_byte_ends_a_priority() {
+        // spec §9.2, *Quirk: a NUL byte in VALUE*; §9.5: the text before the first NUL, 0 when
+        // it is empty, and the VALUE is not empty, so it wins over the parameter.
+        for (input, expected) in [
+            (".priority {3\0x}\na = 1", 3),
+            (".priority {+3\0}\na = 1", 3),
+            (".priority { 3\0 }\na = 1", 3),
+            (".priority {\0}\na = 1", 0),
+            (".priority {\0x}\na = 1", 0),
+            (".priority(priority=4) {\0}\na = 1", 0),
+        ] {
+            let mut parser = Parser::new();
+            parser.set_priority(5);
+            let v = parser.parse(input.as_bytes()).unwrap();
+            assert_eq!(priorities(obj(&v), "a"), [expected], "{input:?}");
+        }
+        for input in [".priority {3 \0}\na = 1", ".priority {x\x003}\na = 1"] {
+            assert_eq!(kind(input), ErrorKind::InvalidPriority, "{input:?}");
+        }
+        // `.inherit` uses every byte.
+        assert!(matches!(
+            kind("d { x = 1 }\ne { .inherit {d\0zz} }"),
+            ErrorKind::InheritSourceMissing { .. }
+        ));
     }
 }

@@ -192,11 +192,14 @@ fn fail_macro(_: &mut MacroCall<'_>) -> Result<(), MacroError> {
     Err(MacroError::stop())
 }
 
-/// `.ctx`, a context macro: adds `ctx` with a copy of the root it received, and fails like
+/// `.ctx`, a context macro: adds `ctx` with a copy of the root it received, which keeps the
+/// root's priority, that of the first input (spec §13.2, *The root's priority*), and fails like
 /// `.seen`.
 fn ctx_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
     let root = call.root().map_or(UclValue::Null, test_macro_copy);
-    call.add("ctx", root).map_err(|_| MacroError::stop())
+    let priority = call.root_priority().unwrap_or(0);
+    call.add_with_priority("ctx", root, priority)
+        .map_err(|_| MacroError::stop())
 }
 
 /// Registers the test macros a case's `.flags` ask for.

@@ -167,7 +167,9 @@ Added:
   `ErrorKind::MacroStopped`, a silent stop) or fail with a message (`MacroError::new`,
   `ErrorKind::MacroFailed`; libucl has no such error). A registered name replaces a built-in
   macro of the same name. A deserialization error of a document whose parse ran a registered
-  macro has no position, since the document is not parsed again.
+  macro has no position, since the document is not parsed again. A context macro also gets the
+  root's priority, that of the first input (`MacroCall::root_priority`), which a copy of the root
+  keeps in libucl; `MacroCall::add_with_priority` adds a value at a priority other than 0.
 
 ### Behaviour changes
 
@@ -214,6 +216,19 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
   (`MAX_SERDE_NESTING`).
 - Deserializing into a borrowed `&str` field is not supported and fails with "expected a
   borrowed string"; use `String` or `Cow<str>`.
+- Edge cases follow libucl (spec-v12): after an entry, a VT or FF makes a `#` that is the last
+  byte of the input an error unless a comment comes directly before it (§2.2); `<<` followed by
+  two or more uppercase letters and then the end of the document, an included file or a macro
+  argument list is an unterminated heredoc, `ErrorKind::UnterminatedHeredoc` (§6.3), where it was a
+  string; in macro arguments a `"` after a `\` outside quotes begins a quoted part, and a `(`
+  that is the last byte is the macro's value (§9.2); a macro inside macro arguments whose own
+  arguments are rejected runs without them instead of failing the document (§9.2); a NUL byte in
+  a braced macro value ends an include or `.load` path and a `.priority` value, where an empty
+  priority is 0 (§9.2, §9.5); `.load` looks its path up as written, so a regular file followed
+  by `/` is not found (§9.6); after a fraction or exponent, the number before an `x` does not
+  count toward the 127-character limit (§5.2, §5.3); and an included file, or text a registered macro parses in place,
+  that holds only whitespace and then a `{` or `[` as its last byte adds nothing (§9.4, §13.2),
+  where it was an error.
 
 ### Removed features, examples and benches
 

@@ -897,6 +897,61 @@ fn context_macros_see_the_root_built_so_far() {
 }
 
 #[test]
+fn context_macros_get_the_root_priority() {
+    // spec §13.2, *The root's priority*: that of the first input; `.priority` does not change
+    // it. A copy added with it keeps it, and it takes part in §8.3 for later values.
+    let snapshot = |call: &mut MacroCall<'_>| {
+        let root = call.root().cloned().unwrap();
+        let priority = call.root_priority().unwrap();
+        call.add_with_priority("ctx", root, priority)
+    };
+    let priorities = |value: &UclValue, key: &str| -> Vec<u8> {
+        let entry = obj(value).entry(key).unwrap();
+        entry.slots().iter().map(|slot| slot.priority()).collect()
+    };
+    let mut parser = ParserBuilder::new()
+        .with_priority(3)
+        .with_context_macro("ctx", snapshot)
+        .build();
+    let v = parser.parse(b".priority 7\na = 1\n.ctx c").unwrap();
+    assert_eq!(priorities(&v, "a"), [7]);
+    assert_eq!(priorities(&v, "ctx"), [3]);
+    assert_eq!(priorities(&obj(&v)["ctx"], "a"), [7]);
+    let v = parser
+        .parse(b"a = 1\n.ctx c\n.priority 1\nctx = 1")
+        .unwrap();
+    assert_eq!(priorities(&v, "ctx"), [3]);
+    assert!(obj(&v)["ctx"].is_object());
+    let v = parser
+        .parse(b"a = 1\n.ctx c\n.priority 5\nctx = 1")
+        .unwrap();
+    assert_eq!(obj(&v)["ctx"], UclValue::Integer(1));
+    // With several inputs, the first decides.
+    let mut parser = ParserBuilder::new()
+        .with_context_macro("ctx", snapshot)
+        .build();
+    let mut session = parser.inputs();
+    session.add(Input::bytes("a = 1;")).unwrap();
+    session
+        .add(Input::bytes(".ctx c").with_priority(5))
+        .unwrap();
+    let v = session.finish().unwrap();
+    assert_eq!(priorities(&v, "ctx"), [0]);
+    // `add` adds at priority 0; a macro that is not a context macro gets no root priority.
+    let mut parser = ParserBuilder::new()
+        .with_priority(3)
+        .with_macro("plain", |call| {
+            assert_eq!(call.root_priority(), None);
+            call.add_with_priority("p", UclValue::Integer(1), 0x13)?;
+            call.add("q", UclValue::Integer(1))
+        })
+        .build();
+    let v = parser.parse(b".plain {}").unwrap();
+    assert_eq!(priorities(&v, "p"), [3]);
+    assert_eq!(priorities(&v, "q"), [0]);
+}
+
+#[test]
 fn deserialization_errors_do_not_run_handlers_again() {
     #[derive(Debug, Deserialize)]
     #[allow(dead_code)]

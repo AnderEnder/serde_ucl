@@ -125,11 +125,13 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
             _ => break,
         }
     }
+    if matches!(at(i), Some(b'x' | b'X')) {
+        // The number before the `x` is dropped and never checked for range (spec §5.2), so its
+        // length does not count either (§5.3); the digits after the `x` do (fuzz finding, C9).
+        return decimal_after_x(src, i + 1, negative, no_time);
+    }
     if i - int_start >= LENGTH_LIMIT {
         return Number::Text;
-    }
-    if matches!(at(i), Some(b'x' | b'X')) {
-        return decimal_after_x(src, i + 1, negative, no_time);
     }
 
     if dot || exponent {
@@ -497,6 +499,18 @@ mod tests {
         assert!(matches!(value(&n126), UclValue::Float(_)));
         let n127 = "1".repeat(126) + ".";
         assert_eq!(num(&n127), Number::Text);
+        // §5.2, *Quirk*: before an `x` after a fraction or exponent the number is dropped, and
+        // its length does not count; the hex digits after the `x` do.
+        let long = "0.".to_string() + &"0".repeat(300) + "1x0";
+        assert_eq!(value(&long), UclValue::Integer(0));
+        let long = "-0.".to_string() + &"0".repeat(200) + "1x5kb";
+        assert_eq!(value(&long), UclValue::Integer(-5120));
+        assert_eq!(value(&("1".repeat(130) + "e1x5")), UclValue::Integer(0));
+        assert_eq!(
+            value(&("1.5x".to_string() + &"1".repeat(126))),
+            UclValue::Integer(0)
+        );
+        assert_eq!(num(&("1.5x".to_string() + &"1".repeat(127))), Number::Text);
     }
 
     #[test]

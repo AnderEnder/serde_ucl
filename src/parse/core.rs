@@ -22,7 +22,7 @@ use super::include::Includes;
 use super::number::{self, Number};
 use super::string;
 use super::vars::Expander;
-use super::{Comment, Error, ErrorKind, MAX_NESTING, PathSegment};
+use super::{Comment, Error, ErrorKind, MAX_NESTING, PathSegment, Uncertain};
 use crate::emit::key_needs_quoting;
 use crate::error::Position;
 use crate::value::{
@@ -83,6 +83,9 @@ pub(crate) struct Document {
     /// How many macro argument documents this document is inside (§9.2): 0 for the parse of
     /// the parser's inputs.
     depth: usize,
+    /// The root's priority: that of the first input, which creates the root (§13.2, *The root's
+    /// priority*; §8.7).
+    root_priority: u8,
 }
 
 /// A finished parse ([`Document::finish`]).
@@ -106,6 +109,7 @@ impl Document {
             uppercase_keys: false,
             boundary: Boundary::Start,
             depth,
+            root_priority: 0,
         }
     }
 
@@ -127,7 +131,11 @@ impl Document {
             return Ok(());
         }
         let boundary = std::mem::replace(&mut self.boundary, Boundary::Entry);
+        if matches!(boundary, Boundary::Start) {
+            self.root_priority = settings.priority;
+        }
         let unit = includes.new_unit();
+        includes.open_units.push(unit);
         let mut core = Core {
             src,
             pos: 0,
@@ -140,6 +148,7 @@ impl Document {
             root: std::mem::replace(&mut self.root, UclValue::Null),
             frames: std::mem::take(&mut self.frames),
             depth: self.depth,
+            root_priority: self.root_priority,
             unit,
             role: Role::Input,
             unit_done: false,
@@ -164,6 +173,7 @@ impl Document {
         self.uppercase_keys = core.uppercase_keys;
         self.facts = core.facts;
         self.notes = core.notes;
+        includes.open_units.pop();
         if let Some(notes) = &mut self.notes {
             // The next input's comments are counted from its own start.
             notes.suspend(src);
@@ -235,6 +245,7 @@ impl Document {
                 root: std::mem::replace(&mut self.root, UclValue::Null),
                 frames: std::mem::take(&mut self.frames),
                 depth: self.depth,
+                root_priority: self.root_priority,
                 unit: 0,
                 role: Role::Input,
                 unit_done: false,
@@ -646,6 +657,9 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     frames: Vec<Frame>,
     /// How many macro argument documents this document is inside (§9.2): 0 for the main one.
     pub(super) depth: usize,
+    /// The root's priority, that of the first input ([`Document`]); a context macro's handler
+    /// receives it with the root (§13.2).
+    pub(super) root_priority: u8,
     /// This input unit's identity, which the frames it opens record.
     unit: usize,
     /// Whether this unit is an input or an included file (or text parsed in place).
@@ -1826,6 +1840,7 @@ impl Core<'_, '_, '_, '_> {
             _ => None,
         };
         let unit = self.includes.new_unit();
+        self.includes.open_units.push(unit);
         let mut inner = Core {
             src: input,
             pos: 0,
@@ -1838,6 +1853,7 @@ impl Core<'_, '_, '_, '_> {
             root: std::mem::replace(&mut self.root, UclValue::Null),
             frames: std::mem::take(&mut self.frames),
             depth: self.depth,
+            root_priority: self.root_priority,
             unit,
             role: Role::Included,
             unit_done: false,
@@ -1853,6 +1869,7 @@ impl Core<'_, '_, '_, '_> {
             ends: None,
         };
         let result = inner.run_included();
+        inner.includes.open_units.pop();
         self.root = inner.root;
         self.frames = inner.frames;
         self.uppercase_keys = inner.uppercase_keys;
@@ -1873,16 +1890,25 @@ impl Core<'_, '_, '_, '_> {
 
     /// The start of an included unit follows §1.1, except that a `[` there is an error and a
     /// `{` takes over the brace of the object the entries go into (§9.4).
+    ///
+    /// A `{` or `[` there that is the last byte of the unit, with nothing but whitespace before
+    /// it, takes nothing over and is not checked: the unit adds nothing (§9.4, *Quirk: a file
+    /// that ends right after its leading bracket*; §13.2). After a leading comment group the
+    /// oracle does the same, which the spec does not say (QUESTIONS.md #70).
     fn run_included(&mut self) -> Result<(), Error> {
         let mut after_space = false;
         while self.peek().is_some_and(is_space) {
             self.pos += 1;
             after_space = true;
         }
-        if !after_space {
-            self.comment_group()?;
-        }
+        let commented = !after_space && self.comment_group()?;
         match self.peek() {
+            Some(b'[' | b'{') if self.pos + 1 == self.src.len() && !commented => {
+                self.pos += 1;
+                return self.end_included_unit();
+            }
+            // Other text in place that starts with `[` is uncertain in libucl (§13.2); the
+            // project reports the error there, as for an included file (§9.4).
             Some(b'[') => return Err(self.error(ErrorKind::IncludeArrayRoot, self.pos)),
             Some(b'{') => {
                 self.pos += 1;
@@ -1937,8 +1963,9 @@ impl Core<'_, '_, '_, '_> {
     /// one, is not closed, and that is an error. Containers below one that another unit opened
     /// are not checked, whatever that container is (oracle runs, QUESTIONS.md #41).
     fn unit_end_check(&self) -> Result<(), Error> {
-        for frame in self.frames.iter().rev() {
+        for (index, frame) in self.frames.iter().enumerate().rev() {
             if frame.unit != self.unit {
+                self.note_ended_unit_containers(index);
                 break;
             }
             if frame.close.has_bracket() {
@@ -1950,6 +1977,23 @@ impl Core<'_, '_, '_, '_> {
             }
         }
         Ok(())
+    }
+
+    /// Where the check at the end of an included file stops at frame `index`, opened by a unit
+    /// that has ended: whether libucl counts such containers as this file's is uncertain (spec
+    /// §9.4, *Where the entries go*). It matters only when one of them, from that frame inward
+    /// to the first container of a unit still open, holds a bracket.
+    fn note_ended_unit_containers(&self, index: usize) {
+        let open = &self.includes.open_units;
+        if self.role == Role::Included
+            && self.frames[..=index]
+                .iter()
+                .rev()
+                .take_while(|frame| !open.contains(&frame.unit))
+                .any(|frame| frame.close.has_bracket())
+        {
+            self.includes.reached(Uncertain::EndedUnitContainer);
+        }
     }
 
     /// The number of open containers.
@@ -2184,7 +2228,15 @@ impl Core<'_, '_, '_, '_> {
 
     /// Parses the next entry of the current object, or closes it.
     fn object_step(&mut self) -> Result<(), Error> {
-        self.skip_space()?;
+        if matches!(self.peek(), Some(0x0B | 0x0C)) {
+            // After an entry, a VT or FF ends the skipping of [`Core::after_value`]: from there
+            // on the place is where the first key of the root would start, so a last-byte `#`
+            // is an error unless it directly follows a comment (§2.2, *Quirk: VT and FF after an
+            // entry*).
+            self.skip_space_checking_hash(true)?;
+        } else {
+            self.skip_space()?;
+        }
         let at = self.pos;
         match self.peek() {
             None if self
@@ -2197,6 +2249,15 @@ impl Core<'_, '_, '_, '_> {
             None if self.role == Role::Included => self.end_included_unit(),
             None => self.end_input(),
             Some(b'}') if self.top().close == Close::Brace => {
+                let n = self.frames.len();
+                if self.role == Role::Included
+                    && self.top().unit != self.unit
+                    && n >= 2
+                    && self.frames[n - 2].kind == Kind::Array
+                {
+                    // §9.4, *Where the entries go*: uncertain in libucl.
+                    self.includes.reached(Uncertain::ClosedArrayElement);
+                }
                 self.pos += 1;
                 self.close_container()
             }
@@ -2272,6 +2333,7 @@ impl Core<'_, '_, '_, '_> {
                     .try_enter(self.current())
                     .is_some_and(|v| v.is_object())
                 {
+                    self.includes.reached(Uncertain::ReopenedNotObject);
                     return Ok(());
                 }
                 (self.take_out(step, Kind::Object), Some(recent))
@@ -2775,6 +2837,10 @@ impl Core<'_, '_, '_, '_> {
                     ..Origin::default()
                 };
                 Ok((UclValue::String(self.text(bytes, at)?), true, origin))
+            }
+            Some(b'<') if string::heredoc_opener_cut_by_end(self.src, at) => {
+                // `<<` and uppercase letters up to the end of the unit (§6.3, *Quirk*).
+                Err(self.error(ErrorKind::UnterminatedHeredoc, at))
             }
             _ => {
                 let (value, keyword) = self.unquoted()?;

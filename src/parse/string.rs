@@ -145,6 +145,16 @@ pub(crate) fn heredoc_opener(src: &[u8], start: usize) -> Option<(usize, usize)>
     (src.get(name_end) == Some(&b'\n')).then_some((name_start, name_end))
 }
 
+/// Whether the text at `src[start]` is a heredoc opener that the end of its unit cuts short
+/// (spec §6.3, *Quirk*): four or more bytes from `<<` to the end, all of them after `<<`
+/// uppercase ASCII letters. That is an error; any other byte before the end makes the text an
+/// ordinary unquoted value.
+pub(crate) fn heredoc_opener_cut_by_end(src: &[u8], start: usize) -> bool {
+    src.get(start..).is_some_and(|rest| {
+        rest.len() >= 4 && rest.starts_with(b"<<") && rest[2..].iter().all(u8::is_ascii_uppercase)
+    })
+}
+
 /// A heredoc read by [`heredoc`].
 #[derive(Debug)]
 pub(crate) struct Heredoc {
@@ -449,6 +459,28 @@ mod tests {
         assert!(heredoc_opener(b"<<eod\n", 0).is_none());
         assert!(heredoc_opener(b"<<EOD \n", 0).is_none());
         assert!(heredoc_opener(b"<<EOD\r\n", 0).is_none());
+    }
+
+    #[test]
+    fn heredoc_openers_cut_by_the_end() {
+        // spec §6.3, *Quirk*: four or more bytes, uppercase letters only after `<<`.
+        for cut in [&b"<<EO"[..], b"<<AA", b"<<EOD", b"k = <<ABCDEF"] {
+            let start = cut.windows(2).position(|w| w == b"<<").unwrap();
+            assert!(heredoc_opener_cut_by_end(cut, start), "{cut:?}");
+        }
+        for not in [
+            &b"<<E"[..],
+            b"<<",
+            b"<<EO ",
+            b"<<EO;",
+            b"<<AB1",
+            b"<<Ab",
+            b"<<ab",
+            b"<<EOD]",
+            b"<<EOD\n",
+        ] {
+            assert!(!heredoc_opener_cut_by_end(not, 0), "{not:?}");
+        }
     }
 
     fn unq(s: &str) -> String {

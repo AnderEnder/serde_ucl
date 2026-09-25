@@ -50,6 +50,24 @@ A limit of this crate's API, with no libucl counterpart: a deserialization error
 whose parse ran a registered macro carries no position, because positions are found by parsing
 again and a handler is not run a second time.
 
+### Known differences not yet specified
+
+A fuzzer that compares the crate with libucl found these differences after the last spec release.
+In each, the crate follows the spec text and libucl does something the spec does not describe.
+They involve NUL bytes in parameters or values, glob patterns, text parsed in place by registered
+macros, and one number quirk:
+
+- a lone `{` or `[` after a leading comment group in an included file;
+- `.load(try=true)` with a value that starts with a NUL byte;
+- NUL bytes in a glob pattern, and in the `key` and `path` parameters;
+- a glob pattern ending in `/` matching a symbolic link to a file;
+- braced text parsed in place directly after a section name, and text parsed in place inside a
+  section object left open;
+- `-1.5xd`, which libucl reads as a string;
+- the first-value rule of `.inherit` at nested levels.
+
+They are open questions #70–#78 in `docs/clean-room/QUESTIONS.md`.
+
 ## libucl quirks the crate reproduces
 
 libucl behaves in some places in ways a reader may not expect. The crate does the same, because
@@ -119,10 +137,7 @@ A parser that reads several inputs in turn keeps libucl's behaviour where they j
 - A text input goes on in the file of the input before it, so after a file input it cannot
   include that file (`cases/spec/13-inputs/joins_text_input_continues_file_input_self_include_error`).
 
-### Specified, not yet reproduced
-
-`spec-v12` specifies these quirks; the crate does not follow them yet, and their cases are held in
-`tests/conformance/pending/`:
+### Macro arguments, values and text in place (spec-v12)
 
 - Inside an argument document, a macro whose own ARGUMENTS are rejected runs without them, its
   VALUE starting right after the `)`; the rejection is not an error (§9.2;

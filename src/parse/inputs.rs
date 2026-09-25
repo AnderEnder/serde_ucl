@@ -194,6 +194,7 @@ pub(crate) struct Parts<'p> {
     pub(crate) search_path: Option<Vec<String>>,
     pub(crate) max_input_bytes: Option<u64>,
     pub(crate) macros: &'p MacroTable,
+    pub(crate) uncertain: &'p std::cell::Cell<u8>,
     pub(crate) comments: &'p mut Vec<Comment>,
     pub(crate) attached: &'p mut CommentGroups,
     pub(crate) facts: &'p mut OutputFacts,
@@ -263,6 +264,7 @@ impl<'p> Inputs<'p> {
             search_path,
             max_input_bytes,
             macros,
+            uncertain,
             comments,
             attached,
             facts,
@@ -276,13 +278,14 @@ impl<'p> Inputs<'p> {
             handler,
             !flags.contains(ParserFlags::DISABLE_MACRO),
         );
-        let includes = Includes::new(
+        let mut includes = Includes::new(
             loader,
             PathBuf::new(),
             search_path,
             Budget::new(max_input_bytes),
             (!macros.is_empty()).then_some(macros),
         );
+        includes.uncertain = Some(uncertain);
         let document = Document::new(
             flags.contains(ParserFlags::SAVE_COMMENTS),
             Some(OutputFacts::new()),

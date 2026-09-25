@@ -100,6 +100,10 @@ pub(crate) struct Includes<'l> {
     pub(crate) macros: Option<&'l MacroTable>,
     /// The number of input units opened so far, which gives each its own identity.
     units: usize,
+    /// The input units being parsed, outermost first; the others have ended (spec §9.4).
+    pub(crate) open_units: Vec<usize>,
+    /// Where the parse records the [`super::Uncertain`] rules it reaches.
+    pub(crate) uncertain: Option<&'l Cell<u8>>,
 }
 
 impl<'l> Includes<'l> {
@@ -120,6 +124,15 @@ impl<'l> Includes<'l> {
             budget,
             macros,
             units: 0,
+            open_units: Vec::new(),
+            uncertain: None,
+        }
+    }
+
+    /// Records that the parse reached `rule`, which the spec leaves uncertain.
+    pub(crate) fn reached(&self, rule: super::Uncertain) {
+        if let Some(cell) = self.uncertain {
+            cell.set(cell.get() | rule.bit());
         }
     }
 
@@ -136,6 +149,7 @@ impl<'l> Includes<'l> {
             None,
         );
         includes.files.push(None);
+        includes.uncertain = self.uncertain;
         includes
     }
 
@@ -145,8 +159,8 @@ impl<'l> Includes<'l> {
         self.units
     }
 
-    /// Reads the file at `path`, a canonical path, through the loader, and counts its bytes
-    /// against the input limit. Without a limit, the loader reads it whole.
+    /// Reads the file at `path` through the loader, and counts its bytes against the input
+    /// limit. Without a limit, the loader reads it whole.
     pub(crate) fn read(&self, path: &Path) -> io::Result<Read> {
         let Some(limit) = self.budget.limit else {
             return self.loader.read(path).map(Read::Bytes);
@@ -222,9 +236,11 @@ fn duplicate_strategy(name: Option<&str>) -> DuplicateStrategy {
 }
 
 impl Core<'_, '_, '_, '_> {
-    /// The path a macro's value names; it must be UTF-8.
+    /// The path a macro's value names: the value up to its first NUL byte, if it has one (spec
+    /// §9.2, *Quirk: a NUL byte in VALUE*; §9.3). It must be UTF-8.
     fn macro_path(&self, call: &MacroCall) -> Result<String, Error> {
-        String::from_utf8(call.value.clone())
+        let path = call.value.split(|&b| b == 0).next().unwrap_or_default();
+        String::from_utf8(path.to_vec())
             .map_err(|_| self.error(ErrorKind::InvalidUtf8, call.value_at))
     }
 
@@ -489,19 +505,22 @@ impl Core<'_, '_, '_, '_> {
         };
         let key = key.to_owned();
         let path = self.macro_path(call)?;
+        // An empty path, also one that a NUL byte ends before its first byte, is an error even
+        // with `try` (spec §9.6, §9.2). libucl skips the latter with `try` (QUESTIONS.md #71).
         if path.is_empty() {
             return Err(self.error(ErrorKind::FileNotFound { path }, call.value_at));
         }
         let loader = self.includes.loader;
         let not_found = || ErrorKind::FileNotFound { path: path.clone() };
         let not_a_file = || ErrorKind::NotAFile { path: path.clone() };
-        let read = match loader.canonicalize(&self.includes.resolve(&path)) {
-            Err(_) => Err(not_found()),
-            Ok(canonical) => match loader.kind(&canonical) {
-                None => Err(not_found()),
-                Some(FileKind::File) => self.includes.read(&canonical).map_err(|_| not_a_file()),
-                Some(_) => Err(not_a_file()),
-            },
+        // The path is used as written (§9.6), not resolved first as an include path is (§9.3):
+        // the loader looks it up as it stands, so with `FsLoader` a regular file followed by `/`
+        // names nothing (oracle runs, C9).
+        let written = self.includes.resolve(&path);
+        let read = match loader.kind(&written) {
+            None => Err(not_found()),
+            Some(FileKind::File) => self.includes.read(&written).map_err(|_| not_a_file()),
+            Some(_) => Err(not_a_file()),
         };
         let bytes = match read {
             Ok(Read::Bytes(bytes)) => bytes,
@@ -685,6 +704,148 @@ mod tests {
     }
 
     const A: (&str, &str) = ("/c/files/a.inc", "x = 1\ny = \"inc\"\n");
+
+    #[test]
+    fn uncertain_rules_reached_are_recorded() {
+        use crate::parse::Uncertain;
+        let files = [
+            ("/c/elem.inc", "a = [ {\n.include \"sep.inc\""),
+            ("/c/sep.inc", "x \"y{\" = \n"),
+            ("/c/close.inc", "a = 1 }\n"),
+            ("/c/left_open.inc", "x \"y{\" z"),
+            ("/c/v.inc", "v = 1"),
+            ("/c/reopen_int.inc", "\"s\".include {v.inc} # c"),
+        ];
+        let reached = |input: &str| {
+            let mut p = parser(&files, ParserFlags::DEFAULT);
+            let _ = p.parse(input.as_bytes());
+            p.uncertain_reached()
+        };
+        // §9.4: the check at the end of close.inc stops at containers of ended units, the
+        // array element among them (a fuzz finding, C9).
+        assert_eq!(
+            reached(".include \"elem.inc\"x {.include \"close.inc\""),
+            [Uncertain::EndedUnitContainer]
+        );
+        // Section objects of an ended unit without a bracket are defined (§9.4).
+        assert_eq!(reached("a {\n.include \"left_open.inc\"\nk = 1"), []);
+        // §9.4: a `}` in an included file closes an array element of the including unit.
+        assert_eq!(
+            reached("a = [ { .include \"close.inc\"\n]"),
+            [Uncertain::ClosedArrayElement]
+        );
+        // §9.1: the value created most recently is not an object.
+        assert_eq!(
+            reached(".include \"reopen_int.inc\"\nk = 1"),
+            [Uncertain::ReopenedNotObject]
+        );
+        assert_eq!(reached("a = 1"), []);
+    }
+
+    #[test]
+    fn a_unit_that_is_only_its_leading_bracket_adds_nothing() {
+        // spec §9.4, *Quirk: a file that ends right after its leading bracket*; §13.2: with
+        // nothing but whitespace before it.
+        let files = [
+            ("/c/b.inc", "{"),
+            ("/c/nb.inc", "\n{"),
+            ("/c/k.inc", "["),
+            ("/c/sk.inc", " \t["),
+            ("/c/cb.inc", "# c\n{"),
+            ("/c/ck.inc", "/* c */["),
+            ("/c/sp.inc", "{ "),
+        ];
+        for file in ["b.inc", "nb.inc", "k.inc", "sk.inc"] {
+            let v = run(&files, &format!("a = 1\n.include \"{file}\"\nb = 2")).unwrap();
+            assert_eq!(keys(&v), ["a", "b"], "{file}");
+            // Nothing is taken over: the object keeps its own brace.
+            let v = run(
+                &files,
+                &format!("x {{ .include \"{file}\"\nb = 2 }}\nc = 3"),
+            )
+            .unwrap();
+            assert_eq!(keys(&v), ["x", "c"], "{file}");
+            assert_eq!(keys(&obj(&v)["x"]), ["b"], "{file}");
+        }
+        assert!(run(&files, "a = 1\n.include \"b.inc\"\nb = 2\n}").is_err());
+        // With any byte after the `{`, the brace is taken over (§9.4), and so it is after a
+        // leading comment group, where the spec names no exception (QUESTIONS.md #70: libucl
+        // adds nothing there as well).
+        for file in ["sp.inc", "cb.inc"] {
+            let v = run(
+                &files,
+                &format!("x {{ .include \"{file}\"\nb = 2 }}\nc = 3"),
+            )
+            .unwrap();
+            assert_eq!(keys(&v), ["x"], "{file}");
+            assert_eq!(keys(&obj(&v)["x"]), ["b", "c"], "{file}");
+        }
+        assert_eq!(
+            run(&files, "a = 1\n.include \"ck.inc\"")
+                .unwrap_err()
+                .kind(),
+            &ErrorKind::IncludeArrayRoot
+        );
+        // Under a key, the key's object stays empty.
+        let v = run(&files, ".include(key=\"k\") \"b.inc\"\nb = 2").unwrap();
+        assert_eq!(keys(&v), ["k", "b"]);
+        assert!(obj(&obj(&v)["k"]).is_empty());
+        // Text parsed in place follows the same rule; other text that starts with `[` is an
+        // error (the project's choice where libucl is uncertain, §13.2).
+        let mut p = parser(&files, ParserFlags::DEFAULT);
+        p.register_macro("emit", |call| {
+            let text = call.value().to_vec();
+            call.parse(text)
+        });
+        let v = p
+            .parse(b"a = 1\n.emit \"{\"\nb = 2\no { .emit \"{\" }\nc = 3\n.emit \" [\"")
+            .unwrap();
+        assert_eq!(keys(&v), ["a", "b", "o", "c"]);
+        assert!(obj(&obj(&v)["o"]).is_empty());
+        for text in ["[1]", "[]", "[1", "[ "] {
+            let e = p
+                .parse(format!("a = 1\n.emit \"{text}\"\nb = 2").as_bytes())
+                .unwrap_err();
+            assert_eq!(e.kind(), &ErrorKind::IncludeArrayRoot, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_nul_byte_ends_a_path() {
+        // spec §9.2, *Quirk: a NUL byte in VALUE*; §9.3. Only a braced VALUE can hold one.
+        let files = [A, ("/c/text.txt", "hello")];
+        for input in [".include {files/a.inc\0zzz}", ".include {files/a.inc\0}"] {
+            assert_eq!(keys(&run(&files, input).unwrap()), ["x", "y"], "{input:?}");
+        }
+        // An empty path before the NUL names no file.
+        assert!(matches!(
+            run(&files, "a = 1\n.include {\0}\nb = 2").unwrap_err().kind(),
+            ErrorKind::FileNotFound { path } if path.is_empty()
+        ));
+        let e = run(&files, "a = 1\n.try_include {\0}\nb = 2").unwrap_err();
+        assert!(e.is_stopped(), "{e}");
+        assert_eq!(keys(e.partial().unwrap()), ["a"]);
+        #[cfg(feature = "load")]
+        {
+            let v = run(&files, ".load(key=\"k\") {text.txt\0zz}").unwrap();
+            assert_eq!(obj(&v)["k"].as_str(), Some("hello"));
+            // An empty path is an error even with `try` (§9.6), also when a NUL ends it
+            // (QUESTIONS.md #71: libucl skips it with `try`).
+            for input in [
+                ".load(key=\"k\", try=true) {\0zz}\nb = 2",
+                ".load(key=\"k\") {\0zz}",
+                ".load(key=\"k\", try=true) \"\"",
+            ] {
+                assert!(
+                    matches!(
+                        run(&files, input).unwrap_err().kind(),
+                        ErrorKind::FileNotFound { path } if path.is_empty()
+                    ),
+                    "{input:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn included_entries_go_where_the_macro_stands() {

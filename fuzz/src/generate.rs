@@ -73,6 +73,8 @@ const TOKENS: &[&str] = &[
     "\\$",
     "$FILENAME",
     "${CURDIR}",
+    "${H_X}",
+    "x${H_X}",
     "\\u0041",
     "\\u00e9",
     "\\uD800",

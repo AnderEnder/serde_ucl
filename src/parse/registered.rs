@@ -73,9 +73,15 @@ impl MacroTable {
 
 /// What a handler's [`MacroCall`] does to the parse, through the parser core.
 pub(crate) trait Host {
-    /// Adds `value` under `key` to the innermost open object, with priority 0, as a further
+    /// Adds `value` under `key` to the innermost open object, with `priority`, as a further
     /// value of an existing key (spec §13.2, *Add entries*). `at` is the macro.
-    fn add_entry(&mut self, key: String, value: UclValue, at: usize) -> Result<(), MacroError>;
+    fn add_entry(
+        &mut self,
+        key: String,
+        value: UclValue,
+        priority: u8,
+        at: usize,
+    ) -> Result<(), MacroError>;
 
     /// Parses `text` in place of the macro at `at` (spec §13.2, *Have text parsed in place*).
     fn parse_text(&mut self, text: &[u8], at: usize) -> Result<(), Error>;
@@ -111,7 +117,7 @@ pub struct MacroCall<'a> {
     name: &'a str,
     value: &'a [u8],
     arguments: Option<&'a UclValue>,
-    root: Option<&'a UclValue>,
+    root: Option<(&'a UclValue, u8)>,
     at: usize,
     /// The error of text parsed in place that was rejected or stopped: it decides the outcome
     /// of the macro, whatever the handler returns.
@@ -124,7 +130,7 @@ impl<'a> MacroCall<'a> {
         name: &'a str,
         value: &'a [u8],
         arguments: Option<&'a UclValue>,
-        root: Option<&'a UclValue>,
+        root: Option<(&'a UclValue, u8)>,
         at: usize,
     ) -> Self {
         Self {
@@ -175,7 +181,33 @@ impl<'a> MacroCall<'a> {
     /// entries they had then, also when the macro stands in an included file (spec §13.2).
     /// `None` for a macro registered with [`super::Parser::register_macro`].
     pub fn root(&self) -> Option<&UclValue> {
-        self.root
+        self.root.map(|(root, _)| root)
+    }
+
+    /// For a macro registered with [`super::Parser::register_context_macro`], the priority of
+    /// the root: that of the first input, which creates the root, whatever `.priority` says
+    /// later (spec §13.2, *The root's priority*). It has no effect on the result (§8.7), but a
+    /// copy of the root keeps it, as libucl's does: give it to
+    /// [`MacroCall::add_with_priority`] to add such a copy. `None` for a macro registered with
+    /// [`super::Parser::register_macro`].
+    ///
+    /// ```
+    /// use ucl_lexer::parse::Parser;
+    ///
+    /// let mut parser = Parser::new();
+    /// parser.set_priority(3);
+    /// parser.register_context_macro("snapshot", |call| {
+    ///     let root = call.root().cloned().expect("a context macro gets the root");
+    ///     let priority = call.root_priority().expect("and its priority");
+    ///     call.add_with_priority("snapshot", root, priority)
+    /// });
+    /// let value = parser.parse(b".priority 7\na = 1\n.snapshot {}")?;
+    /// let entry = value.as_object().unwrap().entry("snapshot").unwrap();
+    /// assert_eq!(entry.slots()[0].priority(), 3);
+    /// # Ok::<(), ucl_lexer::parse::Error>(())
+    /// ```
+    pub fn root_priority(&self) -> Option<u8> {
+        self.root.map(|(_, priority)| priority)
     }
 
     /// Adds `value` under `key` to the innermost open object, where the macro stands, in order
@@ -188,7 +220,21 @@ impl<'a> MacroCall<'a> {
     /// Fails when no object is open, after text parsed in place closed the braced root, and when
     /// `value` would nest containers deeper than the limit of spec §11.2.
     pub fn add(&mut self, key: impl Into<String>, value: UclValue) -> Result<(), MacroError> {
-        self.host.add_entry(key.into(), value, self.at)
+        self.host.add_entry(key.into(), value, 0, self.at)
+    }
+
+    /// [`MacroCall::add`] with the value at `priority` (0 to 15; higher bits are ignored, as in
+    /// spec §8.3) instead of 0. The duplicate rules still do not apply when it is added; the
+    /// priority takes part when a later value of `key` is inserted (§8.3). A copy of the root
+    /// that keeps the root's priority ([`MacroCall::root_priority`]) is added this way.
+    pub fn add_with_priority(
+        &mut self,
+        key: impl Into<String>,
+        value: UclValue,
+        priority: u8,
+    ) -> Result<(), MacroError> {
+        let priority = priority & crate::value::MAX_PRIORITY;
+        self.host.add_entry(key.into(), value, priority, self.at)
     }
 
     /// Parses `text` in place of the macro (spec §13.2, *Have text parsed in place*), as the
@@ -225,6 +271,7 @@ impl fmt::Debug for MacroCall<'_> {
             .field("value", &String::from_utf8_lossy(self.value))
             .field("arguments", &self.arguments)
             .field("root", &self.root.is_some())
+            .field("root_priority", &self.root_priority())
             .finish()
     }
 }

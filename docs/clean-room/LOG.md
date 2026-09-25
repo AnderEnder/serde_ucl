@@ -2017,3 +2017,107 @@
     file changed. `scripts/ci.sh` passes at both commits.
   - Commits: `b778847` (cases, pending), `736575e` (spec, QUESTIONS, COMPATIBILITY; tag
     `spec-v12`), and this entry. The spec contains behaviour only.
+- 2026-09-25 — Role: implementation team. Item: C9 (the crate brought up to `spec-v12`, the
+  answers to QUESTIONS #60–#69; the fuzzer's filtering; fuzz runs).
+  - Inputs consulted: `docs/clean-room/` (PROTOCOL, WORKLIST, QUESTIONS, the C8c and C0 v12
+    entries of this log); `docs/spec/` at `spec-v12` (`git diff spec-v11 spec-v12 -- docs/spec/`,
+    and §2.2, §5.4, §6.3, §7.7, §9.1–§9.7, §12.5, §13.2 and the README's *Divergences* and
+    *Uncertain behaviour*; HEAD's `docs/spec/` equals `spec-v12`); `docs/COMPATIBILITY.md`; the
+    conformance suite (`tests/conformance.rs`, `tests/common/oracle.rs`,
+    `tests/conformance/README.md`, `tests/conformance/pending/` with its README, the xfail lists,
+    and the fixtures under `cases/spec/09-macros/files/`); `fuzz/`; `scripts/ci.sh`,
+    `scripts/regen-golden.sh` (the `pending` lines only) and `.github/workflows/fuzz.yml`;
+    `CHANGELOG.md` and the crate's own files.
+  - Black-box oracle runs: about 130 single probes of `target/libucl-oracle/ucl-dump` from
+    `target/c9/o.sh` (inputs in `target/c9/`, fixtures in `target/c9/scr/` and the case
+    directories), `--check` and `--replay` of the fuzzer, and the fuzz runs below. I did not list
+    or open anything in the libucl clone or `build.log`; the listing of `target/libucl-oracle/`
+    showed its entry names only. Background command output went to files under `target/c9/`; I
+    did not open anything under `/tmp` or `/private/tmp`. No sub-agents were used; the advisor
+    tool was called once, before the work, and timed out.
+  - Work, each with unit tests, and each case moved unchanged from `tests/conformance/pending/`
+    (`git mv`; 156 files, all exact renames) once the crate passed it; the pending copies of
+    `files/a.inc`, `files/text.txt` and `files/v12/args_bad.inc` were identical to those in
+    `cases/spec/09-macros/files/` and were removed; `pending/` and its README are gone:
+    - §2.2: after an entry, a VT or FF makes the place the one where the first key of the root
+      would start, so a last-byte `#` there is an error unless a comment directly precedes it
+      (4 cases);
+    - §6.3: `<<` followed only by uppercase letters up to the end of a unit of four or more bytes
+      is `ErrorKind::UnterminatedHeredoc` (3 cases);
+    - §9.2 ARGUMENTS: outside a quoted part every `"` begins one, also after `\`; a `(` that is
+      the last byte of its unit is the VALUE; inside an argument document, or a file one
+      includes, a rejected argument document is dropped and the VALUE starts right after the `)`.
+      The errors of the project's divergences and limits (non-UTF-8, unsupported, the argument
+      depth and nesting limits, the input limit, read errors) are not dropped, so they stay
+      errors as the divergences say (9 cases);
+    - §9.2, §9.3, §9.5: a NUL byte in a braced VALUE ends an include or `.load` path and a
+      `.priority` text, an empty priority text before it being 0 (5 cases);
+    - §9.4, §13.2: an included file or text in place that is whitespace and then a `{` or `[` as
+      its last byte adds nothing and takes no brace over (6 cases);
+    - §13.2, §8.7: the root carries the first input's priority; `MacroCall::root_priority` gives
+      it to a context macro, `MacroCall::add_with_priority` adds a value at a priority, and the
+      runner's `.ctx` (`tests/common/oracle.rs`) adds its copy with it (2 cases; the copy's
+      priority takes part in §8.3 afterwards, as in the oracle);
+    - fuzzer (`fuzz/`): seeds keep `dump-comments` and `variable-handler`, which are also extra
+      flags now, so saved comments and handler results are compared; `fuzz/src/uncertain.rs`
+      recognises the Uncertain rules the dumps can show (§5.4 out-of-range `kb`/`mb`/`gb`
+      floats, §7.7 handler results with other text, §9.7/§13.2 bytes after a NUL in copied
+      strings and the key of a collection in `.seen`'s copy, §12.5 the byte after a block comment
+      at the end of a unit and comments of replaced values, §9.4/§13.2 a unit that starts with
+      `[`), and a difference is skipped only when every part of it is one of these; the skip
+      list otherwise holds only oracle crashes and time-outs and the project's divergences;
+    - fixes from the fuzz runs where the spec is clear: `.load` looks its path up as written
+      (§9.6), not through its canonical path, so with `FsLoader` a regular file followed by `/`
+      is not found, as in the oracle (`tests/api_tests.rs`); in the §5.2 `x`-after-a-fraction
+      quirk the dropped number before the `x` does not count toward the §5.3 length limit;
+    - the parser records three Uncertain rules the dumps cannot show, through a hidden
+      `Parser::uncertain_reached` (`parse::Uncertain`): §9.1 a reopened value that is not an
+      object, §9.4 a container of an ended unit at the check at the end of a later included
+      file, §9.4 a `}` in an included file that closes an array element; the fuzzer skips any
+      difference of such a parse. The comment, NUL-copy, `.seen`-key and handler recognisers
+      were widened after the runs showed other memory-dependent bytes (a space, `0xc0`, NUL
+      padding) in the places §7.7, §9.7 and §13.2 call memory-dependent;
+    - `CHANGELOG.md` (behaviour and API), QUESTIONS.md #70–#78.
+    Where the oracle differs from an explicit spec rule or goes beyond it, the crate follows the
+    spec text and the difference is asked (no answers are expected: the project owner has
+    stopped spec releases after spec-v12): #70 (a lone `{`/`[` after a leading comment group),
+    #71 (`.load` with `try=true` and a VALUE starting with NUL), #72 (the glob test sees the
+    VALUE past a NUL), #73 (a trailing `/` pattern matches a symbolic link to a file), #74
+    (braced text in place after a name), #75 (`-1.5xd`), #76 (text in place inside a left-open
+    section object), #77 (the first-value rule at nested levels of an `.inherit` copy), #78 (NUL
+    bytes in string parameters).
+  - Choices where spec-v12 marks behaviour Uncertain: text in place that starts with `[` and
+    holds more, other than `[1]` and `[]` (§13.2): an error at the `[`, as for an included file;
+    strings with a NUL byte copied by `.inherit` (§9.7): copied byte for byte, as the spec
+    records; the runner's test macros copy keys and strings exactly (§13.2, #66, #68).
+  - Fuzz results (`scripts/ci.sh fuzz 600 SEED`, 14 jobs, inputs of at most 4096 bytes). Runs on
+    intermediate builds, each followed by fixes or questions: seed 20261010 (1,969,297 inputs,
+    5 differences, 4 findings), 20261011 (1,569,130 inputs, 7 differences, 7 findings), 20261013
+    (1,712,355 inputs, 5 differences, 5 findings), 20261015 (1,641,048 inputs, 2 differences);
+    stopped early after a fix: 20261012 (171 s, 446,947 inputs, none), 20261014 (382 s,
+    1,048,192 inputs, none), 20261016 (171 s, 362,109 inputs, 1). Final build (`1723d96`, the
+    crate and fuzzer as committed):
+    - seed 20261017, 600 s: 1,841,460 inputs, 1,838,347 agree, 3,109 skipped (228 of them
+      Uncertain: §7.7 90, §12.5 block comment 117 and replaced comments 8, `[` 6, §9.7 3, §13.2
+      3, §9.4 ended unit 1), 4 differ, 3 findings: #74 (2), #72, #73;
+    - seed 20261018, 600 s: 1,608,991 inputs, 1,606,333 agree, 2,653 skipped (154 Uncertain),
+      5 differ, 4 findings: #74 (3), #77, #78.
+    `--replay` of the 25 saved findings of all runs with the final build: 4 agree (the `.load`
+    and length fixes, and two §9.4 ended-unit inputs that the oracle now accepts, having rejected
+    them before: its result varies between runs), 3 are skipped as Uncertain (the widened
+    recognisers), and 18 fall under the questions: #72 (4), #73 (2), #74 (7), #75, #76, #77 (2),
+    #78. The finding of the stopped run 20261016 (`a=${H_$ABI` under `variable-handler`, §7.7) is
+    skipped as Uncertain by the widened recogniser.
+  - Results: conformance, only the 29 new cases added: new core 1622 cases, 1618 pass, 4 expected
+    failures (was 1593, 1589); emitters 1195 cases with output, 1191 match in every format (was
+    1173, 1169); readback 1191 cases parse, config [1177, 11, 3, 0], json and json-compact
+    [1188, 0, 3, 0], yaml [1179, 9, 3, 0] (was 1169). `xfail-new.txt` and `xfail-emit.txt`
+    unchanged. `scripts/ci.sh` (stable 1.98.1) passes at each of the 17 commits below, run one by
+    one in a scratch worktree detached at each (`target/c9/wt`, removed since), exit status 0
+    for all; of its logs I read only the step lines.
+  - Questions: #70–#74.
+  - Commits: `c1bd026`, `d814744`, `5283258`, `5497b5f`, `9e5dfa2`, `184d70c`, `0ccaa86`,
+    `d136848`, `ff4fb4d`, `deda819`, `2608233`, `0cdd850`, `8c9d029`, `9e36809`, `d46125b`,
+    `1723d96`, `0dc6ebf`, and the `C9:` commit that adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

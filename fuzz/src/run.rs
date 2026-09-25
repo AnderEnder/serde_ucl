@@ -2,7 +2,9 @@
 //! the conformance runner compares a case with its golden file (`tests/common/oracle.rs`).
 
 use crate::oracle::{self, Setup};
+use crate::uncertain::{self, Context};
 use serde_json::Value as J;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -10,7 +12,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use ucl_lexer::parse::ErrorKind;
+use ucl_lexer::parse::{ErrorKind, Parser, Uncertain};
 
 /// The oracle's options for the entries of a `.flags` file, mapped as `scripts/regen-golden.sh`
 /// maps them.
@@ -126,33 +128,73 @@ pub enum CrateResult {
 }
 
 /// Parses `bytes` as a document given as text, set up as the oracle runs with `setup` from the
-/// working directory `base_dir`.
-pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> CrateResult {
+/// working directory `base_dir`. With `dump-comments`, the dump has the saved comments, as the
+/// oracle's does. Also returns what [`uncertain`] needs from the parse: the texts of the comments
+/// the crate saved but attached to no value (spec §12.5), and the uncertain rules the parse
+/// reached that its result does not show ([`Parser::uncertain_reached`]).
+pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, CrateNotes) {
     let result = oracle::quietly(|| {
         let mut parser = oracle::configure(setup, base_dir);
-        match parser.parse(bytes) {
-            Ok(value) => Ok(oracle::dump(&value, None)),
-            Err(e) if e.is_stopped() => Ok(oracle::dump(
-                &e.into_partial().expect("a stop keeps its result"),
-                None,
-            )),
+        let parsed = match parser.parse(bytes) {
+            Ok(value) => Ok(value),
+            Err(e) if e.is_stopped() => Ok(e.into_partial().expect("a stop keeps its result")),
             Err(e) => Err(e),
-        }
+        };
+        let mut notes = CrateNotes {
+            dropped_comments: Vec::new(),
+            uncertain: parser.uncertain_reached(),
+        };
+        let value = match parsed {
+            Ok(value) => value,
+            Err(e) => return (Err(e), notes),
+        };
+        let comments = setup.dump_comments.then(|| oracle::comment_map(&parser));
+        notes.dropped_comments = dropped_comments(&parser);
+        (Ok(oracle::dump(&value, comments.as_ref())), notes)
     });
     match result {
-        Ok(Ok(dump)) => CrateResult::Dump(dump),
-        Ok(Err(e)) => CrateResult::Rejected {
-            kind: e.kind().clone(),
-            message: e.to_string(),
-        },
-        Err(panic) => CrateResult::Panicked(
-            panic
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| panic.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "a panic".to_string()),
+        Ok((Ok(dump), notes)) => (CrateResult::Dump(dump), notes),
+        Ok((Err(e), notes)) => (
+            CrateResult::Rejected {
+                kind: e.kind().clone(),
+                message: e.to_string(),
+            },
+            notes,
+        ),
+        Err(panic) => (
+            CrateResult::Panicked(
+                panic
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "a panic".to_string()),
+            ),
+            CrateNotes::default(),
         ),
     }
+}
+
+/// What the crate's parse tells [`uncertain`] besides its result.
+#[derive(Default)]
+pub struct CrateNotes {
+    pub dropped_comments: Vec<String>,
+    pub uncertain: Vec<Uncertain>,
+}
+
+/// The texts of the saved comments that are attached to no value of the result.
+fn dropped_comments(parser: &Parser) -> Vec<String> {
+    let attached: BTreeSet<usize> = parser
+        .attached_comments()
+        .iter()
+        .flat_map(|group| group.comments.iter().copied())
+        .collect();
+    parser
+        .comments()
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !attached.contains(i))
+        .map(|(_, comment)| comment.text.clone())
+        .collect()
 }
 
 /// How the crate differs from the oracle.
@@ -192,7 +234,20 @@ pub enum Verdict {
 }
 
 /// Compares the oracle's result with the crate's, as `tests/conformance.rs` compares a case.
-pub fn compare(oracle: &OracleResult, krate: &CrateResult) -> Verdict {
+/// Only the project's divergences (spec README, *Divergences decided by the project*), what
+/// libucl does not define (a crash) and the behaviour the spec leaves uncertain
+/// ([`uncertain`]) are skipped.
+pub fn compare(oracle: &OracleResult, krate: &CrateResult, ctx: &Context<'_>) -> Verdict {
+    match compare_results(oracle, krate, ctx) {
+        // The parse reached a rule the spec leaves uncertain, where libucl's result is undefined.
+        Verdict::Differs { .. } if !ctx.uncertain.is_empty() => {
+            Verdict::Skipped(uncertain::reached(ctx.uncertain[0]))
+        }
+        verdict => verdict,
+    }
+}
+
+fn compare_results(oracle: &OracleResult, krate: &CrateResult, ctx: &Context<'_>) -> Verdict {
     if let CrateResult::Panicked(message) = krate {
         return Verdict::Differs {
             kind: Kind::CratePanics,
@@ -217,6 +272,9 @@ pub fn compare(oracle: &OracleResult, krate: &CrateResult) -> Verdict {
             ErrorKind::Unsupported { .. } => Verdict::Skipped("divergence: unsupported"),
             ErrorKind::ArgumentsTooDeep { .. } => Verdict::Skipped("divergence: argument depth"),
             ErrorKind::NestingTooDeep { .. } => Verdict::Skipped("divergence: nesting depth"),
+            // Spec §9.4 and §13.2 leave libucl's reading of such a unit uncertain; the crate
+            // reports the error at the `[`.
+            ErrorKind::IncludeArrayRoot => Verdict::Skipped(uncertain::ARRAY_TEXT),
             _ => Verdict::Differs {
                 kind: Kind::CrateRejects,
                 detail: format!("crate error: {message}"),
@@ -231,8 +289,12 @@ pub fn compare(oracle: &OracleResult, krate: &CrateResult) -> Verdict {
         (OracleResult::Dump(golden), CrateResult::Dump(value)) => {
             let mut golden = golden.clone();
             oracle::strip_unobservable_priorities(&mut golden, true);
+            let mut reasons = BTreeSet::new();
+            uncertain::excuse(&mut golden, value, ctx, &mut reasons);
             match oracle::find_diff(&golden, value, "$") {
-                None => Verdict::Agree,
+                None => reasons
+                    .first()
+                    .map_or(Verdict::Agree, |reason| Verdict::Skipped(reason)),
                 Some(detail) => Verdict::Differs {
                     kind: Kind::ValuesDiffer,
                     detail,
@@ -273,8 +335,14 @@ pub fn check(target: &Target<'_>, bytes: &[u8], flags: &[String], dir: &Path) ->
     let options = oracle_options(flags).expect("the fuzzer's flags are known");
     fs::write(target.file, bytes).expect("the work file can be written");
     let oracle = run_oracle(target.oracle, &options, target.file, dir, target.timeout);
-    let krate = run_crate(&setup, dir, bytes);
-    let verdict = compare(&oracle, &krate);
+    let (krate, notes) = run_crate(&setup, dir, bytes);
+    let ctx = Context {
+        input: bytes,
+        flags,
+        dropped_comments: &notes.dropped_comments,
+        uncertain: &notes.uncertain,
+    };
+    let verdict = compare(&oracle, &krate, &ctx);
     Checked {
         oracle,
         krate,
@@ -308,8 +376,15 @@ mod tests {
     fn verdicts() {
         let dump = |text: &str| {
             let setup = Setup::from_flags(&flags(&["string-input"])).unwrap();
-            run_crate(&setup, Path::new("."), text.as_bytes())
+            run_crate(&setup, Path::new("."), text.as_bytes()).0
         };
+        let ctx = Context {
+            input: b"",
+            flags: &[],
+            dropped_comments: &[],
+            uncertain: &[],
+        };
+        let compare = |oracle: &OracleResult, krate: &CrateResult| compare(oracle, krate, &ctx);
         let value = |text: &str| match dump(text) {
             CrateResult::Dump(value) => OracleResult::Dump(value),
             _ => panic!("{text} parses"),

@@ -79,7 +79,7 @@ pub use registered::{MacroCall, MacroError, MacroHandler};
 use crate::error::Position;
 use crate::value::{DuplicateStrategy, ParserFlags, UclValue};
 use indexmap::IndexMap;
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -172,6 +172,39 @@ pub struct Parser {
     handler_answers: Vec<Option<String>>,
     /// The macros the application registered (spec §13.2).
     macros: registered::MacroTable,
+    /// The [`Uncertain`] rules the last parse reached, as bits.
+    uncertain: Cell<u8>,
+}
+
+/// Behaviour that the spec leaves uncertain (spec README, *Uncertain behaviour*) and that the
+/// dumps of a parse result cannot show, which a parse reached ([`Parser::uncertain_reached`]).
+/// libucl's result there is undefined; the crate's is its own choice. For tools that compare the
+/// crate with libucl, such as the differential fuzzer in `fuzz/`; not part of the stable API.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Uncertain {
+    /// §9.1: a macro directly after a name, followed only by comments to the end of its unit,
+    /// when the value created most recently is not an object. The crate leaves it alone.
+    ReopenedNotObject,
+    /// §9.4, *The check at the end of a unit*: at the end of an included file, the check stopped
+    /// at a container of a unit that has ended, and taking the containers of ended units as the
+    /// file's own would have found one with an open bracket. The crate stops there.
+    EndedUnitContainer,
+    /// §9.4, *Where the entries go*: a `}` in an included file closes an object that is an
+    /// element of an array the including unit opened. The crate goes on inside the array.
+    ClosedArrayElement,
+}
+
+impl Uncertain {
+    const ALL: [Uncertain; 3] = [
+        Uncertain::ReopenedNotObject,
+        Uncertain::EndedUnitContainer,
+        Uncertain::ClosedArrayElement,
+    ];
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
 }
 
 impl Default for Parser {
@@ -221,6 +254,7 @@ impl Parser {
             facts: OutputFacts::new(),
             handler_answers: Vec::new(),
             macros: registered::MacroTable::default(),
+            uncertain: Cell::new(0),
         }
     }
 
@@ -307,8 +341,9 @@ impl Parser {
     }
 
     /// Registers a context macro under `name`: as [`Parser::register_macro`], and its handler
-    /// also gets a copy of the root as built so far, [`MacroCall::root`] (spec §13.2). `.inherit`
-    /// (§9.7) is the built-in context macro.
+    /// also gets a copy of the root as built so far, [`MacroCall::root`], and the root's
+    /// priority, [`MacroCall::root_priority`] (spec §13.2). `.inherit` (§9.7) is the built-in
+    /// context macro.
     pub fn register_context_macro(
         &mut self,
         name: impl Into<String>,
@@ -506,8 +541,10 @@ impl Parser {
             facts,
             handler_answers,
             macros,
+            uncertain,
         } = self;
         handler_answers.clear();
+        uncertain.set(0);
         *attached_paths = OnceCell::new();
         // The handler's answers are recorded, so that `Parser::locate` can give them again.
         let recording = handler.as_deref_mut().map(|handler| {
@@ -528,10 +565,22 @@ impl Parser {
             search_path: search_path.clone(),
             max_input_bytes: *max_input_bytes,
             macros,
+            uncertain,
             comments,
             attached,
             facts,
         })
+    }
+
+    /// The behaviour the spec leaves uncertain that the last parse reached and its result does
+    /// not show ([`Uncertain`]). Empty for almost every document.
+    #[doc(hidden)]
+    pub fn uncertain_reached(&self) -> Vec<Uncertain> {
+        let bits = self.uncertain.get();
+        Uncertain::ALL
+            .into_iter()
+            .filter(|rule| bits & rule.bit() != 0)
+            .collect()
     }
 
     /// Parses a document given as bytes rather than read from a file.
@@ -789,6 +838,83 @@ mod tests {
         ] {
             assert!(parse(ok).is_ok(), "{ok:?}");
         }
+    }
+
+    #[test]
+    fn hash_as_last_byte_after_vt_or_ff_after_an_entry() {
+        // spec §2.2, *Quirk: VT and FF after an entry*: from a VT or FF on, the place is where
+        // the first key of the root would start. The same in an included file (oracle runs).
+        for bad in [
+            &b"a {}\x0c#"[..],
+            b"a {}\x0b#",
+            b"a = 1;\x0b#",
+            b"a = 1\n\x0c\n#",
+            b"a = 1\n \x0c#",
+            b"a {b 1}\x0c/**/ #",
+            b"a {b 1}\x0c# c\n #",
+            b"a = \"x\"\n\x0c#",
+            b"o { a = 1 }\x0c\x0c\x0c#",
+            b"a = 1; # c\n\x0c#",
+        ] {
+            assert_eq!(kind(bad), ErrorKind::HashAtEnd, "{bad:?}");
+        }
+        for ok in [
+            &b"a {}\t#"[..],
+            b"a {} #",
+            b"a {}\n #",
+            b"a {}\x0c# c",
+            b"a {}\x0c/* c */#",
+            b"a {b 1}\x0c# c\n#",
+            b"a = 1\n\x0b# c\n#",
+            b"a = 1;\x0c\x0c/**/#",
+            b"a {}\x0cb = 2\n #",
+        ] {
+            assert!(parse(ok).is_ok(), "{ok:?}");
+        }
+        // After an unquoted value the FF is part of the value (§4).
+        let v = parse(b"a = 1\x0c#").unwrap();
+        assert_eq!(obj(&v)["a"].as_str(), Some("1\x0c"));
+        let mut loader = MemoryLoader::new();
+        loader.add_file("f", "a = 1;\x0c#");
+        let mut parser = Parser::new();
+        parser.set_loader(loader);
+        let error = parser.parse(b".include \"f\"\nb = 2").unwrap_err();
+        assert_eq!(error.kind(), &ErrorKind::HashAtEnd);
+    }
+
+    #[test]
+    fn heredoc_opener_cut_by_the_end_of_its_unit() {
+        // spec §6.3, *Quirk*: the input, an argument document and an included file alike.
+        for bad in [
+            &b"k = <<EO"[..],
+            b"k <<AA",
+            b"\"a\"<<OD",
+            b"a=/**/<<EO",
+            b".priority(k = <<EOD) 1\na = 1",
+        ] {
+            assert_eq!(kind(bad), ErrorKind::UnterminatedHeredoc, "{bad:?}");
+        }
+        let mut loader = MemoryLoader::new();
+        loader.add_file("f", "k = <<EO");
+        let mut parser = Parser::new();
+        parser.set_loader(loader);
+        let error = parser.parse(b".include \"f\"\nm = 1").unwrap_err();
+        assert_eq!(error.kind(), &ErrorKind::UnterminatedHeredoc);
+        for (ok, value) in [
+            (&b"k = <<E"[..], "<<E"),
+            (b"k = <<EO ", "<<EO"),
+            (b"k = <<EO;", "<<EO"),
+            (b"k = <<AB1", "<<AB1"),
+            (b"k = <<Ab", "<<Ab"),
+        ] {
+            assert_eq!(
+                obj(&parse(ok).unwrap())["k"].as_str(),
+                Some(value),
+                "{ok:?}"
+            );
+        }
+        let v = parse(b"k = [<<EOD]").unwrap();
+        assert_eq!(obj(&v)["k"].as_array().unwrap()[0].as_str(), Some("<<EOD"));
     }
 
     #[test]

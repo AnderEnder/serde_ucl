@@ -108,6 +108,42 @@ fn text_input_loads_no_files() {
     assert_eq!(from_value::<Value>(value).unwrap(), json!({"k": "42\n"}));
 }
 
+#[cfg(feature = "load")]
+#[test]
+fn load_uses_its_path_as_written() {
+    // spec §9.6: the path of `.load` is used as written, not resolved to a canonical path first
+    // as an include path is (§9.3), so a regular file followed by `/` names nothing (oracle
+    // runs, C9). Whether an include path resolves so depends on the platform.
+    let dir = scratch("load_uses_its_path_as_written");
+    write(&dir.join("text.txt"), "hello");
+    let mut parser = ParserBuilder::new()
+        .with_loader(FsLoader::new())
+        .with_base_dir(&dir)
+        .build();
+    for path in ["text.txt/", "text.txt//", "text.txt/."] {
+        let e = parser
+            .parse(format!(".load(key=\"k\") \"{path}\"").as_bytes())
+            .unwrap_err();
+        assert!(
+            matches!(e.kind(), ErrorKind::FileNotFound { .. }),
+            "{path}: {e}"
+        );
+        let v = parser
+            .parse(format!(".load(key=\"k\", try=true) \"{path}\"\nb = 2").as_bytes())
+            .unwrap();
+        assert_eq!(from_value::<Value>(v).unwrap(), json!({"b": 2}), "{path}");
+    }
+    let v = parser
+        .parse(b".load(key=\"k\") \"sub/../text.txt\"")
+        .unwrap_err();
+    assert!(matches!(v.kind(), ErrorKind::FileNotFound { .. }), "{v}");
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let v = parser
+        .parse(b".load(key=\"k\") \"sub/../text.txt\"")
+        .unwrap();
+    assert_eq!(from_value::<Value>(v).unwrap(), json!({"k": "hello"}));
+}
+
 #[test]
 fn file_variables_of_text_input() {
     // spec §7.8 for a document given as bytes; `CURDIR` is the default loader's current

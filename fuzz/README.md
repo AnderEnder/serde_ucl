@@ -4,8 +4,9 @@
 input on which the two disagree. libucl runs as a black box: the oracle binary
 `target/libucl-oracle/ucl-dump` that `scripts/regen-golden.sh` builds, one process per input.
 The comparison is the conformance suite's (`tests/common/oracle.rs`, shared with
-`tests/conformance.rs`): the crate's value is dumped in the oracle's schema, the priorities
-spec §8.7 calls unobservable are removed, and floats are compared by their bits.
+`tests/conformance.rs`): the crate's value is dumped in the oracle's schema, with the saved
+comments under `dump-comments`, the priorities spec §8.7 calls unobservable are removed, and
+floats are compared by their bits.
 
 The fuzzer is a package of its own, outside `cargo test` and outside the crate's workspace.
 `scripts/ci.sh` checks that it is formatted, passes clippy, and passes its unit tests; running it
@@ -52,22 +53,35 @@ saved a finding.
   nested objects and arrays, every value form, comments, section names, `.priority`, `.inherit`
   and `.try_include`.
 - A quarter of the inputs get one more parser flag (`key-lowercase`, `no-time`,
-  `no-implicit-arrays`, `disable-macro`, `no-filevars`, `zerocopy`, a strategy, a priority, or
-  the test macros of spec §13.2).
+  `no-implicit-arrays`, `disable-macro`, `no-filevars`, `zerocopy`, a strategy, a priority,
+  the test macros of spec §13.2, `dump-comments` or the test variable handler).
 
 Both sides parse the input as a document given as text (the flag `string-input`), with the
 seed's directory as the oracle's working directory and as the crate's base directory, so the
-seeds' relative include paths find their files (spec §9.3). The flags `dump-comments`,
-`save-comments` and `variable-handler` are dropped: comments are not compared, and libucl's
-handler results can depend on memory contents (§7.7).
+seeds' relative include paths find their files (spec §9.3). A seed's other flags are kept:
+under `dump-comments` the saved comments are compared too (§12.5), and under
+`variable-handler` the handler's results (§7.7).
 
 ## Verdicts
 
 - **agree**: the same value, or both reject the input.
-- **skipped**: not compared. The oracle crashed (undefined behaviour in the spec), timed out, or
-  wrote a dump nested deeper than `serde_json` reads; or the crate rejected the input for a
-  project divergence: non-UTF-8 text, an unsupported feature (signatures), the limit on nested
-  argument documents, or the nesting limit.
+- **skipped**: not compared, or the difference is one the spec allows. The oracle crashed
+  (undefined behaviour in the spec), timed out, or wrote a dump nested deeper than `serde_json`
+  reads; the crate rejected the input for a project divergence (spec README, *Divergences
+  decided by the project*): non-UTF-8 text, an unsupported feature (signatures), the limit on
+  nested argument documents, or the nesting limit; or the results differ only in behaviour the
+  spec marks **Uncertain** (`src/uncertain.rs`): a handler result that shares its string with
+  other text (§7.7), a float outside the 64-bit range with `kb`, `mb` or `gb` (§5.4), the byte
+  saved after a block comment that ends its unit and the comments of a value §8 replaced
+  (§12.5), the bytes after a NUL in a string that `.inherit` or a test macro copies (§9.7), the
+  key of a collection in `.seen`'s copy of ARGUMENTS (§13.2), and an included file or text in
+  place that starts with `[` (§9.4, §13.2), which the crate rejects there. Three uncertain
+  rules that the dumps cannot show are reported by the crate's parse
+  (`Parser::uncertain_reached`, hidden from the crate's documentation): a macro after a name
+  followed only by comments when the value created most recently is not an object (§9.1), a
+  container of an ended unit at the check at the end of a later included file, and a `}` in an
+  included file that closes an array element (§9.4); any difference of such a parse is skipped.
+  Nothing the spec specifies is skipped.
 - **differ**: `crate-accepts` (libucl rejects the input), `crate-rejects` (libucl accepts it),
   `values-differ`, or `crate-panics`.
 

@@ -12,6 +12,7 @@ mod oracle;
 
 mod generate;
 mod run;
+mod uncertain;
 
 use generate::Rng;
 use run::{Checked, CrateResult, Kind, OracleResult, Target, Verdict};
@@ -134,14 +135,11 @@ struct Seed {
     flags: Vec<String>,
 }
 
-/// Flags the fuzzer drops from a seed's: comments are not compared, and the variable handler's
-/// result is memory-dependent in libucl where it shares a string with other text (spec §7.7).
-const DROPPED_FLAGS: &[&str] = &[
-    "dump-comments",
-    "save-comments",
-    "variable-handler",
-    "string-input",
-];
+/// Flags the fuzzer drops from a seed's: `string-input`, which it adds to every input. The
+/// others stay, `dump-comments` (comments are compared, as the conformance runner compares them)
+/// and `variable-handler` included; the behaviour of theirs that the spec leaves uncertain is
+/// recognised in `uncertain.rs`.
+const DROPPED_FLAGS: &[&str] = &["string-input"];
 
 /// Flags the fuzzer adds to a seed's now and then.
 const EXTRA_FLAGS: &[&str] = &[
@@ -157,6 +155,8 @@ const EXTRA_FLAGS: &[&str] = &[
     "strategy:append",
     "priority:3",
     "registered-macros",
+    "dump-comments",
+    "variable-handler",
 ];
 
 /// The cases of `tests/conformance/`, as the conformance runner finds them.
