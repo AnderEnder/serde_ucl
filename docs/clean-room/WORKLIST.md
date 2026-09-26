@@ -245,3 +245,9 @@ from the same text. The spec side reruns the libucl comparison after the work it
    change.
 5. New dependencies, `unsafe` code and public API changes are proposals in the report, not code;
    they are owner decisions.
+6. Study how other Rust parsers get their speed and take the ideas that fit (owner request of
+   2026-09-27): `serde_json` first, then others such as `simd-json`, `sonic-rs`, `toml` and
+   `toml_edit` (`winnow`), `logos`, and `memchr`. Read their source through cargo (the registry
+   under `~/.cargo/registry/src/`, fetched from a scratch package under `target/` if needed) and
+   their published documentation. Excluded: any crate that binds, bundles or ports libucl or
+   parses UCL, other than this one. The report credits the source of each idea.
