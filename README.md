@@ -17,9 +17,8 @@ specification and libucl's observable output.
 - Emitters that write a parsed document byte for byte as libucl does, with saved comments on
   request.
 
-Before 0.3.0 the package and the repository were named `ucl-rust-lexer` and the library
-`ucl_lexer`. Release 0.3.0 renamed all three to `serde_ucl`: code that used `ucl_lexer::` uses
-`serde_ucl::` ([CHANGELOG.md](CHANGELOG.md)).
+Release 0.3.0 renamed the package, the library and the repository to `serde_ucl`;
+[CHANGELOG.md](CHANGELOG.md) says how to upgrade.
 
 ## Contents
 
@@ -47,11 +46,9 @@ Before 0.3.0 the package and the repository were named `ucl-rust-lexer` and the 
 
 ## Installation
 
-The crate is not published on crates.io. Depend on the repository:
-
 ```toml
 [dependencies]
-serde_ucl = { git = "https://github.com/AnderEnder/serde_ucl" }
+serde_ucl = "0.3"
 serde = { version = "1", features = ["derive"] }
 ```
 

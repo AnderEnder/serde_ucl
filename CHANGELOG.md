@@ -2,6 +2,142 @@
 
 All notable changes to this crate are recorded here.
 
+## 0.3.0 - 2026-09-26
+
+The crate is renamed `serde_ucl`. This release also gives deserialization errors the position of
+the offending value, adds several inputs into one parser, registered macros, search directories,
+an input limit and a configurable `.inherit` depth limit, and follows libucl in more edge cases
+(spec-v12 and spec-v13). It is not compatible with 0.2.0: read *Renamed to `serde_ucl`* and
+*Breaking API changes* before upgrading.
+
+### Renamed to `serde_ucl`
+
+**Breaking.** The package `ucl-rust-lexer` and the library `ucl_lexer` are renamed `serde_ucl`,
+and the GitHub repository `AnderEnder/ucl-rust-lexer` is renamed `AnderEnder/serde_ucl`
+(<https://github.com/AnderEnder/serde_ucl>). From this release the crate is published on
+crates.io, with its documentation on docs.rs. To upgrade, depend on the new name:
+
+```toml
+[dependencies]
+serde_ucl = "0.3"
+```
+
+and change every `ucl_lexer::` path to `serde_ucl::`, attributes included:
+`use ucl_lexer::parse::Parser;` becomes `use serde_ucl::parse::Parser;`, and
+`#[serde(with = "ucl_lexer::time")]` becomes `#[serde(with = "serde_ucl::time")]`. The rename
+changes nothing else.
+
+### Breaking API changes
+
+- A document that parses but does not fit the target type is the new
+  `UclError::Deserialize(error::DeserializeError)`, not `UclError::Serde`, which is left for
+  serialization. The error has serde's error (`DeserializeError::error`), the path of the value
+  it is about (`path`, as `parse::PathSegment`s; `at_key` for an error about a key, such as an
+  unknown field) and, from `from_str`, `from_slice`, `from_reader`, `from_file`, the
+  `from_str_with_*` functions and `UclDeserializer`, where the value was written (`position`, and
+  `file` for a value from an included file), also for values merged by the duplicate rules or
+  copied by `.inherit`. `UclError::position` returns it. `from_value` gives neither a path nor a
+  position. `SerdeError::TooDeep` of deserialization comes inside `UclError::Deserialize`. The
+  text functions record nothing while deserialization succeeds: when it fails, they parse the
+  document again, recording where values were written, and deserialize the target a second time,
+  recording the path; the second parse asks the loader for included files again but gives the
+  variable handler's answers from the first parse instead of asking it. `UclDeserializer`, which
+  cannot run its visitor twice, records paths as it deserializes.
+
+### Added
+
+- Search directories for the include macros: `ParserBuilder::with_search_path`,
+  `Parser::set_search_path`, `Parser::clear_search_path` and `Parser::search_path`. The list is
+  in effect from the start of every parse, as a `path` list given to an earlier include would be
+  (spec §9.4), and in macro argument documents too.
+- An input limit: `ParserBuilder::with_max_input_bytes`, `Parser::set_max_input_bytes` and
+  `Parser::max_input_bytes` cap the bytes one parse reads, the document and the files that
+  `.include`, `.try_include` and `.load` read for it together. Going over it is the new
+  `parse::ErrorKind::InputTooLarge`, which `try=true` and `.try_include` do not soften. The
+  default is no limit, as in libucl. `Loader::read_limited`, with a default that calls
+  `Loader::read`, lets a loader stop reading a file once it is over the limit; `FsLoader` and
+  `MemoryLoader` do.
+- Several inputs into one parser (spec §13.1): `Parser::inputs` starts a parse that takes inputs
+  in turn, `Inputs::add` reads each `Input` (`Input::bytes`, `Input::file`, with
+  `Input::with_priority` and `Input::with_strategy`), and `Inputs::finish` returns the result. A
+  silent stop ends only its own input; any other error fails the parse. libucl's quirks at the
+  joins are kept: at most 16 inputs (`ErrorKind::TooManyInputs`), which count towards the include
+  nesting limit; nothing can follow a closed root or a zero-byte first input
+  (`ErrorKind::AfterRoot`); and the end of an input is not a separator
+  (`ErrorKind::UnseparatedInput`). `Parser::parse` and `Parser::parse_file` are parses of one
+  input.
+- Registered macros (spec §13.2): `Parser::register_macro`, `Parser::register_context_macro`,
+  `ParserBuilder::with_macro` and `ParserBuilder::with_context_macro` register a handler
+  (`MacroHandler`) by name. It gets a `MacroCall`, with the macro's value, arguments and, for a
+  context macro, the root built so far; it can add entries (`MacroCall::add`), have text parsed
+  in place (`MacroCall::parse`), stop the parse silently (`MacroError::stop`, reported as
+  `ErrorKind::MacroStopped`, a silent stop) or fail with a message (`MacroError::new`,
+  `ErrorKind::MacroFailed`; libucl has no such error). A registered name replaces a built-in
+  macro of the same name. A deserialization error of a document whose parse ran a registered
+  macro has no position, since the document is not parsed again. A context macro also gets the
+  root's priority, that of the first input (`MacroCall::root_priority`), which a copy of the root
+  keeps in libucl; `MacroCall::add_with_priority` adds a value at a priority other than 0.
+- A configurable limit on the copies `.inherit` makes: `ParserBuilder::with_inherit_depth_limit`,
+  `Parser::set_inherit_depth_limit` and `Parser::inherit_depth_limit`. A copy that would nest a
+  value more than the limit deep, the root included, fails with `ErrorKind::NestingTooDeep`,
+  whose `limit` is the setting. The default, `parse::DEFAULT_INHERIT_DEPTH_LIMIT`, is 1024; the
+  largest setting, `parse::MAX_INHERIT_DEPTH_LIMIT`, is 2048, the largest round depth at which
+  every entry point handles the parser's values on a 2 MiB thread stack in an unoptimised build.
+  A larger setting panics. The serde text functions reject a value nested more than 1024 deep,
+  which could not be parsed again; `emit` writes it. libucl sets no limit.
+- `UclError::file`: the included file that `UclError::position` is in, if any.
+- `MAX_PRIORITY` (15) is re-exported from the crate root.
+
+### Behaviour changes
+
+- Edge cases follow libucl (spec-v12): after an entry, a VT or FF makes a `#` that is the last
+  byte of the input an error unless a comment comes directly before it (§2.2); `<<` followed by
+  two or more uppercase letters and then the end of the document, an included file or a macro
+  argument list is an unterminated heredoc, `ErrorKind::UnterminatedHeredoc` (§6.3), where it was a
+  string; in macro arguments a `"` after a `\` outside quotes begins a quoted part, and a `(`
+  that is the last byte is the macro's value (§9.2); a macro inside macro arguments whose own
+  arguments are rejected runs without them instead of failing the document (§9.2); a NUL byte in
+  a braced macro value ends an include or `.load` path and a `.priority` value, where an empty
+  priority is 0 (§9.2, §9.5); `.load` looks its path up as written, so a regular file followed
+  by `/` is not found (§9.6); after a fraction or exponent, the number before an `x` does not
+  count toward the 127-character limit (§5.2, §5.3); and an included file, or text a registered macro parses in place,
+  that holds only whitespace and then a `{` or `[` as its last byte adds nothing (§9.4, §13.2),
+  where it was an error.
+- Edge cases follow libucl (spec-v13): with a leading `-`, a number with an `x` after a fraction
+  or exponent whose hex digits begin with a letter is a string (`-1.5xd`), where it was `0`
+  (§5.2); the string parameters of the include macros and of `.load` (`key`, `target`,
+  `duplicate` and the entries of `path`) end at their first NUL byte (§9.2); `.load(try=true)`
+  with a braced value that starts with a NUL byte is skipped as a missing file, where it was an
+  error (§9.6); with `glob=true`, a `*` or `?` after a NUL byte in the value makes the part before
+  the NUL a pattern (§9.4); an included file or text in place that holds only a `{` or `[` after a
+  leading comment group adds nothing (§9.4, §13.2); `.inherit` keeps only the first value of an
+  entry whose first value is an object or an array at every level of a copy, not only in the
+  copied object itself (§9.7); and text that a registered macro parses in place keeps the section
+  object it stands in open for the rest of the parse (§13.2).
+- Comparing (`==`) a `UclValue`, `UclObject`, `Entry` or `Slot` takes the same stack at any
+  depth, as cloning them does, where it recursed into nested values.
+
+### Packaging
+
+- The crate targets the latest stable Rust (1.98 at this release; `rust-version` in
+  `Cargo.toml`), where 0.2.0 required 1.88.
+- `Cargo.toml` sets `homepage` (the repository) and `documentation` (docs.rs).
+- `cargo bench` runs the benches in `benches/` only, so criterion's options work
+  (`cargo bench -- --noplot`); the library has no benchmarks (`bench = false`).
+- Release builds of this package, its benches and examples, use fat LTO and one codegen unit.
+  Crates that depend on it build it with their own release profile.
+
+### Repository
+
+- libucl's license moved from the repository root to `tests/conformance/libucl/LICENSE`, next to
+  the libucl test files it covers. It was never in the package.
+- `fuzz/` holds a differential fuzzer that compares the crate's parse results with libucl's on
+  generated inputs (`scripts/ci.sh fuzz`, the manual workflow `fuzz.yml`).
+- New workflows: `pin-move.yml` (manual: the golden files at another libucl commit, for review),
+  `coverage.yml` (cargo-llvm-cov on Linux; Codecov with a `CODECOV_TOKEN` secret) and
+  `release.yml` (on a `vX.Y.Z` tag: the checks, then `cargo publish` through crates.io Trusted
+  Publishing and the GitHub release). CI runs on stable Rust only.
+
 ## 0.2.0
 
 This release replaces the parser with one that reads UCL as libucl does, adds output in libucl's
@@ -90,20 +226,6 @@ Changed:
   `file()`. `UclError::Stopped` is new (see above). Error messages have new wording.
 - A `Position` has a 1-based line and column, the column counted in characters, and a 0-based
   byte offset. Only a line feed starts a new line; a carriage return is counted as a character.
-- A document that parses but does not fit the target type is the new
-  `UclError::Deserialize(error::DeserializeError)`, not `UclError::Serde`, which is left for
-  serialization. The error has serde's error (`DeserializeError::error`), the path of the value
-  it is about (`path`, as `parse::PathSegment`s; `at_key` for an error about a key, such as an
-  unknown field) and, from `from_str`, `from_slice`, `from_reader`, `from_file`, the
-  `from_str_with_*` functions and `UclDeserializer`, where the value was written (`position`, and
-  `file` for a value from an included file), also for values merged by the duplicate rules or
-  copied by `.inherit`. `UclError::position` returns it. `from_value` gives neither a path nor a
-  position. `SerdeError::TooDeep` of deserialization comes inside `UclError::Deserialize`. The
-  text functions record nothing while deserialization succeeds: when it fails, they parse the
-  document again, recording where values were written, and deserialize the target a second time,
-  recording the path; the second parse asks the loader for included files again but gives the
-  variable handler's answers from the first parse instead of asking it. `UclDeserializer`, which
-  cannot run its visitor twice, records paths as it deserializes.
 
 Added:
 
@@ -128,17 +250,8 @@ Added:
   another type, with the same stack at any depth: `from_value::<UclValue>(v)` and `to_value(&v)`
   give `v` back, priorities and the marks of `.inherit` copies included. Other types are read
   and written by recursion, and there nesting is limited to `MAX_SERDE_NESTING` (128) maps and
-  sequences; deeper nesting fails with the new `SerdeError::TooDeep`. Cloning and comparing
-  (`==`) a `UclValue`, `UclObject`, `Entry` or `Slot` take the same stack at any depth as well.
-- A configurable limit on the copies `.inherit` makes: `ParserBuilder::with_inherit_depth_limit`,
-  `Parser::set_inherit_depth_limit` and `Parser::inherit_depth_limit`. A copy that would nest a
-  value more than the limit deep, the root included, fails with `ErrorKind::NestingTooDeep`,
-  whose `limit` is the setting. The default, `parse::DEFAULT_INHERIT_DEPTH_LIMIT`, is 1024; the
-  largest setting, `parse::MAX_INHERIT_DEPTH_LIMIT`, is 2048, the largest round depth at which
-  every entry point handles the parser's values on a 2 MiB thread stack in an unoptimised build.
-  A larger setting panics. The serde text functions reject a value nested more than 1024 deep,
-  which could not be parsed again; `emit` writes it. libucl sets no limit.
-- `MAX_PRIORITY` (15) is re-exported from the crate root.
+  sequences; deeper nesting fails with the new `SerdeError::TooDeep`. Cloning a `UclValue`
+  takes the same stack at any depth as well.
 - `time` serializes `Duration` as well as deserializing it.
 - `from_slice`, `from_reader`, `from_file` (feature `fs`) and `from_value`; `from_value`,
   `from_str_with_env` and `from_str_with_map` are also re-exported from the crate root.
@@ -146,39 +259,8 @@ Added:
 - In the value model: `Placement` (also at the crate root), `UclObject::insert_slot_placed`,
   `UclObject::get_index`, `UclObject::get_index_mut`, `UclObject::index_of`,
   `UclObject::rename_key` and `Entry::value_at_mut`.
-- `UclError::parse_error`, `UclError::position` and `UclError::file`.
-- Search directories for the include macros: `ParserBuilder::with_search_path`,
-  `Parser::set_search_path`, `Parser::clear_search_path` and `Parser::search_path`. The list is
-  in effect from the start of every parse, as a `path` list given to an earlier include would be
-  (spec §9.4), and in macro argument documents too.
-- An input limit: `ParserBuilder::with_max_input_bytes`, `Parser::set_max_input_bytes` and
-  `Parser::max_input_bytes` cap the bytes one parse reads, the document and the files that
-  `.include`, `.try_include` and `.load` read for it together. Going over it is the new
-  `parse::ErrorKind::InputTooLarge`, which `try=true` and `.try_include` do not soften. The
-  default is no limit, as in libucl. `Loader::read_limited`, with a default that calls
-  `Loader::read`, lets a loader stop reading a file once it is over the limit; `FsLoader` and
-  `MemoryLoader` do.
+- `UclError::parse_error` and `UclError::position`.
 - Cargo features `fs` (default) and `load`.
-- Several inputs into one parser (spec §13.1): `Parser::inputs` starts a parse that takes inputs
-  in turn, `Inputs::add` reads each `Input` (`Input::bytes`, `Input::file`, with
-  `Input::with_priority` and `Input::with_strategy`), and `Inputs::finish` returns the result. A
-  silent stop ends only its own input; any other error fails the parse. libucl's quirks at the
-  joins are kept: at most 16 inputs (`ErrorKind::TooManyInputs`), which count towards the include
-  nesting limit; nothing can follow a closed root or a zero-byte first input
-  (`ErrorKind::AfterRoot`); and the end of an input is not a separator
-  (`ErrorKind::UnseparatedInput`). `Parser::parse` and `Parser::parse_file` are parses of one
-  input.
-- Registered macros (spec §13.2): `Parser::register_macro`, `Parser::register_context_macro`,
-  `ParserBuilder::with_macro` and `ParserBuilder::with_context_macro` register a handler
-  (`MacroHandler`) by name. It gets a `MacroCall`, with the macro's value, arguments and, for a
-  context macro, the root built so far; it can add entries (`MacroCall::add`), have text parsed
-  in place (`MacroCall::parse`), stop the parse silently (`MacroError::stop`, reported as
-  `ErrorKind::MacroStopped`, a silent stop) or fail with a message (`MacroError::new`,
-  `ErrorKind::MacroFailed`; libucl has no such error). A registered name replaces a built-in
-  macro of the same name. A deserialization error of a document whose parse ran a registered
-  macro has no position, since the document is not parsed again. A context macro also gets the
-  root's priority, that of the first input (`MacroCall::root_priority`), which a copy of the root
-  keeps in libucl; `MacroCall::add_with_priority` adds a value at a priority other than 0.
 
 ### Behaviour changes
 
@@ -217,8 +299,7 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
   `ErrorKind::UrlNotSupported`, and with `try=true` is skipped. Without `url=true` such a path is
   an ordinary path.
 - Limits: containers nest at most 1024 deep, the root included (`parse::MAX_NESTING`), also in
-  the objects that `.inherit` copies unless the parser's `.inherit` depth limit is changed
-  (libucl sets no limit there); included files 16 deep
+  the objects that `.inherit` copies (libucl sets no limit there); included files 16 deep
   (`parse::MAX_INCLUDE_DEPTH`) and macro argument documents 64 deep
   (`parse::MAX_ARGUMENT_DEPTH`; libucl sets no limit there either). The old lexer's
   configurable limits are gone. serde deserialization into, and serialization from, types
@@ -226,30 +307,6 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
   (`MAX_SERDE_NESTING`).
 - Deserializing into a borrowed `&str` field is not supported and fails with "expected a
   borrowed string"; use `String` or `Cow<str>`.
-- Edge cases follow libucl (spec-v12): after an entry, a VT or FF makes a `#` that is the last
-  byte of the input an error unless a comment comes directly before it (§2.2); `<<` followed by
-  two or more uppercase letters and then the end of the document, an included file or a macro
-  argument list is an unterminated heredoc, `ErrorKind::UnterminatedHeredoc` (§6.3), where it was a
-  string; in macro arguments a `"` after a `\` outside quotes begins a quoted part, and a `(`
-  that is the last byte is the macro's value (§9.2); a macro inside macro arguments whose own
-  arguments are rejected runs without them instead of failing the document (§9.2); a NUL byte in
-  a braced macro value ends an include or `.load` path and a `.priority` value, where an empty
-  priority is 0 (§9.2, §9.5); `.load` looks its path up as written, so a regular file followed
-  by `/` is not found (§9.6); after a fraction or exponent, the number before an `x` does not
-  count toward the 127-character limit (§5.2, §5.3); and an included file, or text a registered macro parses in place,
-  that holds only whitespace and then a `{` or `[` as its last byte adds nothing (§9.4, §13.2),
-  where it was an error.
-- Edge cases follow libucl (spec-v13): with a leading `-`, a number with an `x` after a fraction
-  or exponent whose hex digits begin with a letter is a string (`-1.5xd`), where it was `0`
-  (§5.2); the string parameters of the include macros and of `.load` (`key`, `target`,
-  `duplicate` and the entries of `path`) end at their first NUL byte (§9.2); `.load(try=true)`
-  with a braced value that starts with a NUL byte is skipped as a missing file, where it was an
-  error (§9.6); with `glob=true`, a `*` or `?` after a NUL byte in the value makes the part before
-  the NUL a pattern (§9.4); an included file or text in place that holds only a `{` or `[` after a
-  leading comment group adds nothing (§9.4, §13.2); `.inherit` keeps only the first value of an
-  entry whose first value is an object or an array at every level of a copy, not only in the
-  copied object itself (§9.7); and text that a registered macro parses in place keeps the section
-  object it stands in open for the rest of the parse (§13.2).
 
 ### Removed features, examples and benches
 
@@ -269,9 +326,7 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
 
 ### Packaging
 
-- `cargo bench` runs the benches in `benches/` only, so criterion's options work
-  (`cargo bench -- --noplot`); the library has no benchmarks (`bench = false`).
-- The crate targets the latest stable Rust (1.98 at this release; `rust-version` in `Cargo.toml`).
+- The minimum supported Rust version is 1.88 (`rust-version` in `Cargo.toml`).
 - The license files `LICENSE-MIT` and `LICENSE-APACHE` are added, for the crate's license
   `MIT OR Apache-2.0`.
 - The package holds only the library sources, `Cargo.toml`, `README.md`, `CHANGELOG.md` and the
