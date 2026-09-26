@@ -207,9 +207,8 @@ answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58
 join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, and `spec-v13`
 answers #70–#78, found by the fuzzer after `spec-v12`.
 
-24 cases of `spec-v13` are held in `tests/conformance/pending/`, because the crate does not follow
-their rules yet (§5.2, §9.2, §9.4, §9.6, §9.7, §13.2); they move to `cases/spec/` once it does, and
-the table below lists them under those paths.
+The cases of `spec-v13` are all in `cases/spec/`; `tests/conformance/pending/` was removed when the
+crate followed them (C10a).
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
 check (`tests/conformance/README.md`, *Golden files per platform*). The files next to each case
@@ -236,9 +235,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1629 cases in `cases/` and
-`libucl/`, and 24 cases held in `pending/` until the crate passes them, listed under the paths
-they will have (`tests/conformance/pending/README.md` names them).
+Every case in `tests/conformance/` and the section(s) that explain it: 1653 cases in `cases/` and
+`libucl/`.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the

@@ -21,7 +21,7 @@ example `key-lowercase` is `ParserFlags::KEY_LOWERCASE` and `no-filevars` is
 | Documents given as text: `from_str`, `from_slice`, `from_reader` and a parser without a file loader | `.include`, `.try_include` and `.load` read files relative to the working directory | no file is found, so they behave as for a missing file (§9.4, §9.6); file access is opt-in through `ParserBuilder` | parsing untrusted text must not read local files | `tests/api_tests.rs`: `text_input_reads_no_files`, `text_input_loads_no_files` |
 | The working directory | relative include paths and `CURDIR` in macro argument lists (§9.2) use it, in every input of a parser (§13.1) | never used: a configured base directory stands in for it; without one, a document parsed from a file, or an input given as a file, uses that file's directory, in included files too | results must not depend on where the program runs | `tests/api_tests.rs`: `from_file_resolves_includes_against_the_file_directory`; `tests/inputs_and_macros.rs`: `file_inputs_read_through_the_loader_and_set_the_file_variables` |
 | Macro argument lists nested inside argument lists (§9.2) | no limit of its own; very deep nesting crashes | at most 64 levels (`parse::MAX_ARGUMENT_DEPTH`), then an error | bounded stack use | `cases/spec/09-macros/macro_args_nested_100_levels` |
-| Values that `.inherit` copies (§9.7, §11.2) | no limit: copies of copies can nest a value tens of thousands of levels deep | a copy that would nest a value more than 1024 containers deep, the root included, is an error (`parse::ErrorKind::NestingTooDeep`), the same limit as for containers open at once | bounded stack use: no parsed value is nested deeper than 1024 | `tests/stack_depth.rs`; no conformance case, because the golden file would be too deep for the runner |
+| Values that `.inherit` copies (§9.7, §11.2) | no limit: copies of copies can nest a value tens of thousands of levels deep | a copy that would nest a value more than the parser's `.inherit` depth limit deep, the root included, is an error (`parse::ErrorKind::NestingTooDeep`, whose `limit` is the setting); the limit is 1024 by default, the same as for containers open at once, and can be set up to 2048 (`ParserBuilder::with_inherit_depth_limit`, `Parser::set_inherit_depth_limit`, `parse::MAX_INHERIT_DEPTH_LIMIT`) | bounded stack use: up to the largest setting, every entry point handles the parser's values on a 2 MiB stack in an unoptimised build | `tests/stack_depth.rs`; no conformance case, because the golden file would be too deep for the runner |
 | A variable handler's result in a string that also holds other text (§7.7) | depends on memory contents | the result is substituted in place | libucl's result is undefined | none (undefined in libucl) |
 | An error or silent stop inside an included file when the same macro still has files to read: a glob of `.try_include`, or a search path with directories left (§9.4) | crashes | an error fails the document; a silent stop ends the parse | libucl's behaviour is a crash | none (libucl crashes) |
 | An included file that starts with `[` (§9.4) | reads on and may stop or crash | error at the `[` | libucl's behaviour is undefined | none (undefined in libucl) |
@@ -58,23 +58,29 @@ the glob rules of spec §9.4 (`^` in `[^…]` is an ordinary member, no characte
 the first matched file under `prefix=true`). With glibc, libucl gives other results for those
 cases. Whether a pattern ending in `/` matches a symbolic link to a file, and whether a plain path
 ending in `/` after a file name names that file, differ between macOS and Linux in libucl, and the
-crate may follow either (§9.4, *Uncertain*).
+crate may follow either (§9.4, *Uncertain*). The crate matches directories only with a glob pattern
+that ends in `/`, on every platform, so a symbolic link to a file is left out; a plain path that
+ends in `/` after a file's name is looked up as the operating system does, which names the file on
+macOS and nothing on Linux.
 
-### Specified, not yet reproduced
+### NUL bytes, globs, copies and text in place (spec-v13)
 
-`spec-v13` answers the fuzzer's questions #70–#78. The crate does not follow these rules yet; their
-cases are held in `tests/conformance/pending/`:
-
-- An included file or text in place that is only a `{` or `[` after a leading comment group adds
-  nothing, as after whitespace (§9.4, §13.2).
-- `.load(try=true)` with a VALUE that starts with a NUL byte skips the missing file (§9.2, §9.6).
+- With a leading `-`, a number whose hex digits after an `x` that follows a fraction or exponent
+  begin with a letter is a string: `-1.5xd` (§5.2;
+  `cases/spec/05-numbers/hex_after_fraction_negative_nothing_read_is_string`).
+- The string parameters of the include macros and `.load` end at their first NUL byte:
+  `key="s\u0000t"` is `s` (§9.2; `cases/spec/09-macros/include_key_param_ends_at_nul`,
+  `cases/spec/09-macros/load_key_param_ends_at_nul`).
+- `.load(try=true)` with a VALUE that starts with a NUL byte skips the missing file; an empty VALUE
+  is still an error (§9.2, §9.6; `cases/spec/09-macros/load_try_path_nul_first_skipped`).
 - With `glob=true`, a `*` or `?` after a NUL byte in the VALUE makes the part before the NUL a
-  pattern (§9.4).
+  pattern (§9.4; `cases/spec/09-macros/include_glob_wildcard_after_nul_no_match_stops`).
+- An included file or text in place that is only a `{` or `[` after a leading comment group adds
+  nothing (§9.4, §13.2; `cases/spec/09-macros/include_comment_then_open_brace_takes_nothing_over`).
 - Text parsed in place while the innermost open object is a section object keeps that object open
-  for the rest of the parse (§13.2).
-- With a leading `-`, a hex-after-fraction number from which nothing is read is a string (§5.2).
-- The first-value rule of `.inherit` copies applies at every level of the copy (§9.7).
-- String parameters of the include macros and `.load` end at their first NUL byte (§9.2).
+  for the rest of the parse (§13.2; `cases/spec/13-inputs/macro_registered_text_keeps_section_open`).
+- The first-value rule of `.inherit` copies applies at every level of the copy (§9.7;
+  `cases/spec/09-macros/inherit_first_value_rule_at_every_level`).
 
 ## libucl quirks the crate reproduces
 
