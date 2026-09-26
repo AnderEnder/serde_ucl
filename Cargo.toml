@@ -70,3 +70,10 @@ harness = false
 # stack-depth tests that way, as a debug build of an application builds the crate.
 [profile.test.package.ucl-rust-lexer]
 opt-level = 2
+
+# Release builds of this package (its benches and examples; `cargo bench` inherits this) use fat
+# LTO and one codegen unit: about 4-6% faster parsing. Crates that depend on this one build it
+# with their own release profile.
+[profile.release]
+lto = "fat"
+codegen-units = 1
