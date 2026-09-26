@@ -13,40 +13,64 @@ use std::path::{Path, PathBuf};
 ///
 /// A silent stop (spec §9.4, *Missing and unusable files*) is reported as an error of kind
 /// [`ErrorKind::Stopped`]; it carries the entries parsed before the stop ([`Error::partial`]).
-#[derive(Debug, Clone, PartialEq)]
+///
+/// The error is one pointer: the parser's functions return `Result<_, Error>` on every path, and a
+/// small error keeps those results in registers (clean-room work item C11; the idea is from
+/// `serde_json`'s `Error`, `src/error.rs`).
+#[derive(Clone, PartialEq)]
 pub struct Error {
+    inner: Box<Inner>,
+}
+
+#[derive(Clone, PartialEq)]
+struct Inner {
     kind: ErrorKind,
     position: Position,
     file: Option<PathBuf>,
     partial: Option<Box<UclValue>>,
 }
 
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Error")
+            .field("kind", &self.inner.kind)
+            .field("position", &self.inner.position)
+            .field("file", &self.inner.file)
+            .field("partial", &self.inner.partial)
+            .finish()
+    }
+}
+
 impl Error {
     /// An error of `kind` at `position`.
+    #[cold]
+    #[inline(never)]
     pub fn new(kind: ErrorKind, position: Position) -> Self {
         Self {
-            kind,
-            position,
-            file: None,
-            partial: None,
+            inner: Box::new(Inner {
+                kind,
+                position,
+                file: None,
+                partial: None,
+            }),
         }
     }
 
     /// What went wrong.
     pub fn kind(&self) -> &ErrorKind {
-        &self.kind
+        &self.inner.kind
     }
 
     /// Where the error was detected: 1-based line and column (in characters), 0-based byte offset,
     /// in the input named by [`Error::file`].
     pub fn position(&self) -> Position {
-        self.position
+        self.inner.position
     }
 
     /// The canonical path of the included file (spec §9.4) the error was detected in, or `None`
     /// when it was detected in the document the parser was given.
     pub fn file(&self) -> Option<&Path> {
-        self.file.as_deref()
+        self.inner.file.as_deref()
     }
 
     /// True for input the parser recognises but does not support: the macro `.includes`, the
@@ -54,14 +78,14 @@ impl Error {
     /// verified), and `.load` when the crate is built without its `load` feature. Such an error
     /// is not a rejection of the document by the format rules.
     pub fn is_unsupported(&self) -> bool {
-        matches!(self.kind, ErrorKind::Unsupported { .. })
+        matches!(self.inner.kind, ErrorKind::Unsupported { .. })
     }
 
     /// True for a silent stop: [`ErrorKind::Stopped`], or [`ErrorKind::MacroStopped`] for a
     /// registered macro whose handler stopped the parse (spec §13.2).
     pub fn is_stopped(&self) -> bool {
         matches!(
-            self.kind,
+            self.inner.kind,
             ErrorKind::Stopped { .. } | ErrorKind::MacroStopped { .. }
         )
     }
@@ -70,25 +94,25 @@ impl Error {
     /// returns as the result in that situation (spec §9.4). For a stop in one of several inputs
     /// ([`crate::parse::Inputs`]), the root as parsed so far, with the inputs before.
     pub fn partial(&self) -> Option<&UclValue> {
-        self.partial.as_deref()
+        self.inner.partial.as_deref()
     }
 
     /// [`Error::partial`], by value.
     pub fn into_partial(self) -> Option<UclValue> {
-        self.partial.map(|v| *v)
+        self.inner.partial.map(|v| *v)
     }
 
     /// The error with `file` recorded, unless it already names one.
     pub(crate) fn in_file(mut self, file: &Path) -> Self {
-        if self.file.is_none() {
-            self.file = Some(file.to_path_buf());
+        if self.inner.file.is_none() {
+            self.inner.file = Some(file.to_path_buf());
         }
         self
     }
 
     /// The error with the partial result of a silent stop.
     pub(crate) fn with_partial(mut self, root: UclValue) -> Self {
-        self.partial = Some(Box::new(root));
+        self.inner.partial = Some(Box::new(root));
         self
     }
 }
@@ -98,9 +122,9 @@ impl fmt::Display for Error {
         write!(
             f,
             "{} (line {}, column {}",
-            self.kind, self.position.line, self.position.column
+            self.inner.kind, self.inner.position.line, self.inner.position.column
         )?;
-        match &self.file {
+        match &self.inner.file {
             Some(file) => write!(f, " of {})", file.display()),
             None => f.write_str(")"),
         }
@@ -396,6 +420,8 @@ fn describe(c: char) -> String {
 }
 
 /// The position of byte `offset` in `src`. Columns count UTF-8 characters.
+#[cold]
+#[inline(never)]
 pub(crate) fn position_at(src: &[u8], offset: usize) -> Position {
     let offset = offset.min(src.len());
     let before = &src[..offset];

@@ -771,12 +771,16 @@ impl Core<'_, '_, '_, '_> {
         self.peek() == Some(b'/') && self.peek_at(1) == Some(b'*')
     }
 
+    #[cold]
+    #[inline(never)]
     pub(super) fn error(&self, kind: ErrorKind, at: usize) -> Error {
         Error::new(kind, position_at(self.src, at))
     }
 
     /// An error about `key`: where it starts, in this input or, for a key read in an earlier
     /// input, in that one.
+    #[cold]
+    #[inline(never)]
     fn key_error(&self, key: &Key, kind: ErrorKind) -> Error {
         match key.origin {
             Some(position) => Error::new(kind, position),

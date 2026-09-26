@@ -6,6 +6,8 @@
 use super::error::position_at;
 use super::{Error, ErrorKind};
 
+#[cold]
+#[inline(never)]
 fn error(src: &[u8], offset: usize, kind: ErrorKind) -> Error {
     Error::new(kind, position_at(src, offset))
 }
