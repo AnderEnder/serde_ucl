@@ -2,28 +2,74 @@
 //! ([`super::OutputFacts`]), the saved comments of a parse, and the comments an emitter writes
 //! are kept in such trees, so that the node of a value is one step from the node of its
 //! container.
+//!
+//! Most nodes have no children or a few, so a node keeps up to [`SMALL`] keyed children, and up
+//! to [`SMALL`] element children, in a vector searched in order, and moves them to a hash map
+//! when there are more (clean-room work item C11). A node without children allocates nothing.
 
 use super::PathSegment;
 use std::collections::HashMap;
 
+/// The most keyed children, and the most element children, kept in a vector.
+const SMALL: usize = 8;
+
 /// The children of a node, identified by the caller's node numbers.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Children {
-    /// The node of value `index` of entry `key` is `keys[key][index]`.
-    keys: HashMap<String, Vec<Option<usize>>>,
-    /// The node of element `index`.
-    elements: HashMap<usize, usize>,
+    keys: Keyed,
+    elements: Elements,
+}
+
+/// The nodes of the values of an object's entries.
+#[derive(Debug, Clone)]
+enum Keyed {
+    /// The node of value `index` of entry `key` is `child` in an item `(key, index, child)`.
+    Small(Vec<(String, usize, usize)>),
+    /// The node of value `index` of entry `key` is `map[key][index]`.
+    Large(HashMap<String, Vec<Option<usize>>>),
+}
+
+impl Default for Keyed {
+    fn default() -> Self {
+        Keyed::Small(Vec::new())
+    }
+}
+
+/// The nodes of an array's elements.
+#[derive(Debug, Clone)]
+enum Elements {
+    /// The node of element `index` is `child` in an item `(index, child)`.
+    Small(Vec<(usize, usize)>),
+    Large(HashMap<usize, usize>),
+}
+
+impl Default for Elements {
+    fn default() -> Self {
+        Elements::Small(Vec::new())
+    }
 }
 
 impl Children {
     /// The node of value `index` of entry `key`.
     pub(crate) fn key(&self, key: &str, index: usize) -> Option<usize> {
-        self.keys.get(key)?.get(index).copied().flatten()
+        match &self.keys {
+            Keyed::Small(items) => items
+                .iter()
+                .find(|(k, i, _)| *i == index && k == key)
+                .map(|&(_, _, child)| child),
+            Keyed::Large(map) => map.get(key)?.get(index).copied().flatten(),
+        }
     }
 
     /// The node of element `index`.
     pub(crate) fn element(&self, index: usize) -> Option<usize> {
-        self.elements.get(&index).copied()
+        match &self.elements {
+            Elements::Small(items) => items
+                .iter()
+                .find(|(i, _)| *i == index)
+                .map(|&(_, child)| child),
+            Elements::Large(map) => map.get(&index).copied(),
+        }
     }
 
     pub(crate) fn get(&self, segment: &PathSegment) -> Option<usize> {
@@ -42,64 +88,197 @@ impl Children {
     }
 
     /// Makes `child` the node of value `index` of entry `key`. The key is copied only when the
-    /// entry has no node yet.
+    /// value has no node yet.
     pub(crate) fn insert_key(&mut self, key: &str, index: usize, child: usize) {
-        let values = match self.keys.get_mut(key) {
-            Some(values) => values,
-            None => self.keys.entry(key.to_owned()).or_default(),
-        };
-        if values.len() <= index {
-            values.resize(index + 1, None);
+        match &mut self.keys {
+            Keyed::Small(items) => {
+                if let Some(item) = items.iter_mut().find(|(k, i, _)| *i == index && k == key) {
+                    item.2 = child;
+                } else if items.len() < SMALL {
+                    items.push((key.to_owned(), index, child));
+                } else {
+                    let mut map: HashMap<String, Vec<Option<usize>>> = HashMap::new();
+                    for (key, index, child) in items.drain(..) {
+                        set_value(map.entry(key).or_default(), index, child);
+                    }
+                    set_value(map.entry(key.to_owned()).or_default(), index, child);
+                    self.keys = Keyed::Large(map);
+                }
+            }
+            Keyed::Large(map) => {
+                let values = match map.get_mut(key) {
+                    Some(values) => values,
+                    None => map.entry(key.to_owned()).or_default(),
+                };
+                set_value(values, index, child);
+            }
         }
-        values[index] = Some(child);
     }
 
     /// Makes `child` the node of element `index`.
     pub(crate) fn insert_element(&mut self, index: usize, child: usize) {
-        self.elements.insert(index, child);
+        match &mut self.elements {
+            Elements::Small(items) => {
+                if let Some(item) = items.iter_mut().find(|(i, _)| *i == index) {
+                    item.1 = child;
+                } else if items.len() < SMALL {
+                    items.push((index, child));
+                } else {
+                    let mut map: HashMap<usize, usize> = items.drain(..).collect();
+                    map.insert(index, child);
+                    self.elements = Elements::Large(map);
+                }
+            }
+            Elements::Large(map) => {
+                map.insert(index, child);
+            }
+        }
     }
 
     /// Removes the node of value `index` of entry `key`, and returns it.
     pub(crate) fn take_value(&mut self, key: &str, index: usize) -> Option<usize> {
-        self.keys.get_mut(key)?.get_mut(index)?.take()
+        match &mut self.keys {
+            Keyed::Small(items) => {
+                let at = items.iter().position(|(k, i, _)| *i == index && k == key)?;
+                Some(items.remove(at).2)
+            }
+            Keyed::Large(map) => map.get_mut(key)?.get_mut(index)?.take(),
+        }
     }
 
-    /// Removes the nodes of every value of entry `key`, and returns them with their indices.
+    /// Removes the nodes of every value of entry `key`, and returns them with their indices, in
+    /// the order of the indices.
     pub(crate) fn take_values(&mut self, key: &str) -> Vec<(usize, usize)> {
-        self.keys.remove(key).map_or_else(Vec::new, |values| {
-            values
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, child)| Some((index, child?)))
-                .collect()
-        })
+        match &mut self.keys {
+            Keyed::Small(items) => {
+                let mut taken = Vec::new();
+                items.retain(|(k, index, child)| {
+                    let keep = k != key;
+                    if !keep {
+                        taken.push((*index, *child));
+                    }
+                    keep
+                });
+                taken.sort_unstable();
+                taken
+            }
+            Keyed::Large(map) => map.remove(key).map_or_else(Vec::new, |values| {
+                values
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(index, child)| Some((index, child?)))
+                    .collect()
+            }),
+        }
     }
 
-    /// Every child with its segment.
+    /// Every child with its segment, in no particular order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (PathSegment, usize)> + '_ {
-        let keyed = self.keys.iter().flat_map(|(key, values)| {
-            values.iter().enumerate().filter_map(move |(index, child)| {
-                Some((
-                    PathSegment::Key {
-                        key: key.clone(),
-                        index,
-                    },
-                    (*child)?,
-                ))
-            })
-        });
-        let elements = self
-            .elements
-            .iter()
-            .map(|(&index, &child)| (PathSegment::Index(index), child));
-        keyed.chain(elements)
+        let mut all = Vec::new();
+        match &self.keys {
+            Keyed::Small(items) => all.extend(items.iter().map(|(key, index, child)| {
+                let segment = PathSegment::Key {
+                    key: key.clone(),
+                    index: *index,
+                };
+                (segment, *child)
+            })),
+            Keyed::Large(map) => {
+                for (key, values) in map {
+                    for (index, child) in values.iter().enumerate() {
+                        if let Some(child) = child {
+                            let segment = PathSegment::Key {
+                                key: key.clone(),
+                                index,
+                            };
+                            all.push((segment, *child));
+                        }
+                    }
+                }
+            }
+        }
+        match &self.elements {
+            Elements::Small(items) => all.extend(
+                items
+                    .iter()
+                    .map(|&(index, child)| (PathSegment::Index(index), child)),
+            ),
+            Elements::Large(map) => all.extend(
+                map.iter()
+                    .map(|(&index, &child)| (PathSegment::Index(index), child)),
+            ),
+        }
+        all.into_iter()
     }
 
     /// Removes every child, and returns them.
     pub(crate) fn take_all(&mut self) -> Vec<usize> {
-        let keyed = self.keys.drain().flat_map(|(_, values)| values).flatten();
-        let mut all: Vec<usize> = keyed.collect();
-        all.extend(self.elements.drain().map(|(_, child)| child));
+        let mut all: Vec<usize> = match std::mem::take(&mut self.keys) {
+            Keyed::Small(items) => items.into_iter().map(|(_, _, child)| child).collect(),
+            Keyed::Large(map) => map.into_values().flatten().flatten().collect(),
+        };
+        match std::mem::take(&mut self.elements) {
+            Elements::Small(items) => all.extend(items.into_iter().map(|(_, child)| child)),
+            Elements::Large(map) => all.extend(map.into_values()),
+        }
         all
+    }
+}
+
+/// Makes `child` value `index` of `values`, the nodes of an entry's values.
+fn set_value(values: &mut Vec<Option<usize>>, index: usize, child: usize) {
+    if values.len() <= index {
+        values.resize(index + 1, None);
+    }
+    values[index] = Some(child);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(key: &str, index: usize) -> PathSegment {
+        PathSegment::Key {
+            key: key.to_owned(),
+            index,
+        }
+    }
+
+    /// The same operations on a node with few children and on one with many give the same
+    /// answers, before and after the node's children move to a map.
+    #[test]
+    fn small_and_large_forms_agree() {
+        for extra in [0, SMALL * 3] {
+            let mut children = Children::default();
+            let mut next = 100;
+            for i in 0..extra {
+                children.insert(&key(&format!("k{i}"), 0), next);
+                children.insert(&PathSegment::Index(1000 + i), next + 1);
+                next += 2;
+            }
+            children.insert(&key("a", 2), 1);
+            children.insert(&key("a", 0), 2);
+            children.insert(&key("b", 0), 3);
+            children.insert(&PathSegment::Index(5), 4);
+            children.insert(&key("a", 0), 5);
+            children.insert(&PathSegment::Index(5), 6);
+            assert_eq!(children.key("a", 0), Some(5));
+            assert_eq!(children.key("a", 1), None);
+            assert_eq!(children.key("a", 2), Some(1));
+            assert_eq!(children.get(&PathSegment::Index(5)), Some(6));
+            assert_eq!(children.element(4), None);
+            assert_eq!(children.iter().count(), 4 + 2 * extra);
+            assert_eq!(children.take_value("a", 2), Some(1));
+            assert_eq!(children.take_value("a", 2), None);
+            children.insert(&key("a", 3), 7);
+            assert_eq!(children.take_values("a"), vec![(0, 5), (3, 7)]);
+            assert_eq!(children.take_values("a"), vec![]);
+            assert_eq!(children.key("b", 0), Some(3));
+            let mut all = children.take_all();
+            all.sort_unstable();
+            assert_eq!(all.len(), 2 + 2 * extra);
+            assert!(all.contains(&3) && all.contains(&6));
+            assert_eq!(children.iter().count(), 0);
+        }
     }
 }
