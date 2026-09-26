@@ -78,7 +78,8 @@ item, the inputs consulted, and the commits produced. Implementers add this atte
 read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md."* Spec-team
 entries state that the spec contains behaviour only.
 
-Commit messages start with the work-item ID (`C0: …` for the spec, `C2.3: …` for implementation).
+Commit messages follow the conventional commit format (`type(scope): summary`, see `CLAUDE.md`), with the
+work-item ID in a footer: `Work item: C2.3`. Spec releases are `docs(spec): release spec vN`, tagged `spec-vN`.
 
 ## Legal review
 
