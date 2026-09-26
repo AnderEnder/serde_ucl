@@ -1267,15 +1267,16 @@ impl Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("entries are parsed inside objects");
+        // The key is looked up once, and its entry, if any, found by position from then on.
+        let index = object.index_of(&key.name);
+        let entry = index.map(|index| object.get_index(index).expect("just found").1);
         let is_container = |v: &UclValue| v.is_object() || v.is_array();
         // Under `merge`, a scalar that follows a container takes its place in the entry (§8.4,
         // *Quirk*); the oracle keeps the container's comments on it, as for one value.
-        let replaces_in_place = |e: &Entry| {
+        let existed = entry.is_some();
+        let in_place = entry.is_some_and(|e| {
             strategy == DuplicateStrategy::Merge && is_container(e.first()) && !is_container(&value)
-        };
-        let (existed, in_place) = object
-            .entry(&key.name)
-            .map_or((false, false), |e| (true, replaces_in_place(e)));
+        });
         // A number written with digits, a time or a boolean that takes the place of a
         // non-empty container keeps the normal layout of a multi-value entry; the keywords `nan`
         // and `inf` follow their own kind, as strings and `null` do (spec §10.7, *Quirk*).
@@ -1286,31 +1287,28 @@ impl Core<'_, '_, '_, '_> {
         };
         let normal_layout = in_place
             && counts_as_container
-            && object.entry(&key.name).is_some_and(|e| match e.first() {
+            && entry.is_some_and(|e| match e.first() {
                 UclValue::Object(o) => !o.is_empty(),
                 UclValue::Array(a) => !a.is_empty(),
                 _ => false,
             });
-        let was_collected = object
-            .entry(&key.name)
-            .is_some_and(|e| e.slots()[0].is_collected());
-        let before = track
-            .then(|| {
-                object.entry(&key.name).map(|e| Before {
-                    len: e.len(),
-                    collected: e.slots()[0].is_collected(),
-                    in_place,
-                })
-            })
-            .flatten();
-        let result = object.insert_slot_placed(
+        let was_collected = entry.is_some_and(|e| e.slots()[0].is_collected());
+        let before = entry.filter(|_| track).map(|e| Before {
+            len: e.len(),
+            collected: e.slots()[0].is_collected(),
+            in_place,
+        });
+        let result = object.insert_slot_at(
+            index,
             key.name.as_str(),
             Slot::new(value, priority),
             strategy,
             flags,
         );
+        // A new key, which cannot fail, is the object's last entry.
         let after = if track {
-            object.entry(&key.name).map_or(0, Entry::len)
+            let index = index.unwrap_or(object.len() - 1);
+            object.get_index(index).map_or(0, |(_, e)| e.len())
         } else {
             0
         };
@@ -1358,27 +1356,22 @@ impl Core<'_, '_, '_, '_> {
         placed: PlacedFacts,
         at: usize,
     ) {
-        let spelling = written.unwrap_or(&key.name);
-        let key_spelling = (spelling != key.name).then(|| spelling.to_owned());
-        let key_quoted = (key.quoted != key_needs_quoting(spelling)).then_some(key.quoted);
-        let (step, keyed) = match placement {
+        let (slot, collected, keyed) = match placement {
             // A scalar that took a container's place under `merge` keeps the container's key
             // (oracle runs, QUESTIONS.md #50).
-            Placement::Slot(slot) => (
-                Step::Entry {
-                    key: key.name.clone(),
-                    slot,
-                },
-                !placed.in_place,
-            ),
-            Placement::Collected(index) => (
-                Step::Collected {
-                    key: key.name.clone(),
-                    index,
-                },
-                false,
-            ),
+            Placement::Slot(slot) => (slot, false, !placed.in_place),
+            Placement::Collected(index) => (index, true, false),
             Placement::Merged | Placement::Dropped => return,
+        };
+        // The key's facts are only recorded for a keyed value.
+        let (key_spelling, key_quoted) = if keyed {
+            let spelling = written.unwrap_or(&key.name);
+            (
+                (spelling != key.name).then(|| spelling.to_owned()),
+                (key.quoted != key_needs_quoting(spelling)).then_some(key.quoted),
+            )
+        } else {
+            (None, None)
         };
         let has_value_facts = placed.origin.has_string_facts() || placed.normal_layout;
         let has_key_facts = keyed && (key_spelling.is_some() || key_quoted.is_some());
@@ -1390,6 +1383,18 @@ impl Core<'_, '_, '_, '_> {
         if !has_value_facts && !has_key_facts && !stale && !locating {
             return;
         }
+        let key_name = key.name.clone();
+        let step = if collected {
+            Step::Collected {
+                key: key_name,
+                index: slot,
+            }
+        } else {
+            Step::Entry {
+                key: key_name,
+                slot,
+            }
+        };
         let Some(node) = self.facts_node_below(&step.segments()) else {
             return;
         };

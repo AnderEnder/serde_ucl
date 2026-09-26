@@ -1015,18 +1015,40 @@ impl UclObject {
         if flags.contains(ParserFlags::KEY_LOWERCASE) {
             key.make_ascii_lowercase();
         }
-        let Some(entry) = self.entries.get_mut(&key) else {
-            self.entries.insert(key, Entry::from_slot(slot));
+        let index = self.entries.get_index_of(&key);
+        self.insert_slot_at(index, key, slot, strategy, flags)
+    }
+
+    /// [`UclObject::insert_slot_placed`] for a key that is already lowercased where
+    /// `KEY_LOWERCASE` asks for it, and whose position `index` the caller has looked up (`None`
+    /// for a new key), so that the key is hashed once. A new key is stored as `key`.
+    pub(crate) fn insert_slot_at(
+        &mut self,
+        index: Option<usize>,
+        key: impl AsRef<str> + Into<String>,
+        slot: Slot,
+        strategy: DuplicateStrategy,
+        flags: ParserFlags,
+    ) -> Result<Placement, DuplicateKeyError> {
+        let Some(index) = index else {
+            self.entries.insert(key.into(), Entry::from_slot(slot));
             return Ok(Placement::Slot(0));
         };
+        let (_, entry) = self
+            .entries
+            .get_index_mut(index)
+            .expect("the caller found the key at this index");
+        let key = key.as_ref();
         match strategy {
-            DuplicateStrategy::Append => entry.add_by_priority(&key, slot, true, flags),
-            DuplicateStrategy::Merge => entry.merge(&key, slot, flags),
+            DuplicateStrategy::Append => entry.add_by_priority(key, slot, true, flags),
+            DuplicateStrategy::Merge => entry.merge(key, slot, flags),
             DuplicateStrategy::Rewrite => {
                 *entry = Entry::from_slot(slot);
                 Ok(Placement::Slot(0))
             }
-            DuplicateStrategy::Error => Err(DuplicateKeyError { key }),
+            DuplicateStrategy::Error => Err(DuplicateKeyError {
+                key: key.to_owned(),
+            }),
         }
     }
 }
