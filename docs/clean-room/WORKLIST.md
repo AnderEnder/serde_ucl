@@ -260,3 +260,10 @@ from the same text. The spec side reruns the libucl comparison after the work it
    dependencies and `unsafe` code remain owner decisions. A breaking change is marked `!` in its
    commit and listed under `## Unreleased` in `CHANGELOG.md`, and the next release is 0.4.0.
    Item 4 still holds: behaviour and output do not change.
+8. Owner request of 2026-09-27: research new dependencies and `unsafe` code too, and record the
+   possible gain of each, without implementing them yet. For each candidate, the report gives the
+   gain (measured with a throwaway prototype that is not committed, or estimated with the
+   reasoning), where it would apply, and its cost. For a dependency, the cost covers its license,
+   maintenance, the Rust version it needs, what it adds to compile time and size, and what it pulls
+   in. For `unsafe` code, it covers the invariants it relies on and how they would be checked
+   (tests, Miri, the fuzzer).
