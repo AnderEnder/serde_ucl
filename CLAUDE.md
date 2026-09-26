@@ -25,9 +25,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-UCL (Universal Configuration Language) for Rust with serde: package `ucl-rust-lexer`, library
-`ucl_lexer`, latest stable Rust (1.98 at this release). The crate reads and writes UCL as libucl,
-the C library used by FreeBSD, does. Compatibility is defined by behaviour: the behaviour spec in
+UCL (Universal Configuration Language) for Rust with serde: package and library `serde_ucl`,
+latest stable Rust (1.98 at this release). The crate reads and writes UCL as libucl, the C
+library used by FreeBSD, does. Compatibility is defined by behaviour: the behaviour spec in
 `docs/spec/` and the conformance suite in `tests/conformance/`, whose golden files come from
 libucl. `docs/COMPATIBILITY.md` lists the deliberate differences and the libucl quirks the crate
 reproduces.

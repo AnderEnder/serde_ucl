@@ -19,9 +19,9 @@
 )]
 
 use serde::Deserialize;
+use serde_ucl::parse::ParserBuilder;
+use serde_ucl::{from_str, from_str_with_variables, from_value};
 use std::collections::HashMap;
-use ucl_lexer::parse::ParserBuilder;
-use ucl_lexer::{from_str, from_str_with_variables, from_value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Real-World UCL Usage Examples");

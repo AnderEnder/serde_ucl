@@ -242,7 +242,7 @@ pub(crate) enum Step<'a> {
 ///     server: Server,
 /// }
 ///
-/// let err = ucl_lexer::from_str::<Config>("server {\n    port = 80000\n}").unwrap_err();
+/// let err = serde_ucl::from_str::<Config>("server {\n    port = 80000\n}").unwrap_err();
 /// let position = err.position().unwrap();
 /// assert_eq!((position.line, position.column), (2, 12));
 /// assert_eq!(

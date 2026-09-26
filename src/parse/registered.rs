@@ -90,8 +90,8 @@ pub(crate) trait Host {
 /// One use of a registered macro, as its handler sees it (spec §13.2).
 ///
 /// ```
-/// use ucl_lexer::parse::{MacroError, ParserBuilder};
-/// use ucl_lexer::UclValue;
+/// use serde_ucl::parse::{MacroError, ParserBuilder};
+/// use serde_ucl::UclValue;
 ///
 /// let mut parser = ParserBuilder::new()
 ///     // `.env NAME`: the entry NAME from a fixed table.
@@ -110,7 +110,7 @@ pub(crate) trait Host {
 /// assert_eq!(server["HOME"].as_str(), Some("/home/app"));
 /// let workers: Vec<i64> = server.get_all("workers").filter_map(UclValue::as_integer).collect();
 /// assert_eq!(workers, [4, 8]);
-/// # Ok::<(), ucl_lexer::parse::Error>(())
+/// # Ok::<(), serde_ucl::parse::Error>(())
 /// ```
 pub struct MacroCall<'a> {
     host: &'a mut dyn Host,
@@ -192,7 +192,7 @@ impl<'a> MacroCall<'a> {
     /// [`super::Parser::register_macro`].
     ///
     /// ```
-    /// use ucl_lexer::parse::Parser;
+    /// use serde_ucl::parse::Parser;
     ///
     /// let mut parser = Parser::new();
     /// parser.set_priority(3);
@@ -204,7 +204,7 @@ impl<'a> MacroCall<'a> {
     /// let value = parser.parse(b".priority 7\na = 1\n.snapshot {}")?;
     /// let entry = value.as_object().unwrap().entry("snapshot").unwrap();
     /// assert_eq!(entry.slots()[0].priority(), 3);
-    /// # Ok::<(), ucl_lexer::parse::Error>(())
+    /// # Ok::<(), serde_ucl::parse::Error>(())
     /// ```
     pub fn root_priority(&self) -> Option<u8> {
         self.root.map(|(_, priority)| priority)

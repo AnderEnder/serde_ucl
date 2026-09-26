@@ -130,7 +130,7 @@ impl Loader for FsLoader {
 /// implicitly. There are no symbolic links.
 ///
 /// ```
-/// use ucl_lexer::parse::{MemoryLoader, Parser};
+/// use serde_ucl::parse::{MemoryLoader, Parser};
 ///
 /// let mut loader = MemoryLoader::new();
 /// loader.add_file("/etc/app/main.conf", "port = 80\n.include \"${CURDIR}/extra.conf\"\n");

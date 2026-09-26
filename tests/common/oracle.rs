@@ -9,14 +9,14 @@
 //! - [`strip_unobservable_priorities`] and [`find_diff`]: the comparison of two dumps.
 
 use serde_json::{Value as J, json};
+use serde_ucl::parse::{CommentPlacement, FsLoader, MacroCall, MacroError, Parser, PathSegment};
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclObject, UclValue};
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::Once;
-use ucl_lexer::parse::{CommentPlacement, FsLoader, MacroCall, MacroError, Parser, PathSegment};
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclObject, UclValue};
 
 thread_local! {
     /// Set while this thread runs [`quietly`].
@@ -160,9 +160,9 @@ fn test_macro_copy(value: &UclValue) -> UclValue {
                     _ => entry.len(),
                 };
                 let mut slots = entry.slots()[..count].iter().map(|slot| {
-                    ucl_lexer::Slot::new(test_macro_copy(slot.value()), slot.priority())
+                    serde_ucl::Slot::new(test_macro_copy(slot.value()), slot.priority())
                 });
-                let mut copied = ucl_lexer::Entry::from_slot(slots.next().expect("a value"));
+                let mut copied = serde_ucl::Entry::from_slot(slots.next().expect("a value"));
                 slots.for_each(|slot| copied.push_slot(slot));
                 copy.insert_entry(key.clone(), copied);
             }

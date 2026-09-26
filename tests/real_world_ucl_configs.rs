@@ -6,8 +6,8 @@
 //! expected results are libucl's.
 
 use serde_json::{Value, json};
-use ucl_lexer::parse::ErrorKind;
-use ucl_lexer::{UclError, from_str};
+use serde_ucl::parse::ErrorKind;
+use serde_ucl::{UclError, from_str};
 
 #[cfg(test)]
 mod real_world_configs {

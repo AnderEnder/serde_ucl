@@ -19,7 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 # `load`, so that `.load` behaves as in the oracle and in the conformance runner.
-ucl-rust-lexer = { path = "..", features = ["load"] }
+serde_ucl = { path = "..", features = ["load"] }
 serde_json = "1"
 
 [profile.release]

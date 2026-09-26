@@ -5,10 +5,10 @@
 //! Run with `cargo run --example advanced_features`.
 
 use serde::{Deserialize, Serialize};
+use serde_ucl::emit::Format;
+use serde_ucl::parse::{ErrorKind, MemoryLoader, Parser, ParserBuilder};
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclError, UclObject, UclValue};
 use std::path::Path;
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{ErrorKind, MemoryLoader, Parser, ParserBuilder};
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclError, UclObject, UclValue};
 
 fn main() -> Result<(), UclError> {
     variables()?;
@@ -149,7 +149,7 @@ fn duplicate_strategies() -> Result<(), UclError> {
 /// dropped (spec §8.3). `.priority N` sets the priority of the values after it (§9.5).
 fn priorities() -> Result<(), UclError> {
     section("Priorities");
-    let value = ucl_lexer::parse::parse(
+    let value = serde_ucl::parse::parse(
         b"port = 80\n.priority 5\nport = 9000\n.priority 1\nport = 7000\nhost = a\n",
     )?;
     let root = object(&value);
@@ -268,15 +268,15 @@ fn output_formats() -> Result<(), UclError> {
         r#"{"name":"web","ports":[80,443],"timeout":90.0}"#
     );
 
-    let service: Service = ucl_lexer::from_value(value)?;
-    let text = ucl_lexer::to_string(&service)?;
+    let service: Service = serde_ucl::from_value(value)?;
+    let text = serde_ucl::to_string(&service)?;
     println!("to_string:\n{text}");
-    assert_eq!(ucl_lexer::from_str::<Service>(&text)?, service);
+    assert_eq!(serde_ucl::from_str::<Service>(&text)?, service);
     println!(
         "to_json_string_compact: {}",
-        ucl_lexer::to_json_string_compact(&service)?
+        serde_ucl::to_json_string_compact(&service)?
     );
-    println!("to_yaml_string:\n{}", ucl_lexer::to_yaml_string(&service)?);
+    println!("to_yaml_string:\n{}", serde_ucl::to_yaml_string(&service)?);
     Ok(())
 }
 
@@ -307,7 +307,7 @@ fn silent_stop() {
 /// Parse errors carry a kind, a position and, inside an included file, that file's path.
 fn errors() {
     section("Errors");
-    let err = ucl_lexer::from_str::<UclValue>("server {\n  name = \"web\n}\n").unwrap_err();
+    let err = serde_ucl::from_str::<UclValue>("server {\n  name = \"web\n}\n").unwrap_err();
     let position = err.position().expect("a parse error has a position");
     println!("{err}");
     assert_eq!(

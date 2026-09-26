@@ -5,9 +5,9 @@
 //! value in libucl (checked with the oracle in clean-room work item C5).
 
 use serde::Deserialize;
+use serde_ucl::parse::ErrorKind;
+use serde_ucl::{UclError, UclValue, from_str};
 use std::collections::HashMap;
-use ucl_lexer::parse::ErrorKind;
-use ucl_lexer::{UclError, UclValue, from_str};
 
 #[test]
 fn test_large_configuration() {
@@ -110,7 +110,7 @@ fn test_large_configuration() {
     }
 
     // The unquoted time keeps its type in the parsed value (spec §5.4).
-    let value = ucl_lexer::parse::parse(large_config.as_bytes()).unwrap();
+    let value = serde_ucl::parse::parse(large_config.as_bytes()).unwrap();
     let service = value.as_object().unwrap()["service_0"].as_object().unwrap();
     assert_eq!(service["timeout"], UclValue::Time(30.0));
     assert_eq!(
@@ -1480,7 +1480,7 @@ fn test_slash_slash_is_not_a_comment() {
     let parsed: serde_json::Value = from_str(config).expect("parses");
     assert_eq!(parsed["key1"], "value1");
     assert_eq!(parsed["key2"], "value2");
-    let value = ucl_lexer::parse::parse(config.as_bytes()).unwrap();
+    let value = serde_ucl::parse::parse(config.as_bytes()).unwrap();
     let slashes: Vec<_> = value.as_object().unwrap().get_all("//").collect();
     assert_eq!(
         slashes,

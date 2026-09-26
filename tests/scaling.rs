@@ -33,14 +33,14 @@
 //! that every entry point fits in a 2 MiB stack, and a large one here keeps a stack limit from
 //! failing a test about time.
 
+use serde_ucl::emit::Format;
+use serde_ucl::parse::Parser;
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclValue};
 use std::fmt::Write;
 use std::hint::black_box;
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::Parser;
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue};
 
 const SMALL: usize = 120;
 const LARGE: usize = 960;
@@ -336,8 +336,8 @@ fn serde_time_grows_linearly() {
         check_growth(
             "from_str",
             size_ratio,
-            || drop(black_box(ucl_lexer::from_str::<UclValue>(&small).unwrap())),
-            || drop(black_box(ucl_lexer::from_str::<UclValue>(&large).unwrap())),
+            || drop(black_box(serde_ucl::from_str::<UclValue>(&small).unwrap())),
+            || drop(black_box(serde_ucl::from_str::<UclValue>(&large).unwrap())),
         );
         let (v, w) = (
             parse(ParserFlags::empty(), &small).1,
@@ -348,40 +348,40 @@ fn serde_time_grows_linearly() {
             size_ratio,
             || {
                 drop(black_box(
-                    ucl_lexer::from_value::<UclValue>(v.clone()).unwrap(),
+                    serde_ucl::from_value::<UclValue>(v.clone()).unwrap(),
                 ))
             },
             || {
                 drop(black_box(
-                    ucl_lexer::from_value::<UclValue>(w.clone()).unwrap(),
+                    serde_ucl::from_value::<UclValue>(w.clone()).unwrap(),
                 ))
             },
         );
         check_growth(
             "to_value",
             size_ratio,
-            || drop(black_box(ucl_lexer::to_value(&v).unwrap())),
-            || drop(black_box(ucl_lexer::to_value(&w).unwrap())),
+            || drop(black_box(serde_ucl::to_value(&v).unwrap())),
+            || drop(black_box(serde_ucl::to_value(&w).unwrap())),
         );
         let compact = ratio(
-            ucl_lexer::to_json_string_compact(&v).unwrap().len(),
-            ucl_lexer::to_json_string_compact(&w).unwrap().len(),
+            serde_ucl::to_json_string_compact(&v).unwrap().len(),
+            serde_ucl::to_json_string_compact(&w).unwrap().len(),
         );
         check_growth(
             "to_json_string_compact",
             compact,
-            || drop(black_box(ucl_lexer::to_json_string_compact(&v).unwrap())),
-            || drop(black_box(ucl_lexer::to_json_string_compact(&w).unwrap())),
+            || drop(black_box(serde_ucl::to_json_string_compact(&v).unwrap())),
+            || drop(black_box(serde_ucl::to_json_string_compact(&w).unwrap())),
         );
         let config = ratio(
-            ucl_lexer::to_string(&v).unwrap().len(),
-            ucl_lexer::to_string(&w).unwrap().len(),
+            serde_ucl::to_string(&v).unwrap().len(),
+            serde_ucl::to_string(&w).unwrap().len(),
         );
         check_growth(
             "to_string",
             config,
-            || drop(black_box(ucl_lexer::to_string(&v).unwrap())),
-            || drop(black_box(ucl_lexer::to_string(&w).unwrap())),
+            || drop(black_box(serde_ucl::to_string(&v).unwrap())),
+            || drop(black_box(serde_ucl::to_string(&w).unwrap())),
         );
     });
 }

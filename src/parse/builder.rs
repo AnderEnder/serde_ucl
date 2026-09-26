@@ -14,8 +14,8 @@ use std::path::PathBuf;
 ///
 /// ```
 /// use serde::Deserialize;
-/// use ucl_lexer::parse::{MemoryLoader, ParserBuilder};
-/// use ucl_lexer::{ParserFlags, from_value};
+/// use serde_ucl::parse::{MemoryLoader, ParserBuilder};
+/// use serde_ucl::{ParserFlags, from_value};
 ///
 /// #[derive(Deserialize)]
 /// struct Config {
@@ -39,7 +39,7 @@ use std::path::PathBuf;
 /// assert_eq!(config.url, "https://example.org/");
 /// assert_eq!(config.home, "/home/app");
 /// assert_eq!(config.port, 8443);
-/// # Ok::<(), ucl_lexer::UclError>(())
+/// # Ok::<(), serde_ucl::UclError>(())
 /// ```
 #[derive(Debug, Default)]
 pub struct ParserBuilder {

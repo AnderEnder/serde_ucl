@@ -1,12 +1,12 @@
-//! Parse throughput of the parser core (`ucl_lexer::parse`), in input bytes per second.
+//! Parse throughput of the parser core (`serde_ucl::parse`), in input bytes per second.
 
 mod common;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use serde_ucl::ParserFlags;
+use serde_ucl::parse::{Parser, ParserBuilder};
 use std::hint::black_box;
 use std::time::Duration;
-use ucl_lexer::ParserFlags;
-use ucl_lexer::parse::{Parser, ParserBuilder};
 
 fn bench_config(c: &mut Criterion) {
     let mut group = c.benchmark_group("parse/config");

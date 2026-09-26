@@ -6,7 +6,7 @@
 //! libucl's own. [COMPATIBILITY.md] lists the places where the crate deliberately differs, and
 //! the `README.md` of the repository describes the crate at more length.
 //!
-//! [COMPATIBILITY.md]: https://github.com/AnderEnder/ucl-rust-lexer/blob/HEAD/docs/COMPATIBILITY.md
+//! [COMPATIBILITY.md]: https://github.com/AnderEnder/serde_ucl/blob/HEAD/docs/COMPATIBILITY.md
 //!
 //! ## Reading configuration
 //!
@@ -34,12 +34,12 @@
 //!     upstream = b.example
 //! "#;
 //!
-//! let config: Config = ucl_lexer::from_str(text)?;
+//! let config: Config = serde_ucl::from_str(text)?;
 //! assert_eq!(config.port, 8080);
 //! assert_eq!(config.timeout, 30.0);
 //! assert_eq!(config.max_body, 512 * 1024);
 //! assert_eq!(config.upstream, ["a.example", "b.example"]);
-//! # Ok::<(), ucl_lexer::UclError>(())
+//! # Ok::<(), serde_ucl::UclError>(())
 //! ```
 //!
 //! [`from_str`], [`from_slice`], [`from_reader`] and [`from_file`] parse with a default
@@ -60,8 +60,8 @@
 //!
 //! ```rust
 //! use serde::Deserialize;
-//! use ucl_lexer::parse::ParserBuilder;
-//! use ucl_lexer::{DuplicateStrategy, from_value};
+//! use serde_ucl::parse::ParserBuilder;
+//! use serde_ucl::{DuplicateStrategy, from_value};
 //!
 //! #[derive(Deserialize)]
 //! struct Config {
@@ -77,7 +77,7 @@
 //! let config: Config = from_value(value)?;
 //! assert_eq!(config.url, "https://example.org/");
 //! assert_eq!(config.workers, 8);
-//! # Ok::<(), ucl_lexer::UclError>(())
+//! # Ok::<(), serde_ucl::UclError>(())
 //! ```
 //!
 //! ## Several inputs and custom macros
@@ -88,8 +88,8 @@
 //! objects combine.
 //!
 //! ```rust
-//! use ucl_lexer::parse::{Input, MemoryLoader, ParserBuilder};
-//! use ucl_lexer::DuplicateStrategy;
+//! use serde_ucl::parse::{Input, MemoryLoader, ParserBuilder};
+//! use serde_ucl::DuplicateStrategy;
 //!
 //! let mut files = MemoryLoader::new();
 //! files.add_file("/usr/share/app/app.conf", "workers = 4\nlog { level = info }\n");
@@ -108,7 +108,7 @@
 //! let log = root["log"].as_object().unwrap();
 //! assert_eq!(log["level"].as_str(), Some("info"));
 //! assert_eq!(log["file"].as_str(), Some("/var/log/app.log"));
-//! # Ok::<(), ucl_lexer::parse::Error>(())
+//! # Ok::<(), serde_ucl::parse::Error>(())
 //! ```
 //!
 //! An application can also register macros of its own ([`parse::ParserBuilder::with_macro`];
@@ -117,8 +117,8 @@
 //! [`parse::MacroError`]):
 //!
 //! ```rust
-//! use ucl_lexer::parse::{MacroError, ParserBuilder};
-//! use ucl_lexer::UclValue;
+//! use serde_ucl::parse::{MacroError, ParserBuilder};
+//! use serde_ucl::UclValue;
 //!
 //! let mut parser = ParserBuilder::new()
 //!     // `.version`: adds the application's version where the macro stands.
@@ -136,7 +136,7 @@
 //! assert_eq!(root["version"].as_str(), Some("1.4.2"));
 //! let tls = root["server"].as_object().unwrap()["tls"].as_object().unwrap();
 //! assert_eq!(tls["port"].as_integer(), Some(443));
-//! # Ok::<(), ucl_lexer::parse::Error>(())
+//! # Ok::<(), serde_ucl::parse::Error>(())
 //! ```
 //!
 //! ## Errors
@@ -146,10 +146,10 @@
 //! [`Position`] where the error was found:
 //!
 //! ```rust
-//! use ucl_lexer::UclError;
-//! use ucl_lexer::parse::ErrorKind;
+//! use serde_ucl::UclError;
+//! use serde_ucl::parse::ErrorKind;
 //!
-//! let err = ucl_lexer::from_str::<serde_json::Value>("a = 1\nb = \"open").unwrap_err();
+//! let err = serde_ucl::from_str::<serde_json::Value>("a = 1\nb = \"open").unwrap_err();
 //! let UclError::Syntax(e) = err else { panic!("{err}") };
 //! assert_eq!(e.kind(), &ErrorKind::UnterminatedString);
 //! assert_eq!((e.position().line, e.position().column), (2, 5));
@@ -168,7 +168,7 @@
 //!     port: u16,
 //! }
 //!
-//! let err = ucl_lexer::from_str::<Config>("# the port\nport = http").unwrap_err();
+//! let err = serde_ucl::from_str::<Config>("# the port\nport = http").unwrap_err();
 //! let position = err.position().unwrap();
 //! assert_eq!((position.line, position.column), (2, 8));
 //! assert_eq!(
@@ -203,11 +203,11 @@
 //! }
 //!
 //! let limits = Limits { name: "$HOME/db".into(), ratio: 0.1 };
-//! let text = ucl_lexer::to_string(&limits)?;
+//! let text = serde_ucl::to_string(&limits)?;
 //! assert_eq!(text, "name = '$HOME/db';\nratio = 0.1;\n");
-//! let back: Limits = ucl_lexer::from_str(&text)?;
+//! let back: Limits = serde_ucl::from_str(&text)?;
 //! assert_eq!(back, limits);
-//! # Ok::<(), ucl_lexer::UclError>(())
+//! # Ok::<(), serde_ucl::UclError>(())
 //! ```
 //!
 //! ## Cargo features

@@ -2,8 +2,8 @@
 //! libucl's (spec §4, checked with the oracle).
 
 use serde_json::Value;
-use ucl_lexer::parse::{self, ErrorKind};
-use ucl_lexer::{UclError, UclValue, from_str};
+use serde_ucl::parse::{self, ErrorKind};
+use serde_ucl::{UclError, UclValue, from_str};
 
 #[cfg(test)]
 mod bare_word_tests {

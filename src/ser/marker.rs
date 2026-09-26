@@ -7,18 +7,18 @@
 
 /// A UCL time: a newtype struct around the `f64` number of seconds, written by
 /// [`crate::time::serialize`] and, for other serializers, by `Serialize for UclValue`.
-pub(crate) const TIME: &str = "$__ucl_lexer_private_Time";
+pub(crate) const TIME: &str = "$__serde_ucl_private_Time";
 
 /// The values of a multi-value entry: a newtype struct around the sequence of values, which
 /// `Serialize for UclObject` writes, for serializers other than the crate's, as the value of the
 /// entry's key.
-pub(crate) const MULTI: &str = "$__ucl_lexer_private_Multi";
+pub(crate) const MULTI: &str = "$__serde_ucl_private_Multi";
 
 /// A whole value: the newtype struct that `Serialize for UclValue` and `Serialize for UclObject`
 /// write, and that `Deserialize for UclValue` asks for. The crate's serializer and deserializer
 /// then move the value itself (see [`crate::handoff`]).
-pub(crate) const VALUE: &str = "$__ucl_lexer_private_Value";
+pub(crate) const VALUE: &str = "$__serde_ucl_private_Value";
 
 /// The enum variant by which the crate's deserializer answers a request for [`VALUE`]: the value
 /// is waiting in [`crate::handoff`].
-pub(crate) const TREE: &str = "$__ucl_lexer_private_Tree";
+pub(crate) const TREE: &str = "$__serde_ucl_private_Tree";

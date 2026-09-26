@@ -5,14 +5,14 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::borrow::Cow;
-use std::io::{self, Read};
-use std::path::{Path, PathBuf};
-use ucl_lexer::parse::{ErrorKind, FsLoader, Parser, ParserBuilder};
-use ucl_lexer::{
+use serde_ucl::parse::{ErrorKind, FsLoader, Parser, ParserBuilder};
+use serde_ucl::{
     ParserFlags, UclDeserializer, UclError, from_file, from_reader, from_slice, from_str,
     from_value,
 };
+use std::borrow::Cow;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 
 /// A fresh, empty directory for one test under Cargo's scratch directory for integration tests.
 fn scratch(name: &str) -> PathBuf {
@@ -54,7 +54,7 @@ fn text_input_reads_no_files() {
         UclDeserializer::new(&include)
     ))));
     assert!(not_found(
-        ucl_lexer::parse::parse(include.as_bytes())
+        serde_ucl::parse::parse(include.as_bytes())
             .unwrap_err()
             .kind()
             .clone()
@@ -385,7 +385,7 @@ fn from_str_with_variables_registers_them_in_order() {
         "path": "/srv/data",
         "keep": "example.orgNAME ${HOSTX}",
     });
-    let value: Value = ucl_lexer::from_str_with_variables(input, variables).unwrap();
+    let value: Value = serde_ucl::from_str_with_variables(input, variables).unwrap();
     assert_eq!(value, expected);
     // From a map, a longer name wins over its prefixes.
     let map = variables
@@ -393,11 +393,11 @@ fn from_str_with_variables_registers_them_in_order() {
         .chain(&[("HOSTNAME", "h.example.org")])
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    let value: Value = ucl_lexer::from_str_with_map(input, map).unwrap();
+    let value: Value = serde_ucl::from_str_with_map(input, map).unwrap();
     assert_eq!(value["keep"], "h.example.org ${HOSTX}");
     // Text input has no file access here either.
     assert!(matches!(
-        ucl_lexer::from_str_with_variables::<Value, _, _, _>(".include \"$ROOT/x\"", variables),
+        serde_ucl::from_str_with_variables::<Value, _, _, _>(".include \"$ROOT/x\"", variables),
         Err(UclError::Syntax(e)) if matches!(e.kind(), ErrorKind::FileNotFound { .. })
     ));
 }
@@ -406,7 +406,7 @@ fn from_str_with_variables_registers_them_in_order() {
 fn from_str_with_env_reads_braced_references_only() {
     // SAFETY: no other test reads or writes this variable.
     unsafe { std::env::set_var("UCL_API_TESTS_VAR", "from-env") };
-    let value: Result<Value, _> = ucl_lexer::from_str_with_env(
+    let value: Result<Value, _> = serde_ucl::from_str_with_env(
         "braced = \"${UCL_API_TESTS_VAR}\"\nunbraced = \"$UCL_API_TESTS_VAR\"\nbare = ${UCL_API_TESTS_VAR}\nunset = \"${UCL_API_TESTS_UNSET}\"",
     );
     unsafe { std::env::remove_var("UCL_API_TESTS_VAR") };

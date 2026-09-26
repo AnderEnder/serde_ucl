@@ -15,7 +15,7 @@
 //!     host: String,
 //!     ports: Vec<u16>,
 //!     ratio: f64,
-//!     #[serde(with = "ucl_lexer::time")]
+//!     #[serde(with = "serde_ucl::time")]
 //!     timeout: Duration,
 //! }
 //!
@@ -25,13 +25,13 @@
 //!     ratio: 0.1,
 //!     timeout: Duration::from_millis(1500),
 //! };
-//! let text = ucl_lexer::to_string(&server).unwrap();
+//! let text = serde_ucl::to_string(&server).unwrap();
 //! assert_eq!(
 //!     text,
 //!     "host = \"example.org\";\nports [\n    80,\n    443,\n]\nratio = 0.1;\ntimeout = 1.5s;\n"
 //! );
-//! let value = ucl_lexer::parse::parse(text.as_bytes()).unwrap();
-//! assert_eq!(ucl_lexer::from_value::<Server>(value).unwrap(), server);
+//! let value = serde_ucl::parse::parse(text.as_bytes()).unwrap();
+//! assert_eq!(serde_ucl::from_value::<Server>(value).unwrap(), server);
 //! ```
 //!
 //! # Round trip

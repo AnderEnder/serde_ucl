@@ -3,8 +3,8 @@
 //! Run with `cargo run --example basic_usage`.
 
 use serde::Deserialize;
-use ucl_lexer::parse::ErrorKind;
-use ucl_lexer::{UclError, from_str};
+use serde_ucl::parse::ErrorKind;
+use serde_ucl::{UclError, from_str};
 
 #[derive(Debug, Deserialize)]
 struct AppConfig {

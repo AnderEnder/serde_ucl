@@ -1,12 +1,12 @@
-//! Output throughput of the emitters (`ucl_lexer::emit`), in output bytes per second.
+//! Output throughput of the emitters (`serde_ucl::emit`), in output bytes per second.
 
 mod common;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use serde_ucl::emit::Format;
+use serde_ucl::parse::Parser;
 use std::hint::black_box;
 use std::time::Duration;
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::Parser;
 
 fn bench_formats(c: &mut Criterion) {
     let input = common::config(1000);

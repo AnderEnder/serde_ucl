@@ -5,13 +5,13 @@
 //! the spec does not state yet, from oracle runs (QUESTIONS.md #59).
 
 use serde::Deserialize;
-use std::cell::Cell;
-use std::rc::Rc;
-use ucl_lexer::emit::to_json_compact;
-use ucl_lexer::parse::{
+use serde_ucl::emit::to_json_compact;
+use serde_ucl::parse::{
     Error, ErrorKind, Input, MacroCall, MacroError, MemoryLoader, Parser, ParserBuilder,
 };
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclDeserializer, UclError, UclObject, UclValue};
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclDeserializer, UclError, UclObject, UclValue};
+use std::cell::Cell;
+use std::rc::Rc;
 
 fn obj(v: &UclValue) -> &UclObject {
     v.as_object().expect("object")
@@ -606,7 +606,7 @@ fn saved_comments_and_output_facts_describe_the_result() {
     // Positions are in the input each comment was read from.
     assert_eq!(parser.comments()[1].position.line, 1);
     // The output facts: `b` was single-quoted.
-    let config = parser.emitter(ucl_lexer::emit::Format::Config).emit(&value);
+    let config = parser.emitter(serde_ucl::emit::Format::Config).emit(&value);
     assert!(config.contains("b = 'q';"), "{config}");
 }
 

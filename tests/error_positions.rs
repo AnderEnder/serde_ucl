@@ -4,13 +4,13 @@
 //! from included files (§9.4).
 
 use serde::Deserialize;
+use serde_ucl::error::{DeserializeError, SerdeError};
+use serde_ucl::parse::{MemoryLoader, Parser, ParserBuilder, PathSegment};
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclDeserializer, UclError, from_str};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use ucl_lexer::error::{DeserializeError, SerdeError};
-use ucl_lexer::parse::{MemoryLoader, Parser, ParserBuilder, PathSegment};
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclDeserializer, UclError, from_str};
 
 /// The deserialization error of `result`.
 fn error<T: std::fmt::Debug>(result: Result<T, UclError>) -> DeserializeError {
@@ -435,24 +435,24 @@ fn values_copied_by_inherit() {
 
 #[test]
 fn nesting_past_the_serde_limit() {
-    let depth = ucl_lexer::MAX_SERDE_NESTING + 2;
+    let depth = serde_ucl::MAX_SERDE_NESTING + 2;
     let text = format!("a = {}1{}", "[".repeat(depth), "]".repeat(depth));
     let e = error(from_str::<serde_json::Value>(&text));
     assert!(matches!(e.error(), SerdeError::TooDeep { .. }));
     // The array that is one level too deep.
-    assert_eq!(e.path().len(), ucl_lexer::MAX_SERDE_NESTING);
+    assert_eq!(e.path().len(), serde_ucl::MAX_SERDE_NESTING);
     let p = e.position().unwrap();
     assert_eq!(
         (p.line, p.column),
-        (1, 5 + ucl_lexer::MAX_SERDE_NESTING - 1)
+        (1, 5 + serde_ucl::MAX_SERDE_NESTING - 1)
     );
 }
 
 #[test]
 fn from_value_has_neither_path_nor_position() {
     // It consumes the value, so it cannot deserialize a second time to find them.
-    let value = ucl_lexer::parse::parse(b"server { host = h; port = x }").unwrap();
-    let e = error(ucl_lexer::from_value::<Config>(value));
+    let value = serde_ucl::parse::parse(b"server { host = h; port = x }").unwrap();
+    let e = error(serde_ucl::from_value::<Config>(value));
     assert!(e.path().is_empty());
     assert_eq!(e.position(), None);
     assert_eq!(e.to_string(), "invalid type: string \"x\", expected u16");
@@ -534,20 +534,20 @@ fn the_variable_handler_is_asked_once() {
 #[test]
 fn every_text_entry_point() {
     let text = "a = 1\nk = foo";
-    assert_eq!(at(ucl_lexer::from_slice::<K>(text.as_bytes())), (2, 5));
-    assert_eq!(at(ucl_lexer::from_reader::<K>(text.as_bytes())), (2, 5));
+    assert_eq!(at(serde_ucl::from_slice::<K>(text.as_bytes())), (2, 5));
+    assert_eq!(at(serde_ucl::from_reader::<K>(text.as_bytes())), (2, 5));
     assert_eq!(
-        at(ucl_lexer::from_str_with_variables::<K, _, _, _>(
+        at(serde_ucl::from_str_with_variables::<K, _, _, _>(
             "k = $V",
             [("V", "x")]
         )),
         (1, 5)
     );
     assert_eq!(
-        at(ucl_lexer::from_str_with_map::<K>(text, HashMap::new())),
+        at(serde_ucl::from_str_with_map::<K>(text, HashMap::new())),
         (2, 5)
     );
-    assert_eq!(at(ucl_lexer::from_str_with_env::<K>(text)), (2, 5));
+    assert_eq!(at(serde_ucl::from_str_with_env::<K>(text)), (2, 5));
     // A parser that saves comments keeps them: the second parse does not touch them.
     let mut parser = Parser::with_flags(ParserFlags::SAVE_COMMENTS);
     parser.register_variable("V", "x");
@@ -569,13 +569,13 @@ fn file(name: &str, text: &str) -> PathBuf {
 fn from_file_and_its_includes() {
     let inc = file("inc.conf", "\n\nk = x\n");
     let main = file("main.conf", "a = 1\n.include \"inc.conf\"\n");
-    let e = error(ucl_lexer::from_file::<HashMap<String, u32>>(&main));
+    let e = error(serde_ucl::from_file::<HashMap<String, u32>>(&main));
     assert_eq!(e.path(), [key("k", 0)]);
     assert_eq!(e.file(), Some(inc.as_path()));
     assert_eq!(e.position().map(|p| (p.line, p.column)), Some((3, 5)));
     // In the file itself, which is the document: no file is named.
     let main = file("main2.conf", "a = 1\nb = y\n");
-    let e = error(ucl_lexer::from_file::<HashMap<String, u32>>(&main));
+    let e = error(serde_ucl::from_file::<HashMap<String, u32>>(&main));
     assert_eq!(e.file(), None);
     assert_eq!(e.position().map(|p| (p.line, p.column)), Some((2, 5)));
 }

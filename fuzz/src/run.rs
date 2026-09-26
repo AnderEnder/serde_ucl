@@ -4,6 +4,7 @@
 use crate::oracle::{self, Setup};
 use crate::uncertain::{self, Context};
 use serde_json::Value as J;
+use serde_ucl::parse::{ErrorKind, Parser, Uncertain};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read;
@@ -12,7 +13,6 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use ucl_lexer::parse::{ErrorKind, Parser, Uncertain};
 
 /// The oracle's options for the entries of a `.flags` file, mapped as `scripts/regen-golden.sh`
 /// maps them.

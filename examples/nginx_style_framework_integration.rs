@@ -10,15 +10,15 @@
 //! - `location "/api" { ... }` is the object `location { "/api" { ... } }`; repeating it adds
 //!   another value to `location`, unless the parser merges repeated objects
 //!   (`DuplicateStrategy::Merge`), which gives one map of routes;
-//! - `30s`, `1d` are times (seconds), read into `Duration` with `ucl_lexer::time`; `1kb`, `10mb`
+//! - `30s`, `1d` are times (seconds), read into `Duration` with `serde_ucl::time`; `1kb`, `10mb`
 //!   are byte multipliers (powers of 1024) and `10k` a decimal one;
 //! - `yes`, `on` and `true` are booleans; comments are `#` and `/* */` (not `//`).
 
 use indexmap::IndexMap;
 use serde::Deserialize;
+use serde_ucl::parse::ParserBuilder;
+use serde_ucl::{DuplicateStrategy, UclValue, from_value};
 use std::time::Duration;
-use ucl_lexer::parse::ParserBuilder;
-use ucl_lexer::{DuplicateStrategy, UclValue, from_value};
 
 /// The service configuration, in the nginx-like style.
 const SERVICE_CONF: &str = r#"
@@ -112,11 +112,11 @@ struct Server {
     listen: String,
     worker_threads: Option<u32>,
     max_connections: u32,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     request_timeout: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     keepalive: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     shutdown_timeout: Duration,
     max_body: u64,
     tls: Option<Tls>,
@@ -182,14 +182,14 @@ struct Location {
     status: Option<u16>,
 }
 
-/// `Option<Duration>` through `ucl_lexer::time`.
+/// `Option<Duration>` through `serde_ucl::time`.
 mod option_seconds {
     use serde::{Deserialize, Deserializer};
     use std::time::Duration;
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
         #[derive(Deserialize)]
-        struct Seconds(#[serde(with = "ucl_lexer::time")] Duration);
+        struct Seconds(#[serde(with = "serde_ucl::time")] Duration);
         Ok(Option::<Seconds>::deserialize(d)?.map(|s| s.0))
     }
 }
@@ -199,7 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // With the default strategy (`append`), each `location "..." { }` block is one more value of
     // the key `location`: three objects of one route each.
-    let appended = ucl_lexer::parse::parse(SERVICE_CONF.as_bytes())?;
+    let appended = serde_ucl::parse::parse(SERVICE_CONF.as_bytes())?;
     let locations = appended.as_object().unwrap().entry("location").unwrap();
     assert_eq!(locations.len(), 3);
     println!(

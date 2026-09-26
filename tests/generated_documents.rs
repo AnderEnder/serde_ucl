@@ -6,7 +6,7 @@
 //! measures throughput.
 
 use serde_json::{Map, Value, json};
-use ucl_lexer::{UclValue, from_str};
+use serde_ucl::{UclValue, from_str};
 
 #[test]
 fn test_small_config() {
@@ -105,7 +105,7 @@ fn test_string_heavy_config() {
 fn test_number_heavy_config() {
     let items = 500;
     let config = generate_number_heavy_config(items);
-    let value = ucl_lexer::parse::parse(config.as_bytes()).unwrap();
+    let value = serde_ucl::parse::parse(config.as_bytes()).unwrap();
     let root = value.as_object().unwrap();
     assert_eq!(root.len(), items);
     for i in 0..items {

@@ -3,8 +3,8 @@
 //! oracle).
 
 use serde_json::Value;
-use ucl_lexer::parse::{ErrorKind, Parser};
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue, from_str};
+use serde_ucl::parse::{ErrorKind, Parser};
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclValue, from_str};
 
 #[cfg(test)]
 mod implicit_array_tests {
@@ -278,7 +278,7 @@ mod implicit_array_tests {
         // By default a repeated key holds several values (spec §8.2).
         let result: Value = from_str(config).expect("Should create array with default settings");
         assert_eq!(result["server"], serde_json::json!(["server1", "server2"]));
-        let value = ucl_lexer::parse::parse(config.as_bytes()).unwrap();
+        let value = serde_ucl::parse::parse(config.as_bytes()).unwrap();
         assert_eq!(value.as_object().unwrap().entry("server").unwrap().len(), 2);
 
         // With the `error` strategy any repeated key is an error (spec §8.4).

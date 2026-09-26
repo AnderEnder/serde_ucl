@@ -124,8 +124,8 @@ use std::path::Path;
 ///
 /// ```
 /// use serde::Deserialize;
-/// use ucl_lexer::UclDeserializer;
-/// use ucl_lexer::parse::Parser;
+/// use serde_ucl::UclDeserializer;
+/// use serde_ucl::parse::Parser;
 ///
 /// #[derive(Deserialize)]
 /// struct Config {
@@ -136,7 +136,7 @@ use std::path::Path;
 /// parser.register_variable("APP", "demo");
 /// let config = Config::deserialize(UclDeserializer::from_parser(parser, b"name = $APP"))?;
 /// assert_eq!(config.name, "demo");
-/// # Ok::<(), ucl_lexer::UclError>(())
+/// # Ok::<(), serde_ucl::UclError>(())
 /// ```
 pub struct UclDeserializer<'a> {
     parser: Parser,
@@ -312,9 +312,9 @@ impl<'de> de::Deserializer<'de> for UclDeserializer<'de> {
 ///     timeout: f64,
 /// }
 ///
-/// let server: Server = ucl_lexer::from_str("port = 8080\ntimeout = 1.5min")?;
+/// let server: Server = serde_ucl::from_str("port = 8080\ntimeout = 1.5min")?;
 /// assert_eq!((server.port, server.timeout), (8080, 90.0));
-/// # Ok::<(), ucl_lexer::UclError>(())
+/// # Ok::<(), serde_ucl::UclError>(())
 /// ```
 pub fn from_str<'a, T>(s: &'a str) -> Result<T, UclError>
 where
@@ -380,12 +380,12 @@ where
 /// not its place.
 ///
 /// ```
-/// let value: serde_json::Value = ucl_lexer::from_str_with_variables(
+/// let value: serde_json::Value = serde_ucl::from_str_with_variables(
 ///     "url = \"https://${HOST}:$PORT/\"",
 ///     [("HOST", "example.org"), ("PORT", "8443")],
 /// )?;
 /// assert_eq!(value["url"], "https://example.org:8443/");
-/// # Ok::<(), ucl_lexer::UclError>(())
+/// # Ok::<(), serde_ucl::UclError>(())
 /// ```
 pub fn from_str_with_variables<'a, T, I, K, V>(s: &'a str, variables: I) -> Result<T, UclError>
 where

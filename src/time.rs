@@ -6,14 +6,14 @@
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Config {
-//!     #[serde(with = "ucl_lexer::time")]
+//!     #[serde(with = "serde_ucl::time")]
 //!     timeout: Duration,
 //! }
 //!
-//! let value = ucl_lexer::parse::parse(b"timeout = 90s").unwrap();
-//! let config: Config = ucl_lexer::from_value(value).unwrap();
+//! let value = serde_ucl::parse::parse(b"timeout = 90s").unwrap();
+//! let config: Config = serde_ucl::from_value(value).unwrap();
 //! assert_eq!(config.timeout, Duration::from_secs(90));
-//! assert_eq!(ucl_lexer::to_string(&config).unwrap(), "timeout = 90.0s;\n");
+//! assert_eq!(serde_ucl::to_string(&config).unwrap(), "timeout = 90.0s;\n");
 //! ```
 //!
 //! Any number is read as seconds: a UCL time (`30s`, `10ms`, `2h`), a float or an integer. The

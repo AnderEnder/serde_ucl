@@ -61,7 +61,7 @@ checks() {
 	# The tests of stack depth again, with the crate unoptimised as a debug build of an
 	# application builds it: the test profile optimises it (Cargo.toml).
 	run cargo test --lib --test stack_depth \
-		--config 'profile.test.package.ucl-rust-lexer.opt-level=0'
+		--config 'profile.test.package.serde_ucl.opt-level=0'
 	# The crate without `load`: with its default features, and with none.
 	run cargo test --manifest-path "$FEATURES_MANIFEST" --target-dir "$FEATURES_TARGET"
 	run cargo test --manifest-path "$FEATURES_MANIFEST" --target-dir "$FEATURES_TARGET" \

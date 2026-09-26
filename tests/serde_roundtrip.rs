@@ -1,7 +1,7 @@
 //! Serde round trips (clean-room work item C4b, spec §10.8).
 //!
 //! What serde writes must read back as the same value: through the new parser core
-//! (`ucl_lexer::parse`) and through libucl. Values are compared as typed dumps in the schema of
+//! (`serde_ucl::parse`) and through libucl. Values are compared as typed dumps in the schema of
 //! `tests/conformance.rs` (entries in order, every value of a multi-value entry, times apart from
 //! floats, floats by their bits), never with `PartialEq`, which ignores key order and the sign of
 //! zero and never equates NaN. A typed Rust value is compared through `to_value` of the value
@@ -29,20 +29,20 @@
 //! `ABI`. The config format reads back exactly whatever is registered. In JSON, compact JSON and
 //! YAML a string that refers to `FILENAME` or `CURDIR` must be an error, and one that refers to
 //! `ABI`, a variable the reader registers, expands (a reader precondition documented in
-//! `ucl_lexer::ser`), so values that hold one are written but not compared.
+//! `serde_ucl::ser`), so values that hold one are written but not compared.
 
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as J, json};
+use serde_ucl::error::SerdeError;
+use serde_ucl::parse::Parser;
+use serde_ucl::{UclError, UclObject, UclValue, from_value, to_value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
-use ucl_lexer::error::SerdeError;
-use ucl_lexer::parse::Parser;
-use ucl_lexer::{UclError, UclObject, UclValue, from_value, to_value};
 
 // ---------------------------------------------------------------------------------------------
 // Formats, reading back, dumps
@@ -60,10 +60,10 @@ const FORMATS: [Fmt; 4] = [Fmt::Config, Fmt::Json, Fmt::Compact, Fmt::Yaml];
 impl Fmt {
     fn write<T: ?Sized + Serialize>(self, value: &T) -> Result<String, UclError> {
         match self {
-            Fmt::Config => ucl_lexer::to_string(value),
-            Fmt::Json => ucl_lexer::to_json_string(value),
-            Fmt::Compact => ucl_lexer::to_json_string_compact(value),
-            Fmt::Yaml => ucl_lexer::to_yaml_string(value),
+            Fmt::Config => serde_ucl::to_string(value),
+            Fmt::Json => serde_ucl::to_json_string(value),
+            Fmt::Compact => serde_ucl::to_json_string_compact(value),
+            Fmt::Yaml => serde_ucl::to_yaml_string(value),
         }
     }
 
@@ -205,7 +205,7 @@ fn any_string(value: &UclValue, test: &dyn Fn(&str) -> bool) -> bool {
     }
 }
 
-/// Whether `value` has no form in `fmt` (see `ucl_lexer::ser`), so that serializing it must fail
+/// Whether `value` has no form in `fmt` (see `serde_ucl::ser`), so that serializing it must fail
 /// with `SerdeError::Unrepresentable`: in the config format a string that single quotes cannot
 /// hold, in the others a string that refers to a file variable; and a float or time of
 /// [`number_unwritable`].
@@ -221,7 +221,7 @@ fn expect_error(value: &UclValue, fmt: Fmt) -> bool {
 }
 
 /// Whether the output of `value` in `fmt` expands when read by `read_core` or the oracle, which
-/// register `ABI`: a reader precondition (see `ucl_lexer::ser`), so such values are not compared.
+/// register `ABI`: a reader precondition (see `serde_ucl::ser`), so such values are not compared.
 fn reader_dependent(value: &UclValue, fmt: Fmt) -> bool {
     fmt.expands() && any_string(value, &|s| refers_to(s, "ABI"))
 }
@@ -243,7 +243,7 @@ fn any_number(value: &UclValue, test: &dyn Fn(f64, bool) -> bool) -> bool {
     }
 }
 
-/// Whether a float or time has no form in `fmt` (see `ucl_lexer::ser`, spec §10.8): a subnormal
+/// Whether a float or time has no form in `fmt` (see `serde_ucl::ser`, spec §10.8): a subnormal
 /// float, a NaN time and a time closer to zero than [`SMALLEST_MS_TIME`] in every format, and in
 /// JSON also NaN, the infinities and every subnormal value.
 fn number_unwritable(v: f64, time: bool, fmt: Fmt) -> bool {
@@ -280,7 +280,7 @@ fn expected_reading(value: &UclValue, fmt: Fmt) -> UclValue {
     }
 }
 
-/// Whether a string has no config form (see `ucl_lexer::ser`): it contains `$`, and a
+/// Whether a string has no config form (see `serde_ucl::ser`): it contains `$`, and a
 /// backslash, paired from the left, stands before `'`, LF, CR or the end.
 fn config_unwritable(s: &str) -> bool {
     if !s.contains('$') {
@@ -662,7 +662,7 @@ struct Sample {
     marker: Marker,
     id: Id,
     shapes: Vec<Shape>,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
     empty_list: Vec<String>,
     empty_map: BTreeMap<String, i32>,
@@ -761,7 +761,7 @@ fn gen_f32(rng: &mut Rng) -> f32 {
     }
 }
 
-/// A duration that a 64-bit float of seconds holds exactly (see `ucl_lexer::time`).
+/// A duration that a 64-bit float of seconds holds exactly (see `serde_ucl::time`).
 fn gen_duration(rng: &mut Rng) -> Duration {
     let d = match rng.below(3) {
         0 => Duration::from_millis(rng.next() % 10_000_000),
@@ -874,7 +874,7 @@ fn check_typed<T: Serialize + DeserializeOwned>(original: &T, fmt: Fmt) -> Resul
     let text = fmt.write(original).map_err(|e| e.to_string())?;
     let back = read_core(text.as_bytes())?;
     let again = typed_back::<T>(back).map_err(|e| format!("{fmt:?}: from_value: {e}\n{text}"))?;
-    // In JSON a `Duration` comes back as itself through `ucl_lexer::time`, and a time in a
+    // In JSON a `Duration` comes back as itself through `serde_ucl::time`, and a time in a
     // `UclValue` field as a float; both sides are compared as JSON reads them.
     let expected = expected_reading(&tree, fmt);
     match find_diff(&dump(&expected), &dump(&expected_reading(&again, fmt)), "$") {
@@ -1800,13 +1800,13 @@ fn values_without_a_form_are_errors() {
     let subnormal = obj([("t", UclValue::Time(1e-310))]);
     assert!(unrepresentable(&subnormal, Fmt::Json));
     assert!(unrepresentable(&subnormal, Fmt::Compact));
-    assert_eq!(ucl_lexer::to_string(&subnormal).unwrap(), "t = 1e-307ms;\n");
+    assert_eq!(serde_ucl::to_string(&subnormal).unwrap(), "t = 1e-307ms;\n");
     assert_eq!(
-        ucl_lexer::to_yaml_string(&subnormal).unwrap(),
+        serde_ucl::to_yaml_string(&subnormal).unwrap(),
         "t: 1e-307ms"
     );
     let smallest = obj([("t", UclValue::Time(-SMALLEST_MS_TIME))]);
-    let text = ucl_lexer::to_string(&smallest).unwrap();
+    let text = serde_ucl::to_string(&smallest).unwrap();
     assert_eq!(text, "t = -2.2250738585072014e-308ms;\n");
     assert_eq!(dump(&read_core(text.as_bytes()).unwrap()), dump(&smallest));
     // to_value rejects integers it cannot hold, but takes any other value.
@@ -1822,17 +1822,17 @@ fn values_without_a_form_are_errors() {
         for fmt in [Fmt::Json, Fmt::Compact, Fmt::Yaml] {
             assert!(unrepresentable(&V { v: s }, fmt), "{fmt:?} {s:?}");
         }
-        let text = ucl_lexer::to_string(&V { v: s }).unwrap();
+        let text = serde_ucl::to_string(&V { v: s }).unwrap();
         let back = read_core(text.as_bytes()).unwrap();
         assert_eq!(back.as_object().unwrap()["v"].as_str(), Some(s));
     }
     for s in ["$ABI", "${CURDIR", "$CURDI", "${HOME}"] {
-        assert!(ucl_lexer::to_json_string(&V { v: s }).is_ok(), "{s:?}");
+        assert!(serde_ucl::to_json_string(&V { v: s }).is_ok(), "{s:?}");
     }
     // Strings with `$` that single quotes cannot hold have no config form; JSON writes them.
     for s in ["$ABI\\", "$x\\'", "$x\\\n", "$x\\\r\n", "$x\\\r"] {
         assert!(unrepresentable(&V { v: s }, Fmt::Config), "{s:?}");
-        let json = ucl_lexer::to_json_string_compact(&V { v: s }).unwrap();
+        let json = serde_ucl::to_json_string_compact(&V { v: s }).unwrap();
         assert_eq!(serde_json::from_str::<J>(&json).unwrap()["v"], s);
     }
 }
@@ -1864,13 +1864,13 @@ fn nesting_limit() {
 #[test]
 fn to_writer_writes_the_config_text() {
     let mut out = Vec::new();
-    ucl_lexer::to_writer(&mut out, &fixed_sample()).unwrap();
+    serde_ucl::to_writer(&mut out, &fixed_sample()).unwrap();
     assert_eq!(
         out,
-        ucl_lexer::to_string(&fixed_sample()).unwrap().as_bytes()
+        serde_ucl::to_string(&fixed_sample()).unwrap().as_bytes()
     );
     let mut out = Vec::new();
-    assert!(ucl_lexer::to_writer(&mut out, &1).is_err());
+    assert!(serde_ucl::to_writer(&mut out, &1).is_err());
     assert!(out.is_empty());
 }
 
@@ -1888,11 +1888,11 @@ fn forms_of_each_format() {
     value.append("a b", UclValue::Array(vec![UclValue::Null]));
     let value = UclValue::Object(value);
     assert_eq!(
-        ucl_lexer::to_string(&value).unwrap(),
+        serde_ucl::to_string(&value).unwrap(),
         "f = 0.1;\nt = 1.5s;\nm = 1;\nm = -1e308k;\ns = '$ABI it\\'s';\n\"a b\" [\n    null,\n]\n"
     );
     assert_eq!(
-        ucl_lexer::to_yaml_string(&value).unwrap(),
+        serde_ucl::to_yaml_string(&value).unwrap(),
         "f: 0.1\nt: 1.5s\nm: 1\nm: -1e308k\ns: \"$ABI it's\"\n\"a b\": [\n    null\n]"
     );
     // JSON has no form for −∞ (WORKLIST.md C4, decision 2) ...
@@ -1905,12 +1905,12 @@ fn forms_of_each_format() {
     value.append("m", UclValue::Float(-1e308));
     let value = UclValue::Object(value);
     assert_eq!(
-        ucl_lexer::to_json_string(&value).unwrap(),
+        serde_ucl::to_json_string(&value).unwrap(),
         "{\n    \"f\": 0.1,\n    \"t\": 1.5,\n    \"s\": \"$ABI it's\",\n    \
          \"a b\": [\n        null\n    ],\n    \"m\": 1,\n    \"m\": -1e308\n}"
     );
     assert_eq!(
-        ucl_lexer::to_json_string_compact(&value).unwrap(),
+        serde_ucl::to_json_string_compact(&value).unwrap(),
         r#"{"f":0.1,"t":1.5,"s":"$ABI it's","a b":[null],"m":1,"m":-1e308}"#
     );
 }
@@ -1970,7 +1970,7 @@ fn ucl_value_through_other_serde_formats() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Deserializing parsed documents with from_value (the rules of `ucl_lexer::de`)
+// Deserializing parsed documents with from_value (the rules of `serde_ucl::de`)
 
 fn parsed<T: DeserializeOwned>(text: &str) -> Result<T, UclError> {
     from_value(read_core(text.as_bytes()).unwrap())

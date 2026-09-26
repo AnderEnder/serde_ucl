@@ -17,11 +17,11 @@
 
 use indexmap::IndexMap;
 use serde::Deserialize;
+use serde_ucl::emit::{Emitter, Format};
+use serde_ucl::parse::{ErrorKind, MemoryLoader, ParserBuilder};
+use serde_ucl::{UclError, UclValue, from_str, from_value};
 use std::collections::HashMap;
 use std::time::Duration;
-use ucl_lexer::emit::{Emitter, Format};
-use ucl_lexer::parse::{ErrorKind, MemoryLoader, ParserBuilder};
-use ucl_lexer::{UclError, UclValue, from_str, from_value};
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct ApplicationConfig {
@@ -61,11 +61,11 @@ struct TlsConfig {
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct TimeoutConfig {
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     read: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     write: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     idle: Duration,
 }
 
@@ -438,8 +438,8 @@ fn reloading() -> Result<(), Box<dyn std::error::Error>> {
         metrics { enabled = true; }
     "#;
 
-    let old = ucl_lexer::parse::parse(running.as_bytes())?;
-    let new = ucl_lexer::parse::parse(changed.as_bytes())?;
+    let old = serde_ucl::parse::parse(running.as_bytes())?;
+    let new = serde_ucl::parse::parse(changed.as_bytes())?;
     let mut changes = Vec::new();
     diff("", &old, &new, &mut changes);
     println!("  {} changes in the document:", changes.len());

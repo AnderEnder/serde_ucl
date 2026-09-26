@@ -11,17 +11,17 @@
 //! recursion through their serde impls, and fail with `SerdeError::TooDeep` past
 //! `MAX_SERDE_NESTING` maps and sequences.
 //!
-//! `cargo test` builds this crate optimised (`[profile.test.package.ucl-rust-lexer]` in
+//! `cargo test` builds this crate optimised (`[profile.test.package.serde_ucl]` in
 //! `Cargo.toml`), which takes less stack than a debug build. `scripts/ci.sh` also runs this file
 //! with the crate unoptimised, as a debug build of an application builds it; that run is what
 //! shows `MAX_INHERIT_DEPTH_LIMIT` to be safe.
 
 use serde::{Deserialize, Serialize};
+use serde_ucl::emit::Format;
+use serde_ucl::error::SerdeError;
+use serde_ucl::parse::{ErrorKind, MAX_INHERIT_DEPTH_LIMIT, MAX_NESTING, Parser, ParserBuilder};
+use serde_ucl::{MAX_SERDE_NESTING, ParserFlags, UclDeserializer, UclError, UclObject, UclValue};
 use std::io::Write;
-use ucl_lexer::emit::Format;
-use ucl_lexer::error::SerdeError;
-use ucl_lexer::parse::{ErrorKind, MAX_INHERIT_DEPTH_LIMIT, MAX_NESTING, Parser, ParserBuilder};
-use ucl_lexer::{MAX_SERDE_NESTING, ParserFlags, UclDeserializer, UclError, UclObject, UclValue};
 
 /// Runs `f` on a thread with a 2 MiB stack. A stack overflow aborts the whole test process.
 fn on_small_stack(f: impl FnOnce() + Send + 'static) {
@@ -127,7 +127,7 @@ fn deepest() -> Vec<(&'static str, String)> {
         ("inherited", inherited()),
     ];
     for (name, document) in &documents {
-        let value = ucl_lexer::parse::parse(document.as_bytes()).expect(name);
+        let value = serde_ucl::parse::parse(document.as_bytes()).expect(name);
         assert_eq!(nesting(&value), MAX_NESTING, "{name}");
     }
     documents
@@ -190,32 +190,32 @@ fn parse_and_emit_at_the_parser_limit() {
 fn text_into_ucl_value_at_the_parser_limit() {
     on_small_stack(|| {
         for (name, document) in deepest() {
-            let parsed = ucl_lexer::parse::parse(document.as_bytes()).unwrap();
+            let parsed = serde_ucl::parse::parse(document.as_bytes()).unwrap();
             let values: Vec<(&str, UclValue)> = vec![
-                ("from_str", ucl_lexer::from_str(&document).expect(name)),
+                ("from_str", serde_ucl::from_str(&document).expect(name)),
                 (
                     "from_slice",
-                    ucl_lexer::from_slice(document.as_bytes()).expect(name),
+                    serde_ucl::from_slice(document.as_bytes()).expect(name),
                 ),
                 (
                     "from_reader",
-                    ucl_lexer::from_reader(document.as_bytes()).expect(name),
+                    serde_ucl::from_reader(document.as_bytes()).expect(name),
                 ),
                 (
                     "from_file",
-                    ucl_lexer::from_file(file(&name.replace(' ', "_"), &document)).expect(name),
+                    serde_ucl::from_file(file(&name.replace(' ', "_"), &document)).expect(name),
                 ),
                 (
                     "from_str_with_variables",
-                    ucl_lexer::from_str_with_variables(&document, [("V", "v")]).expect(name),
+                    serde_ucl::from_str_with_variables(&document, [("V", "v")]).expect(name),
                 ),
                 (
                     "from_str_with_map",
-                    ucl_lexer::from_str_with_map(&document, Default::default()).expect(name),
+                    serde_ucl::from_str_with_map(&document, Default::default()).expect(name),
                 ),
                 (
                     "from_str_with_env",
-                    ucl_lexer::from_str_with_env(&document).expect(name),
+                    serde_ucl::from_str_with_env(&document).expect(name),
                 ),
             ];
             for (entry_point, value) in values {
@@ -230,11 +230,11 @@ fn text_into_ucl_value_at_the_parser_limit() {
 fn from_value_into_ucl_value_at_the_parser_limit() {
     on_small_stack(|| {
         for (name, document) in deepest() {
-            let parsed = ucl_lexer::parse::parse(document.as_bytes()).unwrap();
-            let value: UclValue = ucl_lexer::from_value(parsed.clone()).expect(name);
+            let parsed = serde_ucl::parse::parse(document.as_bytes()).unwrap();
+            let value: UclValue = serde_ucl::from_value(parsed.clone()).expect(name);
             assert!(same(&value, &parsed), "{name}");
             if parsed.is_object() {
-                let object: UclObject = ucl_lexer::from_value(parsed.clone()).expect(name);
+                let object: UclObject = serde_ucl::from_value(parsed.clone()).expect(name);
                 assert!(same(&UclValue::Object(object), &parsed), "{name}");
             }
         }
@@ -245,35 +245,35 @@ fn from_value_into_ucl_value_at_the_parser_limit() {
 fn ucl_value_into_every_output_at_the_parser_limit() {
     on_small_stack(|| {
         for (name, document) in deepest() {
-            let value = ucl_lexer::parse::parse(document.as_bytes()).unwrap();
+            let value = serde_ucl::parse::parse(document.as_bytes()).unwrap();
             // `to_value` copies the value as it is.
             assert!(
-                same(&ucl_lexer::to_value(&value).expect(name), &value),
+                same(&serde_ucl::to_value(&value).expect(name), &value),
                 "{name}"
             );
 
             let mut written = Vec::new();
-            ucl_lexer::to_writer(&mut written, &value).expect(name);
+            serde_ucl::to_writer(&mut written, &value).expect(name);
             let texts = [
-                ("to_string", ucl_lexer::to_string(&value).expect(name)),
+                ("to_string", serde_ucl::to_string(&value).expect(name)),
                 ("to_writer", String::from_utf8(written).unwrap()),
                 (
                     "to_json_string",
-                    ucl_lexer::to_json_string(&value).expect(name),
+                    serde_ucl::to_json_string(&value).expect(name),
                 ),
                 (
                     "to_json_string_compact",
-                    ucl_lexer::to_json_string_compact(&value).expect(name),
+                    serde_ucl::to_json_string_compact(&value).expect(name),
                 ),
                 (
                     "to_yaml_string",
-                    ucl_lexer::to_yaml_string(&value).expect(name),
+                    serde_ucl::to_yaml_string(&value).expect(name),
                 ),
             ];
             for (entry_point, text) in texts {
                 // The output reads back as the value (spec §10.8); a parse has no `.inherit`
                 // marks, so the inherited document is compared by depth only.
-                let back = ucl_lexer::parse::parse(text.as_bytes()).expect(entry_point);
+                let back = serde_ucl::parse::parse(text.as_bytes()).expect(entry_point);
                 assert_eq!(nesting(&back), MAX_NESTING, "{entry_point}, {name}");
                 if name != "inherited" {
                     assert!(same(&back, &value), "{entry_point}, {name}");
@@ -281,11 +281,11 @@ fn ucl_value_into_every_output_at_the_parser_limit() {
             }
             if let UclValue::Object(object) = &value {
                 assert!(
-                    same(&ucl_lexer::to_value(object).expect(name), &value),
+                    same(&serde_ucl::to_value(object).expect(name), &value),
                     "{name}"
                 );
-                let text = ucl_lexer::to_string(object).expect(name);
-                assert!(ucl_lexer::parse::parse(text.as_bytes()).is_ok(), "{name}");
+                let text = serde_ucl::to_string(object).expect(name);
+                assert!(serde_ucl::parse::parse(text.as_bytes()).is_ok(), "{name}");
             }
         }
     });
@@ -299,15 +299,15 @@ fn ucl_value_deeper_than_the_parser_limit() {
         for _ in 0..=MAX_NESTING {
             value = UclValue::Array(vec![value]);
         }
-        let copy = ucl_lexer::to_value(&value).unwrap();
+        let copy = serde_ucl::to_value(&value).unwrap();
         assert!(same(&copy, &value));
-        let back: UclValue = ucl_lexer::from_value(copy).unwrap();
+        let back: UclValue = serde_ucl::from_value(copy).unwrap();
         assert!(same(&back, &value));
         for result in [
-            ucl_lexer::to_string(&value),
-            ucl_lexer::to_json_string(&value),
-            ucl_lexer::to_json_string_compact(&value),
-            ucl_lexer::to_yaml_string(&value),
+            serde_ucl::to_string(&value),
+            serde_ucl::to_json_string(&value),
+            serde_ucl::to_json_string_compact(&value),
+            serde_ucl::to_yaml_string(&value),
         ] {
             let error = result.unwrap_err().to_string();
             assert!(error.contains("nested more than 1024"), "{error}");
@@ -381,9 +381,9 @@ fn json_objects(depth: usize) -> serde_json::Value {
 fn text_into_typed_targets_up_to_the_serde_limit() {
     on_small_stack(|| {
         let at_limit = objects(MAX_SERDE_NESTING);
-        let json: serde_json::Value = ucl_lexer::from_str(&at_limit).unwrap();
+        let json: serde_json::Value = serde_ucl::from_str(&at_limit).unwrap();
         assert!(json == json_objects(MAX_SERDE_NESTING));
-        let node: Node = ucl_lexer::from_str(&at_limit).unwrap();
+        let node: Node = serde_ucl::from_str(&at_limit).unwrap();
         assert!(node == Node::chain(MAX_SERDE_NESTING));
 
         // One level more, and the parser's deepest documents, fail at the limit through every
@@ -392,30 +392,30 @@ fn text_into_typed_targets_up_to_the_serde_limit() {
         documents.extend(deepest());
         for (name, document) in documents {
             let path = file(&format!("typed_{}", name.replace(' ', "_")), &document);
-            assert_too_deep(ucl_lexer::from_str::<serde_json::Value>(&document), name);
+            assert_too_deep(serde_ucl::from_str::<serde_json::Value>(&document), name);
             assert_too_deep(
-                ucl_lexer::from_slice::<serde_json::Value>(document.as_bytes()),
+                serde_ucl::from_slice::<serde_json::Value>(document.as_bytes()),
                 name,
             );
             assert_too_deep(
-                ucl_lexer::from_reader::<serde_json::Value>(document.as_bytes()),
+                serde_ucl::from_reader::<serde_json::Value>(document.as_bytes()),
                 name,
             );
-            assert_too_deep(ucl_lexer::from_file::<serde_json::Value>(&path), name);
+            assert_too_deep(serde_ucl::from_file::<serde_json::Value>(&path), name);
             // `Node` skips keys other than `a` and `b`, and reads an array as a map.
             if name == "one more" || name == "objects" {
-                assert_too_deep(ucl_lexer::from_str::<Node>(&document), name);
+                assert_too_deep(serde_ucl::from_str::<Node>(&document), name);
             }
-            let value = ucl_lexer::parse::parse(document.as_bytes()).unwrap();
-            assert_too_deep(ucl_lexer::from_value::<serde_json::Value>(value), name);
+            let value = serde_ucl::parse::parse(document.as_bytes()).unwrap();
+            assert_too_deep(serde_ucl::from_value::<serde_json::Value>(value), name);
         }
 
         // A multi-value entry reads as a sequence: one level more for a typed target.
         let multi = multi_values(MAX_SERDE_NESTING / 2 + 1);
-        assert!(ucl_lexer::from_str::<serde_json::Value>(&multi).is_ok());
+        assert!(serde_ucl::from_str::<serde_json::Value>(&multi).is_ok());
         let multi = multi_values(MAX_SERDE_NESTING / 2 + 2);
         assert_too_deep(
-            ucl_lexer::from_str::<serde_json::Value>(&multi),
+            serde_ucl::from_str::<serde_json::Value>(&multi),
             "multi-values",
         );
 
@@ -425,7 +425,7 @@ fn text_into_typed_targets_up_to_the_serde_limit() {
             b: i64,
         }
         let skipped = format!("b = 2\n{}", objects(MAX_NESTING));
-        assert_eq!(ucl_lexer::from_str::<Skips>(&skipped).unwrap().b, 2);
+        assert_eq!(serde_ucl::from_str::<Skips>(&skipped).unwrap().b, 2);
     });
 }
 
@@ -438,13 +438,13 @@ fn ucl_value_inside_a_typed_target_at_the_parser_limit() {
     on_small_stack(|| {
         // The wrapper's map is the root; `inner` holds the other 1023 containers.
         let document = format!("inner {{ {} }}", objects(MAX_NESTING - 1));
-        let wrapper: Wrapper = ucl_lexer::from_str(&document).unwrap();
+        let wrapper: Wrapper = serde_ucl::from_str(&document).unwrap();
         assert_eq!(nesting(&wrapper.inner), MAX_NESTING - 1);
-        let text = ucl_lexer::to_string(&wrapper).unwrap();
-        let back = ucl_lexer::parse::parse(text.as_bytes()).unwrap();
+        let text = serde_ucl::to_string(&wrapper).unwrap();
+        let back = serde_ucl::parse::parse(text.as_bytes()).unwrap();
         assert!(same(
             &back,
-            &ucl_lexer::parse::parse(document.as_bytes()).unwrap()
+            &serde_ucl::parse::parse(document.as_bytes()).unwrap()
         ));
     });
 }
@@ -454,12 +454,12 @@ fn typed_values_into_every_output_up_to_the_serde_limit() {
     on_small_stack(|| {
         let json = json_objects(MAX_SERDE_NESTING);
         let node = Node::chain(MAX_SERDE_NESTING);
-        let expected = ucl_lexer::parse::parse(objects(MAX_SERDE_NESTING).as_bytes()).unwrap();
-        assert!(same(&ucl_lexer::to_value(&json).unwrap(), &expected));
-        assert!(same(&ucl_lexer::to_value(&node).unwrap(), &expected));
-        let text = ucl_lexer::to_string(&node).unwrap();
+        let expected = serde_ucl::parse::parse(objects(MAX_SERDE_NESTING).as_bytes()).unwrap();
+        assert!(same(&serde_ucl::to_value(&json).unwrap(), &expected));
+        assert!(same(&serde_ucl::to_value(&node).unwrap(), &expected));
+        let text = serde_ucl::to_string(&node).unwrap();
         assert!(same(
-            &ucl_lexer::parse::parse(text.as_bytes()).unwrap(),
+            &serde_ucl::parse::parse(text.as_bytes()).unwrap(),
             &expected
         ));
 
@@ -475,13 +475,13 @@ fn typed_values_into_every_output_up_to_the_serde_limit() {
                 Node::chain(MAX_NESTING),
             ),
         ] {
-            assert_too_deep(ucl_lexer::to_value(&json), name);
-            assert_too_deep(ucl_lexer::to_value(&node), name);
-            assert_too_deep(ucl_lexer::to_string(&json), name);
-            assert_too_deep(ucl_lexer::to_json_string(&json), name);
-            assert_too_deep(ucl_lexer::to_json_string_compact(&json), name);
-            assert_too_deep(ucl_lexer::to_yaml_string(&json), name);
-            assert_too_deep(ucl_lexer::to_writer(Vec::new(), &node), name);
+            assert_too_deep(serde_ucl::to_value(&json), name);
+            assert_too_deep(serde_ucl::to_value(&node), name);
+            assert_too_deep(serde_ucl::to_string(&json), name);
+            assert_too_deep(serde_ucl::to_json_string(&json), name);
+            assert_too_deep(serde_ucl::to_json_string_compact(&json), name);
+            assert_too_deep(serde_ucl::to_yaml_string(&json), name);
+            assert_too_deep(serde_ucl::to_writer(Vec::new(), &node), name);
             drop_json(json);
         }
 
@@ -496,9 +496,9 @@ fn typed_values_into_every_output_up_to_the_serde_limit() {
         for _ in 0..MAX_SERDE_NESTING - 2 {
             shape = Shape::Newtype(Box::new(shape));
         }
-        assert!(ucl_lexer::to_value(&shape).is_ok());
+        assert!(serde_ucl::to_value(&shape).is_ok());
         assert_too_deep(
-            ucl_lexer::to_value(&Shape::Newtype(Box::new(shape))),
+            serde_ucl::to_value(&Shape::Newtype(Box::new(shape))),
             "variants",
         );
         let _ = Shape::Struct { x: 0 };
@@ -642,10 +642,10 @@ fn parse_clone_compare_emit_and_drop_at_the_inherit_limit() {
             let commented = matches!(shape, Shape::Commented);
             assert_eq!(with_comments.contains("# c"), commented, "{shape:?}");
             for text in [
-                ucl_lexer::emit::to_json(&value),
-                ucl_lexer::emit::to_json_compact(&value),
-                ucl_lexer::emit::to_config(&value),
-                ucl_lexer::emit::to_yaml(&value),
+                serde_ucl::emit::to_json(&value),
+                serde_ucl::emit::to_json_compact(&value),
+                serde_ucl::emit::to_config(&value),
+                serde_ucl::emit::to_yaml(&value),
             ] {
                 assert!(!text.is_empty(), "{shape:?}");
             }
@@ -666,11 +666,11 @@ fn serde_at_the_inherit_limit() {
                 .parse(document.as_bytes())
                 .expect("parse");
             // To and from `UclValue` and `UclObject`.
-            let copy = ucl_lexer::to_value(&value).unwrap();
+            let copy = serde_ucl::to_value(&value).unwrap();
             assert!(same(&copy, &value), "{shape:?}");
-            let back: UclValue = ucl_lexer::from_value(copy).unwrap();
+            let back: UclValue = serde_ucl::from_value(copy).unwrap();
             assert!(same(&back, &value), "{shape:?}");
-            let object: UclObject = ucl_lexer::from_value(back).unwrap();
+            let object: UclObject = serde_ucl::from_value(back).unwrap();
             assert_eq!(object.len(), value.as_object().unwrap().len());
             drop(object);
             let parser = deepest_parser(ParserFlags::DEFAULT);
@@ -684,7 +684,7 @@ fn serde_at_the_inherit_limit() {
                 inner: value.clone(),
             };
             let wrapped: Wrapper =
-                ucl_lexer::from_value(ucl_lexer::to_value(&wrapper).unwrap()).unwrap();
+                serde_ucl::from_value(serde_ucl::to_value(&wrapper).unwrap()).unwrap();
             assert!(same(&wrapped.inner, &value), "{shape:?}");
             drop(wrapped);
             // Typed targets stop at the serde limit; the error's position comes from parsing
@@ -698,19 +698,19 @@ fn serde_at_the_inherit_limit() {
                 "from_parser",
             );
             assert_too_deep(
-                ucl_lexer::from_value::<serde_json::Value>(value.clone()),
+                serde_ucl::from_value::<serde_json::Value>(value.clone()),
                 "from_value",
             );
             // Text that could not be parsed again, deeper than containers can be open
             // (spec §11.2), is an error.
             let mut written = Vec::new();
             for result in [
-                ucl_lexer::to_string(&value),
-                ucl_lexer::to_json_string(&value),
-                ucl_lexer::to_json_string_compact(&value),
-                ucl_lexer::to_yaml_string(&value),
-                ucl_lexer::to_writer(&mut written, &value).map(|()| String::new()),
-                ucl_lexer::to_string(&wrapper),
+                serde_ucl::to_string(&value),
+                serde_ucl::to_json_string(&value),
+                serde_ucl::to_json_string_compact(&value),
+                serde_ucl::to_yaml_string(&value),
+                serde_ucl::to_writer(&mut written, &value).map(|()| String::new()),
+                serde_ucl::to_string(&wrapper),
             ] {
                 let error = result.unwrap_err().to_string();
                 assert!(

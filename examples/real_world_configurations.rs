@@ -22,10 +22,10 @@
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use serde_ucl::emit::{Emitter, Format};
+use serde_ucl::parse::{ErrorKind, MemoryLoader, ParserBuilder};
+use serde_ucl::{UclError, from_str, from_value, to_string};
 use std::time::Duration;
-use ucl_lexer::emit::{Emitter, Format};
-use ucl_lexer::parse::{ErrorKind, MemoryLoader, ParserBuilder};
-use ucl_lexer::{UclError, from_str, from_value, to_string};
 
 const MAIN_CONF: &str = r#"
 # Entry point: shared settings, the production overlay, then an optional local file.
@@ -146,9 +146,9 @@ struct LoadBalancer {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct HealthCheck {
     path: String,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     interval: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
     retries: u32,
 }
@@ -164,9 +164,9 @@ struct Backend {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Monitoring {
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     retention: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     scrape_interval: Duration,
     #[serde(rename = "target")]
     targets: Vec<String>,
@@ -179,7 +179,7 @@ struct Monitoring {
 struct Alert {
     name: String,
     condition: String,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     duration: Duration,
     severity: String,
 }

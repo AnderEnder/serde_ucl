@@ -4,7 +4,7 @@
 //! libucl's typed dump of the same input (`<case>.golden.json`, produced by
 //! `scripts/regen-golden.sh`). Expected values are never written by hand.
 //!
-//! The parser `ucl_lexer::parse` runs every case (`libucl_conformance_new_core`), with its known
+//! The parser `serde_ucl::parse` runs every case (`libucl_conformance_new_core`), with its known
 //! failures in `tests/conformance/xfail-new.txt`. The runner applies each case's `.flags` file,
 //! and gives the parser the case's directory as its base directory, so relative include paths
 //! resolve as the oracle's do (spec §9.3) without changing the process's working directory. A
@@ -32,7 +32,7 @@
 //! comments attached before the value, `"ca"` for those attached after it.
 //!
 //! A second test (`libucl_conformance_emitters`) compares the new core's output formats (spec §10,
-//! `ucl_lexer::emit`) byte for byte with libucl's: for every case that parses, the config, JSON,
+//! `serde_ucl::emit`) byte for byte with libucl's: for every case that parses, the config, JSON,
 //! compact JSON and YAML output with the golden files `<case>.<format>.golden`, the config output
 //! with saved comments with `<case>.config-comments.golden` for cases that save comments, and for
 //! upstream cases the config output of the two passes of spec §10.9 with the `.res` file. Its
@@ -55,13 +55,13 @@ use oracle::{
     strip_unobservable_priorities,
 };
 use serde_json::Value as J;
+use serde_ucl::emit::Format;
+use serde_ucl::parse::{FsLoader, Input, Parser as CoreParser, PathSegment};
+use serde_ucl::{DuplicateStrategy, ParserFlags, UclValue};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{FsLoader, Input, Parser as CoreParser, PathSegment};
-use ucl_lexer::{DuplicateStrategy, ParserFlags, UclValue};
 
 const CONFORMANCE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/conformance");
 
@@ -181,7 +181,7 @@ fn run_inputs(
     parser: &mut CoreParser,
     case: &Case,
     as_bytes: bool,
-) -> Result<UclValue, ucl_lexer::parse::Error> {
+) -> Result<UclValue, serde_ucl::parse::Error> {
     let own = fs::read(&case.input).unwrap();
     let further: Vec<Vec<u8>> = case
         .inputs
@@ -229,7 +229,7 @@ fn run_inputs(
 fn run_new_core(
     case: &Case,
     setup: &Setup,
-) -> (CoreParser, Result<UclValue, ucl_lexer::parse::Error>) {
+) -> (CoreParser, Result<UclValue, serde_ucl::parse::Error>) {
     let mut parser = configure(
         setup,
         case.input.parent().expect("a case is in a directory"),
@@ -800,7 +800,7 @@ type CaseReadback = Result<Vec<(&'static str, ReadbackOutcome)>, String>;
 /// losses §10.8 lists.
 struct Readback<'a> {
     written: Written,
-    facts: &'a ucl_lexer::parse::OutputFacts,
+    facts: &'a serde_ucl::parse::OutputFacts,
     /// Differences that §10.8 does not list.
     diffs: Vec<String>,
     /// Keys written bare that cannot be read bare (§10.8), found while walking the value.
@@ -811,7 +811,7 @@ struct Readback<'a> {
 }
 
 impl<'a> Readback<'a> {
-    fn new(written: Written, facts: &'a ucl_lexer::parse::OutputFacts) -> Self {
+    fn new(written: Written, facts: &'a serde_ucl::parse::OutputFacts) -> Self {
         Self {
             written,
             facts,
@@ -830,7 +830,7 @@ impl<'a> Readback<'a> {
             .unwrap_or_else(|| key.to_string());
         let quoted = facts
             .and_then(|f| f.key_quoted)
-            .unwrap_or_else(|| ucl_lexer::emit::key_needs_quoting(&spelling));
+            .unwrap_or_else(|| serde_ucl::emit::key_needs_quoting(&spelling));
         (spelling, quoted)
     }
 
@@ -945,8 +945,8 @@ impl<'a> Readback<'a> {
 
     fn compare_objects(
         &mut self,
-        o: &ucl_lexer::UclObject,
-        b: &ucl_lexer::UclObject,
+        o: &serde_ucl::UclObject,
+        b: &serde_ucl::UclObject,
         path: &[PathSegment],
     ) {
         // The keys values are read back under, in order, each with the values expected there

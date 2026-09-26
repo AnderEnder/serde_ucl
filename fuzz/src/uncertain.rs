@@ -15,7 +15,7 @@
 //! | [`ARRAY_TEXT`] | §9.4, §13.2 | an included file, or text parsed in place, that starts with `[` and holds more |
 //!
 //! Four more cannot be seen in the dumps or the input, so the crate reports when a parse reaches
-//! them ([`ucl_lexer::parse::Parser::uncertain_reached`]), and any difference of such a parse is
+//! them ([`serde_ucl::parse::Parser::uncertain_reached`]), and any difference of such a parse is
 //! skipped ([`reached`]): a macro after a name followed only by comments when the value created
 //! most recently is not an object (§9.1), a container of an ended unit at the check at the end of
 //! a later included file (§9.4), a `}` in an included file that closes an array element
@@ -27,9 +27,9 @@
 //! included under a key where the object holds only its own bracket (§9.4).
 
 use serde_json::Value as J;
+use serde_ucl::UclValue;
+use serde_ucl::parse::Uncertain;
 use std::collections::BTreeSet;
-use ucl_lexer::UclValue;
-use ucl_lexer::parse::Uncertain;
 
 pub const HANDLER: &str = "uncertain: a handler result with other text (§7.7)";
 pub const BINARY_MULTIPLIER: &str = "uncertain: an out-of-range float with kb, mb or gb (§5.4)";
@@ -242,7 +242,7 @@ fn out_of_range_binary_multiplier(actual: &str, ctx: &Context<'_>) -> bool {
                 .or_else(|| number.split_once('x')?.1.parse::<f64>().ok());
             let out_of_range = float.is_some_and(|f| f.abs() >= 9.223_372_036_854_776e18);
             out_of_range
-                && ucl_lexer::parse::parse(format!("k = {token}").as_bytes())
+                && serde_ucl::parse::parse(format!("k = {token}").as_bytes())
                     .ok()
                     .and_then(|v| v.as_object()?.get("k").cloned())
                     == Some(UclValue::Integer(actual.parse().unwrap_or(i64::MIN)))
@@ -403,7 +403,7 @@ mod tests {
     fn out_of_range_floats_with_binary_multipliers() {
         let int = |v: &str| json!({"t": "int", "v": v});
         let crate_value = |text: &str| {
-            let v = ucl_lexer::parse::parse(format!("k = {text}").as_bytes()).unwrap();
+            let v = serde_ucl::parse::parse(format!("k = {text}").as_bytes()).unwrap();
             v.as_object().unwrap()["k"]
                 .as_integer()
                 .unwrap()

@@ -2,7 +2,7 @@
 //! and API services take, read from UCL.
 //!
 //! 1. An Axum-style server: nested sections and times read as `Duration` through
-//!    `ucl_lexer::time`.
+//!    `serde_ucl::time`.
 //! 2. A Tokio-style runtime: optional fields, multipliers (`2mb`, `1k`).
 //! 3. An API service: a secret from the environment through a variable handler, and a repeated
 //!    key read as a list.
@@ -10,9 +10,9 @@
 //!    serializer writes the effective configuration as UCL and as JSON.
 
 use serde::{Deserialize, Serialize};
+use serde_ucl::parse::ParserBuilder;
+use serde_ucl::{from_str, from_value, to_json_string, to_string};
 use std::time::Duration;
-use ucl_lexer::parse::ParserBuilder;
-use ucl_lexer::{from_str, from_value, to_json_string, to_string};
 
 #[derive(Debug, Deserialize)]
 struct AxumConfig {
@@ -26,7 +26,7 @@ struct AxumConfig {
 struct ServerConfig {
     host: String,
     port: u16,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     graceful_shutdown_timeout: Duration,
 }
 
@@ -35,9 +35,9 @@ struct DatabaseConfig {
     url: String,
     max_connections: u32,
     min_connections: u32,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     acquire_timeout: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     idle_timeout: Duration,
 }
 
@@ -46,7 +46,7 @@ struct MiddlewareConfig {
     cors: CorsConfig,
     compression: bool,
     request_id: bool,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
 }
 
@@ -55,7 +55,7 @@ struct CorsConfig {
     allow_origins: Vec<String>,
     allow_methods: Vec<String>,
     allow_headers: Vec<String>,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     max_age: Duration,
 }
 
@@ -92,7 +92,7 @@ struct RuntimeConfig {
 #[derive(Debug, Deserialize)]
 struct TaskConfig {
     max_concurrent: usize,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
     retry_attempts: u32,
     backoff_multiplier: f64,
@@ -102,7 +102,7 @@ struct TaskConfig {
 struct MetricsConfig {
     enabled: bool,
     endpoint: String,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     interval: Duration,
 }
 
@@ -119,16 +119,16 @@ struct ApiConfig {
 struct ApiRateLimitConfig {
     requests_per_second: u32,
     burst_capacity: u32,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     window_size: Duration,
 }
 
 #[derive(Debug, Deserialize)]
 struct AuthConfig {
     jwt_secret: String,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     token_expiry: Duration,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     refresh_token_expiry: Duration,
     #[serde(rename = "allowed_issuer")]
     allowed_issuers: Vec<String>,
@@ -370,7 +370,7 @@ struct ServiceConfig {
     name: String,
     listen: String,
     workers: u32,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     request_timeout: Duration,
     features: Features,
 }

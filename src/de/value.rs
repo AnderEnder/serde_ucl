@@ -38,8 +38,8 @@ use std::fmt;
 ///     ports: Vec<u16>,
 /// }
 ///
-/// let value = ucl_lexer::parse::parse(b"host = example.org\nports = [80, 443]").unwrap();
-/// let server: Server = ucl_lexer::from_value(value).unwrap();
+/// let value = serde_ucl::parse::parse(b"host = example.org\nports = [80, 443]").unwrap();
+/// let server: Server = serde_ucl::from_value(value).unwrap();
 /// assert_eq!(server, Server { host: "example.org".into(), ports: vec![80, 443] });
 /// ```
 ///

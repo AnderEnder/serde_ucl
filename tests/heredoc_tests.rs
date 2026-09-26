@@ -2,8 +2,8 @@
 //! oracle).
 
 use serde_json::Value;
-use ucl_lexer::parse::ErrorKind;
-use ucl_lexer::{UclError, from_str};
+use serde_ucl::parse::ErrorKind;
+use serde_ucl::{UclError, from_str};
 
 #[cfg(test)]
 mod heredoc_tests {

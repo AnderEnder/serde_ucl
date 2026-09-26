@@ -4,8 +4,8 @@
 //! ordinary text. Expected results are libucl's (spec §2.5, checked with the oracle).
 
 use serde_json::{Value, json};
-use ucl_lexer::parse::{ErrorKind, Parser};
-use ucl_lexer::{ParserFlags, UclError, UclValue, from_str};
+use serde_ucl::parse::{ErrorKind, Parser};
+use serde_ucl::{ParserFlags, UclError, UclValue, from_str};
 
 fn error_kind(config: &str) -> ErrorKind {
     match from_str::<Value>(config) {

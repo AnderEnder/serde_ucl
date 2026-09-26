@@ -3,9 +3,9 @@
 //! Run with `cargo run --example number_parsing`.
 
 use serde::Deserialize;
+use serde_ucl::parse::{self, ErrorKind, ParserBuilder};
+use serde_ucl::{ParserFlags, UclError, UclValue, from_str};
 use std::time::Duration;
-use ucl_lexer::parse::{self, ErrorKind, ParserBuilder};
-use ucl_lexer::{ParserFlags, UclError, UclValue, from_str};
 
 /// Every value below is what libucl produces for the same text.
 const NUMBERS: &str = r#"
@@ -167,7 +167,7 @@ struct Limits {
     /// A time read as seconds.
     timeout: f64,
     /// A time into a `Duration` through the `time` module.
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     keepalive: Duration,
     /// An integral float or time converts to an integer target.
     retries: u32,

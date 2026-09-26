@@ -4,9 +4,9 @@
 //!
 //! Run with `cargo run --example complete_ucl_syntax`.
 
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{MemoryLoader, ParserBuilder};
-use ucl_lexer::{UclError, UclObject, UclValue};
+use serde_ucl::emit::Format;
+use serde_ucl::parse::{MemoryLoader, ParserBuilder};
+use serde_ucl::{UclError, UclObject, UclValue};
 
 const TOUR: &str = r#"
 # Entries: the key and its value are separated by `=`, `:` or only whitespace. An entry ends at

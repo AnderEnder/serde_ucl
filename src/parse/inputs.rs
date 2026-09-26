@@ -136,8 +136,8 @@ struct Outputs<'p> {
 /// [`super::Parser::set_max_input_bytes`] counts every input and every file they read, together.
 ///
 /// ```
-/// use ucl_lexer::parse::{Input, MemoryLoader, ParserBuilder};
-/// use ucl_lexer::DuplicateStrategy;
+/// use serde_ucl::parse::{Input, MemoryLoader, ParserBuilder};
+/// use serde_ucl::DuplicateStrategy;
 ///
 /// let mut files = MemoryLoader::new();
 /// files.add_file("/usr/share/app/defaults.conf", "workers = 4\nlog { level = info }\n");
@@ -156,7 +156,7 @@ struct Outputs<'p> {
 /// let log = root["log"].as_object().unwrap();
 /// assert_eq!(log["level"].as_str(), Some("info"));
 /// assert_eq!(log["file"].as_str(), Some("/var/log/app.log"));
-/// # Ok::<(), ucl_lexer::parse::Error>(())
+/// # Ok::<(), serde_ucl::parse::Error>(())
 /// ```
 pub struct Inputs<'p> {
     flags: ParserFlags,

@@ -1,4 +1,4 @@
-# ucl-rust-lexer
+# serde_ucl
 
 [![CI](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml/badge.svg)](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml)
 
@@ -17,9 +17,9 @@ specification and libucl's observable output.
 - Emitters that write a parsed document byte for byte as libucl does, with saved comments on
   request.
 
-The package is `ucl-rust-lexer` and the library `ucl_lexer`, version 0.2.0. The repository has
-been renamed to `AnderEnder/serde_ucl`, and the next release renames the package and the library
-to `serde_ucl`.
+Before 0.3.0 the package and the repository were named `ucl-rust-lexer` and the library
+`ucl_lexer`. Release 0.3.0 renamed all three to `serde_ucl`: code that used `ucl_lexer::` uses
+`serde_ucl::` ([CHANGELOG.md](CHANGELOG.md)).
 
 ## Contents
 
@@ -51,7 +51,7 @@ The crate is not published on crates.io. Depend on the repository:
 
 ```toml
 [dependencies]
-ucl-rust-lexer = { git = "https://github.com/AnderEnder/serde_ucl" }
+serde_ucl = { git = "https://github.com/AnderEnder/serde_ucl" }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -68,7 +68,7 @@ use std::time::Duration;
 struct Config {
     name: String,
     port: u16,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
     max_body: u64,
     upstream: Vec<String>,
@@ -81,7 +81,7 @@ struct Tls {
     cert: String,
 }
 
-fn main() -> Result<(), ucl_lexer::UclError> {
+fn main() -> Result<(), serde_ucl::UclError> {
     let text = r#"
 # Comments are `#` and `/* ... */`.
 name = "my-server"
@@ -98,7 +98,7 @@ tls {
     cert = "/etc/ssl/server.pem"
 }
 "#;
-    let config: Config = ucl_lexer::from_str(text)?;
+    let config: Config = serde_ucl::from_str(text)?;
     assert_eq!(config.name, "my-server");
     assert_eq!(config.port, 8080);
     assert_eq!(config.timeout, Duration::from_secs(90));
@@ -190,7 +190,7 @@ How values map onto serde (the `de` module documentation has the full table):
 
 - An entry with several values is a sequence. A single value read into a sequence is a
   one-element sequence.
-- A time is an `f64` number of seconds. `#[serde(with = "ucl_lexer::time")]` reads and writes a
+- A time is an `f64` number of seconds. `#[serde(with = "serde_ucl::time")]` reads and writes a
   `std::time::Duration`, and accepts any non-negative finite number as seconds.
 - `null` into an `Option` is `None`. Enums are externally tagged: a string names a unit variant,
   and an object with one key a data variant.
@@ -208,11 +208,11 @@ and `parse::parse` give the tree. `from_value` and `to_value` convert it to and 
 and keep a `UclValue` exactly as it is, priorities included.
 
 ```rust
-use ucl_lexer::UclValue;
+use serde_ucl::UclValue;
 
-fn main() -> Result<(), ucl_lexer::UclError> {
+fn main() -> Result<(), serde_ucl::UclError> {
     let text = "port = 80\nport = 8080\ntimeout = 30s\nservers = [a, b]\n";
-    let value: UclValue = ucl_lexer::from_str(text)?;
+    let value: UclValue = serde_ucl::from_str(text)?;
     let root = value.as_object().unwrap();
     assert_eq!(root["port"].as_integer(), Some(80));
     let ports: Vec<i64> = root.get_all("port").filter_map(UclValue::as_integer).collect();
@@ -241,7 +241,7 @@ quotes expand them. The config format single-quotes every string that contains `
 several values is written as repeated keys.
 
 The JSON functions write valid JSON (RFC 8259). A time is written as its number of seconds and
-reads back as a float, or as the same `Duration` through `ucl_lexer::time`. A NaN or infinite
+reads back as a float, or as the same `Duration` through `serde_ucl::time`. A NaN or infinite
 float or time is an error there. Values that have no form that reads back, such as an integer
 above `i64::MAX` or a root that is not a map, struct or sequence, fail with
 `SerdeError::Unrepresentable`. The `ser` module documentation lists them.
@@ -255,11 +255,11 @@ struct Upstream {
     name: String,
     servers: Vec<String>,
     weight: f64,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
 }
 
-fn main() -> Result<(), ucl_lexer::UclError> {
+fn main() -> Result<(), serde_ucl::UclError> {
     let upstream = Upstream {
         name: "backend".into(),
         servers: vec!["10.0.0.1:80".into(), "10.0.0.2:80".into()],
@@ -267,7 +267,7 @@ fn main() -> Result<(), ucl_lexer::UclError> {
         timeout: Duration::from_millis(1500),
     };
 
-    let text = ucl_lexer::to_string(&upstream)?;
+    let text = serde_ucl::to_string(&upstream)?;
     let expected = r#"name = "backend";
 servers [
     "10.0.0.1:80",
@@ -277,14 +277,14 @@ weight = 0.1;
 timeout = 1.5s;
 "#;
     assert_eq!(text, expected);
-    assert_eq!(ucl_lexer::from_str::<Upstream>(&text)?, upstream);
+    assert_eq!(serde_ucl::from_str::<Upstream>(&text)?, upstream);
 
-    let json = ucl_lexer::to_json_string_compact(&upstream)?;
+    let json = serde_ucl::to_json_string_compact(&upstream)?;
     assert_eq!(
         json,
         r#"{"name":"backend","servers":["10.0.0.1:80","10.0.0.2:80"],"weight":0.1,"timeout":1.5}"#
     );
-    assert_eq!(ucl_lexer::from_str::<Upstream>(&json)?, upstream);
+    assert_eq!(serde_ucl::from_str::<Upstream>(&json)?, upstream);
     Ok(())
 }
 ```
@@ -299,8 +299,8 @@ the settings of a deserializer's parser before it runs.
 
 ```rust
 use serde::Deserialize;
-use ucl_lexer::parse::ParserBuilder;
-use ucl_lexer::{DuplicateStrategy, ParserFlags};
+use serde_ucl::parse::ParserBuilder;
+use serde_ucl::{DuplicateStrategy, ParserFlags};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -309,7 +309,7 @@ struct Config {
     timeout: String,
 }
 
-fn main() -> Result<(), ucl_lexer::UclError> {
+fn main() -> Result<(), serde_ucl::UclError> {
     let mut parser = ParserBuilder::new()
         .with_flags(ParserFlags::NO_TIME)
         .with_strategy(DuplicateStrategy::Rewrite)
@@ -317,7 +317,7 @@ fn main() -> Result<(), ucl_lexer::UclError> {
         .build();
     let text = b"url = \"https://$HOST/\"\nworkers = 2\nworkers = 8\ntimeout = 30s\n";
     let value = parser.parse(text)?;
-    let config: Config = ucl_lexer::from_value(value)?;
+    let config: Config = serde_ucl::from_value(value)?;
     assert_eq!(config.url, "https://example.org/");
     // Rewrite: a repeated key replaces the value before it.
     assert_eq!(config.workers, 8);
@@ -369,10 +369,10 @@ If it returns `None`, or there is no handler, the reference stays as written.
 ```rust
 use serde::Deserialize;
 use std::collections::HashMap;
-use ucl_lexer::UclDeserializer;
-use ucl_lexer::parse::ParserBuilder;
+use serde_ucl::UclDeserializer;
+use serde_ucl::parse::ParserBuilder;
 
-fn main() -> Result<(), ucl_lexer::UclError> {
+fn main() -> Result<(), serde_ucl::UclError> {
     let text = br#"
 url = "https://${HOST}:$PORT/"
 literal = '$HOST'
@@ -413,7 +413,7 @@ Macros stand where a key could start:
   application registered it ([Registered macros](#registered-macros)).
 
 ```rust
-fn main() -> Result<(), ucl_lexer::parse::Error> {
+fn main() -> Result<(), serde_ucl::parse::Error> {
     let text = br#"
 defaults { timeout = 30s; retries = 3 }
 api {
@@ -426,7 +426,7 @@ workers = 16
 .priority 1
 workers = 8
 "#;
-    let value = ucl_lexer::parse::parse(text)?;
+    let value = serde_ucl::parse::parse(text)?;
     let root = value.as_object().unwrap();
     // A copied value gives way to one written in the object.
     let api = root["api"].as_object().unwrap();
@@ -466,7 +466,7 @@ text, `FILENAME` is `undef` and `CURDIR` is the base directory or the loader's c
 
 ```rust
 use serde::Deserialize;
-use ucl_lexer::parse::{FsLoader, ParserBuilder};
+use serde_ucl::parse::{FsLoader, ParserBuilder};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -474,25 +474,25 @@ struct Config {
     workers: u32,
 }
 
-fn main() -> Result<(), ucl_lexer::UclError> {
+fn main() -> Result<(), serde_ucl::UclError> {
     let dir = std::env::temp_dir().join(format!("ucl-readme-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join("app.conf"), "name = app\n.include \"workers.conf\"\n")?;
     std::fs::write(dir.join("workers.conf"), "workers = 4\n")?;
 
     // A file: its relative includes resolve against its directory.
-    let config: Config = ucl_lexer::from_file(dir.join("app.conf"))?;
+    let config: Config = serde_ucl::from_file(dir.join("app.conf"))?;
     assert_eq!((config.name.as_str(), config.workers), ("app", 4));
 
     // The same document as text finds no file...
     let text = std::fs::read(dir.join("app.conf"))?;
-    assert!(ucl_lexer::from_slice::<Config>(&text).is_err());
+    assert!(serde_ucl::from_slice::<Config>(&text).is_err());
     // ...unless its parser has a filesystem loader and a base directory.
     let mut parser = ParserBuilder::new()
         .with_loader(FsLoader::new())
         .with_base_dir(&dir)
         .build();
-    let config: Config = ucl_lexer::from_value(parser.parse(&text)?)?;
+    let config: Config = serde_ucl::from_value(parser.parse(&text)?)?;
     assert_eq!(config.workers, 4);
 
     std::fs::remove_dir_all(&dir)?;
@@ -513,10 +513,10 @@ also under `try=true` and in `.try_include`, and a large file is read no further
 tell.
 
 ```rust
-use ucl_lexer::UclValue;
-use ucl_lexer::parse::{ErrorKind, MemoryLoader, ParserBuilder};
+use serde_ucl::UclValue;
+use serde_ucl::parse::{ErrorKind, MemoryLoader, ParserBuilder};
 
-fn main() -> Result<(), ucl_lexer::parse::Error> {
+fn main() -> Result<(), serde_ucl::parse::Error> {
     let mut files = MemoryLoader::new();
     files.add_file("/usr/share/app/defaults.conf", "workers = 4\n");
     files.add_file("/etc/app/local.conf", "workers = 8\n");
@@ -547,8 +547,8 @@ starts the parse, `Inputs::add` reads each `Input` (`Input::bytes` or `Input::fi
 be layered over the defaults:
 
 ```rust
-use ucl_lexer::parse::{Input, MemoryLoader, ParserBuilder};
-use ucl_lexer::{DuplicateStrategy, UclError};
+use serde_ucl::parse::{Input, MemoryLoader, ParserBuilder};
+use serde_ucl::{DuplicateStrategy, UclError};
 
 fn main() -> Result<(), UclError> {
     let mut files = MemoryLoader::new();
@@ -607,8 +607,8 @@ parsed as a document). The handler can:
   cannot do.
 
 ```rust
-use ucl_lexer::UclValue;
-use ucl_lexer::parse::{ErrorKind, MacroError, ParserBuilder};
+use serde_ucl::UclValue;
+use serde_ucl::parse::{ErrorKind, MacroError, ParserBuilder};
 
 fn main() {
     let mut parser = ParserBuilder::new()
@@ -661,10 +661,10 @@ JSON form and keys as they are stored, quoted in the config and YAML formats whe
 `Parser::emitter` after the parse.
 
 ```rust
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::Parser;
+use serde_ucl::emit::Format;
+use serde_ucl::parse::Parser;
 
-fn main() -> Result<(), ucl_lexer::parse::Error> {
+fn main() -> Result<(), serde_ucl::parse::Error> {
     let mut parser = Parser::new();
     let value = parser.parse(b"name = 'web'\nports = [80, 443]\ntimeout = 1.5")?;
     assert_eq!(
@@ -687,11 +687,11 @@ text and position) and attaches them to values (`Parser::attached_comments`, by 
 after the value). The config format writes them only when asked with `Emitter::with_comments`.
 
 ```rust
-use ucl_lexer::ParserFlags;
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::Parser;
+use serde_ucl::ParserFlags;
+use serde_ucl::emit::Format;
+use serde_ucl::parse::Parser;
 
-fn main() -> Result<(), ucl_lexer::parse::Error> {
+fn main() -> Result<(), serde_ucl::parse::Error> {
     let mut parser = Parser::with_flags(ParserFlags::SAVE_COMMENTS);
     let value = parser.parse(b"# the port\nport = 80\n")?;
     let text = parser
@@ -742,8 +742,8 @@ has them.
 
 ```rust
 use serde::Deserialize;
-use ucl_lexer::UclError;
-use ucl_lexer::parse::{ErrorKind, PathSegment};
+use serde_ucl::UclError;
+use serde_ucl::parse::{ErrorKind, PathSegment};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -752,7 +752,7 @@ struct Config {
 }
 
 fn main() {
-    match ucl_lexer::from_str::<Config>("port = 80\nname = \"open") {
+    match serde_ucl::from_str::<Config>("port = 80\nname = \"open") {
         Err(UclError::Syntax(e)) => {
             assert_eq!(e.kind(), &ErrorKind::UnterminatedString);
             assert_eq!((e.position().line, e.position().column), (2, 8));
@@ -760,7 +760,7 @@ fn main() {
         other => panic!("{other:?}"),
     }
 
-    match ucl_lexer::from_str::<Config>("# ports\nport = 70000") {
+    match serde_ucl::from_str::<Config>("# ports\nport = 70000") {
         Err(UclError::Deserialize(e)) => {
             assert_eq!(e.path(), [PathSegment::Key { key: "port".into(), index: 0 }]);
             let position = e.position().unwrap();
@@ -788,11 +788,11 @@ a `parse::Error` for which `is_stopped()` is true from `Parser::parse`. `partial
 `into_partial()`) returns what was parsed before the stop:
 
 ```rust
-use ucl_lexer::{UclError, UclValue};
+use serde_ucl::{UclError, UclValue};
 
 fn main() {
     let text = "a = 1\n.try_include \"extra.conf\"\nb = 2\n";
-    let err = ucl_lexer::from_str::<UclValue>(text).unwrap_err();
+    let err = serde_ucl::from_str::<UclValue>(text).unwrap_err();
     let UclError::Stopped(stop) = err else { panic!("{err}") };
     let partial = stop.partial().unwrap().as_object().unwrap();
     assert_eq!(partial["a"].as_integer(), Some(1));

@@ -9,11 +9,11 @@
 //!    environment, with fallbacks so that the example never depends on it.
 
 use serde::Deserialize;
+use serde_ucl::emit::Format;
+use serde_ucl::parse::{MemoryLoader, ParserBuilder};
+use serde_ucl::{from_str, from_value};
 use std::collections::HashMap;
 use std::time::Duration;
-use ucl_lexer::emit::Format;
-use ucl_lexer::parse::{MemoryLoader, ParserBuilder};
-use ucl_lexer::{from_str, from_value};
 
 #[derive(Debug, Deserialize)]
 struct WebServerConfig {
@@ -32,7 +32,7 @@ struct ServerConfig {
     #[serde(default = "default_workers")]
     workers: u32,
     max_connections: u32,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
     ssl: Option<SslConfig>,
 }
@@ -50,7 +50,7 @@ struct DatabaseConfig {
     #[serde(default)]
     password: Option<String>,
     pool_size: u32,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     timeout: Duration,
     retry_attempts: u32,
     /// `read_replica` may be repeated; every value is kept, in order.
@@ -70,7 +70,7 @@ struct CorsConfig {
     enabled: bool,
     allowed_origins: Vec<String>,
     allowed_methods: Vec<String>,
-    #[serde(with = "ucl_lexer::time")]
+    #[serde(with = "serde_ucl::time")]
     max_age: Duration,
 }
 

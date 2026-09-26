@@ -100,6 +100,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_ucl"
+version = "0.2.0"
+dependencies = [
+ "indexmap",
+ "serde",
+ "smallvec",
+ "thiserror",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -155,17 +165,7 @@ name = "ucl-differential-fuzz"
 version = "0.0.0"
 dependencies = [
  "serde_json",
- "ucl-rust-lexer",
-]
-
-[[package]]
-name = "ucl-rust-lexer"
-version = "0.2.0"
-dependencies = [
- "indexmap",
- "serde",
- "smallvec",
- "thiserror",
+ "serde_ucl",
 ]
 
 [[package]]

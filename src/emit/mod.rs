@@ -13,8 +13,8 @@
 //! YAML never contain comments.
 //!
 //! ```
-//! use ucl_lexer::emit::Format;
-//! use ucl_lexer::parse::Parser;
+//! use serde_ucl::emit::Format;
+//! use serde_ucl::parse::Parser;
 //!
 //! let mut parser = Parser::new();
 //! let value = parser.parse(b"name = 'web'\nports = [80, 443]\ntimeout = 1.5").unwrap();
@@ -208,8 +208,8 @@ pub fn to_json_compact(value: &UclValue) -> String {
 /// parser's last parse:
 ///
 /// ```
-/// use ucl_lexer::emit::{self, Format};
-/// use ucl_lexer::parse::Parser;
+/// use serde_ucl::emit::{self, Format};
+/// use serde_ucl::parse::Parser;
 ///
 /// let mut parser = Parser::new();
 /// let value = parser.parse(b"name = 'web'").unwrap();

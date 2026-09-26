@@ -41,7 +41,7 @@
 //! deserialize that with [`crate::from_value`].
 //!
 //! ```
-//! use ucl_lexer::parse::Parser;
+//! use serde_ucl::parse::Parser;
 //!
 //! let mut parser = Parser::new();
 //! parser.register_variable("HOST", "example.org");
@@ -429,7 +429,7 @@ impl Parser {
     /// (§9.2) start with this list too. Each directory is text, as in the `path` parameter.
     ///
     /// ```
-    /// use ucl_lexer::parse::{MemoryLoader, ParserBuilder};
+    /// use serde_ucl::parse::{MemoryLoader, ParserBuilder};
     ///
     /// let mut files = MemoryLoader::new();
     /// files.add_file("/usr/share/app/defaults.conf", "workers = 4\n");
@@ -444,7 +444,7 @@ impl Parser {
     ///     .filter_map(|v| v.as_integer())
     ///     .collect();
     /// assert_eq!(workers, [4, 8]);
-    /// # Ok::<(), ucl_lexer::parse::Error>(())
+    /// # Ok::<(), serde_ucl::parse::Error>(())
     /// ```
     pub fn set_search_path<I, S>(&mut self, dirs: I) -> &mut Self
     where
@@ -479,7 +479,7 @@ impl Parser {
     /// sources.
     ///
     /// ```
-    /// use ucl_lexer::parse::{ErrorKind, MemoryLoader, ParserBuilder};
+    /// use serde_ucl::parse::{ErrorKind, MemoryLoader, ParserBuilder};
     ///
     /// let mut files = MemoryLoader::new();
     /// files.add_file("/big.conf", "x = \"".to_string() + &"a".repeat(1000) + "\"\n");
@@ -523,7 +523,7 @@ impl Parser {
     /// If `limit` is greater than [`MAX_INHERIT_DEPTH_LIMIT`].
     ///
     /// ```
-    /// use ucl_lexer::parse::{ErrorKind, ParserBuilder};
+    /// use serde_ucl::parse::{ErrorKind, ParserBuilder};
     ///
     /// // The copies of `a` and `b` in `e` are nested 4 deep, with the root and `e`.
     /// let text = b"d { a { b { c = 1 } } }\ne { .inherit \"d\" }";
@@ -588,7 +588,7 @@ impl Parser {
     /// apply to every input; [`Input`] sets each input's priority and duplicate strategy.
     ///
     /// ```
-    /// use ucl_lexer::parse::{Input, Parser};
+    /// use serde_ucl::parse::{Input, Parser};
     ///
     /// let mut parser = Parser::new();
     /// let mut inputs = parser.inputs();
@@ -598,7 +598,7 @@ impl Parser {
     /// let root = value.as_object().unwrap();
     /// assert_eq!(root["a"].as_integer(), Some(3));
     /// assert_eq!(root.keys().collect::<Vec<_>>(), ["a", "b", "c"]);
-    /// # Ok::<(), ucl_lexer::parse::Error>(())
+    /// # Ok::<(), serde_ucl::parse::Error>(())
     /// ```
     pub fn inputs(&mut self) -> Inputs<'_> {
         let Parser {

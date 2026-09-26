@@ -6,8 +6,8 @@
 //! Plane are written as UTF-8, which passes through unchanged (`dq_utf8`).
 
 use serde_json::Value;
-use ucl_lexer::parse::ErrorKind;
-use ucl_lexer::{UclError, from_str};
+use serde_ucl::parse::ErrorKind;
+use serde_ucl::{UclError, from_str};
 
 fn error_kind(config: &str) -> ErrorKind {
     match from_str::<Value>(config) {

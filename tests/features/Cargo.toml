@@ -14,8 +14,8 @@ publish = false
 [workspace]
 
 [dependencies]
-ucl-rust-lexer = { path = "../..", default-features = false }
+serde_ucl = { path = "../..", default-features = false }
 
 [features]
 default = ["fs"]
-fs = ["ucl-rust-lexer/fs"]
+fs = ["serde_ucl/fs"]

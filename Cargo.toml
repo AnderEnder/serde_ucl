@@ -1,5 +1,5 @@
 [package]
-name = "ucl-rust-lexer"
+name = "serde_ucl"
 version = "0.2.0"
 edition = "2024"
 # The crate targets the latest stable Rust (1.98 at this release); CI builds with stable only.
@@ -7,7 +7,9 @@ rust-version = "1.98"
 authors = ["Andrii Radyk"]
 description = "UCL (Universal Configuration Language) with serde: reads and writes UCL as libucl does"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/AnderEnder/ucl-rust-lexer"
+repository = "https://github.com/AnderEnder/serde_ucl"
+homepage = "https://github.com/AnderEnder/serde_ucl"
+documentation = "https://docs.rs/serde_ucl"
 readme = "README.md"
 keywords = ["ucl", "libucl", "configuration", "serde", "parser"]
 categories = ["config", "parser-implementations", "encoding"]
@@ -34,7 +36,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # The crate itself, with the default-off `load` feature, so that `cargo test` runs the `.load`
 # conformance cases (clean-room work item C3b). This turns `load` on for every test target; the
 # package in tests/features/ tests the crate without it (scripts/ci.sh runs it).
-ucl-rust-lexer = { path = ".", features = ["load"] }
+serde_ucl = { path = ".", features = ["load"] }
 
 [features]
 default = ["fs"]
@@ -45,7 +47,7 @@ fs = []
 load = []
 
 [lib]
-name = "ucl_lexer"
+name = "serde_ucl"
 path = "src/lib.rs"
 # The library has no benchmarks of its own. Without this, `cargo bench` also runs the library's
 # unit-test harness, which rejects the options of criterion, the harness of the benches in
@@ -68,7 +70,7 @@ harness = false
 # generated-document tests parse and write many documents, and run about five times faster this
 # way. No test depends on it; they all pass unoptimised too, and scripts/ci.sh runs the
 # stack-depth tests that way, as a debug build of an application builds the crate.
-[profile.test.package.ucl-rust-lexer]
+[profile.test.package.serde_ucl]
 opt-level = 2
 
 # Release builds of this package (its benches and examples; `cargo bench` inherits this) use fat
