@@ -199,6 +199,8 @@ pub(crate) struct Parts<'p> {
     pub(crate) comments: &'p mut Vec<Comment>,
     pub(crate) attached: &'p mut CommentGroups,
     pub(crate) facts: &'p mut OutputFacts,
+    /// Whether output facts are recorded (`Parser::skip_output_facts`).
+    pub(crate) records_facts: bool,
 }
 
 /// The directory relative paths of an input resolve against (WORKLIST C8b decision 4): the base
@@ -270,6 +272,7 @@ impl<'p> Inputs<'p> {
             comments,
             attached,
             facts,
+            records_facts,
         } = parts;
         comments.clear();
         *attached = CommentGroups::default();
@@ -291,7 +294,7 @@ impl<'p> Inputs<'p> {
         includes.inherit_limit = inherit_depth_limit;
         let document = Document::new(
             flags.contains(ParserFlags::SAVE_COMMENTS),
-            Some(OutputFacts::new()),
+            records_facts.then(OutputFacts::new),
             0,
         );
         Self {
