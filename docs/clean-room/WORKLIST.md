@@ -217,6 +217,7 @@ the spec release that specifies several inputs and registered macros; C8c is too
      summary and an artifact, and to Codecov only when a `CODECOV_TOKEN` secret exists; a missing
      token never fails the job.
    - Release: on a `vX.Y.Z` tag, run `scripts/ci.sh` on Linux and macOS, fail unless the tag
-     matches the `Cargo.toml` version, publish with a `CARGO_TOKEN` secret, and create a GitHub
-     release whose notes are that version's `CHANGELOG.md` section. Nothing publishes if a check
+     matches the `Cargo.toml` version, publish through crates.io Trusted Publishing (GitHub OIDC,
+     environment `release`; the name was reserved with a placeholder `serde_ucl` 0.0.0), and create a
+     GitHub release whose notes are that version's `CHANGELOG.md` section. Nothing publishes if a check
      fails.

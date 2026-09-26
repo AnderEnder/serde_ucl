@@ -4,7 +4,7 @@
 
 UCL (Universal Configuration Language) for Rust, with serde. The crate reads and writes UCL as
 [libucl](https://github.com/vstakhov/libucl), the C library used by FreeBSD, does. A conformance
-suite of 1,622 documents compares its parse results, and its output in four formats, with
+suite of 1,653 documents compares its parse results, and its output in four formats, with
 libucl's. The implementation is written independently of libucl's code, from a behaviour
 specification and libucl's observable output.
 

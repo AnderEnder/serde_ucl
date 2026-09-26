@@ -1,7 +1,7 @@
 /*
  * ucl-dump: typed canonical dump of a libucl parse result.
  *
- * This is the conformance oracle for ucl-rust-lexer. It links
+ * This is the conformance oracle for serde_ucl. It links
  * libucl (BSD-2-Clause, see tests/conformance/libucl/LICENSE) and prints one JSON document to
  * stdout describing exactly what libucl built:
  *
