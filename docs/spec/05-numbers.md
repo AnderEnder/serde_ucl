@@ -41,7 +41,11 @@ Not numbers, so strings: `.5`, `-.5`, `+1`, `--1`, `-`, `-a`, `1_000`, `1e`, `1e
   `1.5x1e5` → `int 0` (`hex_after_fraction_or_exponent`). In detail:
   - The number before the `x` is dropped and never checked for range: `1e999x5kb` → `int 5120`.
     A leading `-` applies to the result: `-1.5x10kb` → `int -10240`
-    (`hex_after_fraction_first_number_unchecked`).
+    (`hex_after_fraction_first_number_unchecked`). **Quirk.** With a leading `-`, when nothing is
+    read from the hex digits (they begin with a letter), the value is a string, whatever follows:
+    `-1.5xd`, `-1.xD`, `-1e1xD`, `-1.5xd;` and `-1.5xe5` are strings, while `-1.5x1d` and `-1.x5`
+    are `int 0`, `1.5xd` is `int 0`, and plain hex is unaffected: `-12xd` → `int -13`
+    (`hex_after_fraction_negative_nothing_read_is_string`).
   - The run of hex digits after the `x` (`e` and `E` are hex digits) is read as a decimal float,
     as far as it forms one, possibly not at all. The rest of the run, with any letters after it,
     is a suffix under §5.4 and §5.5: `1.5x1d` reads `1` with the suffix `d`, `1.5xd` reads nothing

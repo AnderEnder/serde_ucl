@@ -25,8 +25,10 @@ None of them is written by hand.
 - `pending/`, when present, holds cases that a released spec version added but the crate does not
   pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
-  `cases/spec/` when the crate passes it. There is none at present: the cases of spec §13 moved
-  to `cases/spec/13-inputs/`.
+  `cases/spec/` when the crate passes it. At present it holds the 24 cases of spec-v13 that the
+  crate does not pass yet (`pending/README.md`).
+- `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
+  platform's C library; see *Golden files per platform* below.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
   are now libucl's, not the old hand-written assertions.
 - `<case>.golden.json` next to each case is libucl's typed dump of that case, produced by
@@ -86,6 +88,27 @@ a summary and a patch to `target/pin-move/`. The workflow *Golden files at anoth
 (`.github/workflows/pin-move.yml`) runs it on demand and publishes the result; it commits nothing.
 
 `scripts/create-cases.sh` recreates `cases/review/` and `cases/additions/` byte for byte.
+
+### Golden files per platform
+
+libucl leaves some work to the C library: glob matching and sorting (spec §9.4, *Globs*), and the
+base name of a path. A few cases therefore give other results with another C library. The golden
+files next to every case come from the oracle platform, macOS, and are what the crate must
+produce on every platform; the conformance runners read only those.
+
+For the drift check on other platforms, `platform-dependent.txt` lists the cases whose results
+depend on the C library, one per line as `<case id> <reason>`, where the case id is the case's
+path below `tests/conformance/` without its extension. On a platform other than macOS (the
+platform name is `uname -s` in lower case, for example `linux`), `scripts/regen-golden.sh` writes
+the golden files of those cases to `platform/<platform>/<case id>.*` instead of next to the case,
+and those files are committed. Every other case writes next to itself on every platform. So
+`scripts/ci.sh golden` compares, on each platform, with that platform's own expectation for the
+listed cases and with the one expectation for all others; the workflow *Golden files*
+(`.github/workflows/golden.yml`) runs it nightly on Linux and on macOS.
+
+When the drift check on some platform fails for a case whose result depends on the C library,
+add the case to `platform-dependent.txt` and commit the files that the regeneration wrote below
+`platform/<platform>/`. The script rejects a listed id that is not a case.
 
 ## Running
 

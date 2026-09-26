@@ -1,0 +1,3 @@
+a = 1
+.include "files/v13/comment_then_bracket.inc"
+b = 2

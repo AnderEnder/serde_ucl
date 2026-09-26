@@ -7,6 +7,14 @@
 # library and tools/ucl-dump, then dumps every case. The golden files are
 # committed, so running the tests needs no C toolchain.
 #
+# Golden files that depend on the platform's C library (tests/conformance/README.md, *Golden
+# files per platform*): the committed files next to each case come from the oracle platform,
+# macOS, and are the crate's expectation. On any other platform, the cases listed in
+# tests/conformance/platform-dependent.txt write their golden files to
+# tests/conformance/platform/<platform>/ instead, under the same relative path, where that
+# platform's committed results are kept for the drift check. Every other case writes next to the
+# case on every platform, so a drift check anywhere compares with the one expectation.
+#
 # Environment:
 #   LIBUCL_COMMIT     libucl commit to build, as a full 40-character SHA (default: the pinned
 #                     commit below, from which the committed golden files come). scripts/ci.sh
@@ -26,6 +34,10 @@ LIBUCL_DIR=${LIBUCL_DIR:-"$WORK/libucl"}
 LIBUCL_BUILD_DIR=${LIBUCL_BUILD_DIR:-"$WORK/build"}
 CC=${CC:-cc}
 DUMP="$WORK/ucl-dump"
+# The platform whose libucl results are the golden files next to the cases, and this one.
+ORACLE_PLATFORM=darwin
+PLATFORM=$(uname -s | tr '[:upper:]' '[:lower:]')
+PLATFORM_LIST="$CONF/platform-dependent.txt"
 
 # A full SHA, since the checkout's HEAD is compared with it below.
 if [ ${#LIBUCL_COMMIT} -ne 40 ] || [ -n "$(printf '%s' "$LIBUCL_COMMIT" | tr -d 0-9a-f)" ]; then
@@ -127,6 +139,19 @@ input_opts() {
 	printf '%s' "$opts"
 }
 
+# The case ids (paths below tests/conformance without the extension) whose golden files depend
+# on the platform's C library, one per line.
+platform_ids=""
+if [ -f "$PLATFORM_LIST" ]; then
+	platform_ids=$(sed 's/#.*//' "$PLATFORM_LIST" | awk 'NF { print $1 }')
+	for id in $platform_ids; do
+		if [ ! -f "$CONF/$id.ucl" ] && [ ! -f "$CONF/$id.in" ]; then
+			echo "error: $PLATFORM_LIST names $id, which is not a case" >&2
+			exit 1
+		fi
+	done
+fi
+
 count=0
 list=$(
 	{
@@ -149,20 +174,31 @@ for case in $list; do
 	stem=${base%.*}
 	opts=$(flag_opts "$dir/$stem.flags")
 	opts="$opts$(input_opts "$dir/$stem.inputs")"
+	# Where this case's golden files go: next to it, or for a platform-dependent case on a
+	# platform other than the oracle's, below platform/<platform>/.
+	out="$dir"
+	if [ "$PLATFORM" != "$ORACLE_PLATFORM" ]; then
+		rel=${case#"$CONF"/}
+		id=${rel%.*}
+		if printf '%s\n' "$platform_ids" | grep -Fqx -- "$id"; then
+			out="$CONF/platform/$PLATFORM/$(dirname "$id")"
+			mkdir -p "$out"
+		fi
+	fi
 	# Run from the case's directory, so relative include paths resolve the same on every machine.
 	# shellcheck disable=SC2086
-	(cd "$dir" && "$DUMP" $opts "$base" 2>/dev/null) > "$dir/$stem.golden.json"
+	(cd "$dir" && "$DUMP" $opts "$base" 2>/dev/null) > "$out/$stem.golden.json"
 	count=$((count + 1))
 	# Every case that parses also gets libucl's own output in every text format, and cases that
 	# save comments get the config output with those comments (spec section 10).
-	if [ "$(cat "$dir/$stem.golden.json")" != '{"error":true}' ]; then
+	if [ "$(cat "$out/$stem.golden.json")" != '{"error":true}' ]; then
 		fmts="config json json-compact yaml"
 		case " $opts " in
 		*" -C "* | *" -c "*) fmts="$fmts config-comments" ;;
 		esac
 		for fmt in $fmts; do
 			# shellcheck disable=SC2086
-			(cd "$dir" && "$DUMP" $opts -e "$fmt" "$base" 2>/dev/null) > "$dir/$stem.$fmt.golden"
+			(cd "$dir" && "$DUMP" $opts -e "$fmt" "$base" 2>/dev/null) > "$out/$stem.$fmt.golden"
 			count=$((count + 1))
 		done
 	fi

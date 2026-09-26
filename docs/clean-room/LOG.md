@@ -2121,3 +2121,32 @@
     `1723d96`, `0dc6ebf`, and the `C9:` commit that adds this entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-26 — Role: spec team (oracle side). Item: `spec-v13`, answers to QUESTIONS #70–#78
+  (fuzz findings after spec-v12), and golden files per platform so that the drift check runs on
+  Linux and macOS. Released at the project owner's request after the stop at spec-v12.
+  - Inputs: libucl source at the pinned commit (`target/libucl-oracle/libucl`): the include and
+    `.load` handlers, the glob and path handling of includes, the copy function used by
+    `.inherit`, the number parser's hex-after-fraction path, and the parser's container stack and
+    the chunk insertion used for text in place; black-box runs of `target/libucl-oracle/ucl-dump`
+    on macOS, and of the same tool built on Linux (arm64 and x86_64, `rust:1-bookworm` in
+    Docker, the pinned libucl copied in).
+  - Answers: #70, #71, #72, #74, #75, #76, #77 and #78 specified from libucl (§5.2, §9.2, §9.4,
+    §9.6, §9.7, §13.2; #74 and #76 are one rule: text in place makes the innermost section object
+    stay open); #73 Uncertain, because it depends on the operating system (macOS matches a
+    symbolic link to a file with a trailing `/` and resolves `file/`; Linux does neither).
+  - Cases: 31 new with all golden files; the crate passes 7, now in `cases/spec/`; 24 are held in
+    `tests/conformance/pending/` with a README. The spec README maps all 1629 committed and 24
+    pending cases. No existing golden file changed across two macOS regenerations.
+  - Golden files per platform: `tests/conformance/platform-dependent.txt` lists the three cases
+    whose libucl results depend on the C library (glob `[^…]`, character classes, and the key
+    from the first matched file); on a platform other than macOS `scripts/regen-golden.sh` writes
+    their golden files to `tests/conformance/platform/<platform>/`, where the Linux results are
+    committed. `golden.yml` and `pin-move.yml` run on `ubuntu-latest` and `macos-latest`
+    (`pin-move` uploads one artifact per platform). Checks: on Linux arm64 in Docker,
+    `scripts/ci.sh golden` passes on a clean checkout, fails for a tampered Linux platform file
+    and for a tampered ordinary case, and passes for a tampered macOS file of a platform case;
+    Linux x86_64 regenerates every golden file with no difference; on macOS it passes clean, fails
+    for a tampered canonical file, and ignores a tampered Linux platform file. `shellcheck` and
+    `actionlint` clean; `scripts/ci.sh` passes at both commits.
+  - The spec contains behaviour only; no libucl identifiers, file names or code were added.
+  - Commits: `3ed262c`, `bf083aa` (tag `spec-v13`), and the `C0 v13:` commit that adds this entry.

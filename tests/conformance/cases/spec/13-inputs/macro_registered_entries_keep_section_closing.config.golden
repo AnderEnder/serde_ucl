@@ -1,0 +1,9 @@
+t {
+    "{" = 1;
+    seen {
+        data = "v";
+        args = null;
+    }
+    o {}
+}
+c = 3;

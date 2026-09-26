@@ -304,10 +304,12 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   `macro_registered_text_array_error`, `macro_registered_text_incomplete_error`,
   `macro_registered_text_empty`, `macro_registered_text_holds_macro`,
   `macro_registered_text_counts_as_unit_ok`, `macro_registered_text_counts_as_unit_error`).
-  Text that is nothing but a `{` or `[`, whitespace before it allowed, adds nothing and takes no
-  brace over, as for an included file (§9.4, **quirk**): `a = 1⏎.emit "{"⏎b = 2` →
-  `{ a: int 1, b: int 2 }`, and `o { .emit "{" }` leaves `o` closed by its own `}`
-  (`macro_registered_text_only_open_brace`, `macro_registered_text_only_open_bracket`). Text that
+  Text that is nothing but a `{` or `[`, where §1.1 lets a bracketed root start (whitespace, or a
+  comment group at the start of the text, directly before it), adds nothing and takes no brace
+  over, as for an included file (§9.4, **quirk**): `a = 1⏎.emit "{"⏎b = 2` →
+  `{ a: int 1, b: int 2 }`, and `o { .emit "{" }` leaves `o` closed by its own `}`; the same with
+  the text `/* c */{` (`macro_registered_text_only_open_brace`,
+  `macro_registered_text_only_open_bracket`, `macro_registered_text_comment_then_open_brace`). Text that
   starts with `[` and holds more is an error for `[1]` and `[]` (`macro_registered_text_array_error`).
   **Uncertain (undefined in libucl)** for other such text: libucl writes the value after the `[`
   over the most recent value, or over the root when there is none (`.emit "[1"` alone gives the
@@ -319,6 +321,34 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   compare `macro_registered_text_include_differs`). Comments in it are saved as in the input
   (`macro_registered_text_comments`), and a silent stop in it stops the input
   (`macro_registered_text_stop_stops_all`).
+
+  **Quirk: text in place and a section object left open.** When text is parsed in place while
+  the innermost open object is a section object (§3.4), that object stops closing on its own for
+  the rest of the parse, even when the text is empty. A bracketed container that closes in it no
+  longer closes it (§3.4, *Quirk*), and neither does a `}` that removes a brace taken over from it,
+  by the text itself or by a later included file (§9.4). The section objects around it stay open
+  with it, because they would close only after it. A section object created later, inside it,
+  still closes as usual.
+  - `t "{"1⏎.emit ""⏎o {}⏎c 3` → `{ t: { "{": int 1, o: {}, c: int 3 } }`, where without the
+    macro `c` would be at the top level (`macro_registered_text_keeps_section_open`); the same
+    with the text `b = 2`, with `o = [1]`, and for two names `a b "{" 1`, whose objects both stay
+    open (`macro_registered_text_keeps_section_chain_open`).
+  - A `}` meant for a braced object around it then finds the section object open, an error as in
+    §3.4: `r { t "{"1⏎.emit ""⏎o {}⏎c 3⏎}` (`macro_registered_text_section_left_open_brace_error`).
+  - `t "{"1⏎.emit ""⏎u "{" 2⏎o {}⏎c 3` → `u` closes with `o` and `c` goes into `t`
+    (`macro_registered_text_later_section_closes`).
+  - After a macro directly after a name (§9.1), a leading `{` in the text takes over the brace of
+    the section object, and its `}` leaves it open: `"s".emit "{ a = 1 }"x "y{" z⏎k = [1]` →
+    `{ s: { a: int 1, x: { "y{": "z", k: [int 1] } } }`, where an included file with the same
+    content puts `x` at the top level; and `{n .emit "{}"}` is an error, because the root's `}`
+    finds `n` open (`macro_registered_text_braced_after_name_keeps_section_open`,
+    `macro_registered_text_braced_after_name_in_braced_root_error`).
+  - A later included file whose `{` takes over the brace does not close it either:
+    `t "{"1⏎.emit ""⏎.include "braced.inc"⏎c 3` puts `c` into `t`
+    (`macro_registered_text_then_braced_file_keeps_section_open`).
+  - An innermost object written with braces, or the root, is not affected, and neither is a
+    handler that only adds entries (`macro_registered_text_in_braced_object_no_effect`,
+    `macro_registered_entries_keep_section_closing`).
 - **Fail.** A handler succeeds or fails; libucl gives it no way to report an error message. A
   failure is a silent stop (§9.4): parsing ends at the macro in every open unit of the input, the
   entries parsed so far are the result, and later inputs are still read (§13.1)

@@ -3,7 +3,9 @@
 # conformance tests against the new files (scripts/ci.sh pin), and publishes the result for
 # review: the job summary shows what changed, and the artifact holds the full patch and the test
 # logs. It never commits or pushes: the token can only read, and the checkout keeps no
-# credentials. It runs on macOS, where the committed golden files were generated (golden.yml).
+# credentials. It runs on Linux and on macOS, as the drift check does (golden.yml), and publishes
+# one artifact per platform: on Linux the platform-dependent cases write below
+# tests/conformance/platform/linux/ (tests/conformance/README.md).
 name: Golden files at another libucl commit
 
 on:
@@ -23,7 +25,11 @@ env:
 
 jobs:
   pin-move:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -38,6 +44,7 @@ jobs:
       - name: Job summary
         if: always()
         run: |
+          echo "## $RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
           if [ -f target/pin-move/summary.md ]; then
             cat target/pin-move/summary.md >> "$GITHUB_STEP_SUMMARY"
           else
@@ -47,6 +54,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-files-pin-move
+          name: golden-files-pin-move-${{ runner.os }}
           path: target/pin-move/
           if-no-files-found: ignore

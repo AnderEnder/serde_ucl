@@ -179,7 +179,8 @@ cargo doc --open
   divergences, may only shrink, and a listed case that passes fails the run.
   `tests/conformance/README.md` describes the layout.
 - Golden files come only from libucl, through `scripts/regen-golden.sh` (git, CMake and a C
-  compiler; runs on macOS). Never edit them by hand. Cases and golden files belong to the spec
+  compiler; runs on macOS and Linux, with per-platform files for the few cases that depend on the C
+  library, `tests/conformance/README.md`). Never edit them by hand. Cases and golden files belong to the spec
   team.
 - serde: `cargo test --test serde_roundtrip` checks round trips and the corpus in
   `tests/serde_corpus/`; `UCL_SERDE_REGEN=1` regenerates the corpus and needs the oracle binary

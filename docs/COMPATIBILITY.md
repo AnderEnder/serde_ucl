@@ -50,23 +50,31 @@ A limit of this crate's API, with no libucl counterpart: a deserialization error
 whose parse ran a registered macro carries no position, because positions are found by parsing
 again and a handler is not run a second time.
 
-### Known differences not yet specified
+### Behaviour that depends on the platform
 
-A fuzzer that compares the crate with libucl found these differences after the last spec release.
-In each, the crate follows the spec text and libucl does something the spec does not describe.
-They involve NUL bytes in parameters or values, glob patterns, text parsed in place by registered
-macros, and one number quirk:
+libucl leaves glob matching, the base name of a path and the handling of a trailing `/` to the C
+library and the operating system. The crate follows the reference platform (macOS) everywhere:
+the glob rules of spec §9.4 (`^` in `[^…]` is an ordinary member, no character classes, a key from
+the first matched file under `prefix=true`). With glibc, libucl gives other results for those
+cases. Whether a pattern ending in `/` matches a symbolic link to a file, and whether a plain path
+ending in `/` after a file name names that file, differ between macOS and Linux in libucl, and the
+crate may follow either (§9.4, *Uncertain*).
 
-- a lone `{` or `[` after a leading comment group in an included file;
-- `.load(try=true)` with a value that starts with a NUL byte;
-- NUL bytes in a glob pattern, and in the `key` and `path` parameters;
-- a glob pattern ending in `/` matching a symbolic link to a file;
-- braced text parsed in place directly after a section name, and text parsed in place inside a
-  section object left open;
-- `-1.5xd`, which libucl reads as a string;
-- the first-value rule of `.inherit` at nested levels.
+### Specified, not yet reproduced
 
-They are open questions #70–#78 in `docs/clean-room/QUESTIONS.md`.
+`spec-v13` answers the fuzzer's questions #70–#78. The crate does not follow these rules yet; their
+cases are held in `tests/conformance/pending/`:
+
+- An included file or text in place that is only a `{` or `[` after a leading comment group adds
+  nothing, as after whitespace (§9.4, §13.2).
+- `.load(try=true)` with a VALUE that starts with a NUL byte skips the missing file (§9.2, §9.6).
+- With `glob=true`, a `*` or `?` after a NUL byte in the VALUE makes the part before the NUL a
+  pattern (§9.4).
+- Text parsed in place while the innermost open object is a section object keeps that object open
+  for the rest of the parse (§13.2).
+- With a leading `-`, a hex-after-fraction number from which nothing is read is a string (§5.2).
+- The first-value rule of `.inherit` copies applies at every level of the copy (§9.7).
+- String parameters of the include macros and `.load` end at their first NUL byte (§9.2).
 
 ## libucl quirks the crate reproduces
 

@@ -1,0 +1,2 @@
+x = 5
+.include(key="x", target="array\u0000q") "files/a.inc"

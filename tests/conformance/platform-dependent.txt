@@ -1,0 +1,10 @@
+# Cases whose golden files depend on the platform's C library, one per line:
+# <case id> <reason>
+#
+# The golden files next to these cases come from the oracle platform (macOS) and are what the
+# crate must produce everywhere. On another platform, scripts/regen-golden.sh writes libucl's
+# results for them to tests/conformance/platform/<platform>/<case id>.* instead, and those files
+# are committed for the drift check (tests/conformance/README.md, *Golden files per platform*).
+cases/spec/09-macros/include_glob_caret_is_not_negation        glibc glob: [^...] negates the set
+cases/spec/09-macros/include_glob_no_character_classes         glibc glob: [[:alpha:]] is a character class
+cases/spec/09-macros/include_glob_prefix_key_from_first_file   base name: with glibc every match gets its own key

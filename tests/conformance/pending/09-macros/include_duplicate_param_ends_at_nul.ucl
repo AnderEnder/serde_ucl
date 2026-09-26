@@ -1,0 +1,2 @@
+x = 1
+.include(duplicate="rewrite\u0000zz") "files/a.inc"

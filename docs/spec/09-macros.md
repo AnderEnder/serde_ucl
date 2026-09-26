@@ -335,7 +335,14 @@ quoted one rejects it as a raw control byte). What a macro does with it depends 
 
 - A path ends at the first NUL: `.include {files/a.inc<NUL>zzz}` includes `files/a.inc`, and so
   for `.try_include`, `.includes` and `.load` (§9.3; `macro_value_nul_ends_include_path`,
-  `macro_value_nul_ends_load_path`).
+  `macro_value_nul_ends_load_path`). The part before the NUL may be empty. The include macros
+  then include the empty path, as for an empty VALUE (§9.4). For `.load`, only a VALUE of zero
+  bytes is the empty path of §9.6; a VALUE that starts with NUL names the empty path as a file,
+  which is missing: `.load(key="k") {<NUL>zz}` is an error, and with `try=true` nothing is
+  inserted and parsing goes on (`load_path_nul_first_missing_error`,
+  `load_try_path_nul_first_skipped`).
+- With `glob=true`, whether the path is a pattern is decided on the whole VALUE, the NUL and the
+  bytes after it included, while the pattern is the part before the NUL (§9.4, *Globs*).
 - A priority (§9.5) is read from the part before the first NUL: `.priority {3<NUL>x}` sets 3. An
   empty part there counts as 0 without an error, and the VALUE is not empty, so it wins over the
   parameter: `.priority {<NUL>}` and `.priority(priority=4) {<NUL>}` set priority 0
@@ -344,6 +351,21 @@ quoted one rejects it as a raw control byte). What a macro does with it depends 
 - `.inherit` (§9.7) uses every byte, so `.inherit {d<NUL>zz}` names the key `d<NUL>zz` and fails
   when there is none (`macro_value_nul_kept_by_inherit_error`), and a registered macro receives
   every byte (§13.2; `cases/spec/13-inputs/macro_registered_value_nul_kept`).
+
+**Quirk: a NUL byte in a string parameter.** A string in ARGUMENTS can hold a NUL byte through a
+`\u0000` escape or a short `\u` escape (§4.8). The string parameters of the include macros (`key`,
+`target`, `duplicate` and the entries of `path`, §9.4) and of `.load` (`key` and `target`, §9.6)
+end at their first NUL:
+
+- `.include(key="s\u0000t") "files/a.inc"` nests the entries under `s`, with `prefix=true` too,
+  and `key="\u0000t"` nests them under the empty key (`include_key_param_ends_at_nul`,
+  `include_key_param_nul_first_empty_key`).
+- `.load(key="s\u0000t")` inserts under `s`, and `.load(key="\u0000t")` is an error, as for an
+  empty key (`load_key_param_ends_at_nul`, `load_key_param_nul_first_error`).
+- `duplicate="rewrite\u0000zz"` is `rewrite`, `target="array\u0000q"` is `array`, and `.load`'s
+  `target="int\u0000z"` is `int` (`include_duplicate_param_ends_at_nul`,
+  `include_target_param_ends_at_nul`, `load_target_param_ends_at_nul`).
+- `path=["files\u0000zz"]` searches the directory `files` (`include_path_param_entry_ends_at_nul`).
 
 After VALUE, whitespace, line breaks and `;` are skipped, and the next entry may start right there,
 on the same line: `.include "files/a.inc"k = 1`, `.include "files/a.inc";; # c⏎k = 1`
@@ -439,13 +461,20 @@ as `[ { a = 1 } ]` crashes it. The project reports the error at the `[`. A `{` a
 error too, as for the main document (`include_comment_blank_line_brace_error`).
 
 **Quirk: a file that ends right after its leading bracket.** When that `{` or `[` is the last byte
-of the file, with nothing but whitespace before it, nothing is taken over and nothing is checked:
+of the file, and stands where §1.1 lets a bracketed root start (after whitespace alone, or
+directly after a comment group at the start of the file), nothing is taken over and nothing is
+checked:
 the file adds nothing, and the object where the macro stands keeps its own brace. With the file
 `{`, `a = 1⏎.include "…"⏎b = 2` → `{ a: int 1, b: int 2 }`, and
 `x { .include "…"⏎b = 2 }⏎c = 3` → `{ x: { b: int 2 }, c: int 3 }`; the same with the file `⏎{`
 and with the file `[` (`include_only_open_brace_adds_nothing`,
 `include_only_open_brace_takes_nothing_over`, `include_newline_then_open_brace_adds_nothing`,
-`include_only_open_bracket_adds_nothing`). With any byte after the `{`, even a space, the brace is
+`include_only_open_bracket_adds_nothing`), and with the files `# c⏎{`, `/* c */{` and `# c⏎[`
+(`include_comment_then_open_brace_takes_nothing_over`,
+`include_block_comment_then_open_brace_takes_nothing_over`,
+`include_comment_then_open_bracket_adds_nothing`). A `{` that does not stand where a root can start
+is an error, as for the main document: `⏎# c⏎{` and `# c⏎␠␠{` (`include_comment_blank_line_brace_error`,
+`include_comment_then_space_brace_error`). With any byte after the `{`, even a space, the brace is
 taken over as below: with the file `{␠`, the second example puts `c` into `x`. Text parsed in
 place (§13.2) follows the same rule.
 
@@ -646,6 +675,18 @@ written, even if it contains `[`: `files/v4/g/[ab].inc` is simply missing
 (`include_glob_bracket_needs_wildcard_error`, `include_pattern_without_glob_error` for a pattern
 without `glob=true`).
 
+**Quirk: a NUL byte in a pattern.** For a VALUE with a NUL byte (§9.2), the `*` or `?` is looked
+for in the whole VALUE, after the NUL too, and the pattern is the part before the NUL. So
+`a = 1⏎.include(glob=true) {files/nomatch<NUL>*}⏎b = 2` is the pattern `files/nomatch`, which
+matches nothing and stops silently (below): `{ a: int 1 }`. `{<NUL>*}` is the empty pattern and
+stops too, `{files/a.inc<NUL>*}` includes `files/a.inc`, and with `try=true` a pattern that matches
+nothing is skipped (`include_glob_wildcard_after_nul_no_match_stops`,
+`include_glob_nul_first_wildcard_after_stops`, `include_glob_wildcard_after_nul_matches_part_before`,
+`include_glob_wildcard_after_nul_try_continues`). With a search path in effect (*Signatures, URLs
+and search paths*), the path is cut at the NUL before the wildcard is looked for:
+`.include(glob=true, path=["."]) {files/a.in<NUL>?}` is the missing path `./files/a.in`, an error
+(`include_glob_search_path_cuts_at_nul_first_error`).
+
 - Patterns use `*`, `?` and bracket expressions such as `[ab]`, with no brace expansion (`{a,b}` is
   literal) and no `~` expansion (`include_glob`, `include_glob_question_mark`,
   `include_glob_bracket_expression`, `include_glob_no_brace_expansion`). In detail:
@@ -674,9 +715,17 @@ without `glob=true`).
     `sub`, so `.include` fails and `try=true` skips it; where no directory matches, `.include`
     stops silently, as for no match below (`include_glob_trailing_slash_matches_directories_error`,
     `include_glob_trailing_slash_try`, `include_glob_trailing_slash_no_directory_stops`).
+    **Uncertain (depends on the operating system):** on the oracle platform, such a pattern also
+    matches a symbolic link to a regular file, which is then included, and a plain path that ends
+    in `/` after the name of a file or of a link to one names that file (`.include
+    "files/c.conf/"`). On Linux neither holds: the link is not matched, and the plain path is an
+    error. No case pins this; the project may follow either.
   - libucl leaves matching and sorting to the C library, and other C libraries differ, for example
-    in `[^…]` and character classes. The rules here are those of the oracle's C library, and the
-    cases follow them.
+    in `[^…]` and character classes: with glibc, `[^a]*` does not match `a.inc` and
+    `[[:alpha:]]*` matches any name that starts with a letter. The rules here are those of the
+    oracle's C library, the cases follow them, and they are what an implementation follows on
+    every platform. The golden files of the cases that give other results with another C library
+    are also recorded per platform, for the drift check only (`tests/conformance/README.md`).
 - The matching files are included one by one, sorted by byte value: `10.inc`, `9.inc`, `B.inc`,
   `_u.inc`, `a.inc` (`include_glob_byte_order`).
 - A match that cannot be included behaves as in the table above, except that `.try_include` skips
@@ -708,7 +757,8 @@ object instead of directly into it (`include_prefix_key`, `include_key_without_p
   `include_prefix_keeps_other_extensions`, `include_prefix_symlink_uses_target_name`, `libucl/basic/9`).
 - **Quirk.** With `glob=true`, K is taken from the first matched file and used for all of them:
   `.include(glob=true, prefix=true) "files/v4/g/[ab]*"` → `{ "a.inc": { ga: int 1, gb: int 1 } }`
-  (`include_glob_prefix_key_from_first_file`).
+  (`include_glob_prefix_key_from_first_file`). This depends on the C library as well: with glibc,
+  each matched file gets its own key.
 - K is not lowercased under `key-lowercase`, but it is compared with existing keys ignoring ASCII
   case, like every key under that flag (§12.1; `include_key_not_lowercased_but_matched`).
 - An object or array created for K has the include's `priority`
@@ -868,11 +918,12 @@ Parameters match as in §9.2, in the table's order within each type, so `t=true`
 `escape=1` is not a bool and is ignored (`load_escape_must_be_boolean`).
 
 - The path is used as written (§9.3); a search path (§9.4) is never used
-  (`load_ignores_search_path`). An empty path is an error, even with `try=true`
-  (`load_empty_path_error`).
+  (`load_ignores_search_path`). An empty VALUE is an error, even with `try=true`
+  (`load_empty_path_error`). A VALUE that starts with a NUL byte is not empty: it names the empty
+  path as a file, which is missing (§9.2, *Quirk: a NUL byte in VALUE*).
 - The checks come in this order, and the first that fails decides: `key` missing or empty, an
   error even with `try=true` (`load_without_key_error`, `load_missing_key_error_with_try`); an
-  empty path; a missing or unusable file, an error or with `try=true` nothing inserted; K already
+  empty VALUE; a missing or unusable file, an error or with `try=true` nothing inserted; K already
   present, an error (below). So `t = 1⏎.load(key="t", try=true) "missing"` → `{ t: int 1 }`, while
   `t = 1⏎.load(key="t", target="float") "files/num.txt"` and
   `t = 1⏎.load(key="t") "files/v4/empty.txt"` are errors (`load_try_missing_before_existing_key`,
@@ -945,7 +996,13 @@ Cases: `libucl/basic/load`.
   only that value is copied; otherwise all its values are: with
   `d { a = [1]; a = 5; b { x = 1 }; b = 5; c = 5; c = [1]; c = 6 }`, `e { .inherit "d" }` gets
   `a: [int 1]`, `b: { x: int 1 }` and `c: ⟨int 5 | [int 1] | int 6⟩`
-  (`inherit_container_first_value_only`). A second `.inherit` of the same object therefore
+  (`inherit_container_first_value_only`). The rule holds at every level of the copy: inside a
+  copied object, and in the objects of a copied array, an entry whose first value is an object or
+  an array keeps that value only, and an entry whose first value is anything else keeps all its
+  values. With `d { o { b { x = 1 }; b = 5; a = [1]; a = 2; s = 1; s = 2 }; r = [ { b { x = 1 };
+  b = 5 } ] }`, `e { .inherit "d" }` gets `o: { b: { x: int 1 }, a: [int 1], s: ⟨int 1 | int 2⟩ }`
+  and `r: [ { b: { x: int 1 } } ]` (`inherit_first_value_rule_at_every_level`). A second
+  `.inherit` of the same object therefore
   copies nothing (`inherit_twice_no_change`). Copies are **inherited**: a later explicit value
   for the same key replaces them, all values at once, whatever the priorities (§8.3;
   `inherit_basic` → `b: int 3`, not two values; `inherit_replaced_whatever_priority`,
