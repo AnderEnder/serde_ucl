@@ -193,6 +193,7 @@ pub(crate) struct Parts<'p> {
     pub(crate) base_dir: Option<&'p Path>,
     pub(crate) search_path: Option<Vec<String>>,
     pub(crate) max_input_bytes: Option<u64>,
+    pub(crate) inherit_depth_limit: usize,
     pub(crate) macros: &'p MacroTable,
     pub(crate) uncertain: &'p std::cell::Cell<u8>,
     pub(crate) comments: &'p mut Vec<Comment>,
@@ -263,6 +264,7 @@ impl<'p> Inputs<'p> {
             base_dir,
             search_path,
             max_input_bytes,
+            inherit_depth_limit,
             macros,
             uncertain,
             comments,
@@ -286,6 +288,7 @@ impl<'p> Inputs<'p> {
             (!macros.is_empty()).then_some(macros),
         );
         includes.uncertain = Some(uncertain);
+        includes.inherit_limit = inherit_depth_limit;
         let document = Document::new(
             flags.contains(ParserFlags::SAVE_COMMENTS),
             Some(OutputFacts::new()),

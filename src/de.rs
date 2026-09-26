@@ -33,7 +33,8 @@
 //!
 //! A [`UclValue`](crate::UclValue) (or [`UclObject`](crate::UclObject)) is taken in one step,
 //! with the same stack at any depth, so it can be as deep as the parser allows (1024 containers,
-//! [`crate::parse::MAX_NESTING`]) on a thread with a small stack. Any other type is read by
+//! [`crate::parse::MAX_NESTING`], or with copies made by `.inherit` up to
+//! [`crate::parse::MAX_INHERIT_DEPTH_LIMIT`]) on a thread with a small stack. Any other type is read by
 //! recursion through its `Deserialize` impl, one level per map or sequence, and there the
 //! deserializer enters at most [`MAX_SERDE_NESTING`] maps and sequences inside one another, the
 //! document included; deeper, it fails with [`SerdeError::TooDeep`](crate::error::SerdeError).

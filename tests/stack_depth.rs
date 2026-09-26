@@ -1,21 +1,27 @@
 //! Parsing, the emitters and every serde entry point survive the deepest documents the parser
-//! accepts, on a 2 MiB thread stack, the default of a spawned thread (clean-room work item C7).
+//! accepts, on a 2 MiB thread stack, the default of a spawned thread (clean-room work items C7
+//! and C10).
 //!
 //! The parser accepts 1024 containers nested inside one another, the root included (spec §11.2,
-//! `parse::MAX_NESTING`), also when `.inherit` builds them. A `UclValue` is deserialized and
-//! serialized at that depth. Other types are read and written by recursion through their serde
-//! impls, and fail with `SerdeError::TooDeep` past `MAX_SERDE_NESTING` maps and sequences.
+//! `parse::MAX_NESTING`). Copies made by `.inherit` nest a value up to the parser's `.inherit`
+//! depth limit, 1024 by default and at most `parse::MAX_INHERIT_DEPTH_LIMIT`; the tests at the
+//! end take every entry point to that depth: parsing, cloning, comparing and dropping the value,
+//! the emitters, and serde to and from `UclValue` and typed targets. A `UclValue` is
+//! deserialized and serialized at any of these depths. Other types are read and written by
+//! recursion through their serde impls, and fail with `SerdeError::TooDeep` past
+//! `MAX_SERDE_NESTING` maps and sequences.
 //!
 //! `cargo test` builds this crate optimised (`[profile.test.package.ucl-rust-lexer]` in
 //! `Cargo.toml`), which takes less stack than a debug build. `scripts/ci.sh` also runs this file
-//! with the crate unoptimised, as a debug build of an application builds it.
+//! with the crate unoptimised, as a debug build of an application builds it; that run is what
+//! shows `MAX_INHERIT_DEPTH_LIMIT` to be safe.
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use ucl_lexer::emit::Format;
 use ucl_lexer::error::SerdeError;
-use ucl_lexer::parse::{MAX_NESTING, Parser};
-use ucl_lexer::{MAX_SERDE_NESTING, ParserFlags, UclError, UclObject, UclValue};
+use ucl_lexer::parse::{ErrorKind, MAX_INHERIT_DEPTH_LIMIT, MAX_NESTING, Parser, ParserBuilder};
+use ucl_lexer::{MAX_SERDE_NESTING, ParserFlags, UclDeserializer, UclError, UclObject, UclValue};
 
 /// Runs `f` on a thread with a 2 MiB stack. A stack overflow aborts the whole test process.
 fn on_small_stack(f: impl FnOnce() + Send + 'static) {
@@ -52,46 +58,10 @@ fn nesting(value: &UclValue) -> usize {
     deepest
 }
 
-/// Whether `a == b`, compared as `==` compares (keys in any order, the values of each key in
-/// order, with their priorities and `.inherit` marks), but without recursion: `==` recurses once
-/// per level, and these tests measure the entry points, not their own checks.
+/// Whether `a == b`: keys in any order, the values of each key in order, with their priorities
+/// and marks. `==` compares with a heap stack at any depth.
 fn same(a: &UclValue, b: &UclValue) -> bool {
-    let mut stack = vec![(a, b)];
-    while let Some(pair) = stack.pop() {
-        match pair {
-            (UclValue::Object(x), UclValue::Object(y)) => {
-                if x.len() != y.len() {
-                    return false;
-                }
-                for (key, entry) in x.iter() {
-                    let Some(other) = y.entry(key) else {
-                        return false;
-                    };
-                    if entry.len() != other.len() {
-                        return false;
-                    }
-                    for (s, t) in entry.slots().iter().zip(other.slots()) {
-                        if (s.priority(), s.is_inherited()) != (t.priority(), t.is_inherited()) {
-                            return false;
-                        }
-                        stack.push((s.value(), t.value()));
-                    }
-                }
-            }
-            (UclValue::Array(x), UclValue::Array(y)) => {
-                if x.len() != y.len() {
-                    return false;
-                }
-                stack.extend(x.iter().zip(y));
-            }
-            (UclValue::Object(_) | UclValue::Array(_), _)
-            | (_, UclValue::Object(_) | UclValue::Array(_)) => return false,
-            // Scalars: `==` does not recurse.
-            (a, b) if a != b => return false,
-            _ => {}
-        }
-    }
-    true
+    a == b
 }
 
 /// Objects nested `depth` deep, the root included: `a { a { … b = 1 } }`.
@@ -532,5 +502,222 @@ fn typed_values_into_every_output_up_to_the_serde_limit() {
             "variants",
         );
         let _ = Shape::Struct { x: 0 };
+    });
+}
+
+// ----- the `.inherit` depth limit (C10) -----------------------------------------------------
+
+/// The containers of each part of [`inherited_chain`].
+#[derive(Debug, Clone, Copy)]
+enum Shape {
+    /// Objects: `a { a { … } }`.
+    Objects,
+    /// Objects written with quoted keys after comments, and a single-quoted string at the end:
+    /// saved comments and output facts, which copies keep (spec §10.1).
+    Commented,
+    /// Each object holds a key with two values, a number and the next object: a multi-value
+    /// entry at every level, which copies keep, since its first value is not a container
+    /// (spec §9.7).
+    MultiValues,
+    /// Arrays, with an object at the end of each part for the next `.inherit`.
+    Arrays,
+}
+
+const SHAPES: [Shape; 4] = [
+    Shape::Objects,
+    Shape::Commented,
+    Shape::MultiValues,
+    Shape::Arrays,
+];
+
+/// The text before and after the `levels` containers of part `index`: its object `r{index}`
+/// and `levels - 1` containers inside it.
+fn part(shape: Shape, index: usize, levels: usize) -> (String, String) {
+    let (mut head, mut tail) = (String::new(), String::new());
+    let mut wrap = |open: &str, close: &str| {
+        head.push_str(open);
+        tail.insert_str(0, close);
+    };
+    match shape {
+        Shape::Objects => {
+            wrap(&format!("r{index} {{ "), " }\n");
+            (1..levels).for_each(|_| wrap("a { ", " }"));
+        }
+        Shape::Commented => {
+            wrap(&format!("# c\nr{index} {{\n"), "\n}\n");
+            (1..levels).for_each(|_| wrap("# c\n\"a\" {\n", "\n}"));
+        }
+        Shape::MultiValues => {
+            wrap(&format!("r{index} {{ "), " }\n");
+            (1..levels).for_each(|_| wrap("k = 1; k { ", " }"));
+        }
+        Shape::Arrays => {
+            wrap(&format!("r{index} {{ "), " }\n");
+            if levels > 1 {
+                wrap("x = ", "");
+                (2..levels).for_each(|_| wrap("[", "]"));
+                wrap("{ ", " }");
+            }
+        }
+    }
+    (head, tail)
+}
+
+/// A document whose value is nested `depth` containers deep, the root included, made by copies
+/// of copies: `r0` holds up to 1000 containers, and each `r{i}` up to 1000 more, with
+/// `.inherit "r{i - 1}"` in its innermost object, until the copy in the last one reaches
+/// `depth`.
+fn inherited_chain(depth: usize, shape: Shape) -> String {
+    const PART: usize = 1000;
+    let leaf = match shape {
+        Shape::Commented => "v = 'x'",
+        Shape::MultiValues => "k = 2",
+        Shape::Objects | Shape::Arrays => "b = 1",
+    };
+    let mut nested = (depth - 1).min(PART);
+    let (head, tail) = part(shape, 0, nested);
+    let mut document = format!("{head}{leaf}{tail}");
+    let mut index = 1;
+    while nested < depth - 1 {
+        let levels = (depth - nested).min(PART + 1);
+        let (head, tail) = part(shape, index, levels);
+        document.push_str(&format!("{head}.inherit \"r{}\";{tail}", index - 1));
+        nested += levels - 1;
+        index += 1;
+    }
+    document
+}
+
+/// A parser with the largest `.inherit` depth limit.
+fn deepest_parser(flags: ParserFlags) -> Parser {
+    ParserBuilder::new()
+        .with_flags(flags)
+        .with_inherit_depth_limit(MAX_INHERIT_DEPTH_LIMIT)
+        .build()
+}
+
+#[test]
+fn copies_nest_no_deeper_than_the_largest_inherit_limit() {
+    on_small_stack(|| {
+        for shape in SHAPES {
+            let document = inherited_chain(MAX_INHERIT_DEPTH_LIMIT + 1, shape);
+            let error = deepest_parser(ParserFlags::DEFAULT)
+                .parse(document.as_bytes())
+                .unwrap_err();
+            assert_eq!(
+                error.kind(),
+                &ErrorKind::NestingTooDeep {
+                    limit: MAX_INHERIT_DEPTH_LIMIT
+                },
+                "{shape:?}"
+            );
+        }
+    });
+}
+
+#[test]
+fn parse_clone_compare_emit_and_drop_at_the_inherit_limit() {
+    on_small_stack(|| {
+        for shape in SHAPES {
+            let document = inherited_chain(MAX_INHERIT_DEPTH_LIMIT, shape);
+            let mut parser = deepest_parser(ParserFlags::SAVE_COMMENTS);
+            let value = parser.parse(document.as_bytes()).expect("parse");
+            assert_eq!(nesting(&value), MAX_INHERIT_DEPTH_LIMIT, "{shape:?}");
+            let copy = value.clone();
+            assert!(copy == value, "{shape:?}");
+            drop(copy);
+            // libucl's formats with the output facts of the parse, and without.
+            for format in [
+                Format::Json,
+                Format::JsonCompact,
+                Format::Config,
+                Format::Yaml,
+            ] {
+                assert!(!parser.emitter(format).emit(&value).is_empty(), "{shape:?}");
+            }
+            let with_comments = parser
+                .emitter(Format::Config)
+                .with_comments(parser.comments(), parser.attached_comments())
+                .emit(&value);
+            let commented = matches!(shape, Shape::Commented);
+            assert_eq!(with_comments.contains("# c"), commented, "{shape:?}");
+            for text in [
+                ucl_lexer::emit::to_json(&value),
+                ucl_lexer::emit::to_json_compact(&value),
+                ucl_lexer::emit::to_config(&value),
+                ucl_lexer::emit::to_yaml(&value),
+            ] {
+                assert!(!text.is_empty(), "{shape:?}");
+            }
+        }
+    });
+}
+
+#[test]
+fn serde_at_the_inherit_limit() {
+    #[derive(Deserialize, Serialize)]
+    struct Wrapper {
+        inner: UclValue,
+    }
+    on_small_stack(|| {
+        for shape in SHAPES {
+            let document = inherited_chain(MAX_INHERIT_DEPTH_LIMIT, shape);
+            let value = deepest_parser(ParserFlags::DEFAULT)
+                .parse(document.as_bytes())
+                .expect("parse");
+            // To and from `UclValue` and `UclObject`.
+            let copy = ucl_lexer::to_value(&value).unwrap();
+            assert!(same(&copy, &value), "{shape:?}");
+            let back: UclValue = ucl_lexer::from_value(copy).unwrap();
+            assert!(same(&back, &value), "{shape:?}");
+            let object: UclObject = ucl_lexer::from_value(back).unwrap();
+            assert_eq!(object.len(), value.as_object().unwrap().len());
+            drop(object);
+            let parser = deepest_parser(ParserFlags::DEFAULT);
+            let read =
+                UclValue::deserialize(UclDeserializer::from_parser(parser, document.as_bytes()))
+                    .unwrap();
+            assert!(same(&read, &value), "{shape:?}");
+            drop(read);
+            // Inside a typed target.
+            let wrapper = Wrapper {
+                inner: value.clone(),
+            };
+            let wrapped: Wrapper =
+                ucl_lexer::from_value(ucl_lexer::to_value(&wrapper).unwrap()).unwrap();
+            assert!(same(&wrapped.inner, &value), "{shape:?}");
+            drop(wrapped);
+            // Typed targets stop at the serde limit; the error's position comes from parsing
+            // the document again, with the same parser.
+            let parser = deepest_parser(ParserFlags::DEFAULT);
+            assert_too_deep(
+                serde_json::Value::deserialize(UclDeserializer::from_parser(
+                    parser,
+                    document.as_bytes(),
+                )),
+                "from_parser",
+            );
+            assert_too_deep(
+                ucl_lexer::from_value::<serde_json::Value>(value.clone()),
+                "from_value",
+            );
+            // Text that could not be parsed again, deeper than containers can be open
+            // (spec §11.2), is an error.
+            let mut written = Vec::new();
+            for result in [
+                ucl_lexer::to_string(&value),
+                ucl_lexer::to_json_string(&value),
+                ucl_lexer::to_json_string_compact(&value),
+                ucl_lexer::to_yaml_string(&value),
+                ucl_lexer::to_writer(&mut written, &value).map(|()| String::new()),
+                ucl_lexer::to_string(&wrapper),
+            ] {
+                let error = result.unwrap_err().to_string();
+                assert!(
+                    error.contains("nested more than 1024"),
+                    "{shape:?}: {error}"
+                );
+            }
+        }
     });
 }

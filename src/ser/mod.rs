@@ -111,8 +111,10 @@
 //!
 //! A [`UclValue`] or [`UclObject`], also as a field of another type, is copied as it is, with
 //! the same stack at any depth: [`to_value`] of one gives an equal value, priorities and marks
-//! included, and the text functions write any value the parser returns, up to 1024 containers
-//! deep (spec §11.2). Any other type is serialized by recursion through its `Serialize` impl, one
+//! included, and the text functions write any such value up to 1024 containers deep (spec
+//! §11.2), which every value the parser returns is unless its `.inherit` depth limit is raised
+//! ([`Parser::set_inherit_depth_limit`](crate::parse::Parser::set_inherit_depth_limit)). Deeper
+//! text could not be parsed again. Any other type is serialized by recursion through its `Serialize` impl, one
 //! level per map or sequence, and there serialization enters at most
 //! [`MAX_SERDE_NESTING`](crate::MAX_SERDE_NESTING) maps and sequences inside one another, the
 //! outermost included; deeper, it fails with [`SerdeError::TooDeep`]. The object of an enum

@@ -128,8 +128,16 @@ Added:
   another type, with the same stack at any depth: `from_value::<UclValue>(v)` and `to_value(&v)`
   give `v` back, priorities and the marks of `.inherit` copies included. Other types are read
   and written by recursion, and there nesting is limited to `MAX_SERDE_NESTING` (128) maps and
-  sequences; deeper nesting fails with the new `SerdeError::TooDeep`. Cloning a `UclValue`
-  takes the same stack at any depth as well.
+  sequences; deeper nesting fails with the new `SerdeError::TooDeep`. Cloning and comparing
+  (`==`) a `UclValue`, `UclObject`, `Entry` or `Slot` take the same stack at any depth as well.
+- A configurable limit on the copies `.inherit` makes: `ParserBuilder::with_inherit_depth_limit`,
+  `Parser::set_inherit_depth_limit` and `Parser::inherit_depth_limit`. A copy that would nest a
+  value more than the limit deep, the root included, fails with `ErrorKind::NestingTooDeep`,
+  whose `limit` is the setting. The default, `parse::DEFAULT_INHERIT_DEPTH_LIMIT`, is 1024; the
+  largest setting, `parse::MAX_INHERIT_DEPTH_LIMIT`, is 2048, the largest round depth at which
+  every entry point handles the parser's values on a 2 MiB thread stack in an unoptimised build.
+  A larger setting panics. The serde text functions reject a value nested more than 1024 deep,
+  which could not be parsed again; `emit` writes it. libucl sets no limit.
 - `time` serializes `Duration` as well as deserializing it.
 - `from_slice`, `from_reader`, `from_file` (feature `fs`) and `from_value`; `from_value`,
   `from_str_with_env` and `from_str_with_map` are also re-exported from the crate root.
@@ -208,7 +216,8 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
   `ErrorKind::UrlNotSupported`, and with `try=true` is skipped. Without `url=true` such a path is
   an ordinary path.
 - Limits: containers nest at most 1024 deep, the root included (`parse::MAX_NESTING`), also in
-  the objects that `.inherit` copies (libucl sets no limit there); included files 16 deep
+  the objects that `.inherit` copies unless the parser's `.inherit` depth limit is changed
+  (libucl sets no limit there); included files 16 deep
   (`parse::MAX_INCLUDE_DEPTH`) and macro argument documents 64 deep
   (`parse::MAX_ARGUMENT_DEPTH`; libucl sets no limit there either). The old lexer's
   configurable limits are gone. serde deserialization into, and serialization from, types

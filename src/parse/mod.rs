@@ -96,6 +96,24 @@ pub const MAX_INCLUDE_DEPTH: usize = 16;
 /// that nested arguments cannot exhaust the stack (QUESTIONS.md #26).
 pub const MAX_ARGUMENT_DEPTH: usize = 64;
 
+/// The default of [`Parser::set_inherit_depth_limit`]: a copy made by `.inherit` may nest a value
+/// at most 1024 containers deep, the root included, as many as may be open at once
+/// ([`MAX_NESTING`], spec §11.2).
+pub const DEFAULT_INHERIT_DEPTH_LIMIT: usize = MAX_NESTING;
+
+/// The largest setting [`Parser::set_inherit_depth_limit`] accepts: 2048.
+///
+/// Up to this depth, every entry point of the crate handles the values the parser returns on a
+/// thread with a 2 MiB stack, the default of a spawned thread, also in an unoptimised build:
+/// parsing, cloning, comparing and dropping a value, every emitter, and serde to and from
+/// `UclValue` and typed targets (`tests/stack_depth.rs`). Cloning and comparing take the same
+/// stack at any depth; emitting and dropping a value recurse once per level of nesting and set
+/// the limit. In an unoptimised build the emitters overflow a 2 MiB stack at about 2350 levels
+/// on 64-bit ARM macOS and about 2600 on x86-64 Linux, which leaves room for other platforms and
+/// compiler versions. Formatting a value with `Debug` recurses too, and at this depth needs more
+/// than 2 MiB in an unoptimised build.
+pub const MAX_INHERIT_DEPTH_LIMIT: usize = 2048;
+
 /// A comment saved under [`ParserFlags::SAVE_COMMENTS`] (spec §12.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Comment {
@@ -163,6 +181,7 @@ pub struct Parser {
     base_dir: Option<PathBuf>,
     search_path: Option<Vec<String>>,
     max_input_bytes: Option<u64>,
+    inherit_depth_limit: usize,
     comments: Vec<Comment>,
     attached: comments::CommentGroups,
     /// [`Parser::attached_comments`], written out from `attached` when first asked for.
@@ -231,6 +250,7 @@ impl fmt::Debug for Parser {
             .field("base_dir", &self.base_dir)
             .field("search_path", &self.search_path)
             .field("max_input_bytes", &self.max_input_bytes)
+            .field("inherit_depth_limit", &self.inherit_depth_limit)
             .field("comments", &self.comments.len())
             .field("attached", &self.attached.len())
             .field("macros", &self.macros.names())
@@ -240,8 +260,9 @@ impl fmt::Debug for Parser {
 
 impl Parser {
     /// A parser with no flags, priority 0, the `append` strategy, no registered variables, no
-    /// variable handler, no base directory, and an empty [`MemoryLoader`] as its loader, so that
-    /// it reads no files (WORKLIST C5 decision 1). Set [`FsLoader`] with [`Parser::set_loader`]
+    /// variable handler, no base directory, no input limit, the `.inherit` depth limit
+    /// [`DEFAULT_INHERIT_DEPTH_LIMIT`], and an empty [`MemoryLoader`] as its loader, so that it
+    /// reads no files (WORKLIST C5 decision 1). Set [`FsLoader`] with [`Parser::set_loader`]
     /// to read the filesystem.
     pub fn new() -> Self {
         let loader: Box<dyn Loader> = Box::new(MemoryLoader::new());
@@ -255,6 +276,7 @@ impl Parser {
             base_dir: None,
             search_path: None,
             max_input_bytes: None,
+            inherit_depth_limit: DEFAULT_INHERIT_DEPTH_LIMIT,
             comments: Vec::new(),
             attached: comments::CommentGroups::default(),
             attached_paths: OnceCell::new(),
@@ -479,6 +501,53 @@ impl Parser {
         self.max_input_bytes
     }
 
+    /// Sets how deep a copy made by `.inherit` may nest a value: at most `limit` containers
+    /// (objects and arrays), the root included (spec §9.7, §11.2). A copy that would nest a value
+    /// deeper fails the parse with [`ErrorKind::NestingTooDeep`], whose `limit` is this setting,
+    /// at the macro. The default is [`DEFAULT_INHERIT_DEPTH_LIMIT`], 1024.
+    ///
+    /// libucl sets no limit: copies of copies can nest a value tens of thousands of levels deep.
+    /// The crate's limit keeps the stack use of every entry point bounded; up to
+    /// [`MAX_INHERIT_DEPTH_LIMIT`], every one of them handles the values the parser returns on a
+    /// thread with a 2 MiB stack, also in an unoptimised build. A lower setting limits copies
+    /// from untrusted input further. The setting applies to `.inherit` only: containers written
+    /// in the input may still be open [`MAX_NESTING`] deep, and the entries a registered macro
+    /// adds (spec §13.2) may nest a value [`MAX_NESTING`] deep.
+    ///
+    /// The serde functions that write text (`to_string` and the others) reject a value nested
+    /// more than [`MAX_NESTING`] deep, since the output could not be parsed again (spec §11.2);
+    /// the emitters of [`crate::emit`] write it.
+    ///
+    /// # Panics
+    ///
+    /// If `limit` is greater than [`MAX_INHERIT_DEPTH_LIMIT`].
+    ///
+    /// ```
+    /// use ucl_lexer::parse::{ErrorKind, ParserBuilder};
+    ///
+    /// // The copies of `a` and `b` in `e` are nested 4 deep, with the root and `e`.
+    /// let text = b"d { a { b { c = 1 } } }\ne { .inherit \"d\" }";
+    /// let mut parser = ParserBuilder::new().with_inherit_depth_limit(3).build();
+    /// let err = parser.parse(text).unwrap_err();
+    /// assert_eq!(err.kind(), &ErrorKind::NestingTooDeep { limit: 3 });
+    /// parser.set_inherit_depth_limit(4);
+    /// assert!(parser.parse(text).is_ok());
+    /// ```
+    pub fn set_inherit_depth_limit(&mut self, limit: usize) -> &mut Self {
+        assert!(
+            limit <= MAX_INHERIT_DEPTH_LIMIT,
+            "the .inherit depth limit {limit} is greater than MAX_INHERIT_DEPTH_LIMIT \
+             ({MAX_INHERIT_DEPTH_LIMIT})"
+        );
+        self.inherit_depth_limit = limit;
+        self
+    }
+
+    /// The limit set with [`Parser::set_inherit_depth_limit`].
+    pub fn inherit_depth_limit(&self) -> usize {
+        self.inherit_depth_limit
+    }
+
     /// Comments saved by the last parse under [`ParserFlags::SAVE_COMMENTS`], in the order they
     /// were read, included files among them. A comment's position is in the input it was read
     /// from.
@@ -542,6 +611,7 @@ impl Parser {
             base_dir,
             search_path,
             max_input_bytes,
+            inherit_depth_limit,
             comments,
             attached,
             attached_paths,
@@ -571,6 +641,7 @@ impl Parser {
             base_dir: base_dir.as_deref(),
             search_path: search_path.clone(),
             max_input_bytes: *max_input_bytes,
+            inherit_depth_limit: *inherit_depth_limit,
             macros,
             uncertain,
             comments,
@@ -718,6 +789,7 @@ impl Parser {
             (!self.macros.is_empty()).then_some(&self.macros),
         );
         includes.files.push(file);
+        includes.inherit_limit = self.inherit_depth_limit;
         let mut document = core::Document::new(false, Some(OutputFacts::locating()), 0);
         match document.read(input, self.settings(), &mut expander, &mut includes) {
             Ok(()) => {}

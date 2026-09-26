@@ -162,7 +162,7 @@ The deliberate differences, in brief:
 - Where libucl stops without a message, the crate returns an error of its own kind that holds the
   partial result.
 - Limits where libucl has none: 64 levels of nested macro arguments, and 1024 levels of nesting
-  in the objects `.inherit` copies.
+  in the objects `.inherit` copies, a limit the application can set up to 2048.
 - A registered macro can fail with a message.
 - serde's JSON output is valid JSON.
 - Where libucl crashes or its result is undefined, the crate reports an error or gives a defined
@@ -405,7 +405,9 @@ Macros stand where a key could start:
   `priority`, `duplicate`, `glob`, `path` (search directories), `key`, `prefix` and `target`
   (nest the file under a key), `url` and `sign`.
 - `.priority N` sets the priority of the values after it.
-- `.inherit "name"` copies the entries of the root object `name` into the current object.
+- `.inherit "name"` copies the entries of the root object `name` into the current object. The
+  copies may nest a value at most 1024 containers deep, or as deep as
+  `ParserBuilder::with_inherit_depth_limit` allows ([Limits](#limits)).
 - `.load(key="k") "path"` reads a file into a value under the key `k`, with the feature `load`.
 - `.includes` (signed includes) is an "unsupported" error. Any other name is an error unless the
   application registered it ([Registered macros](#registered-macros)).
@@ -800,15 +802,20 @@ fn main() {
 
 | Limit | Value | Error |
 | --- | --- | --- |
-| Containers nested inside one another, the root included, also in the copies `.inherit` makes (`parse::MAX_NESTING`) | 1024 | `ErrorKind::NestingTooDeep` |
+| Containers open inside one another, the root included (`parse::MAX_NESTING`) | 1024 | `ErrorKind::NestingTooDeep` |
+| Containers a copy made by `.inherit` nests a value in, the root included (`with_inherit_depth_limit`, `Parser::set_inherit_depth_limit`) | 1024 by default (`parse::DEFAULT_INHERIT_DEPTH_LIMIT`), at most 2048 (`parse::MAX_INHERIT_DEPTH_LIMIT`) | `ErrorKind::NestingTooDeep` |
 | Input units open at once: inputs, included files and text parsed in place by macros (`parse::MAX_INCLUDE_DEPTH`) | 16 | `ErrorKind::IncludeTooDeep` |
 | Macro argument lists nested inside one another (`parse::MAX_ARGUMENT_DEPTH`; libucl has none) | 64 | `ErrorKind::ArgumentsTooDeep` |
 | Maps and sequences that serde enters in types other than `UclValue` and `UclObject` (`MAX_SERDE_NESTING`, as in `serde_json`) | 128 | `SerdeError::TooDeep` |
 | Bytes read by one parse (`with_max_input_bytes`) | none by default | `ErrorKind::InputTooLarge` |
 
-Parsing, the emitters and serde handle every document the parser accepts on a 2 MiB thread stack
-in a debug build. A `UclValue` or `UclObject`, also as a field of another type, is converted in
-one step at any depth. Other types are read and written by recursion through their serde impls,
+Parsing, cloning, comparing and dropping a value, the emitters and serde handle every document
+the parser accepts on a 2 MiB thread stack in a debug build, with the `.inherit` limit at any
+setting up to 2048; that is how the largest setting was chosen. A value nested more than 1024 deep
+has no text that could be parsed again, so the serde text functions (`to_string` and the others)
+reject it, while the emitters write it. `Debug` formatting of such a value needs a larger stack.
+A `UclValue` or `UclObject`, also as a field of another type, is converted in one step at any
+depth. Other types are read and written by recursion through their serde impls,
 hence `MAX_SERDE_NESTING`. A value that the target skips, such as an unknown field, does not
 count.
 

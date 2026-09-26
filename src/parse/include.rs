@@ -104,6 +104,9 @@ pub(crate) struct Includes<'l> {
     pub(crate) open_units: Vec<usize>,
     /// Where the parse records the [`super::Uncertain`] rules it reaches.
     pub(crate) uncertain: Option<&'l Cell<u8>>,
+    /// How deep a copy made by `.inherit` may nest a value, the root included
+    /// ([`super::Parser::set_inherit_depth_limit`]).
+    pub(crate) inherit_limit: usize,
 }
 
 impl<'l> Includes<'l> {
@@ -126,6 +129,7 @@ impl<'l> Includes<'l> {
             units: 0,
             open_units: Vec::new(),
             uncertain: None,
+            inherit_limit: super::DEFAULT_INHERIT_DEPTH_LIMIT,
         }
     }
 
@@ -150,6 +154,7 @@ impl<'l> Includes<'l> {
         );
         includes.files.push(None);
         includes.uncertain = self.uncertain;
+        includes.inherit_limit = self.inherit_limit;
         includes
     }
 

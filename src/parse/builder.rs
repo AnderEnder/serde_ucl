@@ -8,8 +8,8 @@ use std::path::PathBuf;
 ///
 /// Every method sets what the [`Parser`] setter of the same name sets; [`ParserBuilder::build`]
 /// returns the parser. A builder starts from [`Parser::new`]: no flags, priority 0, the `append`
-/// strategy, no registered variables, no variable handler, no base directory, and a loader that
-/// holds no files. [`ParserBuilder::with_loader`] opts into file access, for example with
+/// strategy, no registered variables, no variable handler, no base directory, no input limit,
+/// the `.inherit` depth limit 1024, and a loader that holds no files. [`ParserBuilder::with_loader`] opts into file access, for example with
 /// [`FsLoader`](super::FsLoader) for the filesystem.
 ///
 /// ```
@@ -153,6 +153,17 @@ impl ParserBuilder {
         self
     }
 
+    /// Sets how deep a copy made by `.inherit` may nest a value
+    /// ([`Parser::set_inherit_depth_limit`]). The default is 1024.
+    ///
+    /// # Panics
+    ///
+    /// If `limit` is greater than [`MAX_INHERIT_DEPTH_LIMIT`](super::MAX_INHERIT_DEPTH_LIMIT).
+    pub fn with_inherit_depth_limit(mut self, limit: usize) -> Self {
+        self.parser.set_inherit_depth_limit(limit);
+        self
+    }
+
     /// The parser.
     pub fn build(self) -> Parser {
         self.parser
@@ -180,8 +191,10 @@ mod tests {
             .with_base_dir("/cfg")
             .with_search_path(["/cfg"])
             .with_max_input_bytes(1000)
+            .with_inherit_depth_limit(2000)
             .build();
         assert_eq!(parser.flags(), ParserFlags::KEY_LOWERCASE);
+        assert_eq!(parser.inherit_depth_limit(), 2000);
         assert_eq!(parser.base_dir(), Some(std::path::Path::new("/cfg")));
         assert_eq!(parser.search_path(), Some(&["/cfg".to_string()][..]));
         assert_eq!(parser.max_input_bytes(), Some(1000));

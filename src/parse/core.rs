@@ -905,13 +905,18 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
-    /// Fails when `value`, added to the current object, would be nested more than
-    /// [`MAX_NESTING`] containers deep, the root included, so that no value the parser returns
-    /// is nested deeper than containers can be open (spec §11.2). Only `.inherit` adds values
-    /// that hold containers without opening them (§9.7).
-    pub(super) fn check_nesting(&self, value: &UclValue, at: usize) -> Result<(), Error> {
-        if self.frames.len() + crate::value::nesting(value) > MAX_NESTING {
-            return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, at));
+    /// Fails when `value`, added to the current object, would be nested more than `limit`
+    /// containers deep, the root included. Only macros add values that hold containers without
+    /// opening them: `.inherit` (§9.7), up to its configured limit, and registered macros
+    /// (§13.2), up to [`MAX_NESTING`], as deep as containers can be open (§11.2).
+    pub(super) fn check_nesting(
+        &self,
+        value: &UclValue,
+        limit: usize,
+        at: usize,
+    ) -> Result<(), Error> {
+        if self.frames.len() + crate::value::nesting(value) > limit {
+            return Err(self.error(ErrorKind::NestingTooDeep { limit }, at));
         }
         Ok(())
     }

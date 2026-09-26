@@ -153,8 +153,10 @@ pub enum ErrorKind {
     InvalidUtf8,
     /// A repeated key that the duplicate strategy does not accept (spec §8).
     DuplicateKey { key: String },
-    /// More containers nested inside one another than the nesting limit allows (spec §11.2):
-    /// open at once, or in the copies `.inherit` adds (§9.7).
+    /// More containers nested inside one another than a limit allows: open at once
+    /// ([`crate::parse::MAX_NESTING`], spec §11.2), in the copies `.inherit` adds (the parser's
+    /// [`inherit_depth_limit`](crate::parse::Parser::inherit_depth_limit), §9.7), or in the
+    /// entries a registered macro adds ([`crate::parse::MAX_NESTING`], §13.2).
     NestingTooDeep { limit: usize },
     /// A macro name that is not known.
     UnknownMacro { name: String },

@@ -22,8 +22,9 @@ pub type UclArray = Vec<UclValue>;
 
 /// A UCL value.
 ///
-/// Cloning does not recurse: it takes the same stack at any depth of nesting.
-#[derive(Debug, PartialEq)]
+/// Cloning and comparing do not recurse: they take the same stack at any depth of nesting.
+/// Dropping a value, and formatting it with `Debug`, recurse once per level.
+#[derive(Debug)]
 pub enum UclValue {
     Object(UclObject),
     Array(UclArray),
@@ -52,6 +53,94 @@ impl Clone for UclValue {
             UclValue::Null => UclValue::Null,
         }
     }
+}
+
+/// Written out rather than derived, which would recurse once per level of nesting: `==` compares
+/// as the derived comparisons of [`UclValue`], [`UclObject`], [`Entry`] and [`Slot`] would, with a
+/// heap stack. Values of different kinds differ; floats and times compare as `f64` (a NaN equals
+/// nothing); objects compare as maps, their keys in any order; the values of an entry compare in
+/// order, each with its priority and marks.
+impl PartialEq for UclValue {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = Vec::new();
+        push_values(self, other, &mut pending) && equal_pending(pending)
+    }
+}
+
+/// See [`UclValue`]'s `PartialEq`.
+impl PartialEq for UclObject {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = Vec::new();
+        push_objects(self, other, &mut pending) && equal_pending(pending)
+    }
+}
+
+/// See [`UclValue`]'s `PartialEq`.
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = Vec::new();
+        push_entries(self, other, &mut pending) && equal_pending(pending)
+    }
+}
+
+/// See [`UclValue`]'s `PartialEq`.
+impl PartialEq for Slot {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = Vec::new();
+        push_slots(self, other, &mut pending) && equal_pending(pending)
+    }
+}
+
+/// Pairs of values still to compare.
+type Pending<'a> = Vec<(&'a UclValue, &'a UclValue)>;
+
+/// Whether every pair in `pending`, and every pair of values inside them, is equal.
+fn equal_pending(mut pending: Pending<'_>) -> bool {
+    while let Some((a, b)) = pending.pop() {
+        if !push_values(a, b, &mut pending) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Compares `a` and `b` without the values inside them, which it pushes to `pending` in pairs.
+fn push_values<'a>(a: &'a UclValue, b: &'a UclValue, pending: &mut Pending<'a>) -> bool {
+    match (a, b) {
+        (UclValue::Object(x), UclValue::Object(y)) => push_objects(x, y, pending),
+        (UclValue::Array(x), UclValue::Array(y)) => {
+            pending.extend(x.iter().zip(y));
+            x.len() == y.len()
+        }
+        (UclValue::Integer(x), UclValue::Integer(y)) => x == y,
+        (UclValue::Float(x), UclValue::Float(y)) | (UclValue::Time(x), UclValue::Time(y)) => x == y,
+        (UclValue::String(x), UclValue::String(y)) => x == y,
+        (UclValue::Boolean(x), UclValue::Boolean(y)) => x == y,
+        (UclValue::Null, UclValue::Null) => true,
+        _ => false,
+    }
+}
+
+fn push_objects<'a>(x: &'a UclObject, y: &'a UclObject, pending: &mut Pending<'a>) -> bool {
+    x.entries.len() == y.entries.len()
+        && x.entries.iter().all(|(key, entry)| {
+            y.entries
+                .get(key)
+                .is_some_and(|other| push_entries(entry, other, pending))
+        })
+}
+
+fn push_entries<'a>(x: &'a Entry, y: &'a Entry, pending: &mut Pending<'a>) -> bool {
+    x.slots.len() == y.slots.len()
+        && x.slots
+            .iter()
+            .zip(&y.slots)
+            .all(|(s, t)| push_slots(s, t, pending))
+}
+
+fn push_slots<'a>(s: &'a Slot, t: &'a Slot, pending: &mut Pending<'a>) -> bool {
+    pending.push((&s.value, &t.value));
+    (s.priority, s.inherited, s.collected) == (t.priority, t.inherited, t.collected)
 }
 
 /// A copy of the container `root`, built with a heap stack: every value is copied after the
@@ -429,7 +518,7 @@ pub enum Placement {
 }
 
 /// One value of an [`Entry`], with its priority and `.inherit` flag.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Slot {
     value: UclValue,
     priority: u8,
@@ -507,7 +596,7 @@ impl Slot {
 }
 
 /// The values of one key: always at least one. More than one is an implicit array.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     slots: SmallVec<[Slot; 1]>,
 }
@@ -738,7 +827,8 @@ impl ExactSizeIterator for Values<'_> {}
 /// A UCL object: keys in insertion order, each with one or more values.
 ///
 /// Equality ignores key order, like `IndexMap`; the order of values inside an entry matters.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// Comparing does not recurse ([`UclValue`]).
+#[derive(Debug, Clone, Default)]
 pub struct UclObject {
     entries: IndexMap<String, Entry>,
 }
@@ -1047,12 +1137,86 @@ mod tests {
                 }
                 let copy = value.clone();
                 assert_eq!(nesting(&copy), 20_000);
-                // Dropping recurses; so does `==`. Neither is under test.
+                // Comparing does not recurse either.
+                assert!(copy == value);
+                // Dropping recurses; it is not under test.
                 std::mem::forget((value, copy));
             })
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn equality_is_that_of_the_derived_comparisons() {
+        let obj = |entries: Vec<(&str, Vec<Slot>)>| {
+            let mut o = UclObject::new();
+            for (key, slots) in entries {
+                let mut slots = slots.into_iter();
+                let mut entry = Entry::from_slot(slots.next().unwrap());
+                slots.for_each(|slot| entry.push_slot(slot));
+                o.insert_entry(key.to_string(), entry);
+            }
+            UclValue::Object(o)
+        };
+        let s = |v: UclValue| Slot::new(v, 0);
+        let a = obj(vec![
+            ("x", vec![s(int(1))]),
+            ("y", vec![s(int(2)), s(int(3))]),
+        ]);
+        // Keys in any order; values of an entry in order.
+        let b = obj(vec![
+            ("y", vec![s(int(2)), s(int(3))]),
+            ("x", vec![s(int(1))]),
+        ]);
+        assert!(a == b);
+        let c = obj(vec![
+            ("x", vec![s(int(1))]),
+            ("y", vec![s(int(3)), s(int(2))]),
+        ]);
+        assert!(a != c);
+        // Priority and marks count.
+        let d = obj(vec![
+            ("x", vec![Slot::new(int(1), 2)]),
+            ("y", vec![s(int(2)), s(int(3))]),
+        ]);
+        assert!(a != d);
+        let e = obj(vec![
+            ("x", vec![Slot::inherited(int(1), 0)]),
+            ("y", vec![s(int(2)), s(int(3))]),
+        ]);
+        assert!(a != e);
+        let f = obj(vec![
+            ("x", vec![Slot::collection(int(1))]),
+            ("y", vec![s(int(2)), s(int(3))]),
+        ]);
+        assert!(a != f);
+        // A missing key, an extra one, a different kind.
+        assert!(a != obj(vec![("x", vec![s(int(1))])]));
+        assert!(obj(vec![("x", vec![s(int(1))])]) != a);
+        assert!(int(1) != UclValue::Float(1.0));
+        assert!(UclValue::Float(1.0) != UclValue::Time(1.0));
+        assert!(UclValue::Time(1.5) == UclValue::Time(1.5));
+        // A NaN equals nothing, itself included.
+        assert!(UclValue::Float(f64::NAN) != UclValue::Float(f64::NAN));
+        assert!(
+            UclValue::Array(vec![UclValue::Float(f64::NAN)])
+                != UclValue::Array(vec![UclValue::Float(f64::NAN)])
+        );
+        // Arrays by length and element.
+        let arr = |items: Vec<UclValue>| UclValue::Array(items);
+        assert!(arr(vec![int(1), arr(vec![])]) == arr(vec![int(1), arr(vec![])]));
+        assert!(arr(vec![int(1)]) != arr(vec![int(1), int(1)]));
+        assert!(arr(vec![arr(vec![int(1)])]) != arr(vec![arr(vec![int(2)])]));
+        // The object, entry and slot comparisons agree with the value's.
+        let (UclValue::Object(x), UclValue::Object(y)) = (&a, &b) else {
+            unreachable!()
+        };
+        assert!(x == y);
+        assert!(x.entry("y") == y.entry("y"));
+        assert!(x.entry("x") != y.entry("y"));
+        assert!(x.entry("y").unwrap().slots()[0] == y.entry("y").unwrap().slots()[0]);
+        assert!(x.entry("y").unwrap().slots()[0] != y.entry("y").unwrap().slots()[1]);
     }
 
     fn insert(obj: &mut UclObject, key: &str, v: UclValue, pri: u8, s: DuplicateStrategy) {

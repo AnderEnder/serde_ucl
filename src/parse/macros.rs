@@ -703,9 +703,10 @@ impl Core<'_, '_, '_, '_> {
     /// to the current object. The copies keep the output facts of the values they copy (spec
     /// §10.1).
     ///
-    /// A copy that would be nested more than [`super::MAX_NESTING`] containers deep, the root
-    /// included, is an error at `at`, the macro. libucl accepts it (a project divergence, see
-    /// [`Core::check_nesting`]).
+    /// A copy that would be nested more than the parser's `.inherit` depth limit allows, the root
+    /// included, is an error at `at`, the macro
+    /// ([`super::Parser::set_inherit_depth_limit`]). libucl accepts it (a project divergence,
+    /// see [`Core::check_nesting`]).
     fn copy_entry(
         &mut self,
         key: String,
@@ -728,7 +729,7 @@ impl Core<'_, '_, '_, '_> {
             return Ok(());
         };
         for slot in &slots {
-            self.check_nesting(slot.value(), at)?;
+            self.check_nesting(slot.value(), self.includes.inherit_limit, at)?;
         }
         let copied_facts: Option<Vec<_>> = self.facts.as_ref().map(|facts| {
             slots
@@ -815,7 +816,7 @@ impl Host for Core<'_, '_, '_, '_> {
                 "no object is open to add entries to: the root has closed",
             ));
         }
-        if let Err(e) = self.check_nesting(&value, at) {
+        if let Err(e) = self.check_nesting(&value, super::MAX_NESTING, at) {
             return Err(MacroError::new(e.kind().to_string()));
         }
         if self.settings.flags.contains(ParserFlags::KEY_LOWERCASE)
@@ -1445,6 +1446,80 @@ e { .inherit \"d\" }",
             kind(&chained),
             ErrorKind::NestingTooDeep { limit: MAX_NESTING }
         );
+    }
+
+    #[test]
+    fn the_inherit_depth_limit_is_a_parser_setting() {
+        use crate::parse::{DEFAULT_INHERIT_DEPTH_LIMIT, MAX_INHERIT_DEPTH_LIMIT, ParserBuilder};
+        assert_eq!(
+            Parser::new().inherit_depth_limit(),
+            DEFAULT_INHERIT_DEPTH_LIMIT
+        );
+        assert_eq!(DEFAULT_INHERIT_DEPTH_LIMIT, MAX_NESTING);
+        let with_limit = |limit| ParserBuilder::new().with_inherit_depth_limit(limit).build();
+        // Lower: a copy nesting a value 600 + 10 - 1 deep with the root, 610.
+        let source = chain("d", 600, "leaf = 1;");
+        let text = format!("{source}{}", chain("e", 10, ".inherit \"d\";"));
+        let mut p = with_limit(610);
+        assert_eq!(
+            crate::value::nesting(&p.parse(text.as_bytes()).unwrap()),
+            610
+        );
+        p.set_inherit_depth_limit(609);
+        assert_eq!(p.inherit_depth_limit(), 609);
+        let e = p.parse(text.as_bytes()).unwrap_err();
+        assert_eq!(e.kind(), &ErrorKind::NestingTooDeep { limit: 609 });
+        // Containers written in the input may still be open 1024 deep.
+        let open = chain("e", MAX_NESTING - 1, "k = 1;");
+        assert!(p.parse(open.as_bytes()).is_ok());
+        // Scalars count their object: with 0, every copy fails.
+        let e = with_limit(0)
+            .parse(b"d { a = 1 }\ne { .inherit \"d\" }")
+            .unwrap_err();
+        assert_eq!(e.kind(), &ErrorKind::NestingTooDeep { limit: 0 });
+        // Higher: chained copies up to the setting, in the argument documents of macros too.
+        let mut chained = chain("r0", 1000, "leaf = 1;");
+        chained.push_str(&chain("r1", 1000, ".inherit \"r0\";"));
+        assert_eq!(
+            kind(&chained),
+            ErrorKind::NestingTooDeep { limit: MAX_NESTING }
+        );
+        let v = with_limit(2000).parse(chained.as_bytes()).unwrap();
+        assert_eq!(crate::value::nesting(&v), 2000);
+        let e = with_limit(1999).parse(chained.as_bytes()).unwrap_err();
+        assert_eq!(e.kind(), &ErrorKind::NestingTooDeep { limit: 1999 });
+        let argument = format!(".priority({}) 1", chained.replace('\n', " "));
+        let e = with_limit(1999).parse(argument.as_bytes()).unwrap_err();
+        assert_eq!(e.kind(), &ErrorKind::NestingTooDeep { limit: 1999 });
+        assert!(with_limit(2000).parse(argument.as_bytes()).is_ok());
+        // The largest setting is accepted, a larger one is not.
+        assert_eq!(
+            with_limit(MAX_INHERIT_DEPTH_LIMIT).inherit_depth_limit(),
+            MAX_INHERIT_DEPTH_LIMIT
+        );
+        let too_large = std::panic::catch_unwind(|| with_limit(MAX_INHERIT_DEPTH_LIMIT + 1));
+        assert!(too_large.is_err());
+    }
+
+    #[test]
+    fn registered_macros_add_values_up_to_the_nesting_limit() {
+        // The `.inherit` setting does not apply to entries a handler adds: they may nest a value
+        // `MAX_NESTING` deep, the root included.
+        let deep = |depth: usize| {
+            let mut value = UclValue::Integer(1);
+            for _ in 0..depth {
+                value = UclValue::Array(vec![value]);
+            }
+            value
+        };
+        for (limit, depth, ok) in [(10, MAX_NESTING - 1, true), (2000, MAX_NESTING, false)] {
+            let mut p = crate::parse::ParserBuilder::new()
+                .with_inherit_depth_limit(limit)
+                .with_macro("deep", move |call| call.add("k", deep(depth)))
+                .build();
+            let result = p.parse(b".deep x");
+            assert_eq!(result.is_ok(), ok, "{limit} {depth}");
+        }
     }
 
     #[test]
