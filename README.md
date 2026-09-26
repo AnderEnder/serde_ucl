@@ -352,7 +352,7 @@ A repeated key is resolved by the `DuplicateStrategy` of the input it is in:
 - `Rewrite` replaces the entry whatever the priorities.
 - `Error` rejects the document.
 
-Priorities run from 0 to 15 (`value::MAX_PRIORITY`) and are taken modulo 16. They come from
+Priorities run from 0 to 15 (`MAX_PRIORITY`) and are taken modulo 16. They come from
 `with_priority` or `set_priority`, the `.priority` macro, an include's `priority` parameter, and
 `Input::with_priority`. An include's `duplicate` parameter sets the strategy of the included file.
 Spec §8 has the details.
@@ -655,8 +655,10 @@ depends on how the document was written, such as which strings were single-quote
 `Parser::emitter` gives an emitter that uses these facts from the last parse
 (`Parser::output_facts`; `Emitter::with_facts` takes them too). `Emitter::new(format)` and the
 functions `emit::to_config`, `emit::to_json`, `emit::to_json_compact` and `emit::to_yaml` write a
-value without them, quoting keys in the config and YAML formats where `emit::key_needs_quoting`
-says.
+value without them: a `UclValue` does not record how it was written, so strings come out in the
+JSON form and keys as they are stored, quoted in the config and YAML formats where
+`emit::key_needs_quoting` says. To write a parsed document as libucl would, use
+`Parser::emitter` after the parse.
 
 ```rust
 use ucl_lexer::emit::Format;
@@ -850,7 +852,8 @@ The [examples](examples/) are programs that check their results with assertions
 ## Benchmarks
 
 Three [criterion](https://docs.rs/criterion) benchmarks cover parsing, the emitters and serde
-([benches/README.md](benches/README.md)). Run them with `cargo bench`. One run on an Apple M4 Max
+([benches/README.md](benches/README.md)). Run them with `cargo bench`; criterion's options go
+after `--`, as in `cargo bench -- --noplot`. One run on an Apple M4 Max
 with rustc 1.98.1, median times:
 
 | Group | Document | Time | Throughput |

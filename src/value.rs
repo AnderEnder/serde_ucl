@@ -498,7 +498,8 @@ impl fmt::Display for DuplicateKeyError {
 
 impl std::error::Error for DuplicateKeyError {}
 
-/// Highest libucl priority: only the 4 least significant bits are used.
+/// The highest priority, 15. Priorities are kept modulo 16, as libucl keeps them (spec §8.3):
+/// only their 4 least significant bits are used.
 pub const MAX_PRIORITY: u8 = 0x0f;
 
 /// Where [`UclObject::insert_slot_placed`] put a value. A parser that fills containers in place

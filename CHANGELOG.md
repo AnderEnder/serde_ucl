@@ -138,6 +138,7 @@ Added:
   every entry point handles the parser's values on a 2 MiB thread stack in an unoptimised build.
   A larger setting panics. The serde text functions reject a value nested more than 1024 deep,
   which could not be parsed again; `emit` writes it. libucl sets no limit.
+- `MAX_PRIORITY` (15) is re-exported from the crate root.
 - `time` serializes `Duration` as well as deserializing it.
 - `from_slice`, `from_reader`, `from_file` (feature `fs`) and `from_value`; `from_value`,
   `from_str_with_env` and `from_str_with_map` are also re-exported from the crate root.
@@ -268,6 +269,8 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
 
 ### Packaging
 
+- `cargo bench` runs the benches in `benches/` only, so criterion's options work
+  (`cargo bench -- --noplot`); the library has no benchmarks (`bench = false`).
 - The crate targets the latest stable Rust (1.98 at this release; `rust-version` in `Cargo.toml`).
 - The license files `LICENSE-MIT` and `LICENSE-APACHE` are added, for the crate's license
   `MIT OR Apache-2.0`.

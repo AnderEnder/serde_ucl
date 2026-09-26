@@ -30,6 +30,10 @@ cargo bench
 # One benchmark, or one group
 cargo bench --bench parse_benchmarks
 cargo bench --bench serde_benchmarks -- serde/deserialize
+
+# Criterion's options apply to every benchmark: without plots, or a quick run
+cargo bench -- --noplot
+cargo bench -- --warm-up-time 0.1 --measurement-time 0.5
 ```
 
 Criterion writes HTML reports to `target/criterion/report/index.html`. Each group runs 30 samples

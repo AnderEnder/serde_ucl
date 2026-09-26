@@ -47,6 +47,10 @@ load = []
 [lib]
 name = "ucl_lexer"
 path = "src/lib.rs"
+# The library has no benchmarks of its own. Without this, `cargo bench` also runs the library's
+# unit-test harness, which rejects the options of criterion, the harness of the benches in
+# benches/ (`cargo bench -- --noplot`).
+bench = false
 
 [[bench]]
 name = "parse_benchmarks"

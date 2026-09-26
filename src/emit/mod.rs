@@ -186,23 +186,42 @@ impl<'a> Emitter<'a> {
     }
 }
 
-/// `value` as pretty JSON (spec §10.4).
+/// `value` as pretty JSON (spec §10.4), without output facts: keys as they are in `value`
+/// ([`to_config`] says what that leaves out).
 pub fn to_json(value: &UclValue) -> String {
     Emitter::new(Format::Json).emit(value)
 }
 
-/// `value` as JSON without whitespace (spec §10.4).
+/// `value` as JSON without whitespace (spec §10.4), without output facts, as [`to_json`].
 pub fn to_json_compact(value: &UclValue) -> String {
     Emitter::new(Format::JsonCompact).emit(value)
 }
 
 /// `value` in the UCL config format (spec §10.5), without output facts: every string in the JSON
-/// form, keys quoted by [`key_needs_quoting`].
+/// form, keys as they are in `value` and quoted by [`key_needs_quoting`].
+///
+/// A [`UclValue`] does not record how its document was written, so this output ignores it:
+/// single-quoted strings and heredocs are written in the JSON form, keys lose the spelling and
+/// quoting they were written with (spec §10.1), and copies made by `.inherit` get the key of
+/// their entry. libucl writes those as they were parsed, and so does
+/// [`Parser::emitter`](crate::parse::Parser::emitter), which uses the output facts of the
+/// parser's last parse:
+///
+/// ```
+/// use ucl_lexer::emit::{self, Format};
+/// use ucl_lexer::parse::Parser;
+///
+/// let mut parser = Parser::new();
+/// let value = parser.parse(b"name = 'web'").unwrap();
+/// assert_eq!(emit::to_config(&value), "name = \"web\";\n");
+/// assert_eq!(parser.emitter(Format::Config).emit(&value), "name = 'web';\n");
+/// ```
 pub fn to_config(value: &UclValue) -> String {
     Emitter::new(Format::Config).emit(value)
 }
 
-/// `value` in libucl's YAML format (spec §10.6), without output facts.
+/// `value` in libucl's YAML format (spec §10.6), without output facts, as [`to_config`]:
+/// strings in the JSON form and keys quoted by [`key_needs_quoting`].
 pub fn to_yaml(value: &UclValue) -> String {
     Emitter::new(Format::Yaml).emit(value)
 }

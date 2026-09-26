@@ -245,6 +245,6 @@ pub use ser::{
     to_json_string, to_json_string_compact, to_string, to_value, to_writer, to_yaml_string,
 };
 pub use value::{
-    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclArray, UclObject,
-    UclValue, Values,
+    DuplicateKeyError, DuplicateStrategy, Entry, MAX_PRIORITY, ParserFlags, Placement, Slot,
+    UclArray, UclObject, UclValue, Values,
 };

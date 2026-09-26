@@ -44,7 +44,11 @@ impl fmt::Display for Position {
 /// Main error type for UCL parsing operations
 #[derive(Debug, Error)]
 pub enum UclError {
-    /// Serde deserialization error
+    /// An error of serde serialization (`to_string`, `to_value` and the other functions of
+    /// [`crate::ser`]): a value that has no form in the output ([`SerdeError::Unrepresentable`]),
+    /// a type nested deeper than [`MAX_SERDE_NESTING`](crate::MAX_SERDE_NESTING)
+    /// ([`SerdeError::TooDeep`]), or a message from a `Serialize` impl ([`SerdeError::Custom`]).
+    /// Deserialization reports its errors as [`UclError::Deserialize`].
     #[error("Serde error: {0}")]
     Serde(#[from] SerdeError),
 
