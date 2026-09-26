@@ -2221,3 +2221,60 @@
   - Commits: `8295e70`, `0d56210`, `bb543ce`, and the `docs:` commit that adds this entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-26 — Role: implementation team (clean-implementer). Item: C10b, WORKLIST C10 items 3
+  (the rename to `serde_ucl`, version 0.3.0) and 4 (coverage and release workflows), with two
+  owner additions given during the session: move `LICENSE-libucl` to
+  `tests/conformance/libucl/LICENSE`, and publish through crates.io Trusted Publishing instead of
+  a `CARGO_TOKEN` secret.
+  - Inputs: `docs/clean-room/` (PROTOCOL.md, WORKLIST.md C6, C7 and C10, earlier entries of this
+    log); `docs/spec/` only through the name greps below (no old names in it; nothing changed);
+    `docs/COMPATIBILITY.md`; `tests/conformance/README.md` and the case discovery in
+    `tests/conformance.rs` and `fuzz/src/main.rs` (a `LICENSE` file in `libucl/` is not a case);
+    the crate's own files, `scripts/`, `fuzz/`, `.github/workflows/` and the root files. Of git
+    history: `git log --oneline`, `git log` of `CHANGELOG.md` and `Cargo.toml`,
+    `git diff 8e66b8c HEAD -- CHANGELOG.md` and `git show 8e66b8c:CHANGELOG.md`. The crates.io
+    index (`serde_ucl` and `serde-ucl` were unregistered when checked), general cargo,
+    cargo-llvm-cov and GitHub Actions documentation.
+  - Searches: `git grep` with explicit pathspecs (`src tests examples benches docs scripts fuzz
+    .github`, the root files), never the repository root. `tools/` was not searched.
+  - `tools/ucl-dump/ucl_dump.c`: the owner asked for its header comment (line 5) to point at the
+    new license path. The file is oracle-side C source, so I did not open it: a `sed`
+    substitution addressed to line 5 replaced `LICENSE-libucl` (and a following "in the
+    repository root", had there been one) with `tests/conformance/libucl/LICENSE`, and the only
+    check was `git diff --numstat` (one line changed). The wording of that line is unreviewed.
+  - Scratch: `target/c10b-scratch/` (detached worktrees `wt` for the per-commit `scripts/ci.sh`
+    runs and `wt-linux` for a Linux run, logs, the cargo-llvm-cov install root, the unpacked
+    crate), which git ignores; the two worktrees were removed at the end. The harness keeps
+    background-task output files under `/private/tmp`; every command redirected its output to
+    `target/c10b-scratch/` and none of those files was opened.
+  - Tools: `rustup component add llvm-tools` (the stable toolchain), cargo-llvm-cov 0.9.1 under
+    `target/c10b-scratch/tools`, the existing Docker image `rust:1-bookworm` (rustc 1.98.1,
+    aarch64 Debian) for the Linux coverage run.
+  - CHANGELOG: 0.2.0 was never tagged or published, so the 0.3.0 section holds everything since
+    the version became 0.2.0 at `8e66b8c`: the entries added to the 0.2.0 section after that
+    commit moved to 0.3.0, after the rename, and the 0.2.0 section is again byte-identical to its
+    text at `8e66b8c`.
+  - Results: `scripts/ci.sh` (stable 1.98.1, macOS arm64) passes at each commit below, run in
+    `target/c10b-scratch/wt` detached at each; its unoptimised stack-depth step recompiles the
+    crate and prints no "did not match any packages" warning. `scripts/ci.sh coverage` passes on
+    macOS and in the Linux container (the tests pass under instrumentation, `stack_depth` and
+    `scaling` included; 95.75 % of regions of `src/`). `actionlint` and `shellcheck` report
+    nothing. `scripts/ci.sh release` passes for `v0.3.0` and fails for `v0.2.0` (version), for a
+    CHANGELOG without the section, and for malformed tags. Conformance unchanged: new core 1653
+    cases, 1649 pass, 4 expected failures; emitters 1220 cases with output, 1216 match; readback
+    1216 cases parse, config [1201, 12, 3, 0], json and json-compact [1213, 0, 3, 0], yaml
+    [1204, 9, 3, 0]. `cargo publish --dry-run --target-dir target/publish-check` packages 41
+    files (the sources, `Cargo.toml`, `Cargo.lock`, `README.md`, `CHANGELOG.md`, the two license
+    files, and cargo's `Cargo.toml.orig` and `.cargo_vcs_info.json`) and verifies; `cargo doc
+    --no-deps` in a fresh target directory lists only the crate `serde_ucl`.
+  - Old names left (`git grep -i -E 'ucl-rust-lexer|ucl_lexer'` over the paths above):
+    `CHANGELOG.md` (the 0.3.0 rename entry, which says how to upgrade, and the 0.2.0 section),
+    this log, and WORKLIST.md C6 decision 1, a dated decision superseded by C10 item 3.
+    `LICENSE-libucl` is left only in the 0.2.0 section of `CHANGELOG.md` and this log.
+    `CARGO_TOKEN` is left in this log and in WORKLIST.md C10 item 4, which the owner's change to
+    Trusted Publishing superseded.
+  - Questions: none.
+  - Commits: `ef79200`, `7e3be41`, `60cb2ba`, `630f34f`, and the `docs(clean-room):` commit that
+    adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
