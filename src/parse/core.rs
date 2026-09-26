@@ -593,6 +593,11 @@ struct Key {
     /// The key was written in double quotes and contains a backslash escape or a byte that makes
     /// the output formats quote it (spec §10.1, fact 3).
     quoted: bool,
+    /// [`key_needs_quoting`] of `name` as read, worked out once. A bare key never needs quoting.
+    needs_quoting: bool,
+    /// Set by [`Core::insert`] when it moved `name` into the entry it created, at this index of
+    /// the current object; the name is then read from there ([`Core::key_name`]).
+    stored: Option<usize>,
     /// For a key read in an earlier input ([`Boundary::Value`]), its position there: errors about
     /// the key are reported there.
     origin: Option<Position>,
@@ -625,6 +630,23 @@ struct PlacedFacts {
     /// The value took the place of a container under `merge` (§8.4, *Quirk*).
     in_place: bool,
     normal_layout: bool,
+}
+
+/// The name of `key`: its own, or for a key that [`Core::insert`] moved into the object of the
+/// top frame, that entry's ([`Key::stored`]). Takes the fields it reads, so that the caller may
+/// borrow others mutably meanwhile.
+fn stored_key_name<'a>(frames: &'a [Frame], root: &'a UclValue, key: &'a Key) -> &'a str {
+    let Some(index) = key.stored else {
+        return &key.name;
+    };
+    let top = match &frames.last().expect("a container is open").home {
+        Home::Root => root,
+        Home::Attached(_, value) | Home::Detached(value) => value,
+    };
+    top.as_object()
+        .and_then(|object| object.get_index(index))
+        .map(|(name, _)| name.as_str())
+        .expect("the entry that insert created")
 }
 
 /// Bytes that may start a bare key (§3.1).
@@ -1209,6 +1231,19 @@ impl Core<'_, '_, '_, '_> {
         self.top_node().map(|path| path.to_vec())
     }
 
+    /// The name of `key`, which [`Core::insert`] may have moved into the current object.
+    fn key_name<'k>(&'k self, key: &'k Key) -> &'k str {
+        stored_key_name(&self.frames, &self.root, key)
+    }
+
+    /// [`Core::placed_path`] for `key`, just inserted.
+    fn placed_key_path(&self, key: &Key, placement: Placement) -> Option<PathRef> {
+        if !self.wants_paths() {
+            return None;
+        }
+        self.placed_path(self.key_name(key), placement)
+    }
+
     /// The path of a value just placed in the current object under `key`, when values need
     /// paths and the value is part of the result.
     fn placed_path(&self, key: &str, placement: Placement) -> Option<PathRef> {
@@ -1315,13 +1350,17 @@ impl Core<'_, '_, '_, '_> {
             collected: e.slots()[0].is_collected(),
             in_place,
         });
-        let result = object.insert_slot_at(
-            index,
-            key.name.as_str(),
-            Slot::new(value, priority),
-            strategy,
-            flags,
-        );
+        let slot = Slot::new(value, priority);
+        let result = match index {
+            // A new key is moved into the object rather than copied; its name is read from
+            // there from now on ([`Key::stored`]).
+            None => {
+                key.stored = Some(object.len());
+                let name = std::mem::take(&mut key.name);
+                object.insert_slot_at(None, name, slot, strategy, flags)
+            }
+            Some(_) => object.insert_slot_at(index, key.name.as_str(), slot, strategy, flags),
+        };
         // A new key, which cannot fail, is the object's last entry.
         let after = if track {
             let index = index.unwrap_or(object.len() - 1);
@@ -1380,15 +1419,18 @@ impl Core<'_, '_, '_, '_> {
             Placement::Collected(index) => (index, true, false),
             Placement::Merged | Placement::Dropped => return,
         };
-        // The key's facts are only recorded for a keyed value.
-        let (key_spelling, key_quoted) = if keyed {
-            let spelling = written.unwrap_or(&key.name);
-            (
+        // The key's facts are only recorded for a keyed value. A key written with another
+        // spelling than the entry's was already there, so its name was not moved.
+        let (key_spelling, key_quoted) = match written {
+            _ if !keyed => (None, None),
+            Some(spelling) => (
                 (spelling != key.name).then(|| spelling.to_owned()),
                 (key.quoted != key_needs_quoting(spelling)).then_some(key.quoted),
-            )
-        } else {
-            (None, None)
+            ),
+            None => (
+                None,
+                (key.quoted != key.needs_quoting).then_some(key.quoted),
+            ),
         };
         let has_value_facts = placed.origin.has_string_facts() || placed.normal_layout;
         let has_key_facts = keyed && (key_spelling.is_some() || key_quoted.is_some());
@@ -1403,12 +1445,13 @@ impl Core<'_, '_, '_, '_> {
         let Some(object) = self.facts_node() else {
             return;
         };
+        let name = stored_key_name(&self.frames, &self.root, key);
         let facts = self.facts.as_mut().expect("facts are recorded");
         let node = if collected {
-            let entry = facts.key_child_or_insert(object, &key.name, 0);
+            let entry = facts.key_child_or_insert(object, name, 0);
             facts.element_child_or_insert(entry, slot)
         } else {
-            facts.key_child_or_insert(object, &key.name, slot)
+            facts.key_child_or_insert(object, name, slot)
         };
         if placed.in_place {
             facts.clear_below(node);
@@ -1560,30 +1603,18 @@ impl Core<'_, '_, '_, '_> {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, self.pos));
         }
         let placement = self.insert(&mut key, Self::empty(kind), Origin::default(), at)?;
-        let path = self.placed_path(&key.name, placement);
+        let path = self.placed_key_path(&key, placement);
+        let name = match key.stored {
+            Some(_) => self.key_name(&key).to_owned(),
+            None => std::mem::take(&mut key.name),
+        };
         let home = match placement {
-            Placement::Slot(slot) => self.take_out(
-                Step::Entry {
-                    key: key.name,
-                    slot,
-                },
-                kind,
-            ),
-            Placement::Collected(index) => self.take_out(
-                Step::Collected {
-                    key: key.name,
-                    index,
-                },
-                kind,
-            ),
+            Placement::Slot(slot) => self.take_out(Step::Entry { key: name, slot }, kind),
+            Placement::Collected(index) => {
+                self.take_out(Step::Collected { key: name, index }, kind)
+            }
             // Merged into the entry's first value, a container of the same kind (§8.4).
-            Placement::Merged => self.take_out(
-                Step::Entry {
-                    key: key.name,
-                    slot: 0,
-                },
-                kind,
-            ),
+            Placement::Merged => self.take_out(Step::Entry { key: name, slot: 0 }, kind),
             Placement::Dropped => Home::Detached(Self::empty(kind)),
         };
         self.created(path.clone());
@@ -2563,13 +2594,21 @@ impl Core<'_, '_, '_, '_> {
         if lowercase && !quoted {
             name.make_ascii_lowercase();
         }
-        // Fact 3 of spec §10.1.
-        let quoted = quoted && (escaped || key_needs_quoting(&name));
+        // Fact 3 of spec §10.1. The bytes of a bare key are none of those that need quoting.
+        let needs_quoting = quoted && key_needs_quoting(&name);
+        debug_assert!(
+            quoted || !key_needs_quoting(&name),
+            "a bare key never needs quoting"
+        );
+        debug_assert!(!name.is_empty(), "keys are never empty");
+        let quoted = quoted && (escaped || needs_quoting);
         Ok(Key {
             name,
             at,
             quoted,
+            needs_quoting,
             origin: None,
+            stored: None,
         })
     }
 
@@ -2790,7 +2829,7 @@ impl Core<'_, '_, '_, '_> {
         }
         let at = key.at;
         let placement = self.insert(&mut key, UclValue::Null, Origin::default(), at)?;
-        let path = self.placed_path(&key.name, placement);
+        let path = self.placed_key_path(&key, placement);
         self.created(path);
         Ok(())
     }
@@ -2832,7 +2871,7 @@ impl Core<'_, '_, '_, '_> {
                     rest.iter().all(|&b| matches!(b, b' ' | b'\t'))
                 };
                 let placement = self.insert(&mut key, value, origin, at)?;
-                let path = self.placed_path(&key.name, placement);
+                let path = self.placed_key_path(&key, placement);
                 self.created(path);
                 self.after_value(quoted)?;
                 if unseparated {
