@@ -966,5 +966,6 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
 
 The repository also holds libucl's test files under `tests/conformance/libucl/`. They are covered
-by libucl's BSD-2-Clause license, [LICENSE-libucl](LICENSE-libucl), and are not part of the
-published package.
+by libucl's BSD-2-Clause license,
+[tests/conformance/libucl/LICENSE](tests/conformance/libucl/LICENSE), and are not part of
+the published package.

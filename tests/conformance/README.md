@@ -7,7 +7,7 @@ None of them is written by hand.
 
 - `libucl/basic/` holds libucl's own `tests/basic` corpus, copied verbatim from
   <https://github.com/vstakhov/libucl> at commit `24c8b399062ae4691168c243e3b7345ef7f31956`
-  (2026-09-20). libucl is BSD-2-Clause; see `LICENSE-libucl` in the repository root. Every `*.in`
+  (2026-09-20). libucl is BSD-2-Clause; see `libucl/LICENSE`. Every `*.in`
   file is a case. The `*.inc` files and `include_dir/` are included by the cases. The `*.res` files
   are libucl's config output, produced by the two passes of spec §10.9; the emitter runner compares
   them (see *Running*).
