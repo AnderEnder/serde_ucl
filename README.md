@@ -1,6 +1,11 @@
 # serde_ucl
 
 [![CI](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml/badge.svg)](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml)
+[![Coverage](https://github.com/AnderEnder/serde_ucl/actions/workflows/coverage.yml/badge.svg)](https://github.com/AnderEnder/serde_ucl/actions/workflows/coverage.yml)
+[![crates.io](https://img.shields.io/crates/v/serde_ucl.svg)](https://crates.io/crates/serde_ucl)
+[![docs.rs](https://img.shields.io/docsrs/serde_ucl)](https://docs.rs/serde_ucl)
+[![MSRV](https://img.shields.io/crates/msrv/serde_ucl)](https://github.com/AnderEnder/serde_ucl/blob/main/Cargo.toml)
+[![License](https://img.shields.io/crates/l/serde_ucl.svg)](#license)
 
 UCL (Universal Configuration Language) for Rust, with serde. The crate reads and writes UCL as
 [libucl](https://github.com/vstakhov/libucl), the C library used by FreeBSD, does. A conformance
