@@ -198,3 +198,25 @@ the spec release that specifies several inputs and registered macros; C8c is too
    CI runs on stable only, so the separate minimum-version job goes. The README, `CHANGELOG.md`,
    `CLAUDE.md`, `scripts/ci.sh` and test comments say "latest stable Rust (1.98 at this release)"
    instead of 1.88. Code may use features up to 1.98.
+
+## C10 — Owner decisions of 2026-09-26
+
+1. The crate follows `spec-v13` (answers to QUESTIONS #70–#78): the cases in
+   `tests/conformance/pending/` pass and move to `cases/spec/`, and the runner reads per-platform
+   golden files as `tests/conformance/README.md` describes.
+2. The limit on how deep `.inherit` copies may nest a value (C7, QUESTIONS #56) is configurable on
+   the parser and its builder. The default stays 1024. The largest accepted setting is the largest
+   depth at which every entry point still runs within a 2 MiB stack in an unoptimised build, shown
+   by `tests/stack_depth.rs`; it is documented.
+3. The package and the library are renamed `serde_ucl`, and the version is `0.3.0`. Every
+   reference follows: code, tests, examples, benches, `fuzz/`, `tests/features/`, the README
+   (installation included), crate docs, `CHANGELOG.md` and `CLAUDE.md`. The GitHub repository is renamed
+   too: `repository` and every link use `https://github.com/AnderEnder/serde_ucl`.
+4. Coverage and release workflows are restored, working:
+   - Coverage: `cargo llvm-cov` on Linux on push and pull request. The report goes to the job
+     summary and an artifact, and to Codecov only when a `CODECOV_TOKEN` secret exists; a missing
+     token never fails the job.
+   - Release: on a `vX.Y.Z` tag, run `scripts/ci.sh` on Linux and macOS, fail unless the tag
+     matches the `Cargo.toml` version, publish with a `CARGO_TOKEN` secret, and create a GitHub
+     release whose notes are that version's `CHANGELOG.md` section. Nothing publishes if a check
+     fails.
