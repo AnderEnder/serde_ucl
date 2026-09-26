@@ -251,3 +251,12 @@ from the same text. The spec side reruns the libucl comparison after the work it
    under `~/.cargo/registry/src/`, fetched from a scratch package under `target/` if needed) and
    their published documentation. Excluded: any crate that binds, bundles or ports libucl or
    parses UCL, other than this one. The report credits the source of each idea.
+7. Owner decision of 2026-09-27: no code depends on the crate yet, so the public API need not stay
+   compatible, except the serde interface. The serde interface stays as it is: the `from_*` and
+   `to_*` functions, `UclDeserializer`, `UclError` with its methods, and how serde types
+   deserialize and serialize. Everything else, including the value model (`UclValue`,
+   `UclObject`, `UclArray` and the rest of `value`), `parse`, `emit` and their error types, may
+   change where that makes parsing faster. This replaces item 5 for the public API; new
+   dependencies and `unsafe` code remain owner decisions. A breaking change is marked `!` in its
+   commit and listed under `## Unreleased` in `CHANGELOG.md`, and the next release is 0.4.0.
+   Item 4 still holds: behaviour and output do not change.
