@@ -46,10 +46,20 @@ fn simple_escape(b: u8) -> u8 {
 
 /// Reads the double-quoted string whose opening quote is at `src[start]` (spec §6.1). Returns
 /// the decoded bytes and the offset just after the closing quote.
+///
+/// Bytes that need no decoding are copied a run at a time, up to the next `"`, `\\` or control
+/// byte (the idea of `serde_json`'s `SliceRead::parse_str_bytes`, `src/read.rs`, and of
+/// `toml_edit`'s `basic_chars`, `src/parser/strings.rs`; clean-room work item C11).
 pub(crate) fn double_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
     let mut out = Vec::new();
     let mut i = start + 1;
     loop {
+        let run = src[i..]
+            .iter()
+            .position(|&b| b == b'"' || b == b'\\' || b <= 0x1E)
+            .map_or(src.len(), |n| i + n);
+        out.extend_from_slice(&src[i..run]);
+        i = run;
         let Some(&b) = src.get(i) else {
             return Err(error(src, start, ErrorKind::UnterminatedString));
         };
@@ -83,46 +93,47 @@ pub(crate) fn double_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize)
                     i += 2;
                 }
             }
-            0x00..=0x1E => return Err(error(src, i, ErrorKind::ControlCharacter { byte: b })),
-            _ => {
-                out.push(b);
-                i += 1;
-            }
+            _ => return Err(error(src, i, ErrorKind::ControlCharacter { byte: b })),
         }
     }
 }
 
 /// Reads the single-quoted string whose opening quote is at `src[start]` (spec §6.2). Returns
 /// the content and the offset just after the closing quote.
+///
+/// Bytes other than `'` and `\\` are copied a run at a time, as in [`double_quoted`].
 pub(crate) fn single_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
     let mut out = Vec::new();
     let mut i = start + 1;
     loop {
+        let run = src[i..]
+            .iter()
+            .position(|&b| b == b'\'' || b == b'\\')
+            .map_or(src.len(), |n| i + n);
+        out.extend_from_slice(&src[i..run]);
+        i = run;
         let Some(&b) = src.get(i) else {
             return Err(error(src, start, ErrorKind::UnterminatedString));
         };
-        match b {
-            b'\'' => return Ok((out, i + 1)),
-            b'\\' => match src.get(i + 1) {
-                None => return Err(error(src, start, ErrorKind::UnterminatedString)),
-                Some(b'\'') => {
-                    out.push(b'\'');
-                    i += 2;
-                }
-                // Line continuation: the backslash and the line break (LF, CR LF, or a CR that
-                // no LF follows) are removed.
-                Some(b'\n') => i += 2,
-                Some(b'\r') if src.get(i + 2) == Some(&b'\n') => i += 3,
-                Some(b'\r') => i += 2,
-                Some(&other) => {
-                    out.push(b'\\');
-                    out.push(other);
-                    i += 2;
-                }
-            },
-            _ => {
-                out.push(b);
-                i += 1;
+        if b == b'\'' {
+            return Ok((out, i + 1));
+        }
+        // A backslash.
+        match src.get(i + 1) {
+            None => return Err(error(src, start, ErrorKind::UnterminatedString)),
+            Some(b'\'') => {
+                out.push(b'\'');
+                i += 2;
+            }
+            // Line continuation: the backslash and the line break (LF, CR LF, or a CR that no LF
+            // follows) are removed.
+            Some(b'\n') => i += 2,
+            Some(b'\r') if src.get(i + 2) == Some(&b'\n') => i += 3,
+            Some(b'\r') => i += 2,
+            Some(&other) => {
+                out.push(b'\\');
+                out.push(other);
+                i += 2;
             }
         }
     }
@@ -268,11 +279,15 @@ pub(crate) fn decode_unquoted(raw: &[u8]) -> (Vec<u8>, bool) {
     let mut out = Vec::with_capacity(raw.len());
     let mut i = 0;
     while i < raw.len() {
-        let b = raw[i];
-        if b != b'\\' {
-            out.push(b);
-            i += 1;
-            continue;
+        // The bytes up to the next backslash are copied as a run.
+        let run = raw[i..]
+            .iter()
+            .position(|&b| b == b'\\')
+            .map_or(raw.len(), |n| i + n);
+        out.extend_from_slice(&raw[i..run]);
+        i = run;
+        if i == raw.len() {
+            break;
         }
         let Some(&next) = raw.get(i + 1) else {
             // A backslash as the last byte of the value is kept.
