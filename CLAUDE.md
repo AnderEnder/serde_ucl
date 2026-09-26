@@ -54,12 +54,15 @@ reproduces.
   errors.
 - `fuzz/`: the differential fuzzer `ucl-differential`, a package of its own outside `cargo test`
   (`fuzz/README.md`).
-- `scripts/ci.sh`: what CI runs, and the `golden`, `pin` and `fuzz` modes;
-  `scripts/regen-golden.sh` and `tools/ucl-dump/`: the oracle that produces the golden files.
+- `scripts/ci.sh`: what CI runs, and the `golden`, `pin`, `fuzz`, `coverage` and `release`
+  modes; `scripts/regen-golden.sh` and `tools/ucl-dump/`: the oracle that produces the golden
+  files.
 - `.github/workflows/`: `ci.yml` (`scripts/ci.sh` on Linux and macOS with stable Rust),
-  `golden.yml` (the nightly drift check), `pin-move.yml` (manual: the golden files at another
-  libucl commit, published for review, nothing committed) and `fuzz.yml` (manual: the
-  differential fuzzer).
+  `coverage.yml` (cargo-llvm-cov on Linux; Codecov only with a `CODECOV_TOKEN` secret),
+  `release.yml` (on a `vX.Y.Z` tag: checks, `cargo publish` through crates.io Trusted
+  Publishing in the environment `release`, the GitHub release), `golden.yml` (the nightly drift
+  check), `pin-move.yml` (manual: the golden files at another libucl commit, published for
+  review, nothing committed) and `fuzz.yml` (manual: the differential fuzzer).
 
 ## Clean-Room Rules
 
@@ -127,6 +130,13 @@ scripts/ci.sh pin <commit>
 
 # The differential fuzzer for N seconds (fuzz/README.md); fails if it finds a difference
 scripts/ci.sh fuzz 600
+
+# Coverage with cargo-llvm-cov (cargo install cargo-llvm-cov; rustup component add llvm-tools);
+# the report goes to target/coverage/
+scripts/ci.sh coverage
+
+# The release check: the tag matches the Cargo.toml version and CHANGELOG.md has its section
+scripts/ci.sh release v0.3.0
 ```
 
 ### Running Examples

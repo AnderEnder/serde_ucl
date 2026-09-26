@@ -1,0 +1,72 @@
+# Coverage of the crate's tests on Linux, on push and pull request: scripts/ci.sh coverage runs
+# them under cargo-llvm-cov and writes the report to target/coverage/. The table goes to the job
+# summary, and the whole report (LCOV and HTML) to an artifact. It is uploaded to Codecov only
+# when the repository has a CODECOV_TOKEN secret; without one (also in pull requests from forks,
+# which get no secrets) the upload is skipped with a notice, and a failed upload does not fail
+# the job either. Failing tests do.
+name: Coverage
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Secrets cannot be tested in `if:`; an unset secret is an empty string here.
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: scripts/ci.sh coverage
+        run: scripts/ci.sh coverage
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage"
+            echo
+            if [ -f target/coverage/summary.txt ]; then
+              echo '```'
+              cat target/coverage/summary.txt
+              echo '```'
+            else
+              echo "scripts/ci.sh coverage wrote no report; see the log of the step before."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: target/coverage/
+          if-no-files-found: ignore
+      - name: Upload to Codecov
+        if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ env.CODECOV_TOKEN }}
+          files: target/coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: false
+      - name: No Codecov token
+        if: env.CODECOV_TOKEN == ''
+        run: echo "::notice title=Codecov::No CODECOV_TOKEN secret, so the report was not uploaded to Codecov."

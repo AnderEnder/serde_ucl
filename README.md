@@ -951,14 +951,28 @@ oracle if needed and runs it for ten minutes.
 `scripts/ci.sh` runs every check CI runs. It runs `cargo fmt --check`, clippy with `-D warnings`
 over every feature set, the tests (the stack-depth tests unoptimised, and the `tests/features/`
 package with and without default features), the fuzzer's unit tests, every example, the
-benchmarks' build, and `cargo doc` with warnings denied.
+benchmarks' build, and `cargo doc` with warnings denied. `scripts/ci.sh coverage` runs the tests
+under [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) and writes the report to
+`target/coverage/`. `scripts/ci.sh release vX.Y.Z` checks a release tag against the version in
+`Cargo.toml` and writes that version's `CHANGELOG.md` section to `target/release-notes.md`.
 
 | Workflow | Runs | Does |
 | --- | --- | --- |
 | `ci.yml` | push, pull request, manual | `scripts/ci.sh` on Linux and macOS with stable Rust |
+| `coverage.yml` | push, pull request, manual | `scripts/ci.sh coverage` on Linux: the report in the job summary and an artifact, and on Codecov when the repository has a `CODECOV_TOKEN` secret; without one the upload is skipped |
+| `release.yml` | a pushed tag `vX.Y.Z` | `scripts/ci.sh release` and `ci.yml`, then `cargo publish` through crates.io Trusted Publishing, skipped with a notice when crates.io has the version already, then the GitHub release with the version's `CHANGELOG.md` section as notes, unless it exists; nothing is published if a check fails |
 | `golden.yml` | nightly, manual | `scripts/ci.sh golden` on Linux and macOS: fails if libucl's results drifted from the golden files |
 | `pin-move.yml` | manual, with a libucl commit | `scripts/ci.sh pin` on Linux and macOS: publishes the golden-file changes as a summary and a patch, one artifact per platform, and commits nothing |
 | `fuzz.yml` | manual, with a duration and seed | `scripts/ci.sh fuzz`: fails on a difference and uploads the findings |
+
+A release is a commit that sets the version in `Cargo.toml` and adds its `CHANGELOG.md` section
+(`## X.Y.Z - DATE`), and a tag `vX.Y.Z` pushed at it. `release.yml` publishes with crates.io
+[Trusted Publishing](https://crates.io/docs/trusted-publishing): the repository stores no
+crates.io token, and the publish job, which runs in the GitHub environment `release`, exchanges
+GitHub's OIDC token for a crates.io token that lasts for the job. This needs a one-time setup on
+crates.io, once the crate exists there: in the crate's settings, under Trusted Publishing, add a
+GitHub publisher with owner `AnderEnder`, repository `serde_ucl`, workflow `release.yml` and
+environment `release`.
 
 ## License
 

@@ -1,12 +1,13 @@
 # Runs scripts/ci.sh, the checks a developer runs locally before pushing, on Linux and macOS
 # with stable Rust. The crate targets the latest stable Rust (rust-version in Cargo.toml), so
-# there is no separate job for an older toolchain.
+# there is no separate job for an older toolchain. release.yml calls this workflow for its checks.
 name: CI
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
