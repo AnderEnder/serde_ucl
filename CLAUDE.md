@@ -71,11 +71,10 @@ team never edits `src/`.
 
 - Do not read libucl source files (`*.c`, `*.h`, build files) anywhere, including the clone that
   `scripts/regen-golden.sh` makes under `target/libucl-oracle/`, or browse its source online.
-- Do not read branches `quarantine/*`, or `REVIEW.md`, `PLAN.md` or `PROGRESS.md`.
+- Do not read branches `quarantine/*` or `backup/*`, or `REVIEW.md`, `PLAN.md` or `PROGRESS.md`.
 - The old `src/lexer.rs` and `src/parser.rs` were deleted at the cut-over (C5b). Their history
   stays forbidden: no `git show`, `git log -p`, `git diff` or checkout of revisions that contain
-  them. The same holds for the history of `src/` before commit `ef8007e` and the history of
-  `CLAUDE.md`.
+  them. The same holds for the history of `CLAUDE.md`.
 - Allowed inputs for implementation: the released spec (latest `spec-vN` tag) in `docs/spec/`,
   `docs/clean-room/`, libucl's public format documentation, the conformance cases and golden
   files, and running the oracle as a black box (`scripts/regen-golden.sh`,

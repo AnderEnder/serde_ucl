@@ -2150,3 +2150,20 @@
     `actionlint` clean; `scripts/ci.sh` passes at both commits.
   - The spec contains behaviour only; no libucl identifiers, file names or code were added.
   - Commits: `3ed262c`, `bf083aa` (tag `spec-v13`), and the `C0 v13:` commit that adds this entry.
+- 2026-09-26 — Role: session lead (oracle side). Item: history squash, README rewrite, spec-v13
+  transplant.
+  - At the owner's request, `main` was rebuilt as one conventional commit per completed piece of
+    work (31 commits from the root, the two original commits reworded). No commit of the new
+    history contains `REVIEW.md`, `PLAN.md`, `PROGRESS.md`, `.claude/` or the early code derived
+    from libucl; the final tree is unchanged. The detailed history is kept on local branches
+    `backup/full-history` and `backup/libucl-compat-pre-squash`, which are forbidden inputs for
+    implementers (PROTOCOL.md). Commit hashes cited in earlier entries of this log refer to those
+    branches. Tags `spec-v1`–`spec-v13` point at the release commits of the new history.
+  - README rewrite (implementation team, clean-implementer, main checkout): the README was
+    rewritten from the crate's public API, `CHANGELOG.md`, `docs/COMPATIBILITY.md`, `docs/spec/`,
+    the examples and the scripts; the oracle binary was run as a black box to check stated values.
+    The participant read no libucl source, no `PLAN.md` or `REVIEW.md`, and nothing else
+    forbidden. Attestation given in its report; recorded here because its commit was limited to
+    `README.md`.
+  - The spec-v13 commits and the C10 decisions were replayed onto the new history; the README
+    kept the rewritten text, which already describes per-platform golden files.

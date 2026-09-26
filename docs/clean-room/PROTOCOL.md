@@ -53,10 +53,13 @@ code or hints.
 - `REVIEW.md`, `PLAN.md` and `PROGRESS.md`. They were written by the oracle side and contain
   references to libucl internals. Since C5 they are kept only on branch `quarantine/oracle-notes`,
   not in the working tree.
-- Branches under `quarantine/`.
-- Git history of `src/` before commit `ef8007e`: no `git log -p`, `git show` or `git diff` against
-  earlier commits for `src/` paths. Earlier revisions of `src/value.rs` contain the removed code
-  that was derived from libucl.
+- Branches under `quarantine/` and `backup/`. `backup/full-history` and
+  `backup/libucl-compat-pre-squash` keep the detailed history from before `main` was squashed
+  into one commit per piece of work; they contain `REVIEW.md`, `PLAN.md`, `PROGRESS.md` and
+  early code in `src/value.rs` that was derived from libucl.
+- Git history of `src/` in the first commits of the squashed history, up to and including
+  `feat: add libucl conformance suite, value model and clean-room protocol`: no `git log -p`,
+  `git show` or `git diff` against those revisions for `src/` paths.
 - The old `src/lexer.rs` and `src/parser.rs`, deleted at the cut-over (C5b): their contents in
   git history (`git show`, `git log -p`, `git diff` or checkouts of any revision that has them).
   They predate the clean room and are not a source of design or code.
