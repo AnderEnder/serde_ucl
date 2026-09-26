@@ -221,3 +221,27 @@ the spec release that specifies several inputs and registered macros; C8c is too
      environment `release`; the name was reserved with a placeholder `serde_ucl` 0.0.0), and create a
      GitHub release whose notes are that version's `CHANGELOG.md` section. Nothing publishes if a check
      fails.
+
+## C11 — Parser performance (owner request of 2026-09-27)
+
+Find out how to make parsing faster, and make the changes that are safe.
+
+Reference points, measured black box on an Apple M4 Max: libucl, built with `-O3`, parses the
+same UCL input about 2.4 times as fast as the crate and the same JSON input about 1.8 times as
+fast; `serde_json` deserializes JSON into typed structs 3.4 to 8 times as fast as `serde_ucl` does
+from the same text. The spec side reruns the libucl comparison after the work item.
+
+1. Profile at least `parse/config/1000`, `parse/json/1000` and
+   `serde/deserialize-1000/from_str`, with the release settings of `Cargo.toml` for the numbers
+   that are reported.
+2. Write a report, `target/perf/C11-report.md`: where the time goes (shares of the profile), each
+   candidate change with its measured or estimated gain and its risk, ranked.
+3. Make the candidate changes that are low risk, one commit each, with the criterion result
+   before and after in the commit message.
+4. Behaviour does not change: the conformance results and `xfail-*.txt` stay as they are, emitter
+   output stays byte-identical, error kinds and positions stay the same, `tests/stack_depth.rs`
+   passes unoptimised, `tests/scaling.rs` passes, `scripts/ci.sh` passes, and a differential fuzz
+   run of at least five minutes (`scripts/ci.sh fuzz 300`) finds no difference after the last
+   change.
+5. New dependencies, `unsafe` code and public API changes are proposals in the report, not code;
+   they are owner decisions.
