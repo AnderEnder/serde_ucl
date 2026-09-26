@@ -443,6 +443,23 @@ impl Step {
     fn path(path: &[PathSegment]) -> Step {
         Step::Path(path.iter().map(Step::from_segment).collect())
     }
+
+    /// The node in `facts` of the value this step leads to from the value at `node`, added with
+    /// the nodes on the way if missing: `facts.descend_or_insert(node, &self.segments())`,
+    /// without building the segments.
+    fn descend_facts(&self, facts: &mut OutputFacts, node: NodeId) -> NodeId {
+        match self {
+            Step::Entry { key, slot } => facts.key_child_or_insert(node, key, *slot),
+            Step::Collected { key, index } => {
+                let entry = facts.key_child_or_insert(node, key, 0);
+                facts.element_child_or_insert(entry, *index)
+            }
+            Step::Element(index) => facts.element_child_or_insert(node, *index),
+            Step::Path(steps) => steps
+                .iter()
+                .fold(node, |node, step| step.descend_facts(facts, node)),
+        }
+    }
 }
 
 /// The value at `path` inside `value`.
@@ -1167,7 +1184,7 @@ impl Core<'_, '_, '_, '_> {
                 .facts_node
                 .get()
                 .expect("set just before")
-                .map(|below| facts.descend_or_insert(below, &step.segments()));
+                .map(|below| step.descend_facts(facts, below));
             let _ = self.frames[above].facts_node.set(node);
         }
         self.frames[index].facts_node.get().copied().flatten()
@@ -1383,22 +1400,16 @@ impl Core<'_, '_, '_, '_> {
         if !has_value_facts && !has_key_facts && !stale && !locating {
             return;
         }
-        let key_name = key.name.clone();
-        let step = if collected {
-            Step::Collected {
-                key: key_name,
-                index: slot,
-            }
-        } else {
-            Step::Entry {
-                key: key_name,
-                slot,
-            }
-        };
-        let Some(node) = self.facts_node_below(&step.segments()) else {
+        let Some(object) = self.facts_node() else {
             return;
         };
         let facts = self.facts.as_mut().expect("facts are recorded");
+        let node = if collected {
+            let entry = facts.key_child_or_insert(object, &key.name, 0);
+            facts.element_child_or_insert(entry, slot)
+        } else {
+            facts.key_child_or_insert(object, &key.name, slot)
+        };
         if placed.in_place {
             facts.clear_below(node);
         }

@@ -300,12 +300,32 @@ impl OutputFacts {
 
     /// The node of `segment` below `node`, added if there is none.
     pub(crate) fn child_or_insert(&mut self, node: NodeId, segment: &PathSegment) -> NodeId {
-        if let Some(child) = self.nodes[node].children.get(segment) {
+        match segment {
+            PathSegment::Key { key, index } => self.key_child_or_insert(node, key, *index),
+            PathSegment::Index(index) => self.element_child_or_insert(node, *index),
+        }
+    }
+
+    /// The node of value `index` of entry `key` of the object at `node`, added if there is
+    /// none. The key is copied only for a new node.
+    pub(crate) fn key_child_or_insert(&mut self, node: NodeId, key: &str, index: usize) -> NodeId {
+        if let Some(child) = self.nodes[node].children.key(key, index) {
             return child;
         }
         let child = self.nodes.len();
         self.nodes.push(Node::default());
-        self.nodes[node].children.insert(segment, child);
+        self.nodes[node].children.insert_key(key, index, child);
+        child
+    }
+
+    /// The node of element `index` of the array at `node`, added if there is none.
+    pub(crate) fn element_child_or_insert(&mut self, node: NodeId, index: usize) -> NodeId {
+        if let Some(child) = self.nodes[node].children.element(index) {
+            return child;
+        }
+        let child = self.nodes.len();
+        self.nodes.push(Node::default());
+        self.nodes[node].children.insert_element(index, child);
         child
     }
 

@@ -36,17 +36,27 @@ impl Children {
     /// Makes `child` the node of `segment`.
     pub(crate) fn insert(&mut self, segment: &PathSegment, child: usize) {
         match segment {
-            PathSegment::Key { key, index } => {
-                let values = self.keys.entry(key.clone()).or_default();
-                if values.len() <= *index {
-                    values.resize(*index + 1, None);
-                }
-                values[*index] = Some(child);
-            }
-            PathSegment::Index(index) => {
-                self.elements.insert(*index, child);
-            }
+            PathSegment::Key { key, index } => self.insert_key(key, *index, child),
+            PathSegment::Index(index) => self.insert_element(*index, child),
         }
+    }
+
+    /// Makes `child` the node of value `index` of entry `key`. The key is copied only when the
+    /// entry has no node yet.
+    pub(crate) fn insert_key(&mut self, key: &str, index: usize, child: usize) {
+        let values = match self.keys.get_mut(key) {
+            Some(values) => values,
+            None => self.keys.entry(key.to_owned()).or_default(),
+        };
+        if values.len() <= index {
+            values.resize(index + 1, None);
+        }
+        values[index] = Some(child);
+    }
+
+    /// Makes `child` the node of element `index`.
+    pub(crate) fn insert_element(&mut self, index: usize, child: usize) {
+        self.elements.insert(index, child);
     }
 
     /// Removes the node of value `index` of entry `key`, and returns it.
