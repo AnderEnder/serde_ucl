@@ -193,13 +193,20 @@ pub enum Uncertain {
     /// §9.4, *Where the entries go*: a `}` in an included file closes an object that is an
     /// element of an array the including unit opened. The crate goes on inside the array.
     ClosedArrayElement,
+    /// §9.4, *Globs*: a glob pattern that ends in `/` left out a symbolic link to a regular file
+    /// (recognised when the link's name differs from its target's), or a plain include path
+    /// ends in `/` after the name of a file or of a link to one. libucl's result depends on the
+    /// operating system. The crate leaves the link out, and looks the plain path up as the
+    /// operating system does (QUESTIONS.md #73).
+    TrailingSlash,
 }
 
 impl Uncertain {
-    const ALL: [Uncertain; 3] = [
+    const ALL: [Uncertain; 4] = [
         Uncertain::ReopenedNotObject,
         Uncertain::EndedUnitContainer,
         Uncertain::ClosedArrayElement,
+        Uncertain::TrailingSlash,
     ];
 
     fn bit(self) -> u8 {

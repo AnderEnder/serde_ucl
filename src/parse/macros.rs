@@ -182,8 +182,10 @@ impl<'a> Resolved<'a> {
         self.get(name).and_then(UclValue::as_bool)
     }
 
+    /// A string parameter, up to its first NUL byte: the string parameters of the include
+    /// macros and of `.load` end there (spec §9.2, *Quirk: a NUL byte in a string parameter*).
     pub(crate) fn string(&self, name: &str) -> Option<&'a str> {
-        self.get(name).and_then(UclValue::as_str)
+        self.get(name).and_then(UclValue::as_str).map(before_nul)
     }
 
     pub(crate) fn int(&self, name: &str) -> Option<i64> {
@@ -195,6 +197,11 @@ impl<'a> Resolved<'a> {
             .and_then(UclValue::as_array)
             .map(Vec::as_slice)
     }
+}
+
+/// `text` up to its first NUL byte, all of it when it has none (spec §9.2).
+pub(crate) fn before_nul(text: &str) -> &str {
+    text.split('\0').next().unwrap_or_default()
 }
 
 /// A macro as read from the input, before it runs.
@@ -664,7 +671,8 @@ impl Core<'_, '_, '_, '_> {
 
     /// The values `.inherit` copies from entry `index` of the object at `source`, as they are
     /// now, with any containers open inside them: all of them, or the first only when it is an
-    /// object or an array (QUESTIONS.md #24).
+    /// object or an array (QUESTIONS.md #24). The same rule holds at every level inside the
+    /// copies, in objects and in the objects of arrays (§9.7, QUESTIONS.md #77).
     fn inherited_slots(&self, source: &[PathSegment], index: usize) -> Option<Vec<Slot>> {
         let (key, entry) = self.value_at(source)?.as_object()?.get_index(index)?;
         let count = match entry.first() {
@@ -680,7 +688,9 @@ impl Core<'_, '_, '_, '_> {
                         key: key.clone(),
                         index: slot_index,
                     });
-                    self.filled_copy(&path)?
+                    let mut copy = self.filled_copy(&path)?;
+                    crate::value::keep_first_container_values(&mut copy);
+                    copy
                 }
                 scalar => scalar.clone(),
             };
@@ -721,14 +731,19 @@ impl Core<'_, '_, '_, '_> {
             self.check_nesting(slot.value(), at)?;
         }
         let copied_facts: Option<Vec<_>> = self.facts.as_ref().map(|facts| {
-            (0..slots.len())
-                .map(|index| {
+            slots
+                .iter()
+                .enumerate()
+                .map(|(index, slot)| {
                     let mut path = source.to_vec();
                     path.push(PathSegment::Key {
                         key: key.clone(),
                         index,
                     });
-                    facts.subtree(&path)
+                    let mut subtree = facts.subtree(&path);
+                    // Not the facts of values that the first-value rule left out of the copy.
+                    subtree.retain(|(rest, _, _)| super::core::get(slot.value(), rest).is_some());
+                    subtree
                 })
                 .collect()
         });
@@ -844,6 +859,10 @@ impl Host for Core<'_, '_, '_, '_> {
             let limit = MAX_INCLUDE_DEPTH;
             return Err(self.error(ErrorKind::IncludeTooDeep { limit }, at));
         }
+        // A section object that is the innermost open object stays open for the rest of the
+        // parse, even when the text is empty (§13.2, *Quirk: text in place and a section object
+        // left open*).
+        self.keep_section_open();
         // The text is part of the file where the macro stands (oracle runs, QUESTIONS.md #59).
         let unit = self.includes.files.len();
         let file = self.includes.files.last().cloned().flatten();
@@ -1298,6 +1317,23 @@ mod tests {
         assert_eq!(e.entry("c").unwrap().len(), 3);
         let f = obj(&obj(&v)["f"]);
         assert_eq!(f.entry("a").unwrap().len(), 2);
+        // The rule holds at every level of the copy, in objects and in the objects of arrays
+        // (§9.7, QUESTIONS.md #77); the source keeps all its values.
+        let v = parse(
+            b"d { o { b { x = 1 }; b = 5; a = [1]; a = 2; s = 1; s = 2; p { q { y = 1 }; q = 2 } }
+              r = [ { b { x = 1 }; b = 5 } ] }
+e { .inherit \"d\" }",
+        )
+        .unwrap();
+        let o = obj(&obj(&obj(&v)["e"])["o"]);
+        assert_eq!(o.entry("b").unwrap().len(), 1);
+        assert_eq!(o.entry("a").unwrap().len(), 1);
+        assert_eq!(o.entry("s").unwrap().len(), 2);
+        assert_eq!(obj(&o["p"]).entry("q").unwrap().len(), 1);
+        let r = obj(&obj(&v)["e"])["r"].as_array().unwrap();
+        assert_eq!(obj(&r[0]).entry("b").unwrap().len(), 1);
+        let source = obj(&obj(&obj(&v)["d"])["o"]);
+        assert_eq!(source.entry("b").unwrap().len(), 2);
     }
 
     #[test]

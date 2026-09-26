@@ -446,7 +446,7 @@ impl Step {
 }
 
 /// The value at `path` inside `value`.
-fn get<'v>(value: &'v UclValue, path: &[PathSegment]) -> Option<&'v UclValue> {
+pub(super) fn get<'v>(value: &'v UclValue, path: &[PathSegment]) -> Option<&'v UclValue> {
     path.iter().try_fold(value, |value, segment| match segment {
         PathSegment::Key { key, index } => value
             .as_object()?
@@ -545,6 +545,11 @@ struct Frame {
     /// The input unit that opened the container: 0 for the main document, `n` for a file
     /// included `n` levels deep (§9.4).
     unit: usize,
+    /// A section object that was the innermost open object when a registered macro had text
+    /// parsed in place: it no longer closes with a bracketed container that closes in it, nor
+    /// when a `}` removes a brace taken over from it, for the rest of the parse (§13.2, *Quirk:
+    /// text in place and a section object left open*; QUESTIONS.md #74, #76).
+    stays_open: bool,
 }
 
 /// Where an object is in the saved comments and the output facts ([`Core::object_places`]).
@@ -937,8 +942,20 @@ impl Core<'_, '_, '_, '_> {
             facts_node: OnceCell::new(),
             lowercase_keys: None,
             unit: self.unit,
+            stays_open: false,
         });
         Ok(())
+    }
+
+    /// Text is about to be parsed in place (§13.2): when the innermost open object is a section
+    /// object, it stays open for the rest of the parse ([`Frame::stays_open`]).
+    pub(super) fn keep_section_open(&mut self) {
+        if let Some(frame) = self.frames.last_mut()
+            && frame.kind == Kind::Object
+            && frame.close.closes_with_inner()
+        {
+            frame.stays_open = true;
+        }
     }
 
     /// Takes the container at `step` inside the current container out of the tree for a new
@@ -1620,13 +1637,15 @@ impl Core<'_, '_, '_, '_> {
     /// in them, back to the nearest object written with a bracket, or the root. Section objects
     /// of both kinds close together in any order, as the oracle does when an included file
     /// leaves one inside another, and so do those whose brace an included file took over
-    /// ([`Close::closes_with_inner`]).
+    /// ([`Close::closes_with_inner`]). A section object that stays open after text parsed in
+    /// place does not close, and so neither do the section objects around it
+    /// ([`Frame::stays_open`], §13.2).
     fn close_sections(&mut self) -> Result<(), Error> {
         let mut outermost = None;
         while self
             .frames
             .last()
-            .is_some_and(|f| f.close.closes_with_inner())
+            .is_some_and(|f| f.close.closes_with_inner() && !f.stays_open)
         {
             let path = if self.wants_paths() {
                 self.top_node()
@@ -1891,19 +1910,21 @@ impl Core<'_, '_, '_, '_> {
     /// The start of an included unit follows §1.1, except that a `[` there is an error and a
     /// `{` takes over the brace of the object the entries go into (§9.4).
     ///
-    /// A `{` or `[` there that is the last byte of the unit, with nothing but whitespace before
-    /// it, takes nothing over and is not checked: the unit adds nothing (§9.4, *Quirk: a file
-    /// that ends right after its leading bracket*; §13.2). After a leading comment group the
-    /// oracle does the same, which the spec does not say (QUESTIONS.md #70).
+    /// A `{` or `[` there that is the last byte of the unit, where §1.1 lets a bracketed root
+    /// start (after whitespace alone, or directly after a comment group at the start of the
+    /// unit), takes nothing over and is not checked: the unit adds nothing (§9.4, *Quirk: a file
+    /// that ends right after its leading bracket*; §13.2; QUESTIONS.md #70).
     fn run_included(&mut self) -> Result<(), Error> {
         let mut after_space = false;
         while self.peek().is_some_and(is_space) {
             self.pos += 1;
             after_space = true;
         }
-        let commented = !after_space && self.comment_group()?;
+        if !after_space {
+            self.comment_group()?;
+        }
         match self.peek() {
-            Some(b'[' | b'{') if self.pos + 1 == self.src.len() && !commented => {
+            Some(b'[' | b'{') if self.pos + 1 == self.src.len() => {
                 self.pos += 1;
                 return self.end_included_unit();
             }
@@ -2263,7 +2284,8 @@ impl Core<'_, '_, '_, '_> {
             }
             Some(b'}') if matches!(self.top().close, Close::IncludedBrace(_)) => {
                 // The brace came from an included file: it goes, and the object stays open
-                // unless it is a section object (§9.4).
+                // unless it is a section object (§9.4) that has not been kept open by text
+                // parsed in place (§13.2, see `close_sections`).
                 self.pos += 1;
                 if let Some(notes) = &mut self.notes {
                     notes.trailing();

@@ -1,8 +1,9 @@
 # Manually triggered: the differential fuzzer (fuzz/README.md), which compares the crate's parse
 # results with libucl's on generated inputs, seeded from the conformance cases. scripts/ci.sh fuzz
 # builds the oracle with scripts/regen-golden.sh and runs the fuzzer; the job fails if it finds a
-# difference. The summary and every finding are uploaded as an artifact. It runs on macOS, where
-# the oracle builds (golden.yml).
+# difference. The summary and every finding are uploaded as an artifact. It runs on macOS, the
+# oracle platform, which the crate follows where libucl leaves glob matching to the C library
+# (fuzz/README.md).
 name: Differential fuzzing
 
 on:

@@ -126,6 +126,32 @@ pub(crate) fn discard(value: UclValue) {
     }
 }
 
+/// Keeps only the first value of each entry whose first value is an object or an array, in
+/// every object inside `value`, `value` itself included: the rule of `.inherit` copies at every
+/// level of the copy (spec §9.7). Entries whose first value is anything else keep all their
+/// values. Walks with a heap stack, and discards the values it removes the same way.
+pub(crate) fn keep_first_container_values(value: &mut UclValue) {
+    let mut stack = vec![value];
+    let mut removed = Vec::new();
+    while let Some(value) = stack.pop() {
+        match value {
+            UclValue::Object(object) => {
+                for entry in object.entries.values_mut() {
+                    if entry.slots.len() > 1 && is_container(&entry.slots[0].value) {
+                        removed.extend(entry.slots.drain(1..).map(Slot::into_value));
+                    }
+                    stack.extend(entry.slots.iter_mut().map(Slot::value_mut));
+                }
+            }
+            UclValue::Array(items) => stack.extend(items.iter_mut()),
+            _ => {}
+        }
+    }
+    for value in removed {
+        discard(value);
+    }
+}
+
 /// The most containers (objects and arrays) nested inside one another in `value`, itself
 /// included: 0 for a scalar, 1 for a container that holds only scalars. Counted with a heap
 /// stack.

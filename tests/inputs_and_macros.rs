@@ -777,6 +777,55 @@ fn handlers_have_text_parsed_in_place() {
 }
 
 #[test]
+fn text_in_place_keeps_a_section_object_open() {
+    // spec §13.2, *Quirk: text in place and a section object left open* (QUESTIONS.md #74, #76):
+    // the innermost open object, when it is a section object, no longer closes with a bracketed
+    // container that closes in it, even after empty text.
+    for text in ["", "b = 2"] {
+        assert_eq!(
+            macro_json(&format!("t \"{{\"1\n.emit \"{text}\"\no {{}}\nc 3")),
+            if text.is_empty() {
+                r#"{"t":{"{":1,"o":{},"c":3}}"#
+            } else {
+                r#"{"t":{"{":1,"b":2,"o":{},"c":3}}"#
+            },
+            "{text:?}"
+        );
+    }
+    assert_eq!(
+        macro_json("a b \"{\" 1\n.emit \"\"\no = [1]\nc 3"),
+        r#"{"a":{"b":{"{":1,"o":[1],"c":3}}}"#
+    );
+    // A section object created later inside it closes as usual.
+    assert_eq!(
+        macro_json("t \"{\"1\n.emit \"\"\nu \"{\" 2\no {}\nc 3"),
+        r#"{"t":{"{":1,"u":{"{":2,"o":{}},"c":3}}"#
+    );
+    // A `}` that removes a brace taken over from it leaves it open.
+    assert_eq!(
+        macro_json("\"s\".emit \"{ a = 1 }\"x \"y{\" z\nk = [1]"),
+        r#"{"s":{"a":1,"x":{"y{":"z","k":[1]}}}"#
+    );
+    // A `}` for a braced object around it then finds it open.
+    for text in ["r { t \"{\"1\n.emit \"\"\no {}\nc 3\n}", "{n .emit \"{}\"}"] {
+        assert_eq!(
+            macro_error(text).kind(),
+            &ErrorKind::UnmatchedClose { found: '}' },
+            "{text:?}"
+        );
+    }
+    // A braced innermost object, and a handler that only adds entries, change nothing.
+    assert_eq!(
+        macro_json("t \"{\"1\n.seen v\no {}\nc 3"),
+        r#"{"t":{"{":1,"seen":{"data":"v","args":null},"o":{}},"c":3}"#
+    );
+    assert_eq!(
+        macro_json("r { .emit \"\"\no {} }\nc 3"),
+        r#"{"r":{"o":{}},"c":3}"#
+    );
+}
+
+#[test]
 fn handlers_fail_with_a_stop_or_a_message() {
     // spec §13.2, *Fail*; the message is WORKLIST C8b decision 3.
     let stop = macro_error("o { a = 1\n.fail \"x\"\nb = 2 }");

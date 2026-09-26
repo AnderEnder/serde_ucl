@@ -14,12 +14,14 @@
 //! | [`SEEN_COLLECTED_KEY`] | §13.2 | the key of a `no-implicit-arrays` collection in `.seen`'s copy of ARGUMENTS |
 //! | [`ARRAY_TEXT`] | §9.4, §13.2 | an included file, or text parsed in place, that starts with `[` and holds more |
 //!
-//! Three more cannot be seen in the dumps or the input, so the crate reports when a parse reaches
+//! Four more cannot be seen in the dumps or the input, so the crate reports when a parse reaches
 //! them ([`ucl_lexer::parse::Parser::uncertain_reached`]), and any difference of such a parse is
 //! skipped ([`reached`]): a macro after a name followed only by comments when the value created
 //! most recently is not an object (§9.1), a container of an ended unit at the check at the end of
-//! a later included file (§9.4), and a `}` in an included file that closes an array element
-//! opened by the including unit (§9.4). The rest of the uncertain rules crash libucl, which the
+//! a later included file (§9.4), a `}` in an included file that closes an array element
+//! opened by the including unit (§9.4), and a `/` at the end of a glob pattern that leaves out a
+//! symbolic link to a regular file, or at the end of a plain include path after the name of a
+//! file, which depends on the operating system (§9.4). The rest of the uncertain rules crash libucl, which the
 //! fuzzer skips in any case: macro argument documents nested very deep (§9.2), a failure in an
 //! included file after which libucl goes on with the same macro (§9.4), and a `}` in a file
 //! included under a key where the object holds only its own bracket (§9.4).
@@ -39,6 +41,7 @@ pub const ARRAY_TEXT: &str = "uncertain: an included file or text in place that 
 pub const REOPENED_NOT_OBJECT: &str = "uncertain: a reopened value that is not an object (§9.1)";
 pub const ENDED_UNIT: &str = "uncertain: a container of an ended unit at a file's end (§9.4)";
 pub const CLOSED_ARRAY_ELEMENT: &str = "uncertain: a file's '}' closes an array element (§9.4)";
+pub const TRAILING_SLASH: &str = "uncertain: a '/' after a file or a link to one (§9.4)";
 
 /// The reason for a difference in a parse that reached `rule`.
 pub fn reached(rule: Uncertain) -> &'static str {
@@ -46,6 +49,7 @@ pub fn reached(rule: Uncertain) -> &'static str {
         Uncertain::ReopenedNotObject => REOPENED_NOT_OBJECT,
         Uncertain::EndedUnitContainer => ENDED_UNIT,
         Uncertain::ClosedArrayElement => CLOSED_ARRAY_ELEMENT,
+        Uncertain::TrailingSlash => TRAILING_SLASH,
     }
 }
 

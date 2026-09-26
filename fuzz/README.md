@@ -14,10 +14,14 @@ needs the oracle, and is a separate step.
 
 ## Running
 
-The oracle is built once, with git, CMake and a C compiler (macOS, where the golden files were
-generated):
+The oracle is built once, with git, CMake and a C compiler, on macOS or Linux:
 
     scripts/regen-golden.sh
+
+Run the fuzzer on macOS, the oracle platform. libucl leaves glob matching and the base name of a
+path to the C library, and the crate follows macOS on every platform (spec §9.4, *Globs*;
+`tests/conformance/README.md`, *Golden files per platform*), so on Linux the fuzzer also reports
+the differences of glibc, for example in `[^…]` patterns.
 
 Then, from the repository root:
 
@@ -75,12 +79,15 @@ under `dump-comments` the saved comments are compared too (§12.5), and under
   saved after a block comment that ends its unit and the comments of a value §8 replaced
   (§12.5), the bytes after a NUL in a string that `.inherit` or a test macro copies (§9.7), the
   key of a collection in `.seen`'s copy of ARGUMENTS (§13.2), and an included file or text in
-  place that starts with `[` (§9.4, §13.2), which the crate rejects there. Three uncertain
+  place that starts with `[` (§9.4, §13.2), which the crate rejects there. Four uncertain
   rules that the dumps cannot show are reported by the crate's parse
   (`Parser::uncertain_reached`, hidden from the crate's documentation): a macro after a name
   followed only by comments when the value created most recently is not an object (§9.1), a
-  container of an ended unit at the check at the end of a later included file, and a `}` in an
-  included file that closes an array element (§9.4); any difference of such a parse is skipped.
+  container of an ended unit at the check at the end of a later included file, a `}` in an
+  included file that closes an array element, and a `/` at the end of a glob pattern that leaves
+  out a symbolic link to a regular file, or at the end of a plain include path after the name of
+  a file (§9.4, which depends on the operating system); any difference of such a parse is
+  skipped.
   Nothing the spec specifies is skipped.
 - **differ**: `crate-accepts` (libucl rejects the input), `crate-rejects` (libucl accepts it),
   `values-differ`, or `crate-panics`.

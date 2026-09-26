@@ -225,13 +225,17 @@ fn followed_properly(src: &[u8], mut end: usize, has_suffix: bool) -> bool {
 /// The value is `int 0`, except with a binary multiplier: the decimal number, with the sign
 /// applied and truncated (saturating), times the multiplier, wrapping. A decimal number that
 /// overflows is an error (spec §5.8). Details beyond the spec's examples follow the oracle
-/// (QUESTIONS.md #19).
+/// (QUESTIONS.md #19). With a leading `-`, when the hex digits begin with a letter, so that
+/// nothing is read, the value is a string whatever follows (§5.2, *Quirk*; QUESTIONS.md #75).
 fn decimal_after_x(src: &[u8], digits: usize, negative: bool, no_time: bool) -> Number {
     let Some(run_end) = hex_run(src, digits) else {
         return Number::Text;
     };
     let run = &src[digits..run_end];
     let mut len = run.iter().take_while(|b| b.is_ascii_digit()).count();
+    if negative && len == 0 {
+        return Number::Text;
+    }
     if len > 0
         && matches!(run.get(len), Some(b'e' | b'E'))
         && run.get(len + 1).is_some_and(|b| b.is_ascii_digit())
@@ -483,6 +487,16 @@ mod tests {
         }
         for s in ["1.5x1e999", "1.5x1e999kb", "1.5x1e999 x", "1.5x1e999e"] {
             assert_eq!(num(s), Number::OutOfRange, "{s}");
+        }
+        // With a leading `-`, hex digits that begin with a letter read nothing: a string, whatever
+        // follows (QUESTIONS.md #75). A digit read, or plain hex, is unaffected.
+        for s in [
+            "-1.5xd", "-1.xD", "-1e1xD", "-1.5xd;", "-1.5xe5", "-1.5xdkb",
+        ] {
+            assert_eq!(num(s), Number::Text, "{s}");
+        }
+        for (s, v) in [("-1.5x1d", 0), ("-1.5x0d", 0), ("-1.x5", 0), ("-12xd", -13)] {
+            assert_eq!(value(s), UclValue::Integer(v), "{s}");
         }
         assert_eq!(num("1.5x10 ;"), Number::Value(UclValue::Integer(0), 6));
         assert_eq!(scan(b"1.5x10s", 0, true), Number::Text);

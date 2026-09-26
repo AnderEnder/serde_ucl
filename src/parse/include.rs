@@ -201,6 +201,10 @@ struct Request {
     /// The `try` parameter, true by default for `.try_include`.
     try_: bool,
     glob: bool,
+    /// With `glob=true`, the VALUE holds a `*` or `?` after its first NUL byte, which makes the
+    /// path before the NUL a pattern when no search path is in effect (spec §9.4, *Quirk: a NUL
+    /// byte in a pattern*).
+    wildcard_after_nul: bool,
     prefix: bool,
     key: Option<String>,
     array: bool,
@@ -261,7 +265,11 @@ impl Core<'_, '_, '_, '_> {
         }
         let path = self.macro_path(call)?;
         if let Some(dirs) = params.array("path") {
-            let dirs = dirs.iter().filter_map(UclValue::as_str).map(str::to_owned);
+            // Each entry ends at its first NUL byte, as string parameters do (§9.2).
+            let dirs = dirs
+                .iter()
+                .filter_map(UclValue::as_str)
+                .map(|dir| super::macros::before_nul(dir).to_owned());
             self.includes.search = Some(dirs.collect());
         }
         let soft = call.kind == MacroKind::TryInclude;
@@ -278,10 +286,13 @@ impl Core<'_, '_, '_, '_> {
                 Err(self.error(ErrorKind::UrlNotSupported { path }, call.value_at))
             };
         }
+        let glob = params.bool("glob").unwrap_or(false);
+        let after_nul = call.value.splitn(2, |&b| b == 0).nth(1).unwrap_or_default();
         let request = Request {
             soft,
             try_,
-            glob: params.bool("glob").unwrap_or(false),
+            glob,
+            wildcard_after_nul: glob && after_nul.iter().any(|&b| matches!(b, b'*' | b'?')),
             prefix: params.bool("prefix").unwrap_or(false),
             key: params.string("key").map(str::to_owned),
             array: params
@@ -295,7 +306,7 @@ impl Core<'_, '_, '_, '_> {
             at: call.value_at,
         };
         let outcome = match self.includes.search.clone() {
-            None => self.include_path(&path, &request)?,
+            None => self.include_path(&path, request.wildcard_after_nul, &request)?,
             Some(dirs) => self.include_searched(&dirs, &path, &request)?,
         };
         match outcome {
@@ -318,7 +329,8 @@ impl Core<'_, '_, '_, '_> {
             path: path.to_owned(),
         });
         for dir in dirs {
-            last = self.include_path(&format!("{dir}/{path}"), request)?;
+            // The path is cut at its NUL before a wildcard is looked for (§9.4).
+            last = self.include_path(&format!("{dir}/{path}"), false, request)?;
             if matches!(last, Outcome::Done) && !request.glob {
                 break;
             }
@@ -329,17 +341,41 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
-    /// One path, expanded when it is a glob pattern.
-    fn include_path(&mut self, path: &str, request: &Request) -> Result<Outcome, Error> {
-        if !(request.glob && glob::has_wildcard(path)) {
+    /// One path, expanded when it is a glob pattern: with `glob=true`, when it holds a wildcard,
+    /// or when `wildcard_after_nul` says that the VALUE held one after the NUL that ended the
+    /// path (spec §9.4, *Quirk: a NUL byte in a pattern*).
+    fn include_path(
+        &mut self,
+        path: &str,
+        wildcard_after_nul: bool,
+        request: &Request,
+    ) -> Result<Outcome, Error> {
+        if !(request.glob && (wildcard_after_nul || glob::has_wildcard(path))) {
             if path.is_empty() {
                 // The empty path names nothing, not the base directory.
                 return self.unusable_missing(path, request);
             }
+            let named = path.trim_end_matches('/');
+            if named.len() < path.len()
+                && !named.is_empty()
+                && self.includes.loader.kind(&self.includes.resolve(named)) == Some(FileKind::File)
+            {
+                // A file's name followed by `/`: uncertain (§9.4, *Globs*).
+                self.includes.reached(super::Uncertain::TrailingSlash);
+            }
             let candidate = self.includes.resolve(path);
             return self.include_candidate(&candidate, path, request, request.key.clone());
         }
-        let matches = glob::expand(self.includes.loader, &self.includes.base, path);
+        // The empty pattern matches nothing.
+        let expansion = if path.is_empty() {
+            glob::Expansion::default()
+        } else {
+            glob::expand(self.includes.loader, &self.includes.base, path)
+        };
+        if expansion.left_out_link {
+            self.includes.reached(super::Uncertain::TrailingSlash);
+        }
+        let matches = expansion.paths;
         let Some(first) = matches.first() else {
             // Nothing matches: skipped with `try`, otherwise a silent stop (spec §9.4, *Quirk*).
             return Ok(if request.try_ {
@@ -505,9 +541,10 @@ impl Core<'_, '_, '_, '_> {
         };
         let key = key.to_owned();
         let path = self.macro_path(call)?;
-        // An empty path, also one that a NUL byte ends before its first byte, is an error even
-        // with `try` (spec §9.6, §9.2). libucl skips the latter with `try` (QUESTIONS.md #71).
-        if path.is_empty() {
+        // An empty VALUE is an error even with `try` (spec §9.6). A VALUE that starts with a NUL
+        // byte is not empty: it names the empty path as a file, which is missing (§9.2,
+        // QUESTIONS.md #71).
+        if call.value.is_empty() {
             return Err(self.error(ErrorKind::FileNotFound { path }, call.value_at));
         }
         let loader = self.includes.loader;
@@ -518,6 +555,7 @@ impl Core<'_, '_, '_, '_> {
         // names nothing (oracle runs, C9).
         let written = self.includes.resolve(&path);
         let read = match loader.kind(&written) {
+            _ if path.is_empty() => Err(not_found()),
             None => Err(not_found()),
             Some(FileKind::File) => self.includes.read(&written).map_err(|_| not_a_file()),
             Some(_) => Err(not_a_file()),
@@ -742,20 +780,60 @@ mod tests {
         assert_eq!(reached("a = 1"), []);
     }
 
+    #[cfg(feature = "fs")]
+    #[test]
+    fn a_trailing_slash_after_a_file_is_uncertain() {
+        // spec §9.4, *Globs*, **Uncertain** (QUESTIONS.md #73), with the conformance fixtures:
+        // `files/v4/link.inc` is a symbolic link to `../c.conf`.
+        use crate::parse::{FsLoader, Uncertain};
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/conformance/cases/spec/09-macros");
+        let reached = |input: &str| {
+            let mut p = Parser::new();
+            p.set_loader(FsLoader::new()).set_base_dir(&dir);
+            let _ = p.parse(input.as_bytes());
+            p.uncertain_reached()
+        };
+        for input in [
+            ".include(glob=true, try=true) \"files/v4/*/\"",
+            ".include(glob=true) \"files/v4/l*/\"",
+            ".include \"files/c.conf/\"",
+            ".try_include \"files/v4/link.inc//\"",
+        ] {
+            assert_eq!(reached(input), [Uncertain::TrailingSlash], "{input}");
+        }
+        // A regular file left out by a pattern, and a directory, are defined.
+        for input in [
+            ".include(glob=true) \"files/v4/g/a.in?/\"",
+            ".include(glob=true, try=true) \"files/v4/g/*\"",
+            ".try_include \"files/v4/dir/\"",
+            ".include \"files/c.conf\"",
+        ] {
+            assert_eq!(reached(input), [], "{input}");
+        }
+    }
+
     #[test]
     fn a_unit_that_is_only_its_leading_bracket_adds_nothing() {
-        // spec §9.4, *Quirk: a file that ends right after its leading bracket*; §13.2: with
-        // nothing but whitespace before it.
+        // spec §9.4, *Quirk: a file that ends right after its leading bracket*; §13.2: where
+        // §1.1 lets a bracketed root start, after whitespace alone or directly after a leading
+        // comment group (QUESTIONS.md #70).
         let files = [
             ("/c/b.inc", "{"),
             ("/c/nb.inc", "\n{"),
             ("/c/k.inc", "["),
             ("/c/sk.inc", " \t["),
             ("/c/cb.inc", "# c\n{"),
+            ("/c/bb.inc", "/* c */{"),
             ("/c/ck.inc", "/* c */["),
+            ("/c/lk.inc", "# c\n["),
             ("/c/sp.inc", "{ "),
+            ("/c/ncb.inc", "\n# c\n{"),
+            ("/c/csb.inc", "# c\n  {"),
         ];
-        for file in ["b.inc", "nb.inc", "k.inc", "sk.inc"] {
+        for file in [
+            "b.inc", "nb.inc", "k.inc", "sk.inc", "cb.inc", "bb.inc", "ck.inc", "lk.inc",
+        ] {
             let v = run(&files, &format!("a = 1\n.include \"{file}\"\nb = 2")).unwrap();
             assert_eq!(keys(&v), ["a", "b"], "{file}");
             // Nothing is taken over: the object keeps its own brace.
@@ -768,24 +846,17 @@ mod tests {
             assert_eq!(keys(&obj(&v)["x"]), ["b"], "{file}");
         }
         assert!(run(&files, "a = 1\n.include \"b.inc\"\nb = 2\n}").is_err());
-        // With any byte after the `{`, the brace is taken over (§9.4), and so it is after a
-        // leading comment group, where the spec names no exception (QUESTIONS.md #70: libucl
-        // adds nothing there as well).
-        for file in ["sp.inc", "cb.inc"] {
-            let v = run(
-                &files,
-                &format!("x {{ .include \"{file}\"\nb = 2 }}\nc = 3"),
-            )
-            .unwrap();
-            assert_eq!(keys(&v), ["x"], "{file}");
-            assert_eq!(keys(&obj(&v)["x"]), ["b", "c"], "{file}");
+        // With any byte after the `{`, the brace is taken over (§9.4).
+        let v = run(&files, "x { .include \"sp.inc\"\nb = 2 }\nc = 3").unwrap();
+        assert_eq!(keys(&v), ["x"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["b", "c"]);
+        // A `{` where no root can start is an error, as in the main document.
+        for file in ["ncb.inc", "csb.inc"] {
+            assert!(
+                run(&files, &format!("a = 1\n.include \"{file}\"\nb = 2")).is_err(),
+                "{file}"
+            );
         }
-        assert_eq!(
-            run(&files, "a = 1\n.include \"ck.inc\"")
-                .unwrap_err()
-                .kind(),
-            &ErrorKind::IncludeArrayRoot
-        );
         // Under a key, the key's object stays empty.
         let v = run(&files, ".include(key=\"k\") \"b.inc\"\nb = 2").unwrap();
         assert_eq!(keys(&v), ["k", "b"]);
@@ -829,13 +900,10 @@ mod tests {
         {
             let v = run(&files, ".load(key=\"k\") {text.txt\0zz}").unwrap();
             assert_eq!(obj(&v)["k"].as_str(), Some("hello"));
-            // An empty path is an error even with `try` (§9.6), also when a NUL ends it
-            // (QUESTIONS.md #71: libucl skips it with `try`).
-            for input in [
-                ".load(key=\"k\", try=true) {\0zz}\nb = 2",
-                ".load(key=\"k\") {\0zz}",
-                ".load(key=\"k\", try=true) \"\"",
-            ] {
+            // An empty VALUE is an error even with `try` (§9.6); a VALUE that starts with a NUL
+            // names the empty path as a file, which is missing: skipped with `try`
+            // (QUESTIONS.md #71).
+            for input in [".load(key=\"k\") {\0zz}", ".load(key=\"k\", try=true) \"\""] {
                 assert!(
                     matches!(
                         run(&files, input).unwrap_err().kind(),
@@ -844,6 +912,91 @@ mod tests {
                     "{input:?}"
                 );
             }
+            let v = run(&files, ".load(key=\"k\", try=true) {\0zz}\nb = 2").unwrap();
+            assert_eq!(keys(&v), ["b"]);
+        }
+    }
+
+    #[test]
+    fn a_wildcard_after_a_nul_byte_makes_a_pattern() {
+        // spec §9.4, *Quirk: a NUL byte in a pattern* (QUESTIONS.md #72): the wildcard is looked
+        // for in the whole VALUE, and the pattern is the part before the NUL.
+        let files = [A];
+        let v = run(&files, "a = 1\n.include(glob=true) {files/a.inc\0*}\nb = 2").unwrap();
+        assert_eq!(keys(&v), ["a", "x", "y", "b"]);
+        for input in [
+            "a = 1\n.include(glob=true) {files/nomatch\0*}\nb = 2",
+            "a = 1\n.include(glob=true) {\0*}\nb = 2",
+        ] {
+            let e = run(&files, input).unwrap_err();
+            assert!(e.is_stopped(), "{input:?}: {e}");
+            assert_eq!(keys(e.partial().unwrap()), ["a"], "{input:?}");
+        }
+        let v = run(
+            &files,
+            "a = 1\n.include(glob=true, try=true) {files/nomatch\0?}\nb = 2",
+        );
+        assert_eq!(keys(&v.unwrap()), ["a", "b"]);
+        // Without `glob`, or with no wildcard anywhere, the path is a plain path.
+        for input in [
+            "a = 1\n.include {files/nomatch\0*}\nb = 2",
+            "a = 1\n.include(glob=true) {files/nomatch\0}\nb = 2",
+        ] {
+            let e = run(&files, input).unwrap_err();
+            assert!(
+                matches!(e.kind(), ErrorKind::FileNotFound { .. }),
+                "{input:?}: {e}"
+            );
+        }
+        // A search path cuts the path at the NUL before the wildcard is looked for.
+        let e = run(
+            &files,
+            "a = 1\n.include(glob=true, path=[\".\"]) {files/a.in\0?}\nb = 2",
+        )
+        .unwrap_err();
+        assert!(matches!(e.kind(), ErrorKind::FileNotFound { .. }), "{e}");
+    }
+
+    #[test]
+    fn string_parameters_end_at_a_nul_byte() {
+        // spec §9.2, *Quirk: a NUL byte in a string parameter* (QUESTIONS.md #78).
+        let files = [A, ("/c/text.txt", "hello"), ("/c/num.txt", "42")];
+        let v = run(&files, ".include(key=\"s\\u0000t\") \"files/a.inc\"").unwrap();
+        assert_eq!(keys(&v), ["s"]);
+        let v = run(
+            &files,
+            ".include(key=\"s\\u0000t\", prefix=true) \"files/a.inc\"",
+        )
+        .unwrap();
+        assert_eq!(keys(&v), ["s"]);
+        let v = run(&files, ".include(key=\"\\u0000t\") \"files/a.inc\"").unwrap();
+        assert_eq!(keys(&v), [""]);
+        let v = run(&files, ".include(path=[\"files\\u0000zz\"]) \"a.inc\"").unwrap();
+        assert_eq!(keys(&v), ["x", "y"]);
+        let v = run(
+            &files,
+            "x = 1\n.include(duplicate=\"rewrite\\u0000zz\") \"files/a.inc\"",
+        )
+        .unwrap();
+        assert_eq!(obj(&v).entry("x").unwrap().len(), 1);
+        let v = run(
+            &files,
+            "x = 5\n.include(key=\"x\", target=\"array\\u0000q\") \"files/a.inc\"",
+        )
+        .unwrap();
+        assert_eq!(obj(&v)["x"].as_array().map(Vec::len), Some(2));
+        #[cfg(feature = "load")]
+        {
+            let v = run(&files, ".load(key=\"s\\u0000t\") \"text.txt\"").unwrap();
+            assert_eq!(keys(&v), ["s"]);
+            let e = run(&files, ".load(key=\"\\u0000t\") \"text.txt\"").unwrap_err();
+            assert_eq!(e.kind(), &ErrorKind::LoadKeyMissing);
+            let v = run(
+                &files,
+                ".load(key=\"k\", target=\"int\\u0000z\") \"num.txt\"",
+            )
+            .unwrap();
+            assert_eq!(obj(&v)["k"], UclValue::Integer(42));
         }
     }
 

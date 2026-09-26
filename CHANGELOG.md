@@ -229,6 +229,17 @@ Parsing now follows libucl. Documents that the old parser read may parse differe
   count toward the 127-character limit (§5.2, §5.3); and an included file, or text a registered macro parses in place,
   that holds only whitespace and then a `{` or `[` as its last byte adds nothing (§9.4, §13.2),
   where it was an error.
+- Edge cases follow libucl (spec-v13): with a leading `-`, a number with an `x` after a fraction
+  or exponent whose hex digits begin with a letter is a string (`-1.5xd`), where it was `0`
+  (§5.2); the string parameters of the include macros and of `.load` (`key`, `target`,
+  `duplicate` and the entries of `path`) end at their first NUL byte (§9.2); `.load(try=true)`
+  with a braced value that starts with a NUL byte is skipped as a missing file, where it was an
+  error (§9.6); with `glob=true`, a `*` or `?` after a NUL byte in the value makes the part before
+  the NUL a pattern (§9.4); an included file or text in place that holds only a `{` or `[` after a
+  leading comment group adds nothing (§9.4, §13.2); `.inherit` keeps only the first value of an
+  entry whose first value is an object or an array at every level of a copy, not only in the
+  copied object itself (§9.7); and text that a registered macro parses in place keeps the section
+  object it stands in open for the rest of the parse (§13.2).
 
 ### Removed features, examples and benches
 

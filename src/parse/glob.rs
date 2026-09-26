@@ -14,9 +14,20 @@ pub(crate) fn has_wildcard(path: &str) -> bool {
     path.contains(['*', '?'])
 }
 
+/// What a pattern matches ([`expand`]).
+#[derive(Debug, Default)]
+pub(crate) struct Expansion {
+    /// The paths that match, sorted by byte value.
+    pub(crate) paths: Vec<PathBuf>,
+    /// A pattern that ends in `/` left out a symbolic link to a regular file, which the C library
+    /// of the oracle's platform matches and others do not (spec §9.4, *Globs*, **Uncertain**).
+    /// A link is recognised by a name other than its target's.
+    pub(crate) left_out_link: bool,
+}
+
 /// The paths that `pattern` matches, sorted by byte value. A relative pattern is matched below
 /// `base`, which is not itself a pattern.
-pub(crate) fn expand(loader: &dyn Loader, base: &Path, pattern: &str) -> Vec<PathBuf> {
+pub(crate) fn expand(loader: &dyn Loader, base: &Path, pattern: &str) -> Expansion {
     let mut parts = components(pattern);
     let start = if parts.len() > 1 && parts[0].is_empty() {
         parts.remove(0);
@@ -58,9 +69,16 @@ pub(crate) fn expand(loader: &dyn Loader, base: &Path, pattern: &str) -> Vec<Pat
         }
         paths = next;
     }
+    let mut left_out_link = false;
     paths.retain(|p| match loader.kind(p) {
         Some(FileKind::Directory) => true,
-        Some(_) => !dirs_only,
+        Some(kind) => {
+            if dirs_only && kind == FileKind::File {
+                let target = loader.canonicalize(p).ok();
+                left_out_link |= target.is_some_and(|t| t.file_name() != p.file_name());
+            }
+            !dirs_only
+        }
         None => false,
     });
     if dirs_only {
@@ -74,7 +92,10 @@ pub(crate) fn expand(loader: &dyn Loader, base: &Path, pattern: &str) -> Vec<Pat
             .cmp(b.as_os_str().as_encoded_bytes())
     });
     paths.dedup();
-    paths
+    Expansion {
+        paths,
+        left_out_link,
+    }
 }
 
 /// The components of a pattern, split at each `/`. A backslash quotes the next character (spec
@@ -277,6 +298,7 @@ mod tests {
         let base = Path::new("/c");
         let names = |pattern: &str| -> Vec<String> {
             expand(&fs, base, pattern)
+                .paths
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect()
