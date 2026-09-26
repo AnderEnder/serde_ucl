@@ -137,15 +137,15 @@ libucl's reading of UCL differs in places from what some UCL guides describe. Th
 
 ## Compatibility with libucl
 
-The conformance suite in `tests/conformance/` holds 1,622 cases: libucl's own test corpus, the
+The conformance suite in `tests/conformance/` holds 1,653 cases: libucl's own test corpus, the
 cases the behaviour spec cites, and documents libucl rejects. Its golden files are libucl's
 results at a pinned commit. Three tests compare the crate with them:
 
 - **Parse results.** Every case's value, with key order, value types, priorities and, where a
-  case saves them, comments; or the fact that libucl rejects it. 1,618 cases match. The 4 listed
+  case saves them, comments; or the fact that libucl rejects it. 1,649 cases match. The 4 listed
   exceptions are deliberate differences: two signature checks, one macro-argument nesting limit
   and one non-UTF-8 document.
-- **Output.** The 1,191 cases that libucl and the crate both parse are written in the config
+- **Output.** The 1,216 cases that libucl and the crate both parse are written in the config
   format, JSON, compact JSON and YAML, and each output is compared byte for byte with libucl's.
   The comparison also covers config output with saved comments (67 cases) and libucl's own
   `.res` files (24).
@@ -168,10 +168,10 @@ The deliberate differences, in brief:
 - Where libucl crashes or its result is undefined, the crate reports an error or gives a defined
   result.
 
-A differential fuzzer found a few differences that the spec does not cover yet, now open spec
-questions. They involve NUL bytes in macro parameters and values, glob patterns, included files
-and text parsed in place by registered macros, one number form and one `.inherit` rule. libucl's
-schema validation and MessagePack support are not implemented.
+A differential fuzzer compares the crate with libucl on generated documents. The spec answers
+every difference it has found, with a rule the crate follows or as behaviour it leaves open,
+such as what depends on the operating system. libucl's schema validation and MessagePack support
+are not implemented.
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists every difference with its case, and the
 libucl quirks the crate reproduces.
 

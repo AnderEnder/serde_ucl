@@ -2167,3 +2167,57 @@
     `README.md`.
   - The spec-v13 commits and the C10 decisions were replayed onto the new history; the README
     kept the rewritten text, which already describes per-platform golden files.
+- 2026-09-26 — Role: implementation team (clean-implementer). Item: C10a, WORKLIST C10 items 1
+  (spec-v13) and 2 (the `.inherit` depth limit as a setting), with small API fixes found while
+  rewriting the README.
+  - Inputs: `docs/spec/` at `spec-v13` (`git diff spec-v12 spec-v13 -- docs/spec/`, and the
+    sections it touches); `docs/clean-room/` (PROTOCOL.md, WORKLIST.md C10, QUESTIONS.md #56 and
+    #70–#78, earlier entries of this log); `docs/COMPATIBILITY.md`; the conformance suite
+    (`tests/conformance/`, the cases in `pending/` and its README, `platform-dependent.txt`,
+    `platform/`, `README.md`); black-box runs of `target/libucl-oracle/ucl-dump` on number forms
+    (`-1.5xdkb`, `-1.5xdk`, `-1.5xAz`) and on the section-object examples of §13.2 with `-R`;
+    the crate's own files, `scripts/`, `fuzz/`, `.github/workflows/`; of git history, only
+    `git log` and the message and `CHANGELOG.md` diff of `e90fe54`, for the conventions of
+    earlier entries. General Rust and cargo documentation.
+  - Scratch: my own files under `target/c10a-scratch/` (a stack probe package, bisection logs,
+    CI logs of a detached worktree, a musl cross build of `tests/stack_depth.rs` run in an
+    `alpine:3` container for x86_64 Linux). Before moving scratch there I wrote and read two
+    files of my own tool output in the session scratchpad under `/private/tmp` (the spec-v13
+    diff of `docs/spec/` and a conformance run log); nothing else there was opened.
+  - spec-v13: the 24 cases of `pending/` pass on the new core, the emitters and read-back, and
+    moved unchanged to `cases/spec/` (fixtures under `files/v13/`; the copies of `a.inc`,
+    `text.txt` and `num.txt` identical to the originals were dropped); `pending/` is gone. The
+    §9.4 trailing-`/` rule (#73, Uncertain) is reported by the parse as
+    `Uncertain::TrailingSlash` (a glob pattern ending in `/` that leaves out a symbolic link to a
+    regular file, recognised by a name other than its target's, or a plain include path ending in
+    `/` after a file's name), and the fuzzer skips differences of such parses.
+  - `.inherit` depth limit: `Parser::set_inherit_depth_limit` / `ParserBuilder::
+    with_inherit_depth_limit`, default 1024, largest setting `MAX_INHERIT_DEPTH_LIMIT` = 2048.
+    Found by bisecting `tests/stack_depth.rs` run as `scripts/ci.sh` runs it (crate at
+    opt-level 0) with the constant raised: on aarch64 macOS every test passes at 2345 and the
+    emitter test overflows at 2350; a probe of each entry point gave emitters 2339, drop 2572
+    (multi-value entries) and, before the change, `==` about 1830. On x86_64 Linux (musl build
+    in Docker) the probe gave emitters about 2608 and drop about 3257, and the stack-depth tests
+    pass at 2048. 2048 is below the measured 2345 on purpose: raising the constant later is
+    compatible, lowering it would make a working setting panic, so it keeps about 13% headroom
+    for other platforms and compiler versions; the owner may choose the measured value. `==` was made non-recursive; drop and the emitters were left recursive, since
+    the emitters bind first and drop only about 10% later. Entries a registered macro adds stay
+    limited to `MAX_NESTING`.
+  - Results: conformance, only the 24 moved cases added: new core 1653 cases, 1649 pass, 4
+    expected failures (was 1629, 1625); emitters 1220 cases with output, 1216 match in every
+    format (was 1199, 1195); readback 1216 cases parse, config [1201, 12, 3, 0], json and
+    json-compact [1213, 0, 3, 0], yaml [1204, 9, 3, 0]. `xfail-new.txt` and `xfail-emit.txt`
+    unchanged. `scripts/ci.sh` (stable 1.98.1, macOS arm64 only) passes at each commit below,
+    run in a worktree detached at each (`target/c10a-scratch/ci-wt`, removed since); of its
+    logs I read the step lines and the exit status. The only Linux evidence is the x86_64 musl
+    run of the stack-depth tests above, emulated in Docker; CI's `ubuntu-latest` job is the
+    first glibc run.
+  - Also changed: the comment of `.github/workflows/fuzz.yml`, which still said the oracle builds
+    only on macOS. Commit messages follow the conventional format the owner asked for, with the
+    work item in a `Work item: C10a` footer rather than at the start (PROTOCOL.md).
+  - COMPATIBILITY.md, the spec README counts and the `pending/` paragraph of
+    `tests/conformance/README.md` are the spec team's; wording given to the session lead.
+  - Questions: none.
+  - Commits: `8295e70`, `0d56210`, `bb543ce`, and the `docs:` commit that adds this entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
