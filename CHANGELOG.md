@@ -2,6 +2,18 @@
 
 All notable changes to this crate are recorded here.
 
+## Unreleased
+
+### Faster parsing
+
+Parsing is about 1.6 to 2 times as fast as in 0.3.0 (clean-room work item C11). On an Apple
+M4 Max, with the crate's benchmarks: `Parser::parse` of the 1000-service configuration takes
+2.8 ms instead of 5.1 ms, of the 1000-record JSON document 1.8 ms instead of 2.8 ms, and
+`from_str` of the configuration into a typed struct 2.9 ms instead of 5.7 ms. A three-entry
+document parses in 0.83 µs instead of 1.19 µs. Values, errors with their positions, and emitter
+output do not change. The `indexmap` requirement is now 2.2.2 (was 2), whose raw entry API the
+parser uses.
+
 ## 0.3.0 - 2026-09-26
 
 The crate is renamed `serde_ucl`. This release also gives deserialization errors the position of

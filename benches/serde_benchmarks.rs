@@ -38,6 +38,16 @@ fn bench_deserialize(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_deserialize_small(c: &mut Criterion) {
+    let input = common::SMALL;
+    let mut group = c.benchmark_group("serde/deserialize-small");
+    group.throughput(Throughput::Bytes(input.len() as u64));
+    group.bench_function("from_str", |b| {
+        b.iter(|| serde_ucl::from_str::<common::Small>(black_box(input)).unwrap())
+    });
+    group.finish();
+}
+
 fn bench_deserialize_error(c: &mut Criterion) {
     let input = common::config(1000);
     // The last service's `ratio` is a string.
@@ -114,6 +124,6 @@ criterion_group! {
         .sample_size(30)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = bench_deserialize, bench_deserialize_error, bench_serialize, bench_nested
+    targets = bench_deserialize, bench_deserialize_small, bench_deserialize_error, bench_serialize, bench_nested
 }
 criterion_main!(benches);

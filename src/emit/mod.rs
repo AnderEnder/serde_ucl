@@ -34,6 +34,7 @@ mod json;
 mod number;
 mod text;
 
+pub(crate) use text::byte_needs_quoting;
 pub use text::key_needs_quoting;
 
 use crate::parse::facts::{self, NodeId};

@@ -14,8 +14,11 @@
 //! [`UclObject::insert_with_strategy`].
 
 use indexmap::IndexMap;
+use indexmap::map::RawEntryApiV1;
+use indexmap::map::raw_entry_v1::RawEntryMut;
 use smallvec::SmallVec;
 use std::fmt;
+use std::hash::BuildHasher;
 
 /// Explicit array (`[...]`).
 pub type UclArray = Vec<UclValue>;
@@ -673,9 +676,11 @@ impl Entry {
     /// The single value, or an explicit array of all values for an implicit array.
     ///
     /// This is the view serde and JSON-like consumers get: a repeated key reads as a sequence.
-    pub fn into_value(self) -> UclValue {
+    pub fn into_value(mut self) -> UclValue {
         if self.slots.len() == 1 {
-            self.slots.into_iter().next().unwrap().value
+            // `pop` moves the one slot out; an iterator over the slots would move them all into
+            // itself first (clean-room work item C11).
+            self.slots.pop().expect("one slot").value
         } else {
             UclValue::Array(self.slots.into_iter().map(|s| s.value).collect())
         }
@@ -899,6 +904,39 @@ impl UclObject {
         self.entries.get_index_of(key)
     }
 
+    /// The hash of `key` in this object, for [`UclObject::index_of_hashed`] and
+    /// [`UclObject::push_hashed`]: a key that the parser looks up and then inserts is hashed
+    /// once (clean-room work item C11).
+    pub(crate) fn key_hash(&self, key: &str) -> u64 {
+        self.entries.hasher().hash_one(key)
+    }
+
+    /// [`UclObject::index_of`] for a key whose hash is `hash` ([`UclObject::key_hash`]).
+    pub(crate) fn index_of_hashed(&self, hash: u64, key: &str) -> Option<usize> {
+        self.entries
+            .raw_entry_v1()
+            .index_from_hash(hash, |k| k == key)
+    }
+
+    /// Adds `key`, whose hash is `hash` ([`UclObject::key_hash`]), with `entry` at the end. The
+    /// caller has found that the key is not in the object; if it were, its entry would be
+    /// replaced in place, as [`UclObject::insert_entry`] does.
+    pub(crate) fn push_hashed(&mut self, hash: u64, key: String, entry: Entry) {
+        match self
+            .entries
+            .raw_entry_mut_v1()
+            .from_hash(hash, |k| *k == key)
+        {
+            RawEntryMut::Vacant(vacant) => {
+                vacant.insert_hashed_nocheck(hash, key, entry);
+            }
+            RawEntryMut::Occupied(mut occupied) => {
+                debug_assert!(false, "push_hashed of a key already present");
+                *occupied.get_mut() = entry;
+            }
+        }
+    }
+
     /// Changes the spelling of key `old` to `new`, keeping its position and entry. Returns false
     /// if `old` is absent or `new` is another key already present.
     pub fn rename_key(&mut self, old: &str, new: impl Into<String>) -> bool {
@@ -1015,18 +1053,40 @@ impl UclObject {
         if flags.contains(ParserFlags::KEY_LOWERCASE) {
             key.make_ascii_lowercase();
         }
-        let Some(entry) = self.entries.get_mut(&key) else {
-            self.entries.insert(key, Entry::from_slot(slot));
+        let index = self.entries.get_index_of(&key);
+        self.insert_slot_at(index, key, slot, strategy, flags)
+    }
+
+    /// [`UclObject::insert_slot_placed`] for a key that is already lowercased where
+    /// `KEY_LOWERCASE` asks for it, and whose position `index` the caller has looked up (`None`
+    /// for a new key), so that the key is hashed once. A new key is stored as `key`.
+    pub(crate) fn insert_slot_at(
+        &mut self,
+        index: Option<usize>,
+        key: impl AsRef<str> + Into<String>,
+        slot: Slot,
+        strategy: DuplicateStrategy,
+        flags: ParserFlags,
+    ) -> Result<Placement, DuplicateKeyError> {
+        let Some(index) = index else {
+            self.entries.insert(key.into(), Entry::from_slot(slot));
             return Ok(Placement::Slot(0));
         };
+        let (_, entry) = self
+            .entries
+            .get_index_mut(index)
+            .expect("the caller found the key at this index");
+        let key = key.as_ref();
         match strategy {
-            DuplicateStrategy::Append => entry.add_by_priority(&key, slot, true, flags),
-            DuplicateStrategy::Merge => entry.merge(&key, slot, flags),
+            DuplicateStrategy::Append => entry.add_by_priority(key, slot, true, flags),
+            DuplicateStrategy::Merge => entry.merge(key, slot, flags),
             DuplicateStrategy::Rewrite => {
                 *entry = Entry::from_slot(slot);
                 Ok(Placement::Slot(0))
             }
-            DuplicateStrategy::Error => Err(DuplicateKeyError { key }),
+            DuplicateStrategy::Error => Err(DuplicateKeyError {
+                key: key.to_owned(),
+            }),
         }
     }
 }

@@ -30,6 +30,7 @@ use crate::value::{
 };
 use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 use std::path::Path;
 
 /// The settings of one input unit.
@@ -138,6 +139,7 @@ impl Document {
         includes.open_units.push(unit);
         let mut core = Core {
             src,
+            utf8: std::str::from_utf8(src).ok(),
             pos: 0,
             settings,
             expander,
@@ -162,6 +164,7 @@ impl Document {
             pending: None,
             unseparated: false,
             ends: None,
+            sizes: Sizes::default(),
         };
         let result = core.read_input(boundary);
         self.boundary = match &result {
@@ -235,6 +238,7 @@ impl Document {
             );
             let mut core = Core {
                 src: b"",
+                utf8: Some(""),
                 pos: 0,
                 settings: pending.settings,
                 expander: &mut expander,
@@ -259,6 +263,7 @@ impl Document {
                 pending: None,
                 unseparated: false,
                 ends: None,
+                sizes: Sizes::default(),
             };
             let result = core.null_value(pending.key);
             if let Some(notes) = &mut core.notes {
@@ -443,6 +448,23 @@ impl Step {
     fn path(path: &[PathSegment]) -> Step {
         Step::Path(path.iter().map(Step::from_segment).collect())
     }
+
+    /// The node in `facts` of the value this step leads to from the value at `node`, added with
+    /// the nodes on the way if missing: `facts.descend_or_insert(node, &self.segments())`,
+    /// without building the segments.
+    fn descend_facts(&self, facts: &mut OutputFacts, node: NodeId) -> NodeId {
+        match self {
+            Step::Entry { key, slot } => facts.key_child_or_insert(node, key, *slot),
+            Step::Collected { key, index } => {
+                let entry = facts.key_child_or_insert(node, key, 0);
+                facts.element_child_or_insert(entry, *index)
+            }
+            Step::Element(index) => facts.element_child_or_insert(node, *index),
+            Step::Path(steps) => steps
+                .iter()
+                .fold(node, |node, step| step.descend_facts(facts, node)),
+        }
+    }
 }
 
 /// The value at `path` inside `value`.
@@ -576,6 +598,11 @@ struct Key {
     /// The key was written in double quotes and contains a backslash escape or a byte that makes
     /// the output formats quote it (spec §10.1, fact 3).
     quoted: bool,
+    /// [`key_needs_quoting`] of `name` as read, worked out once. A bare key never needs quoting.
+    needs_quoting: bool,
+    /// Set by [`Core::insert`] when it moved `name` into the entry it created, at this index of
+    /// the current object; the name is then read from there ([`Core::key_name`]).
+    stored: Option<usize>,
     /// For a key read in an earlier input ([`Boundary::Value`]), its position there: errors about
     /// the key are reported there.
     origin: Option<Position>,
@@ -610,6 +637,23 @@ struct PlacedFacts {
     normal_layout: bool,
 }
 
+/// The name of `key`: its own, or for a key that [`Core::insert`] moved into the object of the
+/// top frame, that entry's ([`Key::stored`]). Takes the fields it reads, so that the caller may
+/// borrow others mutably meanwhile.
+fn stored_key_name<'a>(frames: &'a [Frame], root: &'a UclValue, key: &'a Key) -> &'a str {
+    let Some(index) = key.stored else {
+        return &key.name;
+    };
+    let top = match &frames.last().expect("a container is open").home {
+        Home::Root => root,
+        Home::Attached(_, value) | Home::Detached(value) => value,
+    };
+    top.as_object()
+        .and_then(|object| object.get_index(index))
+        .map(|(name, _)| name.as_str())
+        .expect("the entry that insert created")
+}
+
 /// Bytes that may start a bare key (§3.1).
 fn is_key_start(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'/' || b == b'_' || b >= 0x80
@@ -625,7 +669,22 @@ pub(super) fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
-/// The keywords of §4.5, compared with the whole unquoted value.
+/// The extent of an unquoted value ([`Core::unquoted_extent`]).
+struct Extent {
+    end: usize,
+    /// The value has a backslash.
+    backslash: bool,
+    /// The value has a `$` that is not the byte after a backslash.
+    dollar: bool,
+}
+
+/// The lengths of the keywords of §4.5: [`Core::unquoted`] calls [`keyword`] only for a value of
+/// such a length. It must cover every word `keyword` accepts; `tests::keyword_lengths` checks
+/// the words of §4.5.
+const KEYWORD_LEN: RangeInclusive<usize> = 2..=5;
+
+/// The keywords of §4.5, compared with the whole unquoted value. A word added here also goes in
+/// `tests::KEYWORDS`, so that the test checks [`KEYWORD_LEN`] covers it.
 fn keyword(raw: &[u8]) -> Option<UclValue> {
     let is = |word: &str| raw.eq_ignore_ascii_case(word.as_bytes());
     if is("true") || is("yes") || is("on") {
@@ -646,6 +705,10 @@ fn keyword(raw: &[u8]) -> Option<UclValue> {
 /// include macros and `.load` in `super::include`.
 pub(super) struct Core<'s, 'e, 'v, 'l> {
     pub(super) src: &'s [u8],
+    /// `src` as text when all of it is valid UTF-8, checked once: keys and strings taken from
+    /// it as written need no check of their own ([`Core::slice_string`]; clean-room work item
+    /// C11).
+    utf8: Option<&'s str>,
     pub(super) pos: usize,
     /// The settings of the input unit; `.priority` changes its priority (§9.5).
     pub(super) settings: Settings,
@@ -697,6 +760,39 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     unseparated: bool,
     /// How this input ends when that does not follow from the state at its end.
     ends: Option<Boundary>,
+    /// The sizes of the containers that closed last, for sizing new ones ([`Sizes`]).
+    sizes: Sizes,
+}
+
+/// The depths below which [`Sizes`] keeps the size of the container that closed last.
+const SIZED_DEPTHS: usize = 32;
+
+/// The most entries or elements a new container is given room for ([`Sizes`]).
+const MAX_SIZE_HINT: u16 = 64;
+
+/// For each kind of container and each of the first [`SIZED_DEPTHS`] depths, how many entries
+/// or elements the container of that kind that closed last at that depth held, at most
+/// [`MAX_SIZE_HINT`]. A new container at that depth is created with room for as many, so that
+/// the repeated sections of a document do not grow their maps and vectors step by step
+/// (clean-room work item C11; the C11 research notes adapt simd-json's containers created with
+/// their exact length). Only capacity depends on it, never a result.
+#[derive(Debug, Default)]
+struct Sizes([[u16; SIZED_DEPTHS]; 2]);
+
+impl Sizes {
+    fn hint(&self, kind: Kind, depth: usize) -> usize {
+        self.0[kind as usize]
+            .get(depth)
+            .map_or(0, |&n| usize::from(n))
+    }
+
+    fn record(&mut self, kind: Kind, depth: usize, len: usize) {
+        if let Some(slot) = self.0[kind as usize].get_mut(depth) {
+            *slot = u16::try_from(len)
+                .unwrap_or(MAX_SIZE_HINT)
+                .min(MAX_SIZE_HINT);
+        }
+    }
 }
 
 /// What kind of input unit a [`Core`] parses (§9.4, §13.1).
@@ -732,12 +828,16 @@ impl Core<'_, '_, '_, '_> {
         self.peek() == Some(b'/') && self.peek_at(1) == Some(b'*')
     }
 
+    #[cold]
+    #[inline(never)]
     pub(super) fn error(&self, kind: ErrorKind, at: usize) -> Error {
         Error::new(kind, position_at(self.src, at))
     }
 
     /// An error about `key`: where it starts, in this input or, for a key read in an earlier
     /// input, in that one.
+    #[cold]
+    #[inline(never)]
     fn key_error(&self, key: &Key, kind: ErrorKind) -> Error {
         match key.origin {
             Some(position) => Error::new(kind, position),
@@ -751,6 +851,15 @@ impl Core<'_, '_, '_, '_> {
 
     fn text(&self, bytes: Vec<u8>, at: usize) -> Result<String, Error> {
         String::from_utf8(bytes).map_err(|_| self.error(ErrorKind::InvalidUtf8, at))
+    }
+
+    /// `src[from..to]` as a string, for a token that starts at `at`: [`Core::text`] of those
+    /// bytes, without checking them again when the whole input unit is valid UTF-8.
+    fn slice_string(&self, from: usize, to: usize, at: usize) -> Result<String, Error> {
+        match self.utf8.and_then(|text| text.get(from..to)) {
+            Some(text) => Ok(text.to_owned()),
+            None => self.text(self.src[from..to].to_vec(), at),
+        }
     }
 
     // ----- whitespace and comments (§2) ----------------------------------------------------
@@ -974,6 +1083,15 @@ impl Core<'_, '_, '_, '_> {
     /// frame below.
     fn pop_frame(&mut self) {
         let frame = self.frames.pop().expect("a container is open");
+        let len = match &frame.home {
+            Home::Root => 0,
+            Home::Attached(_, value) | Home::Detached(value) => match value {
+                UclValue::Object(object) => object.len(),
+                UclValue::Array(items) => items.len(),
+                _ => 0,
+            },
+        };
+        self.sizes.record(frame.kind, self.frames.len(), len);
         if let Home::Attached(step, value) = frame.home {
             let place = step.enter(self.current());
             debug_assert!(
@@ -1099,6 +1217,16 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
+    /// An empty container of `kind` for a frame that is about to be pushed, with room for as
+    /// many entries or elements as the one that closed last at its depth ([`Sizes`]).
+    fn sized(&self, kind: Kind) -> UclValue {
+        let capacity = self.sizes.hint(kind, self.frames.len());
+        match kind {
+            Kind::Object => UclValue::Object(UclObject::with_capacity(capacity)),
+            Kind::Array => UclValue::Array(Vec::with_capacity(capacity)),
+        }
+    }
+
     /// A name run is in effect here or in an including unit: the value created most recently is
     /// kept (§9.1).
     fn tracking(&self) -> bool {
@@ -1167,7 +1295,7 @@ impl Core<'_, '_, '_, '_> {
                 .facts_node
                 .get()
                 .expect("set just before")
-                .map(|below| facts.descend_or_insert(below, &step.segments()));
+                .map(|below| step.descend_facts(facts, below));
             let _ = self.frames[above].facts_node.set(node);
         }
         self.frames[index].facts_node.get().copied().flatten()
@@ -1190,6 +1318,19 @@ impl Core<'_, '_, '_, '_> {
     /// [`Core::top_node`] written out.
     pub(super) fn top_path(&self) -> Option<ValuePath> {
         self.top_node().map(|path| path.to_vec())
+    }
+
+    /// The name of `key`, which [`Core::insert`] may have moved into the current object.
+    fn key_name<'k>(&'k self, key: &'k Key) -> &'k str {
+        stored_key_name(&self.frames, &self.root, key)
+    }
+
+    /// [`Core::placed_path`] for `key`, just inserted.
+    fn placed_key_path(&self, key: &Key, placement: Placement) -> Option<PathRef> {
+        if !self.wants_paths() {
+            return None;
+        }
+        self.placed_path(self.key_name(key), placement)
     }
 
     /// The path of a value just placed in the current object under `key`, when values need
@@ -1267,15 +1408,17 @@ impl Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("entries are parsed inside objects");
+        // The key is hashed once, and its entry, if any, found by position from then on.
+        let hash = object.key_hash(&key.name);
+        let index = object.index_of_hashed(hash, &key.name);
+        let entry = index.map(|index| object.get_index(index).expect("just found").1);
         let is_container = |v: &UclValue| v.is_object() || v.is_array();
         // Under `merge`, a scalar that follows a container takes its place in the entry (§8.4,
         // *Quirk*); the oracle keeps the container's comments on it, as for one value.
-        let replaces_in_place = |e: &Entry| {
+        let existed = entry.is_some();
+        let in_place = entry.is_some_and(|e| {
             strategy == DuplicateStrategy::Merge && is_container(e.first()) && !is_container(&value)
-        };
-        let (existed, in_place) = object
-            .entry(&key.name)
-            .map_or((false, false), |e| (true, replaces_in_place(e)));
+        });
         // A number written with digits, a time or a boolean that takes the place of a
         // non-empty container keeps the normal layout of a multi-value entry; the keywords `nan`
         // and `inf` follow their own kind, as strings and `null` do (spec §10.7, *Quirk*).
@@ -1286,31 +1429,33 @@ impl Core<'_, '_, '_, '_> {
         };
         let normal_layout = in_place
             && counts_as_container
-            && object.entry(&key.name).is_some_and(|e| match e.first() {
+            && entry.is_some_and(|e| match e.first() {
                 UclValue::Object(o) => !o.is_empty(),
                 UclValue::Array(a) => !a.is_empty(),
                 _ => false,
             });
-        let was_collected = object
-            .entry(&key.name)
-            .is_some_and(|e| e.slots()[0].is_collected());
-        let before = track
-            .then(|| {
-                object.entry(&key.name).map(|e| Before {
-                    len: e.len(),
-                    collected: e.slots()[0].is_collected(),
-                    in_place,
-                })
-            })
-            .flatten();
-        let result = object.insert_slot_placed(
-            key.name.as_str(),
-            Slot::new(value, priority),
-            strategy,
-            flags,
-        );
+        let was_collected = entry.is_some_and(|e| e.slots()[0].is_collected());
+        let before = entry.filter(|_| track).map(|e| Before {
+            len: e.len(),
+            collected: e.slots()[0].is_collected(),
+            in_place,
+        });
+        let slot = Slot::new(value, priority);
+        let result = match index {
+            // A new key is moved into the object rather than copied; its name is read from
+            // there from now on ([`Key::stored`]).
+            None => {
+                key.stored = Some(object.len());
+                let name = std::mem::take(&mut key.name);
+                object.push_hashed(hash, name, Entry::from_slot(slot));
+                Ok(Placement::Slot(0))
+            }
+            Some(_) => object.insert_slot_at(index, key.name.as_str(), slot, strategy, flags),
+        };
+        // A new key, which cannot fail, is the object's last entry.
         let after = if track {
-            object.entry(&key.name).map_or(0, Entry::len)
+            let index = index.unwrap_or(object.len() - 1);
+            object.get_index(index).map_or(0, |(_, e)| e.len())
         } else {
             0
         };
@@ -1358,27 +1503,25 @@ impl Core<'_, '_, '_, '_> {
         placed: PlacedFacts,
         at: usize,
     ) {
-        let spelling = written.unwrap_or(&key.name);
-        let key_spelling = (spelling != key.name).then(|| spelling.to_owned());
-        let key_quoted = (key.quoted != key_needs_quoting(spelling)).then_some(key.quoted);
-        let (step, keyed) = match placement {
+        let (slot, collected, keyed) = match placement {
             // A scalar that took a container's place under `merge` keeps the container's key
             // (oracle runs, QUESTIONS.md #50).
-            Placement::Slot(slot) => (
-                Step::Entry {
-                    key: key.name.clone(),
-                    slot,
-                },
-                !placed.in_place,
-            ),
-            Placement::Collected(index) => (
-                Step::Collected {
-                    key: key.name.clone(),
-                    index,
-                },
-                false,
-            ),
+            Placement::Slot(slot) => (slot, false, !placed.in_place),
+            Placement::Collected(index) => (index, true, false),
             Placement::Merged | Placement::Dropped => return,
+        };
+        // The key's facts are only recorded for a keyed value. A key written with another
+        // spelling than the entry's was already there, so its name was not moved.
+        let (key_spelling, key_quoted) = match written {
+            _ if !keyed => (None, None),
+            Some(spelling) => (
+                (spelling != key.name).then(|| spelling.to_owned()),
+                (key.quoted != key_needs_quoting(spelling)).then_some(key.quoted),
+            ),
+            None => (
+                None,
+                (key.quoted != key.needs_quoting).then_some(key.quoted),
+            ),
         };
         let has_value_facts = placed.origin.has_string_facts() || placed.normal_layout;
         let has_key_facts = keyed && (key_spelling.is_some() || key_quoted.is_some());
@@ -1390,10 +1533,17 @@ impl Core<'_, '_, '_, '_> {
         if !has_value_facts && !has_key_facts && !stale && !locating {
             return;
         }
-        let Some(node) = self.facts_node_below(&step.segments()) else {
+        let Some(object) = self.facts_node() else {
             return;
         };
+        let name = stored_key_name(&self.frames, &self.root, key);
         let facts = self.facts.as_mut().expect("facts are recorded");
+        let node = if collected {
+            let entry = facts.key_child_or_insert(object, name, 0);
+            facts.element_child_or_insert(entry, slot)
+        } else {
+            facts.key_child_or_insert(object, name, slot)
+        };
         if placed.in_place {
             facts.clear_below(node);
         }
@@ -1543,31 +1693,20 @@ impl Core<'_, '_, '_, '_> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, self.pos));
         }
-        let placement = self.insert(&mut key, Self::empty(kind), Origin::default(), at)?;
-        let path = self.placed_path(&key.name, placement);
+        let container = self.sized(kind);
+        let placement = self.insert(&mut key, container, Origin::default(), at)?;
+        let path = self.placed_key_path(&key, placement);
+        let name = match key.stored {
+            Some(_) => self.key_name(&key).to_owned(),
+            None => std::mem::take(&mut key.name),
+        };
         let home = match placement {
-            Placement::Slot(slot) => self.take_out(
-                Step::Entry {
-                    key: key.name,
-                    slot,
-                },
-                kind,
-            ),
-            Placement::Collected(index) => self.take_out(
-                Step::Collected {
-                    key: key.name,
-                    index,
-                },
-                kind,
-            ),
+            Placement::Slot(slot) => self.take_out(Step::Entry { key: name, slot }, kind),
+            Placement::Collected(index) => {
+                self.take_out(Step::Collected { key: name, index }, kind)
+            }
             // Merged into the entry's first value, a container of the same kind (§8.4).
-            Placement::Merged => self.take_out(
-                Step::Entry {
-                    key: key.name,
-                    slot: 0,
-                },
-                kind,
-            ),
+            Placement::Merged => self.take_out(Step::Entry { key: name, slot: 0 }, kind),
             Placement::Dropped => Home::Detached(Self::empty(kind)),
         };
         self.created(path.clone());
@@ -1585,7 +1724,7 @@ impl Core<'_, '_, '_, '_> {
         self.element_facts(index, Origin::default(), bracket);
         let path = self.element_path(index);
         self.created(path.clone());
-        let home = Home::Attached(Step::Element(index), Self::empty(kind));
+        let home = Home::Attached(Step::Element(index), self.sized(kind));
         self.push_frame(kind, close, home, path, at)
     }
 
@@ -1867,6 +2006,7 @@ impl Core<'_, '_, '_, '_> {
         self.includes.open_units.push(unit);
         let mut inner = Core {
             src: input,
+            utf8: std::str::from_utf8(input).ok(),
             pos: 0,
             settings,
             expander: &mut *self.expander,
@@ -1891,6 +2031,7 @@ impl Core<'_, '_, '_, '_> {
             pending: None,
             unseparated: false,
             ends: None,
+            sizes: Sizes::default(),
         };
         let result = inner.run_included();
         inner.includes.open_units.pop();
@@ -2498,23 +2639,33 @@ impl Core<'_, '_, '_, '_> {
     fn read_key(&mut self) -> Result<Key, Error> {
         let at = self.pos;
         let lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
-        let (bytes, quoted, escaped) = match self.peek() {
+        // Whether a quoted key without escapes needs quoting, as its reading saw.
+        let mut plain_needs_quoting = false;
+        // The key's bytes: decoded, or `None` for those of `src[from..to]` as written.
+        let (bytes, (from, to), quoted, escaped) = match self.peek() {
             Some(b'"') => {
-                let (bytes, end) = string::double_quoted(self.src, at)?;
-                if bytes.is_empty() {
+                let read = string::double_quoted_scan(self.src, at)?;
+                let end = read.end;
+                let empty = match &read.bytes {
+                    Some(bytes) => bytes.is_empty(),
+                    None => end - 1 == at + 1,
+                };
+                if empty {
                     return Err(self.error(ErrorKind::EmptyKey, at));
                 }
                 self.pos = end;
-                let escaped = self.src[at + 1..end - 1].contains(&b'\\');
+                plain_needs_quoting = read.needs_quoting;
+                let escaped = read.escaped();
                 if lowercase {
                     // §12.1, *Quirk*: the key is lowercased as written, then its escapes are
                     // decoded. A `\U` that becomes `\u` is decoded like an unquoted value's
                     // (§4.8), as the oracle does (QUESTIONS.md #20).
                     let mut raw = self.src[at + 1..end - 1].to_vec();
                     raw.make_ascii_lowercase();
-                    (string::decode_unquoted(&raw).0, true, escaped)
+                    let bytes = Some(string::decode_unquoted(&raw).0);
+                    (bytes, (0, 0), true, escaped)
                 } else {
-                    (bytes, true, escaped)
+                    (read.bytes, (at + 1, end - 1), true, escaped)
                 }
             }
             Some(b'\'') => return Err(self.error(ErrorKind::SingleQuotedKey, at)),
@@ -2522,7 +2673,7 @@ impl Core<'_, '_, '_, '_> {
                 while self.peek().is_some_and(is_key_byte) {
                     self.pos += 1;
                 }
-                (self.src[at..self.pos].to_vec(), false, false)
+                (None, (at, self.pos), false, false)
             }
             _ => {
                 return Err(self.error(
@@ -2543,17 +2694,35 @@ impl Core<'_, '_, '_, '_> {
                 });
             }
         }
-        let mut name = self.text(bytes, at)?;
+        let mut name = match bytes {
+            Some(bytes) => self.text(bytes, at)?,
+            None => self.slice_string(from, to, at)?,
+        };
         if lowercase && !quoted {
             name.make_ascii_lowercase();
         }
-        // Fact 3 of spec §10.1.
-        let quoted = quoted && (escaped || key_needs_quoting(&name));
+        // Fact 3 of spec §10.1. The bytes of a bare key are none of those that need quoting. A
+        // quoted key without escapes is its bytes as written, lowercasing aside, which changes
+        // no byte that needs quoting.
+        let needs_quoting = match (quoted, escaped) {
+            (false, _) => false,
+            (true, false) => plain_needs_quoting,
+            (true, true) => key_needs_quoting(&name),
+        };
+        debug_assert_eq!(needs_quoting, quoted && key_needs_quoting(&name));
+        debug_assert!(
+            quoted || !key_needs_quoting(&name),
+            "a bare key never needs quoting"
+        );
+        debug_assert!(!name.is_empty(), "keys are never empty");
+        let quoted = quoted && (escaped || needs_quoting);
         Ok(Key {
             name,
             at,
             quoted,
+            needs_quoting,
             origin: None,
+            stored: None,
         })
     }
 
@@ -2774,7 +2943,7 @@ impl Core<'_, '_, '_, '_> {
         }
         let at = key.at;
         let placement = self.insert(&mut key, UclValue::Null, Origin::default(), at)?;
-        let path = self.placed_path(&key.name, placement);
+        let path = self.placed_key_path(&key, placement);
         self.created(path);
         Ok(())
     }
@@ -2816,7 +2985,7 @@ impl Core<'_, '_, '_, '_> {
                     rest.iter().all(|&b| matches!(b, b' ' | b'\t'))
                 };
                 let placement = self.insert(&mut key, value, origin, at)?;
-                let path = self.placed_path(&key.name, placement);
+                let path = self.placed_key_path(&key, placement);
                 self.created(path);
                 self.after_value(quoted)?;
                 if unseparated {
@@ -2833,14 +3002,20 @@ impl Core<'_, '_, '_, '_> {
         let at = self.pos;
         match self.peek() {
             Some(b'"') => {
-                let (bytes, end) = string::double_quoted(self.src, at)?;
+                let read = string::double_quoted_scan(self.src, at)?;
+                let end = read.end;
                 self.pos = end;
-                let bytes = self.expander.expand(bytes);
-                Ok((
-                    UclValue::String(self.text(bytes, at)?),
-                    true,
-                    Origin::default(),
-                ))
+                // Only a `$` as written, or one an escape made, can start a reference.
+                let text = if read.dollar || read.escaped() {
+                    let bytes = read
+                        .bytes
+                        .unwrap_or_else(|| self.src[at + 1..end - 1].to_vec());
+                    let bytes = self.expander.expand(bytes);
+                    self.text(bytes, at)?
+                } else {
+                    self.slice_string(at + 1, end - 1, at)?
+                };
+                Ok((UclValue::String(text), true, Origin::default()))
             }
             Some(b'\'') => {
                 let (bytes, end) = string::single_quoted(self.src, at)?;
@@ -2895,7 +3070,11 @@ impl Core<'_, '_, '_, '_> {
                 Number::Text => {}
             }
         }
-        let end = self.unquoted_extent(start);
+        let Extent {
+            end,
+            backslash,
+            dollar,
+        } = self.unquoted_extent(start);
         self.pos = end;
         let mut trimmed = end;
         while trimmed > start && matches!(self.src[trimmed - 1], b' ' | b'\t') {
@@ -2905,11 +3084,26 @@ impl Core<'_, '_, '_, '_> {
         if raw.is_empty() {
             return Err(self.error(ErrorKind::MissingValue, start));
         }
-        if let Some(value) = keyword(raw) {
+        // Other lengths cannot be a keyword.
+        if KEYWORD_LEN.contains(&raw.len())
+            && let Some(value) = keyword(raw)
+        {
             return Ok((value, true));
         }
-        // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*).
-        let (bytes, expand) = string::decode_unquoted(raw);
+        // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*). Without
+        // a backslash there is nothing to decode, and every `$` counts.
+        if !backslash && !dollar {
+            // The value as written.
+            return Ok((
+                UclValue::String(self.slice_string(start, trimmed, start)?),
+                false,
+            ));
+        }
+        let (bytes, expand) = if backslash {
+            string::decode_unquoted(raw)
+        } else {
+            (raw.to_vec(), dollar)
+        };
         let bytes = if expand {
             self.expander.expand(bytes)
         } else {
@@ -2920,12 +3114,15 @@ impl Core<'_, '_, '_, '_> {
 
     /// The end of the unquoted value starting at `start` (§4.1, §4.2): the first line break,
     /// NUL, `,`, `;`, `#`, `/*`, or `}` or `]` without a match earlier in the value. A backslash
-    /// takes the byte after it into the value.
-    fn unquoted_extent(&self, start: usize) -> usize {
+    /// takes the byte after it into the value. Also whether the value has a backslash, and a `$`
+    /// that does not follow one, so that the caller need not read it again for them.
+    fn unquoted_extent(&self, start: usize) -> Extent {
         let src = self.src;
         let mut i = start;
         let mut braces = 0usize;
         let mut brackets = 0usize;
+        let mut backslash = false;
+        let mut dollar = false;
         while let Some(&b) = src.get(i) {
             match b {
                 b'\n' | b'\r' | 0 | b',' | b';' | b'#' => break,
@@ -2936,11 +3133,47 @@ impl Core<'_, '_, '_, '_> {
                 b']' if brackets == 0 => break,
                 b'}' => braces -= 1,
                 b']' => brackets -= 1,
-                b'\\' if i + 1 < src.len() => i += 1,
+                b'\\' => {
+                    backslash = true;
+                    if i + 1 < src.len() {
+                        i += 1;
+                    }
+                }
+                b'$' => dollar = true,
                 _ => {}
             }
             i += 1;
         }
-        i
+        Extent {
+            end: i,
+            backslash,
+            dollar,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The keywords of §4.5, as `keyword` accepts them.
+    const KEYWORDS: [&str; 9] = [
+        "true", "yes", "on", "false", "no", "off", "null", "nan", "inf",
+    ];
+
+    /// [`Core::unquoted`] skips [`keyword`] for a value whose length is outside [`KEYWORD_LEN`],
+    /// so a keyword outside it would never match.
+    #[test]
+    fn keyword_lengths() {
+        for word in KEYWORDS {
+            assert!(
+                keyword(word.as_bytes()).is_some(),
+                "{word:?} is not a keyword"
+            );
+            assert!(
+                KEYWORD_LEN.contains(&word.len()),
+                "{word:?} is outside KEYWORD_LEN {KEYWORD_LEN:?}"
+            );
+        }
     }
 }

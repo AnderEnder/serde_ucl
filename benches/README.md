@@ -6,15 +6,17 @@ generators are in `common/mod.rs`.
 
 | Benchmark | Groups | Measures |
 | --- | --- | --- |
-| `parse_benchmarks` | `parse/config/{10,100,1000}`, `parse/config-100-flags/{save-comments,no-implicit-arrays,key-lowercase}`, `parse/json/{100,1000}`, `parse/nested/{10,500,1000}`, `parse/nested-mixed-1000/{default,save-comments}`, `parse/variables/1000` | `parse::Parser::parse`, in input bytes per second |
+| `parse_benchmarks` | `parse/config/{10,100,1000}`, `parse/small/{reused-parser,new-parser}`, `parse/config-100-flags/{save-comments,no-implicit-arrays,key-lowercase}`, `parse/json/{100,1000}`, `parse/nested/{10,500,1000}`, `parse/nested-mixed-1000/{default,save-comments}`, `parse/variables/1000` | `parse::Parser::parse`, in input bytes per second |
 | `emit_benchmarks` | `emit/config-1000/{config,json,json-compact,yaml}`, `emit/nested-mixed-1000/{config,json,json-compact,yaml}` | `emit::Emitter::emit` of a parsed value, in output bytes per second |
-| `serde_benchmarks` | `serde/deserialize-1000/{from_str,UclDeserializer,from_value}`, `serde/deserialize-error-1000/{from_str,from_value}`, `serde/serialize-1000/{to_string,to_json_string,to_json_string_compact,to_yaml_string}`, `serde/to_value-1000`, `serde/nested-mixed-1000/{from_str,to_string,to_json_string_compact}` | deserializing into a typed struct, or a `UclValue` for the nested document (input bytes per second), and serializing it (output bytes per second); `deserialize-error` deserializes a `config(1000)` whose last value does not fit, where `from_str` also finds the value's path and position by parsing and deserializing again |
+| `serde_benchmarks` | `serde/deserialize-1000/{from_str,UclDeserializer,from_value}`, `serde/deserialize-small/from_str`, `serde/deserialize-error-1000/{from_str,from_value}`, `serde/serialize-1000/{to_string,to_json_string,to_json_string_compact,to_yaml_string}`, `serde/to_value-1000`, `serde/nested-mixed-1000/{from_str,to_string,to_json_string_compact}` | deserializing into a typed struct, or a `UclValue` for the nested document (input bytes per second), and serializing it (output bytes per second); `deserialize-error` deserializes a `config(1000)` whose last value does not fit, where `from_str` also finds the value's path and position by parsing and deserializing again |
 
 The documents:
 
 - `config(n)`: a configuration in the style UCL is written in, about 600 bytes per service:
   braced sections, nginx-style `key value` entries, a repeated key, arrays, multipliers, times,
   the three quoted string forms, a heredoc, and `#` and nested block comments.
+- `SMALL`: three entries (a string, an integer and a boolean), where the fixed cost of a parse
+  dominates; `parse/small/new-parser` includes making the parser.
 - `json(n)`: a JSON document, an array of `n` records.
 - `nested(n)`: objects nested `n` deep.
 - `nested_mixed(n)`: objects nested `n` deep, one per line, each with a comment, a number and a

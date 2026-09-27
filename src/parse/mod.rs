@@ -187,6 +187,9 @@ pub struct Parser {
     /// [`Parser::attached_comments`], written out from `attached` when first asked for.
     attached_paths: OnceCell<Vec<AttachedComments>>,
     facts: OutputFacts,
+    /// Whether a parse records output facts. Only the serde entry points turn it off
+    /// ([`Parser::skip_output_facts`]).
+    records_facts: bool,
     /// The variable handler's answers in the last parse, in the order it was asked.
     handler_answers: Vec<Option<String>>,
     /// The macros the application registered (spec §13.2).
@@ -281,6 +284,7 @@ impl Parser {
             attached: comments::CommentGroups::default(),
             attached_paths: OnceCell::new(),
             facts: OutputFacts::new(),
+            records_facts: true,
             handler_answers: Vec::new(),
             macros: registered::MacroTable::default(),
             uncertain: Cell::new(0),
@@ -569,6 +573,16 @@ impl Parser {
         &self.facts
     }
 
+    /// Makes later parses record no output facts ([`Parser::output_facts`] stays empty), for a
+    /// parser whose facts nobody reads: the serde entry points, which deserialize the value and
+    /// drop the parser, use it, since recording facts is a measurable part of a parse (clean-room
+    /// work item C11). Positions of deserialization errors come from a parse of their own
+    /// ([`Parser::parse_located`]), which records locations whatever this says.
+    pub(crate) fn skip_output_facts(&mut self) -> &mut Self {
+        self.records_facts = false;
+        self
+    }
+
     /// An emitter for `format` that uses the output facts of the last parse, so that the value it
     /// returned is written as libucl writes it (spec §10). Saved comments are written only when
     /// asked for with [`crate::emit::Emitter::with_comments`].
@@ -616,6 +630,7 @@ impl Parser {
             attached,
             attached_paths,
             facts,
+            records_facts,
             handler_answers,
             macros,
             uncertain,
@@ -647,6 +662,7 @@ impl Parser {
             comments,
             attached,
             facts,
+            records_facts: *records_facts,
         })
     }
 

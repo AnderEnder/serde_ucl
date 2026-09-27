@@ -194,6 +194,8 @@ fn deserialize_bytes<'de, T: Deserialize<'de>>(
     mut parser: Parser,
     input: &[u8],
 ) -> Result<T, UclError> {
+    // The parser is dropped after deserialization, so nobody reads its output facts.
+    parser.skip_output_facts();
     let value = parser.parse(input)?;
     deserialize_parsed(&mut parser, &Source::Bytes(input), value)
 }
@@ -254,6 +256,9 @@ macro_rules! forward_to_value {
             where
                 V: Visitor<'de>,
             {
+                // The deserializer owns the parser and consumes it here, so nobody reads its
+                // output facts.
+                self.parser.skip_output_facts();
                 let value = self.parser.parse(self.input)?;
                 ValueDeserializer::<true>::new(value)
                     .$method($($arg,)* visitor)
@@ -360,6 +365,7 @@ where
 {
     let mut parser = Parser::new();
     parser.set_loader(crate::parse::FsLoader::new());
+    parser.skip_output_facts();
     let (canonical, input) = parser
         .read_file(path.as_ref())
         .map_err(|(path, e)| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;

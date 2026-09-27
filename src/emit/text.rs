@@ -38,24 +38,27 @@ pub(crate) fn write_json_string(out: &mut String, s: &str) {
 /// Keys that this rule leaves bare are not always readable bare: keys with `;`, `}`, `#` or `,`,
 /// or ones that start with a byte a bare key cannot start with (spec §10.8).
 pub fn key_needs_quoting(key: &str) -> bool {
-    key.bytes().any(|b| {
-        matches!(
-            b,
-            b' ' | b'\t'
-                | b'\n'
-                | b'\r'
-                | 0x0C
-                | 0x08
-                | 0
-                | b'"'
-                | b'+'
-                | b':'
-                | b'='
-                | b'['
-                | b'\\'
-                | b'{'
-        )
-    })
+    key.bytes().any(byte_needs_quoting)
+}
+
+/// Whether a byte makes a key need quoting ([`key_needs_quoting`]).
+pub(crate) const fn byte_needs_quoting(b: u8) -> bool {
+    matches!(
+        b,
+        b' ' | b'\t'
+            | b'\n'
+            | b'\r'
+            | 0x0C
+            | 0x08
+            | 0
+            | b'"'
+            | b'+'
+            | b':'
+            | b'='
+            | b'['
+            | b'\\'
+            | b'{'
+    )
 }
 
 /// Writes a key of the config or YAML format: bare, or in the JSON form when it needs quoting.

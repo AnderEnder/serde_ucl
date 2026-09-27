@@ -32,8 +32,14 @@ enum Suffix {
 
 impl Suffix {
     fn parse(letters: &[u8], no_time: bool) -> Option<Self> {
-        let lower = letters.to_ascii_lowercase();
-        let suffix = match lower.as_slice() {
+        // Every suffix has at most three letters; they are lowercased on the stack.
+        if letters.len() > 3 {
+            return None;
+        }
+        let mut buf = [0u8; 3];
+        buf[..letters.len()].copy_from_slice(letters);
+        buf.make_ascii_lowercase();
+        let suffix = match &buf[..letters.len()] {
             b"k" => Suffix::Decimal(1_000),
             b"m" => Suffix::Decimal(1_000_000),
             b"g" => Suffix::Decimal(1_000_000_000),
@@ -143,12 +149,27 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
             None => Number::OutOfRange,
         }
     } else {
-        let text = std::str::from_utf8(&src[start..i]).expect("ASCII");
-        match text.parse::<i64>() {
-            Ok(v) => finish(src, i, Base::Int(v), false, no_time),
-            Err(_) => Number::OutOfRange,
+        match decimal_int(&src[int_start..i], negative) {
+            Some(v) => finish(src, i, Base::Int(v), false, no_time),
+            None => Number::OutOfRange,
         }
     }
+}
+
+/// The value of the decimal `digits`, with the sign applied, if it fits in an `i64`: what
+/// `str::parse::<i64>` gives for the text, without making a `str` of it and reading the digits
+/// again (clean-room work item C11). A negative number is accumulated below zero, so that
+/// `i64::MIN` fits.
+fn decimal_int(digits: &[u8], negative: bool) -> Option<i64> {
+    digits.iter().try_fold(0i64, |value, &d| {
+        let digit = i64::from(d - b'0');
+        let value = value.checked_mul(10)?;
+        if negative {
+            value.checked_sub(digit)
+        } else {
+            value.checked_add(digit)
+        }
+    })
 }
 
 /// The end of the hex digits that start at `from`. `None` if there are none, if there are too
@@ -339,6 +360,40 @@ mod tests {
 
     fn num(s: &str) -> Number {
         scan(s.as_bytes(), 0, false)
+    }
+
+    #[test]
+    fn decimal_int_is_str_parse() {
+        for text in [
+            "0",
+            "-0",
+            "7",
+            "0012",
+            "-0012",
+            "9223372036854775807",
+            "9223372036854775808",
+            "-9223372036854775808",
+            "-9223372036854775809",
+            "99999999999999999999",
+        ] {
+            let (negative, digits) = match text.strip_prefix('-') {
+                Some(digits) => (true, digits),
+                None => (false, text),
+            };
+            assert_eq!(
+                decimal_int(digits.as_bytes(), negative),
+                text.parse::<i64>().ok(),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn suffixes_of_more_than_three_letters_are_none() {
+        assert_eq!(Suffix::parse(b"MIN", false), Some(Suffix::Seconds(60.0)));
+        assert_eq!(Suffix::parse(b"Kb", false), Some(Suffix::Binary(1 << 10)));
+        assert_eq!(Suffix::parse(b"mins", false), None);
+        assert_eq!(Suffix::parse(b"", false), None);
     }
 
     fn value(s: &str) -> UclValue {

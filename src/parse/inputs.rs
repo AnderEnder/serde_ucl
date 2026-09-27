@@ -199,6 +199,8 @@ pub(crate) struct Parts<'p> {
     pub(crate) comments: &'p mut Vec<Comment>,
     pub(crate) attached: &'p mut CommentGroups,
     pub(crate) facts: &'p mut OutputFacts,
+    /// Whether output facts are recorded (`Parser::skip_output_facts`).
+    pub(crate) records_facts: bool,
 }
 
 /// The directory relative paths of an input resolve against (WORKLIST C8b decision 4): the base
@@ -237,19 +239,27 @@ pub(crate) fn first_variables(
         None => (!flags.contains(ParserFlags::NO_FILEVARS))
             .then(|| ("undef".to_string(), base.to_string_lossy().into_owned())),
     };
-    let mut variables: IndexMap<String, String> = IndexMap::new();
+    // Built as a vector directly: the names are unique, so only a registered `FILENAME` or
+    // `CURDIR` can meet a name already there, and takes its place as a map's insert would.
+    let mut variables = Vec::with_capacity(registered.len() + 2);
     if let Some((filename, curdir)) = filevars {
-        variables.insert("FILENAME".to_string(), filename);
-        variables.insert("CURDIR".to_string(), curdir);
+        variables.push(("FILENAME".to_string(), filename));
+        variables.push(("CURDIR".to_string(), curdir));
     }
     for (name, value) in registered {
         let is_filevar = name == "FILENAME" || name == "CURDIR";
-        if file.is_some() && is_filevar && variables.contains_key(name) {
-            continue;
+        let existing = if is_filevar {
+            variables.iter().position(|(n, _)| n == name)
+        } else {
+            None
+        };
+        match existing {
+            Some(_) if file.is_some() => {}
+            Some(at) => variables[at].1.clone_from(value),
+            None => variables.push((name.clone(), value.clone())),
         }
-        variables.insert(name.clone(), value.clone());
     }
-    variables.into_iter().collect()
+    variables
 }
 
 impl<'p> Inputs<'p> {
@@ -270,6 +280,7 @@ impl<'p> Inputs<'p> {
             comments,
             attached,
             facts,
+            records_facts,
         } = parts;
         comments.clear();
         *attached = CommentGroups::default();
@@ -291,7 +302,7 @@ impl<'p> Inputs<'p> {
         includes.inherit_limit = inherit_depth_limit;
         let document = Document::new(
             flags.contains(ParserFlags::SAVE_COMMENTS),
-            Some(OutputFacts::new()),
+            records_facts.then(OutputFacts::new),
             0,
         );
         Self {
