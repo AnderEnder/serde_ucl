@@ -15,7 +15,7 @@
 
 use super::PathSegment;
 use super::error::position_at;
-use super::tree::Children;
+use super::tree::{Children, KeyRef};
 use crate::error::Position;
 use std::path::{Path, PathBuf};
 
@@ -291,7 +291,12 @@ impl OutputFacts {
     }
 
     /// The node of value `index` of entry `key` of the object at `node`, if there is one.
-    pub(crate) fn child_key(&self, node: NodeId, key: &str, index: usize) -> Option<NodeId> {
+    pub(crate) fn child_key<K: KeyRef + ?Sized>(
+        &self,
+        node: NodeId,
+        key: &K,
+        index: usize,
+    ) -> Option<NodeId> {
         self.node(node)?.children.key(key, index)
     }
 
@@ -309,14 +314,19 @@ impl OutputFacts {
     /// The node of `segment` below `node`, added if there is none.
     pub(crate) fn child_or_insert(&mut self, node: NodeId, segment: &PathSegment) -> NodeId {
         match segment {
-            PathSegment::Key { key, index } => self.key_child_or_insert(node, key, *index),
+            PathSegment::Key { key, index } => self.key_child_or_insert(node, key.as_str(), *index),
             PathSegment::Index(index) => self.element_child_or_insert(node, *index),
         }
     }
 
     /// The node of value `index` of entry `key` of the object at `node`, added if there is
     /// none. The key is copied only for a new node.
-    pub(crate) fn key_child_or_insert(&mut self, node: NodeId, key: &str, index: usize) -> NodeId {
+    pub(crate) fn key_child_or_insert<K: KeyRef + ?Sized>(
+        &mut self,
+        node: NodeId,
+        key: &K,
+        index: usize,
+    ) -> NodeId {
         let nodes = self.nodes_mut();
         if let Some(child) = nodes[node].children.key(key, index) {
             return child;

@@ -26,7 +26,8 @@ use super::{Comment, Error, ErrorKind, MAX_NESTING, PathSegment, Uncertain};
 use crate::emit::key_needs_quoting;
 use crate::error::Position;
 use crate::value::{
-    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, UclObject, UclValue,
+    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, Str, UclObject,
+    UclValue,
 };
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -374,11 +375,17 @@ impl Close {
 /// How to reach a frame's container from the container of the frame below.
 #[derive(Debug)]
 enum Step {
-    /// Value `slot` of entry `key`.
-    Entry { key: String, slot: usize },
-    /// Element `index` of the explicit array that is the first value of entry `key`: a repeat
-    /// collected under `NO_IMPLICIT_ARRAYS` (§8.5).
-    Collected { key: String, index: usize },
+    /// Value `slot` of the entry at position `entry`, whose key is `key`, a copy of the entry's
+    /// ([`Str`]). The entry is found by its key; its position is for the output facts, which
+    /// are kept by position (clean-room work item C13).
+    Entry { entry: usize, key: Str, slot: usize },
+    /// Element `index` of the explicit array that is the first value of the entry at position
+    /// `entry`, whose key is `key`: a repeat collected under `NO_IMPLICIT_ARRAYS` (§8.5).
+    Collected {
+        entry: usize,
+        key: Str,
+        index: usize,
+    },
     /// Element `index` of an array.
     Element(usize),
     /// These steps in turn: a value reopened below the container of the frame below (§9.1,
@@ -389,13 +396,13 @@ enum Step {
 impl Step {
     fn segments(&self) -> Vec<PathSegment> {
         match self {
-            Step::Entry { key, slot } => vec![PathSegment::Key {
-                key: key.clone(),
+            Step::Entry { key, slot, .. } => vec![PathSegment::Key {
+                key: key.to_string(),
                 index: *slot,
             }],
-            Step::Collected { key, index } => vec![
+            Step::Collected { key, index, .. } => vec![
                 PathSegment::Key {
-                    key: key.clone(),
+                    key: key.to_string(),
                     index: 0,
                 },
                 PathSegment::Index(*index),
@@ -405,26 +412,15 @@ impl Step {
         }
     }
 
-    /// The step that follows `segment` of a value path.
-    fn from_segment(segment: &PathSegment) -> Step {
-        match segment {
-            PathSegment::Key { key, index } => Step::Entry {
-                key: key.clone(),
-                slot: *index,
-            },
-            PathSegment::Index(index) => Step::Element(*index),
-        }
-    }
-
     fn try_enter<'v>(&self, value: &'v mut UclValue) -> Option<&'v mut UclValue> {
         match self {
-            Step::Entry { key, slot } => value
+            Step::Entry { entry, key, slot } => value
                 .as_object_mut()
-                .and_then(|o| o.entry_mut(key))
+                .and_then(|o| o.entry_at_mut(*entry, key))
                 .and_then(|e| e.value_at_mut(*slot)),
-            Step::Collected { key, index } => value
+            Step::Collected { entry, key, index } => value
                 .as_object_mut()
-                .and_then(|o| o.entry_mut(key))
+                .and_then(|o| o.entry_at_mut(*entry, key))
                 .and_then(|e| e.value_at_mut(0))
                 .and_then(UclValue::as_array_mut)
                 .and_then(|a| a.get_mut(*index)),
@@ -440,18 +436,39 @@ impl Step {
             .expect("an open container stays where it was inserted")
     }
 
-    /// The steps of `path` in turn.
-    fn path(path: &[PathSegment]) -> Step {
-        Step::Path(path.iter().map(Step::from_segment).collect())
+    /// The steps of `path`, a value path inside `value`, in turn; `None` when `value` has no
+    /// value there.
+    fn resolve(value: &UclValue, path: &[PathSegment]) -> Option<Step> {
+        let mut steps = Vec::with_capacity(path.len());
+        let mut value = value;
+        for segment in path {
+            match segment {
+                PathSegment::Key { key, index } => {
+                    let object = value.as_object()?;
+                    let entry = object.index_of(key)?;
+                    let (name, found) = object.get_index(entry)?;
+                    value = found.slots().get(*index)?.value();
+                    steps.push(Step::Entry {
+                        entry,
+                        key: Str::from(name),
+                        slot: *index,
+                    });
+                }
+                PathSegment::Index(index) => {
+                    value = value.as_array()?.get(*index)?;
+                    steps.push(Step::Element(*index));
+                }
+            }
+        }
+        Some(Step::Path(steps))
     }
 
     /// The node in `facts` of the value this step leads to from the value at `node`, added with
-    /// the nodes on the way if missing: `facts.descend_or_insert(node, &self.segments())`,
-    /// without building the segments.
+    /// the nodes on the way if missing.
     fn descend_facts(&self, facts: &mut OutputFacts, node: NodeId) -> NodeId {
         match self {
-            Step::Entry { key, slot } => facts.key_child_or_insert(node, key, *slot),
-            Step::Collected { key, index } => {
+            Step::Entry { key, slot, .. } => facts.key_child_or_insert(node, key, *slot),
+            Step::Collected { key, index, .. } => {
                 let entry = facts.key_child_or_insert(node, key, 0);
                 facts.element_child_or_insert(entry, *index)
             }
@@ -599,6 +616,8 @@ struct Key {
     /// Set by [`Core::insert`] when it moved `name` into the entry it created, at this index of
     /// the current object; the name is then read from there ([`Core::key_name`]).
     stored: Option<usize>,
+    /// The position in the current object of the entry [`Core::insert`] put the value in.
+    entry: usize,
     /// For a key read in an earlier input ([`Boundary::Value`]), its position there: errors about
     /// the key are reported there.
     origin: Option<Position>,
@@ -1201,7 +1220,8 @@ impl Core<'_, '_, '_, '_> {
         if inner.is_empty() {
             copy = filled;
         } else {
-            *Step::path(inner).enter(&mut copy) = filled;
+            let step = Step::resolve(&copy, inner).expect("the open container is in the copy");
+            *step.enter(&mut copy) = filled;
         }
         Some(copy)
     }
@@ -1335,22 +1355,17 @@ impl Core<'_, '_, '_, '_> {
         if !self.wants_paths() {
             return None;
         }
-        let step = match placement {
-            Placement::Slot(slot) => Step::Entry {
-                key: key.to_owned(),
-                slot,
-            },
-            Placement::Collected(index) => Step::Collected {
-                key: key.to_owned(),
-                index,
-            },
-            Placement::Merged => Step::Entry {
-                key: key.to_owned(),
-                slot: 0,
-            },
+        let entry = |index| PathSegment::Key {
+            key: key.to_owned(),
+            index,
+        };
+        let segments = match placement {
+            Placement::Slot(slot) => vec![entry(slot)],
+            Placement::Collected(index) => vec![entry(0), PathSegment::Index(index)],
+            Placement::Merged => vec![entry(0)],
             Placement::Dropped => return None,
         };
-        Some(self.top_node()?.join(step.segments()))
+        Some(self.top_node()?.join(segments))
     }
 
     /// A value was created at `path`: pending comments attach to it (§12.5), and it is the
@@ -1449,9 +1464,9 @@ impl Core<'_, '_, '_, '_> {
             Some(_) => object.insert_slot_at(index, key.name.as_str(), slot, strategy, flags),
         };
         // A new key, which cannot fail, is the object's last entry.
+        key.entry = index.unwrap_or(object.len() - 1);
         let after = if track {
-            let index = index.unwrap_or(object.len() - 1);
-            object.get_index(index).map_or(0, |(_, e)| e.len())
+            object.get_index(key.entry).map_or(0, |(_, e)| e.len())
         } else {
             0
         };
@@ -1693,16 +1708,36 @@ impl Core<'_, '_, '_, '_> {
         let placement = self.insert(&mut key, container, Origin::default(), at)?;
         let path = self.placed_key_path(&key, placement);
         let name = match key.stored {
-            Some(_) => self.key_name(&key).to_owned(),
-            None => std::mem::take(&mut key.name),
+            Some(_) => Str::from(self.key_name(&key)),
+            None => Str::from(std::mem::take(&mut key.name)),
         };
+        let entry = key.entry;
         let home = match placement {
-            Placement::Slot(slot) => self.take_out(Step::Entry { key: name, slot }, kind),
+            Placement::Slot(slot) => {
+                let step = Step::Entry {
+                    entry,
+                    key: name,
+                    slot,
+                };
+                self.take_out(step, kind)
+            }
             Placement::Collected(index) => {
-                self.take_out(Step::Collected { key: name, index }, kind)
+                let step = Step::Collected {
+                    entry,
+                    key: name,
+                    index,
+                };
+                self.take_out(step, kind)
             }
             // Merged into the entry's first value, a container of the same kind (§8.4).
-            Placement::Merged => self.take_out(Step::Entry { key: name, slot: 0 }, kind),
+            Placement::Merged => {
+                let step = Step::Entry {
+                    entry,
+                    key: name,
+                    slot: 0,
+                };
+                self.take_out(step, kind)
+            }
             Placement::Dropped => Home::Detached(Self::empty(kind)),
         };
         self.created(path.clone());
@@ -2210,6 +2245,7 @@ impl Core<'_, '_, '_, '_> {
         // Where the array frame (if any) and the object frame go.
         // The number of values of an entry whose first value moves into a new array.
         let mut moved_from = None;
+        let entry = found.unwrap_or(object.len());
         let (key, element) = match found {
             None => {
                 let (value, element) = if target.array {
@@ -2298,7 +2334,11 @@ impl Core<'_, '_, '_, '_> {
             }
         }
         let entry_path = self.placed_path(&key, Placement::Slot(0));
-        let entry_step = Step::Entry { key, slot: 0 };
+        let entry_step = Step::Entry {
+            entry,
+            key: Str::from(key),
+            slot: 0,
+        };
         let path = match element {
             None => {
                 let home = self.take_out(entry_step, Kind::Object);
@@ -2492,14 +2532,14 @@ impl Core<'_, '_, '_, '_> {
                 if rest.is_empty() {
                     return Ok(());
                 }
-                let step = Step::path(rest);
-                if !step
-                    .try_enter(self.current())
-                    .is_some_and(|v| v.is_object())
-                {
+                let step = Step::resolve(self.current(), rest);
+                let Some(step) = step.filter(|step| {
+                    step.try_enter(self.current())
+                        .is_some_and(|v| v.is_object())
+                }) else {
                     self.includes.reached(Uncertain::ReopenedNotObject);
                     return Ok(());
-                }
+                };
                 (self.take_out(step, Kind::Object), Some(recent))
             }
         };
@@ -2719,6 +2759,7 @@ impl Core<'_, '_, '_, '_> {
             needs_quoting,
             origin: None,
             stored: None,
+            entry: 0,
         })
     }
 

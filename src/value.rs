@@ -20,6 +20,10 @@ use smallvec::SmallVec;
 use std::fmt;
 use std::hash::BuildHasher;
 
+mod text;
+
+pub(crate) use text::{KeyBytes, Str};
+
 /// Explicit array (`[...]`).
 pub type UclArray = Vec<UclValue>;
 
@@ -863,6 +867,27 @@ impl UclObject {
         self.entries.contains_key(key)
     }
 
+    /// The position of the key whose bytes are `key`, found without checking them to be UTF-8
+    /// (a [`Str`]'s, clean-room work item C13).
+    fn find(&self, key: &[u8]) -> Option<usize> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        self.entries
+            .raw_entry_v1()
+            .index_from_hash(self.key_hash(&KeyBytes(key)), |k| k.as_bytes() == key)
+    }
+
+    /// The entry of `key`, a [`Str`], which is expected at position `index`: found there
+    /// without hashing the key when it is, and by the key otherwise (clean-room work item C13).
+    pub(crate) fn entry_at_mut(&mut self, index: usize, key: &Str) -> Option<&mut Entry> {
+        let index = match self.entries.get_index(index) {
+            Some((k, _)) if k.as_bytes() == key.as_bytes() => index,
+            _ => self.find(key.as_bytes())?,
+        };
+        self.entries.get_index_mut(index).map(|(_, entry)| entry)
+    }
+
     /// The first value of `key`, as libucl's `ucl_object_lookup` returns it.
     pub fn get(&self, key: &str) -> Option<&UclValue> {
         self.entries.get(key).map(Entry::first)
@@ -907,7 +932,7 @@ impl UclObject {
     /// The hash of `key` in this object, for [`UclObject::index_of_hashed`] and
     /// [`UclObject::push_hashed`]: a key that the parser looks up and then inserts is hashed
     /// once (clean-room work item C11).
-    pub(crate) fn key_hash(&self, key: &str) -> u64 {
+    pub(crate) fn key_hash<K: std::hash::Hash + ?Sized>(&self, key: &K) -> u64 {
         self.entries.hasher().hash_one(key)
     }
 
