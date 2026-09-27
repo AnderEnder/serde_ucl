@@ -2547,3 +2547,24 @@
   - Commits: none.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-27 — Role: implementation team (clean-implementer). Item: C11, review follow-up (the
+  keyword length check in `src/parse/core.rs` was not tied to the keyword list).
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `docs/clean-room/WORKLIST.md` (C11),
+    `docs/clean-room/LOG.md` (format of entries); spec-v13 §4.5 (`git show
+    spec-v13:docs/spec/04-unquoted-values.md`; `git diff --stat spec-v13 -- docs/spec` shows only
+    an unreleased `README.md` edit); `src/parse/core.rs`, `src/value.rs`, `Cargo.toml`. Searches:
+    non-recursive `grep` over named files only (`src/parse/*.rs`, `src/value.rs`,
+    `docs/spec/*.md`, `docs/clean-room/WORKLIST.md`, `docs/clean-room/LOG.md`, `Cargo.toml`).
+    Guard refusals: none.
+  - Change: the range `2..=5` at the call site became the constant `KEYWORD_LEN`, and a unit test
+    (`parse::core::tests::keyword_lengths`) asserts that each §4.5 keyword is recognised by
+    `keyword()` and lies within `KEYWORD_LEN`. Chose a test over a table-driven `keyword()` to
+    leave the C11 hot path unchanged. A mutation to `3..=5` made the test fail (`"on"`). The test
+    does not catch a word added to `keyword()` alone; the doc comment on `keyword()` asks for the
+    test list to be updated, and the conformance cases would show a missed keyword.
+  - Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` clean; `cargo test --lib` 199
+    passed; `cargo test --test conformance` 3 passed; `cargo doc` with `-D warnings` clean.
+  - Commits: `33e7d90` (test(parse): tie the keyword length check to the keyword list), and this
+    entry.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
