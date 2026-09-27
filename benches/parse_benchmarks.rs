@@ -21,6 +21,20 @@ fn bench_config(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_small(c: &mut Criterion) {
+    let input = common::SMALL;
+    let mut group = c.benchmark_group("parse/small");
+    group.throughput(Throughput::Bytes(input.len() as u64));
+    group.bench_function("reused-parser", |b| {
+        let mut parser = Parser::new();
+        b.iter(|| parser.parse(black_box(input.as_bytes())).unwrap());
+    });
+    group.bench_function("new-parser", |b| {
+        b.iter(|| serde_ucl::parse::parse(black_box(input.as_bytes())).unwrap());
+    });
+    group.finish();
+}
+
 fn bench_flags(c: &mut Criterion) {
     let input = common::config(100);
     let mut group = c.benchmark_group("parse/config-100-flags");
@@ -96,6 +110,6 @@ criterion_group! {
         .sample_size(30)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = bench_config, bench_flags, bench_json, bench_nested, bench_variables
+    targets = bench_config, bench_small, bench_flags, bench_json, bench_nested, bench_variables
 }
 criterion_main!(benches);

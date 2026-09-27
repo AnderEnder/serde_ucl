@@ -119,6 +119,17 @@ pub fn variables(entries: usize) -> String {
     out
 }
 
+/// A small configuration of three entries, where the fixed cost of a parse dominates.
+pub const SMALL: &str = "name = \"svc\"\nport = 8080\ndebug = true\n";
+
+/// The typed form of [`SMALL`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Small {
+    pub name: String,
+    pub port: u16,
+    pub debug: bool,
+}
+
 /// The typed form of [`config`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
