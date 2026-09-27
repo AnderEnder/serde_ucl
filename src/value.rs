@@ -26,15 +26,15 @@
 //! Cloning, comparing, dropping and [`Value::into_owned`] do not recurse: they take the same
 //! stack at any depth of nesting.
 
-use indexmap::IndexMap;
-use indexmap::map::RawEntryApiV1;
-use indexmap::map::raw_entry_v1::RawEntryMut;
 use std::fmt;
-use std::hash::BuildHasher;
 
+mod map;
 mod string;
 mod text;
 
+use map::Map;
+pub(crate) use map::Probe;
+pub use map::{Entries, IntoIter, Iter, IterMut, Keys};
 pub use string::Str;
 pub(crate) use text::KeyCopy;
 
@@ -241,13 +241,13 @@ fn clone_tree<'a, 'b>(root: &Value<'a>, text: fn(&Str<'a>) -> Str<'b>) -> Value<
             Step::Build(Value::Object(object)) => {
                 let count = object.entries().map(Entry::len).sum::<usize>();
                 let mut values = done.split_off(done.len() - count).into_iter();
-                let mut entries = IndexMap::with_capacity(object.entries.len());
-                for (key, entry) in &object.entries {
+                let mut entries = Map::with_capacity(object.entries.len());
+                for (key, entry) in object.entries.iter() {
                     let slots = entry
                         .slots
                         .iter()
                         .map(|slot| slot.with_value(values.next().expect("copied")));
-                    entries.insert(text(key), Entry::from_slots(slots));
+                    entries.push_unique(text(key), Entry::from_slots(slots));
                 }
                 done.push(Value::Object(Object { entries }));
             }
@@ -311,12 +311,12 @@ fn owned_tree(root: Value<'_>) -> UclValue {
             }),
             Step::Build(Shape::Object(shape, count)) => {
                 let mut values = done.split_off(done.len() - count).into_iter();
-                let mut entries = IndexMap::with_capacity(shape.len());
+                let mut entries = Map::with_capacity(shape.len());
                 for (key, marks) in shape {
                     let slots = marks
                         .into_iter()
                         .map(|mark| mark.with_value(values.next().expect("made owned")));
-                    entries.insert(key, Entry::from_slots(slots));
+                    entries.push_unique(key, Entry::from_slots(slots));
                 }
                 done.push(Value::Object(Object { entries }));
             }
@@ -1239,7 +1239,7 @@ impl<'b> PartialEq<Vec<Value<'b>>> for Array<'_> {
 /// Comparing and dropping do not recurse ([`Value`]).
 #[derive(Clone, Default)]
 pub struct Object<'a> {
-    entries: IndexMap<Str<'a>, Entry<'a>>,
+    entries: Map<'a>,
 }
 
 impl fmt::Debug for Object<'_> {
@@ -1269,7 +1269,7 @@ impl<'a> Object<'a> {
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            entries: IndexMap::with_capacity(capacity),
+            entries: Map::with_capacity(capacity),
         }
     }
 
@@ -1283,7 +1283,7 @@ impl<'a> Object<'a> {
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
-        self.entries.contains_key(key)
+        self.entries.get_index_of(key).is_some()
     }
 
     /// The entry of `key`, a [`KeyCopy`], which is expected at position `index`: found there by
@@ -1338,37 +1338,16 @@ impl<'a> Object<'a> {
         self.entries.get_index_of(key)
     }
 
-    /// The hash of `key` in this object, for [`Object::index_of_hashed`] and
-    /// [`Object::push_hashed`]: a key that the parser looks up and then inserts is hashed
-    /// once (clean-room work item C11).
-    pub(crate) fn key_hash<K: std::hash::Hash + ?Sized>(&self, key: &K) -> u64 {
-        self.entries.hasher().hash_one(key)
+    /// Where `key` is in this object, or would go, for [`Object::push_probed`]: a key that the
+    /// parser looks up and then inserts is searched for, or hashed, once (clean-room work items
+    /// C11 and C13).
+    pub(crate) fn probe(&self, key: &str) -> Probe {
+        self.entries.probe(key)
     }
 
-    /// [`Object::index_of`] for a key whose hash is `hash` ([`Object::key_hash`]).
-    pub(crate) fn index_of_hashed(&self, hash: u64, key: &str) -> Option<usize> {
-        self.entries
-            .raw_entry_v1()
-            .index_from_hash(hash, |k| k.as_str() == key)
-    }
-
-    /// Adds `key`, whose hash is `hash` ([`Object::key_hash`]), with `entry` at the end. The
-    /// caller has found that the key is not in the object; if it were, its entry would be
-    /// replaced in place, as [`Object::insert_entry`] does.
-    pub(crate) fn push_hashed(&mut self, hash: u64, key: Str<'a>, entry: Entry<'a>) {
-        match self
-            .entries
-            .raw_entry_mut_v1()
-            .from_hash(hash, |k| *k == key)
-        {
-            RawEntryMut::Vacant(vacant) => {
-                vacant.insert_hashed_nocheck(hash, key, entry);
-            }
-            RawEntryMut::Occupied(mut occupied) => {
-                debug_assert!(false, "push_hashed of a key already present");
-                *occupied.get_mut() = entry;
-            }
-        }
+    /// Adds `key`, which [`Object::probe`] found absent, with `entry` at the end.
+    pub(crate) fn push_probed(&mut self, probe: Probe, key: Str<'a>, entry: Entry<'a>) {
+        self.entries.push_probed(probe, key, entry);
     }
 
     /// Changes the spelling of key `old` to `new`, keeping its position and entry. Returns false
@@ -1413,33 +1392,33 @@ impl<'a> Object<'a> {
     }
 
     /// Keys and entries in insertion order.
-    pub fn iter(&self) -> indexmap::map::Iter<'_, Str<'a>, Entry<'a>> {
+    pub fn iter(&self) -> Iter<'_, 'a> {
         self.entries.iter()
     }
 
     /// Keys and entries in insertion order, entries mutable.
-    pub fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, Str<'a>, Entry<'a>> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, 'a> {
         self.entries.iter_mut()
     }
 
-    pub fn keys(&self) -> indexmap::map::Keys<'_, Str<'a>, Entry<'a>> {
-        self.entries.keys()
+    pub fn keys(&self) -> Keys<'_, 'a> {
+        Keys(self.entries.iter())
     }
 
     /// Entries in insertion order.
-    pub fn entries(&self) -> indexmap::map::Values<'_, Str<'a>, Entry<'a>> {
-        self.entries.values()
+    pub fn entries(&self) -> Entries<'_, 'a> {
+        Entries(self.entries.iter())
     }
 
     /// A copy of the object that borrows nothing ([`Value::owned_copy`]).
     pub(crate) fn owned_copy(&self) -> Object<'static> {
-        let mut entries = IndexMap::with_capacity(self.entries.len());
-        for (key, entry) in &self.entries {
+        let mut entries = Map::with_capacity(self.entries.len());
+        for (key, entry) in self.entries.iter() {
             let slots = entry
                 .slots
                 .iter()
                 .map(|slot| slot.with_value(slot.value.owned_copy()));
-            entries.insert(key.clone().into_owned(), Entry::from_slots(slots));
+            entries.push_unique(key.clone().into_owned(), Entry::from_slots(slots));
         }
         Object { entries }
     }
@@ -1559,7 +1538,7 @@ impl<'a> std::ops::Index<&str> for Object<'a> {
 
 impl<'a> IntoIterator for Object<'a> {
     type Item = (Str<'a>, Entry<'a>);
-    type IntoIter = indexmap::map::IntoIter<Str<'a>, Entry<'a>>;
+    type IntoIter = IntoIter<'a>;
 
     fn into_iter(mut self) -> Self::IntoIter {
         std::mem::take(&mut self.entries).into_iter()
@@ -1568,7 +1547,7 @@ impl<'a> IntoIterator for Object<'a> {
 
 impl<'v, 'a> IntoIterator for &'v Object<'a> {
     type Item = (&'v Str<'a>, &'v Entry<'a>);
-    type IntoIter = indexmap::map::Iter<'v, Str<'a>, Entry<'a>>;
+    type IntoIter = Iter<'v, 'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.entries.iter()

@@ -42,6 +42,12 @@ offers `visit_string`.
     objects drop what they hold through a heap stack. `Debug` output is as before.
   - The emitters and `Serialize` take a `Value` of any lifetime.
 
+- An object of up to 16 keys keeps them in a vector, searched in order, instead of a hash index
+  (clean-room work item C13). `UclObject::iter`, `iter_mut`, `keys` and `entries`, and its
+  `IntoIterator` implementations, return the crate's `value::Iter`, `IterMut`, `Keys`, `Entries`
+  and `IntoIter` instead of `indexmap`'s iterators. They give the same items in the same order,
+  and `indexmap` no longer appears in the crate's API.
+
 ## 0.4.0 - 2026-09-27
 
 Parsing is about twice as fast as in 0.3.0, and small documents much faster. Output facts

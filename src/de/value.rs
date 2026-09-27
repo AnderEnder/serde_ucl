@@ -529,7 +529,7 @@ enum Keys {
 
 /// Map access over an object. A key with several values reads as a sequence of them.
 struct MapAccess<'v, const PATHS: bool> {
-    entries: indexmap::map::IntoIter<Str<'v>, Entry<'v>>,
+    entries: crate::value::IntoIter<'v>,
     /// The entry whose key was read last, until its value is read.
     entry: Option<Entry<'v>>,
     /// The key read last, for the path of an error in its value (with `PATHS`).
