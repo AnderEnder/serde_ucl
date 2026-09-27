@@ -676,9 +676,11 @@ impl Entry {
     /// The single value, or an explicit array of all values for an implicit array.
     ///
     /// This is the view serde and JSON-like consumers get: a repeated key reads as a sequence.
-    pub fn into_value(self) -> UclValue {
+    pub fn into_value(mut self) -> UclValue {
         if self.slots.len() == 1 {
-            self.slots.into_iter().next().unwrap().value
+            // `pop` moves the one slot out; an iterator over the slots would move them all into
+            // itself first (clean-room work item C11).
+            self.slots.pop().expect("one slot").value
         } else {
             UclValue::Array(self.slots.into_iter().map(|s| s.value).collect())
         }
