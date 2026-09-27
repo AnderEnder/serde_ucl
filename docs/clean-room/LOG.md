@@ -2568,3 +2568,55 @@
     entry.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-27 — Role: implementation team (clean-implementer). Item: C12, value model, small
+  documents and compile-time work (WORKLIST C12 items 1–8; item 8 was added by the owner during
+  the session as `97108f1`). The owner stopped the session at 05:06 CEST; only item 4 was worked
+  on. Report: `target/perf/C12-report.md` (untracked).
+  - Branch: the session started at `71cb185`; the coordinator re-parented it to `d26324f`
+    (identical tree) after PR #1 was squash-merged into `main` as `6d0ce41`, then added
+    `97108f1`. My commits follow `97108f1`.
+  - Inputs:
+    - `docs/clean-room/` (PROTOCOL.md; WORKLIST.md C11 and C12 as of `d26324f` and `97108f1`;
+      earlier entries of this log, for format); CLAUDE.md as embedded in the session prompt, not
+      its history. `docs/spec/` was not needed (no behaviour changed).
+    - The crate: `src/value.rs`, `src/parse/{core,facts,tree,mod,inputs,include,vars,loader,
+      comments,registered}.rs`, `src/parse/macros.rs` (`.inherit` and macro arguments),
+      `src/emit/{mod,config,json}.rs`, `src/de.rs`, `benches/`, the headers of
+      `tests/scaling.rs` and `tests/stack_depth.rs`, `scripts/ci.sh` (the stack-depth step),
+      `CHANGELOG.md`, `Cargo.toml`.
+    - C11's report and scripts in `target/perf/` (`C11-report.md`, `scripts/`,
+      `sizes/src/bin/allocs.rs`, the ends of `ci-run1.log` and `fuzz-run1.log`).
+    - The oracle as a black box, through `scripts/ci.sh fuzz 300` only. No registry sources
+      were read.
+    - Git: `git diff --stat` (file names only) of `src` and `Cargo.toml` between `630f34f`,
+      `3c24a84` (tag `v0.3.0`) and `8fb2b77`, all after C5b, to confirm that 0.3.0's `src/`
+      equals the C11 start's; `git diff --stat 71cb185 d26324f` after the re-parent. The
+      `v0.3.0` worktree (below) also put that revision's `tools/` on disk; I did not open it.
+  - Searches: `grep` over named files and directories only: `src/parse/*.rs`, `src/emit/*.rs`,
+    `src/value.rs`, `src/de.rs`, `tests/*.rs`, `tests/common`, `fuzz/src`, `examples`,
+    `benches`, `docs/clean-room/`, `target/perf/`. Nothing outside the worktree.
+  - Guard refusals, three, quoted in the report §8: a command that saved scratch copies of Rust
+    files under names with a C-source suffix, and a later command whose text mentioned that
+    suffix ("touches libucl-style C source or header"; the copies were renamed `*.rs.txt`, and
+    the text was written with the editor instead); and a wait loop polling the harness's task
+    output under `/private/tmp` ("touches /tmp"; it then polled the benchmark log under
+    `target/perf/c12/`). Nothing was read through them.
+  - Measurement: criterion baseline `c12-start` in `target/criterion/`; per-change bench binaries
+    and A/B runs in turns (`target/perf/c12/bin-*`, `ab/`, `scripts/`); start profiles with
+    `/usr/bin/sample` (`target/perf/c12/prof/`); an allocation counter
+    (`target/perf/c12/allocs/`); build cost at the start. 0.3.0 was built for comparison in a
+    detached worktree of tag `v0.3.0` (`target/perf/c12/wt-v030`, with the current `benches/`
+    copied in), removed after its bench binaries were saved.
+  - Commits: `94950f7` (no per-parse allocation for facts, comment groups and the input
+    budget), `ba5ab2f` (one shared default loader), `5a167f1` (inline include unit lists),
+    `2c2dbc6` (CHANGELOG), and this entry. No experiment was reverted; nothing uncommitted was
+    left in the working tree.
+  - Checks: after each code commit `cargo fmt --check`, clippy with `-D warnings`, `cargo test`,
+    the conformance counts compared with C11's (unchanged: new core 1653/1649/4, emitters
+    1220/1216, readback as before), the stack-depth tests unoptimised; `scripts/ci.sh` on
+    `5a167f1`: 26 steps, exit 0 (`target/perf/c12/ci-run.log`); `scripts/ci.sh fuzz 300` on
+    `5a167f1`: seed 1790476516421262000, 14 jobs, 300 s, 1,175,028 inputs, 1,173,020 agree,
+    2,008 skipped for reasons the fuzzer allows, 0 differences, 0 findings, exit 0
+    (`target/perf/c12/fuzz-run.log`). `git status` clean afterwards.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

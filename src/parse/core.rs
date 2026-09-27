@@ -229,13 +229,9 @@ impl Document {
         if let Boundary::Value(pending) = std::mem::replace(&mut self.boundary, Boundary::Entry) {
             let mut expander = Expander::new(Vec::new(), None, false);
             let loader = super::MemoryLoader::new();
-            let mut includes = Includes::new(
-                &loader,
-                std::path::PathBuf::new(),
-                None,
-                super::include::Budget::new(None),
-                None,
-            );
+            let budget = super::include::Budget::new(None);
+            let mut includes =
+                Includes::new(&loader, std::path::PathBuf::new(), None, &budget, None);
             let mut core = Core {
                 src: b"",
                 utf8: Some(""),

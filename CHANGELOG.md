@@ -14,6 +14,12 @@ document parses in 0.83 µs instead of 1.19 µs. Values, errors with their posit
 output do not change. The `indexmap` requirement is now 2.2.2 (was 2), whose raw entry API the
 parser uses.
 
+The fixed cost of a parse is lower (clean-room work item C12): `Parser::new` no longer
+allocates, and a parse of the three-entry document allocates 13 times, instead of 19 with a
+reused parser and 25 with a new one. It takes 0.70 µs with a reused parser instead of 0.83 µs,
+`parse::parse` of it 0.72 µs instead of 0.98 µs, and `from_str` into a typed struct 0.76 µs
+instead of 0.99 µs. Large documents parse as fast as after C11.
+
 ## 0.3.0 - 2026-09-26
 
 The crate is renamed `serde_ucl`. This release also gives deserialization errors the position of

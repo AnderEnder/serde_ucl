@@ -177,7 +177,8 @@ pub struct Parser {
     strategy: DuplicateStrategy,
     variables: IndexMap<String, String>,
     handler: Option<Box<VariableHandler>>,
-    loader: Box<dyn Loader>,
+    /// The loader set with [`Parser::set_loader`]; `None` for the default, [`DEFAULT_LOADER`].
+    loader: Option<Box<dyn Loader>>,
     base_dir: Option<PathBuf>,
     search_path: Option<Vec<String>>,
     max_input_bytes: Option<u64>,
@@ -196,6 +197,9 @@ pub struct Parser {
     macros: registered::MacroTable,
     /// The [`Uncertain`] rules the last parse reached, as bits.
     uncertain: Cell<u8>,
+    /// The input limit and the bytes read by the current parse, which its include states share;
+    /// kept here so that a parse does not allocate it (clean-room work item C12).
+    budget: include::Budget,
 }
 
 /// Behaviour that the spec leaves uncertain (spec README, *Uncertain behaviour*) and that the
@@ -236,6 +240,11 @@ impl Uncertain {
     }
 }
 
+/// The default loader of every parser: an empty [`MemoryLoader`], shared, so that creating a
+/// parser allocates none (clean-room work item C12). It holds no files and never changes.
+static DEFAULT_LOADER: std::sync::LazyLock<MemoryLoader> =
+    std::sync::LazyLock::new(MemoryLoader::new);
+
 impl Default for Parser {
     fn default() -> Self {
         Self::new()
@@ -268,26 +277,26 @@ impl Parser {
     /// reads no files (WORKLIST C5 decision 1). Set [`FsLoader`] with [`Parser::set_loader`]
     /// to read the filesystem.
     pub fn new() -> Self {
-        let loader: Box<dyn Loader> = Box::new(MemoryLoader::new());
         Self {
             flags: ParserFlags::DEFAULT,
             priority: 0,
             strategy: DuplicateStrategy::Append,
             variables: IndexMap::new(),
             handler: None,
-            loader,
+            loader: None,
             base_dir: None,
             search_path: None,
             max_input_bytes: None,
             inherit_depth_limit: DEFAULT_INHERIT_DEPTH_LIMIT,
             comments: Vec::new(),
-            attached: comments::CommentGroups::default(),
+            attached: comments::CommentGroups::empty(),
             attached_paths: OnceCell::new(),
             facts: OutputFacts::new(),
             records_facts: true,
             handler_answers: Vec::new(),
             macros: registered::MacroTable::default(),
             uncertain: Cell::new(0),
+            budget: include::Budget::new(None),
         }
     }
 
@@ -395,7 +404,7 @@ impl Parser {
     /// Sets where [`Parser::parse_file`], `.include`, `.try_include` and `.load` read files from.
     /// The default is an empty [`MemoryLoader`], which holds no files.
     pub fn set_loader(&mut self, loader: impl Loader + 'static) -> &mut Self {
-        self.loader = Box::new(loader);
+        self.loader = Some(Box::new(loader));
         self
     }
 
@@ -590,11 +599,16 @@ impl Parser {
         crate::emit::Emitter::new(format).with_facts(&self.facts)
     }
 
+    /// The loader: the one set with [`Parser::set_loader`], or the default.
+    fn loader(&self) -> &dyn Loader {
+        self.loader.as_deref().unwrap_or(&*DEFAULT_LOADER)
+    }
+
     /// The directory that relative paths in a document given as bytes, and a relative path given
     /// to [`Parser::parse_file`], resolve against: the base directory, or the loader's current
     /// directory.
     fn base(&self) -> PathBuf {
-        inputs::input_base(self.base_dir.as_deref(), &*self.loader, None)
+        inputs::input_base(self.base_dir.as_deref(), self.loader(), None)
     }
 
     /// Starts a parse of several inputs into one result (spec §13.1): give it each input with
@@ -634,6 +648,7 @@ impl Parser {
             handler_answers,
             macros,
             uncertain,
+            budget,
         } = self;
         handler_answers.clear();
         uncertain.set(0);
@@ -652,7 +667,7 @@ impl Parser {
             strategy: *strategy,
             variables,
             handler: recording,
-            loader: &**loader,
+            loader: loader.as_deref().unwrap_or(&*DEFAULT_LOADER),
             base_dir: base_dir.as_deref(),
             search_path: search_path.clone(),
             max_input_bytes: *max_input_bytes,
@@ -663,6 +678,7 @@ impl Parser {
             attached,
             facts,
             records_facts: *records_facts,
+            budget,
         })
     }
 
@@ -733,13 +749,13 @@ impl Parser {
         path: &Path,
     ) -> Result<(PathBuf, Vec<u8>), (PathBuf, std::io::Error)> {
         let path = self.base().join(path);
-        let canonical = match self.loader.canonicalize(&path) {
+        let canonical = match self.loader().canonicalize(&path) {
             Ok(canonical) => canonical,
             Err(e) => return Err((path, e)),
         };
         let read = match self.max_input_bytes {
-            Some(limit) => self.loader.read_limited(&canonical, limit),
-            None => self.loader.read(&canonical),
+            Some(limit) => self.loader().read_limited(&canonical, limit),
+            None => self.loader().read(&canonical),
         };
         match read {
             Ok(input) => Ok((canonical, input)),
@@ -783,7 +799,7 @@ impl Parser {
             #[cfg(feature = "fs")]
             Source::File { canonical, input } => (*input, Some(canonical.clone())),
         };
-        let base = inputs::input_base(self.base_dir.as_deref(), &*self.loader, file.as_deref());
+        let base = inputs::input_base(self.base_dir.as_deref(), self.loader(), file.as_deref());
         let variables =
             inputs::first_variables(self.flags, &self.variables, file.as_deref(), &base);
         let mut answers = self.handler_answers.iter();
@@ -798,10 +814,10 @@ impl Parser {
         let budget = include::Budget::new(self.max_input_bytes);
         budget.take(input.len());
         let mut includes = include::Includes::new(
-            &*self.loader,
+            self.loader(),
             base,
             self.search_path.clone(),
-            budget,
+            &budget,
             (!self.macros.is_empty()).then_some(&self.macros),
         );
         includes.files.push(file);

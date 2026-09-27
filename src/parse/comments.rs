@@ -162,6 +162,16 @@ impl Default for CommentGroups {
 }
 
 impl CommentGroups {
+    /// No groups, and no nodes: the groups of a parse that saves no comments, which allocates
+    /// nothing (clean-room work item C12). Only [`CommentGroups::len`] and
+    /// [`CommentGroups::attached`] may be called on it, which read the groups alone.
+    pub(crate) fn empty() -> Self {
+        Self {
+            nodes: Vec::new(),
+            groups: Vec::new(),
+        }
+    }
+
     /// The number of groups.
     pub(crate) fn len(&self) -> usize {
         self.groups.iter().flatten().count()
