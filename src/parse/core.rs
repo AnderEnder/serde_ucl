@@ -162,6 +162,7 @@ impl Document {
             pending: None,
             unseparated: false,
             ends: None,
+            sizes: Sizes::default(),
         };
         let result = core.read_input(boundary);
         self.boundary = match &result {
@@ -259,6 +260,7 @@ impl Document {
                 pending: None,
                 unseparated: false,
                 ends: None,
+                sizes: Sizes::default(),
             };
             let result = core.null_value(pending.key);
             if let Some(notes) = &mut core.notes {
@@ -736,6 +738,39 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     unseparated: bool,
     /// How this input ends when that does not follow from the state at its end.
     ends: Option<Boundary>,
+    /// The sizes of the containers that closed last, for sizing new ones ([`Sizes`]).
+    sizes: Sizes,
+}
+
+/// The depths below which [`Sizes`] keeps the size of the container that closed last.
+const SIZED_DEPTHS: usize = 32;
+
+/// The most entries or elements a new container is given room for ([`Sizes`]).
+const MAX_SIZE_HINT: u16 = 64;
+
+/// For each kind of container and each of the first [`SIZED_DEPTHS`] depths, how many entries
+/// or elements the container of that kind that closed last at that depth held, at most
+/// [`MAX_SIZE_HINT`]. A new container at that depth is created with room for as many, so that
+/// the repeated sections of a document do not grow their maps and vectors step by step
+/// (clean-room work item C11; the C11 research notes adapt simd-json's containers created with
+/// their exact length). Only capacity depends on it, never a result.
+#[derive(Debug, Default)]
+struct Sizes([[u16; SIZED_DEPTHS]; 2]);
+
+impl Sizes {
+    fn hint(&self, kind: Kind, depth: usize) -> usize {
+        self.0[kind as usize]
+            .get(depth)
+            .map_or(0, |&n| usize::from(n))
+    }
+
+    fn record(&mut self, kind: Kind, depth: usize, len: usize) {
+        if let Some(slot) = self.0[kind as usize].get_mut(depth) {
+            *slot = u16::try_from(len)
+                .unwrap_or(MAX_SIZE_HINT)
+                .min(MAX_SIZE_HINT);
+        }
+    }
 }
 
 /// What kind of input unit a [`Core`] parses (§9.4, §13.1).
@@ -1017,6 +1052,15 @@ impl Core<'_, '_, '_, '_> {
     /// frame below.
     fn pop_frame(&mut self) {
         let frame = self.frames.pop().expect("a container is open");
+        let len = match &frame.home {
+            Home::Root => 0,
+            Home::Attached(_, value) | Home::Detached(value) => match value {
+                UclValue::Object(object) => object.len(),
+                UclValue::Array(items) => items.len(),
+                _ => 0,
+            },
+        };
+        self.sizes.record(frame.kind, self.frames.len(), len);
         if let Home::Attached(step, value) = frame.home {
             let place = step.enter(self.current());
             debug_assert!(
@@ -1139,6 +1183,16 @@ impl Core<'_, '_, '_, '_> {
         match kind {
             Kind::Object => UclValue::Object(UclObject::new()),
             Kind::Array => UclValue::Array(Vec::new()),
+        }
+    }
+
+    /// An empty container of `kind` for a frame that is about to be pushed, with room for as
+    /// many entries or elements as the one that closed last at its depth ([`Sizes`]).
+    fn sized(&self, kind: Kind) -> UclValue {
+        let capacity = self.sizes.hint(kind, self.frames.len());
+        match kind {
+            Kind::Object => UclValue::Object(UclObject::with_capacity(capacity)),
+            Kind::Array => UclValue::Array(Vec::with_capacity(capacity)),
         }
     }
 
@@ -1608,7 +1662,8 @@ impl Core<'_, '_, '_, '_> {
         if self.frames.len() >= MAX_NESTING {
             return Err(self.error(ErrorKind::NestingTooDeep { limit: MAX_NESTING }, self.pos));
         }
-        let placement = self.insert(&mut key, Self::empty(kind), Origin::default(), at)?;
+        let container = self.sized(kind);
+        let placement = self.insert(&mut key, container, Origin::default(), at)?;
         let path = self.placed_key_path(&key, placement);
         let name = match key.stored {
             Some(_) => self.key_name(&key).to_owned(),
@@ -1638,7 +1693,7 @@ impl Core<'_, '_, '_, '_> {
         self.element_facts(index, Origin::default(), bracket);
         let path = self.element_path(index);
         self.created(path.clone());
-        let home = Home::Attached(Step::Element(index), Self::empty(kind));
+        let home = Home::Attached(Step::Element(index), self.sized(kind));
         self.push_frame(kind, close, home, path, at)
     }
 
@@ -1944,6 +1999,7 @@ impl Core<'_, '_, '_, '_> {
             pending: None,
             unseparated: false,
             ends: None,
+            sizes: Sizes::default(),
         };
         let result = inner.run_included();
         inner.includes.open_units.pop();
