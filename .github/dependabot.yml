@@ -1,0 +1,39 @@
+# Dependency updates. Commit messages follow the repository's conventional commits (CLAUDE.md):
+# `build(deps): ...` for Cargo, `ci(deps): ...` for GitHub Actions. Security updates are not
+# delayed by the cooldown and do not count against the pull request limit.
+version: 2
+updates:
+  # The crate, the differential fuzzer (`fuzz/`) and the feature test package (`tests/features/`),
+  # each with its own lock file.
+  - package-ecosystem: cargo
+    directories:
+      - "/"
+      - "/fuzz"
+      - "/tests/features"
+    schedule:
+      interval: weekly
+    # A release is picked up a week after it is published, not the day it appears.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      # Minor and patch updates together, in one pull request per directory; major updates each
+      # in their own.
+      cargo-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
