@@ -2,6 +2,46 @@
 
 All notable changes to this crate are recorded here.
 
+## Unreleased
+
+### Serde targets that borrow
+
+`from_str`, `from_slice` and `UclDeserializer` now fill targets that borrow from the input
+without copying (clean-room work item C13): `&str` fields, `Cow<str>` fields with
+`#[serde(borrow)]`, and `&str` map keys take the keys and strings that appear in the text as
+they are. A key or string that does not (an escaped or expanded string, a key that
+`KEY_LOWERCASE` changes, a string from an included file or from text a registered macro parses
+in place) is owned in a `Cow`, and still fails for a `&str`, with its path and position. Before,
+every target that borrows failed. Owned targets get the same values as before.
+
+What the deserializer offers visitors changes for borrowed text only: a borrowed string is
+offered with `visit_borrowed_str` where a `&str` is asked for (`deserialize_str`, and for keys
+also `deserialize_identifier` and `deserialize_any`), where it was `visit_string`. A hand-written
+visitor that implements `visit_string` but not `visit_str` no longer sees such strings; serde's
+own types, derived types and serde_json's `Value` are unaffected. `deserialize_string` still
+offers `visit_string`.
+
+### Breaking API changes
+
+- The value model can borrow (clean-room work item C13). `Value<'a>` is a value whose keys and
+  strings may borrow text that lives for `'a`; `UclValue` is now `Value<'static>`, and
+  `UclObject` and `UclArray` are `Object<'static>` and `Array<'static>`, so code that names the
+  owned types keeps compiling where it does not look inside strings and arrays. `Entry`, `Slot`
+  and `Values` have a lifetime parameter. The parser and every other function that gives a value
+  give an owned one; `Value::into_owned` turns a borrowed value into an owned one.
+  - Strings and keys are the new `value::Str<'a>`, borrowed or owned, which derefs to `str`,
+    compares and hashes as one, and converts from `&str`, `String` and `Cow<str>` and into
+    `String`. `UclValue::String` holds a `Str`: build one with `"text".into()` or
+    `Str::from(string)`, and read it through `as_str`, deref or `String::from`. `UclObject`'s
+    keys (`get_index`, `iter`, `keys`, `into_iter`, `remove_index`) are `Str`s, and its methods
+    that take a key take `impl Into<Str>`.
+  - `UclArray` is a struct around the vector of values, which it derefs to, instead of a
+    `Vec<UclValue>` alias: build one with `vec![...].into()` or `collect()`, and take the vector
+    with `into_vec`.
+  - Dropping a value no longer recurses, as cloning and comparing already did not: arrays and
+    objects drop what they hold through a heap stack. `Debug` output is as before.
+  - The emitters and `Serialize` take a `Value` of any lifetime.
+
 ## 0.4.0 - 2026-09-27
 
 Parsing is about twice as fast as in 0.3.0, and small documents much faster. Output facts

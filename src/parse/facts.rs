@@ -25,7 +25,7 @@ use super::PathSegment;
 use super::error::position_at;
 use super::tree::KeyRef;
 use crate::error::Position;
-use crate::value::{Str, UclValue};
+use crate::value::{KeyCopy, UclValue, Value};
 use std::path::{Path, PathBuf};
 
 /// What the output formats need to know about one value beyond the value itself (spec §10.1).
@@ -69,7 +69,11 @@ pub(crate) const ROOT: NodeId = 0;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Pos {
     /// Value `slot` of the entry at position `entry` of an object, whose key is `key`.
-    Entry { entry: usize, key: Str, slot: usize },
+    Entry {
+        entry: usize,
+        key: KeyCopy,
+        slot: usize,
+    },
     /// Element `index` of an array.
     Element(usize),
 }
@@ -87,7 +91,7 @@ impl Pos {
 }
 
 /// The value at `path` inside `value`, by position.
-pub(crate) fn get<'v>(value: &'v UclValue, path: &[Pos]) -> Option<&'v UclValue> {
+pub(crate) fn get<'v, 't>(value: &'v Value<'t>, path: &[Pos]) -> Option<&'v Value<'t>> {
     path.iter().try_fold(value, |value, pos| match pos {
         Pos::Entry { entry, slot, .. } => value
             .as_object()?
@@ -113,7 +117,7 @@ fn positions(value: &UclValue, path: &[PathSegment]) -> Option<Vec<Pos>> {
                 value = found.slots().get(*index)?.value();
                 out.push(Pos::Entry {
                     entry,
-                    key: Str::from(name),
+                    key: KeyCopy::from(name),
                     slot: *index,
                 });
             }
@@ -164,13 +168,13 @@ struct EntryChild {
     entry: usize,
     slot: usize,
     child: NodeId,
-    key: Str,
+    key: KeyCopy,
 }
 
 /// The nodes of the values of one entry, whose key is `key`: that of value `n` is `slots[n]`.
 #[derive(Debug, Clone)]
 struct EntryChildren {
-    key: Str,
+    key: KeyCopy,
     slots: Vec<Option<NodeId>>,
 }
 
@@ -199,7 +203,7 @@ fn set_at<T>(items: &mut Vec<Option<T>>, index: usize, value: T) {
 
 impl Children {
     /// The node of value `slot` of the entry at position `entry`, with the entry's key.
-    fn entry(&self, entry: usize, slot: usize) -> Option<(NodeId, &Str)> {
+    fn entry(&self, entry: usize, slot: usize) -> Option<(NodeId, &KeyCopy)> {
         match &self.entries {
             Entries::Small(items) => items
                 .iter()
@@ -889,7 +893,7 @@ mod tests {
     fn entry(entry: usize, k: &str, slot: usize) -> Pos {
         Pos::Entry {
             entry,
-            key: Str::from(k),
+            key: KeyCopy::from(k),
             slot,
         }
     }
@@ -905,7 +909,10 @@ mod tests {
     fn document() -> UclValue {
         let mut o = UclObject::new();
         o.append("a", UclValue::String("x".into()));
-        o.append("a", UclValue::Array(vec![UclValue::String("y".into())]));
+        o.append(
+            "a",
+            UclValue::Array(vec![UclValue::String("y".into())].into()),
+        );
         o.append("b", UclValue::String("z".into()));
         let mut root = UclObject::new();
         root.insert("o", UclValue::Object(o.clone()));
@@ -1003,7 +1010,7 @@ mod tests {
         assert_eq!(line_col(&facts, &[key("b", 0), key("d", 0)], true), (2, 3));
         assert_eq!(line_col(&facts, &[key("z", 0)], false), (1, 1));
         // A collection array is where its first value was; a graft carries locations.
-        facts.collected(b, 0, &Str::from("c"), 1);
+        facts.collected(b, 0, &KeyCopy::from("c"), 1);
         assert_eq!(line_col(&facts, &[key("b", 0), key("c", 0)], false), (3, 7));
         let copied = facts.subtree(b);
         let e = facts.child_or_insert(ROOT, &entry(2, "e", 0));
@@ -1039,7 +1046,7 @@ mod tests {
         );
         facts.insert(&root, &[key("o", 0), key("b", 0)], sq());
         let o = facts.child_entry(ROOT, 0, "o", 0).unwrap();
-        facts.collected(o, 0, &Str::from("a"), 1);
+        facts.collected(o, 0, &KeyCopy::from("a"), 1);
         assert!(
             facts
                 .get(&[key("o", 0), key("a", 0), PathSegment::Index(0)])

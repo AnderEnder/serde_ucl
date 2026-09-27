@@ -13,7 +13,7 @@ use super::registered::MacroTable;
 use super::vars::{self, Expander};
 use super::{Comment, Error, ErrorKind, MAX_INCLUDE_DEPTH, OutputFacts};
 use crate::error::Position;
-use crate::value::{DuplicateStrategy, MAX_PRIORITY, ParserFlags, UclValue};
+use crate::value::{DuplicateStrategy, MAX_PRIORITY, ParserFlags, UclValue, Value};
 use indexmap::IndexMap;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -159,6 +159,22 @@ struct Outputs<'p> {
 /// # Ok::<(), serde_ucl::parse::Error>(())
 /// ```
 pub struct Inputs<'p> {
+    reader: Reader<'p, 'static>,
+}
+
+impl std::fmt::Debug for Inputs<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inputs")
+            .field("inputs", &self.reader.includes.files.len())
+            .field("failed", &self.reader.failed)
+            .finish()
+    }
+}
+
+/// A parse of inputs into a tree that may borrow from text that lives for `'t` ([`Value`]):
+/// what [`Inputs`] is, with `'t` the lifetime of the text a parse for the serde entry points
+/// borrows from (clean-room work item C13).
+pub(crate) struct Reader<'p, 't> {
     flags: ParserFlags,
     priority: u8,
     strategy: DuplicateStrategy,
@@ -167,18 +183,9 @@ pub struct Inputs<'p> {
     expander: Expander<'p>,
     includes: Includes<'p>,
     /// `None` once the parse has failed.
-    document: Option<Document>,
+    document: Option<Document<'t>>,
     failed: Option<Error>,
     out: Outputs<'p>,
-}
-
-impl std::fmt::Debug for Inputs<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Inputs")
-            .field("inputs", &self.includes.files.len())
-            .field("failed", &self.failed)
-            .finish()
-    }
 }
 
 /// The parser's settings and state that a parse of inputs borrows, from
@@ -266,6 +273,39 @@ pub(crate) fn first_variables(
 
 impl<'p> Inputs<'p> {
     pub(crate) fn new(parts: Parts<'p>) -> Self {
+        Self {
+            reader: Reader::new(parts),
+        }
+    }
+
+    /// Reads the next input (spec §13.1). It goes on where the input before it ended; the first
+    /// input sets up the root (§1.1).
+    ///
+    /// An error for which [`Error::is_stopped`] is true is a silent stop: the input ended at the
+    /// macro, [`Error::partial`] holds the root parsed so far, and the parse goes on with the
+    /// next input. Any other error fails the parse: it is returned again by every later call and
+    /// by [`Inputs::finish`]. Adding a seventeenth input fails with
+    /// [`ErrorKind::TooManyInputs`]; a file that cannot be read with [`ErrorKind::Io`].
+    pub fn add(&mut self, input: Input<'_>) -> Result<(), Error> {
+        self.reader.add(input, None)
+    }
+
+    /// [`Inputs::add`], without the partial result of a silent stop.
+    pub(crate) fn read(&mut self, input: Input<'_>) -> Result<(), Error> {
+        self.reader.read(input, None)
+    }
+
+    /// Ends the parse and returns its result: the root, with every container closed (a key
+    /// still waiting for its value on a following line gets `null`, §1.6). The parser's saved
+    /// comments and output facts then describe it. After an error in an input, returns that
+    /// error.
+    pub fn finish(self) -> Result<UclValue, Error> {
+        self.reader.finish()
+    }
+}
+
+impl<'p, 't> Reader<'p, 't> {
+    pub(crate) fn new(parts: Parts<'p>) -> Self {
         let Parts {
             flags,
             priority,
@@ -327,28 +367,22 @@ impl<'p> Inputs<'p> {
         }
     }
 
-    /// Reads the next input (spec §13.1). It goes on where the input before it ended; the first
-    /// input sets up the root (§1.1).
-    ///
-    /// An error for which [`Error::is_stopped`] is true is a silent stop: the input ended at the
-    /// macro, [`Error::partial`] holds the root parsed so far, and the parse goes on with the
-    /// next input. Any other error fails the parse: it is returned again by every later call and
-    /// by [`Inputs::finish`]. Adding a seventeenth input fails with
-    /// [`ErrorKind::TooManyInputs`]; a file that cannot be read with [`ErrorKind::Io`].
-    pub fn add(&mut self, input: Input<'_>) -> Result<(), Error> {
-        self.read(input).map_err(|e| {
+    /// [`Inputs::add`]; with `borrow`, the input's bytes, as text the tree may borrow from.
+    pub(crate) fn add(&mut self, input: Input<'_>, borrow: Option<&'t [u8]>) -> Result<(), Error> {
+        self.read(input, borrow).map_err(|e| {
             if e.is_stopped()
                 && let Some(document) = &self.document
             {
-                e.with_partial(document.snapshot())
+                e.with_partial(document.snapshot().into_owned())
             } else {
                 e
             }
         })
     }
 
-    /// [`Inputs::add`], without the partial result of a silent stop.
-    pub(crate) fn read(&mut self, input: Input<'_>) -> Result<(), Error> {
+    /// [`Inputs::read`]; with `borrow`, the bytes of `input`, given as bytes, as text that the
+    /// tree may borrow from.
+    pub(crate) fn read(&mut self, input: Input<'_>, borrow: Option<&'t [u8]>) -> Result<(), Error> {
         if let Some(error) = &self.failed {
             return Err(error.clone());
         }
@@ -427,7 +461,14 @@ impl<'p> Inputs<'p> {
         let current = file.or_else(|| self.includes.files.last().cloned().flatten());
         self.includes.files.push(current);
         let document = self.document.as_mut().expect("a parse that has not failed");
-        match document.read(&bytes, settings, &mut self.expander, &mut self.includes) {
+        let read = match borrow {
+            Some(src) => {
+                debug_assert!(*src == *bytes, "the text to borrow is the input's");
+                document.read_borrowed(src, settings, &mut self.expander, &mut self.includes)
+            }
+            None => document.read(&bytes, settings, &mut self.expander, &mut self.includes),
+        };
+        match read {
             Ok(()) => Ok(()),
             Err(e) if e.is_stopped() => Err(e),
             Err(e) => self.fail(e),
@@ -443,11 +484,8 @@ impl<'p> Inputs<'p> {
         Err(error)
     }
 
-    /// Ends the parse and returns its result: the root, with every container closed (a key
-    /// still waiting for its value on a following line gets `null`, §1.6). The parser's saved
-    /// comments and output facts then describe it. After an error in an input, returns that
-    /// error.
-    pub fn finish(mut self) -> Result<UclValue, Error> {
+    /// [`Inputs::finish`].
+    pub(crate) fn finish(mut self) -> Result<Value<'t>, Error> {
         if let Some(error) = self.failed.take() {
             return Err(error);
         }

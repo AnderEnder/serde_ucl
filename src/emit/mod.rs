@@ -1,9 +1,9 @@
 //! Output formats: JSON, compact JSON, the UCL config format and YAML (spec §10).
 //!
-//! An [`Emitter`] writes a [`UclValue`] in one [`Format`], byte for byte as libucl writes it,
-//! quirks included. Besides the value itself, the config and YAML formats depend on facts
-//! remembered from parsing (spec §10.1): whether a string was single-quoted or a heredoc, and how
-//! each key was written. The parser records them ([`crate::parse::Parser::output_facts`]);
+//! An [`Emitter`] writes a [`UclValue`](crate::UclValue) in one [`Format`], byte for byte as
+//! libucl writes it, quirks included. Besides the value itself, the config and YAML formats depend
+//! on facts remembered from parsing (spec §10.1): whether a string was single-quoted or a
+//! heredoc, and how each key was written. The parser records them ([`crate::parse::Parser::output_facts`]);
 //! [`Parser::emitter`](crate::parse::Parser::emitter) gives an emitter that uses the facts of the
 //! last parse. Without facts, strings use the JSON form and keys are quoted by
 //! [`key_needs_quoting`].
@@ -42,7 +42,7 @@ use crate::parse::tree::Children;
 use crate::parse::{
     AttachedComments, Comment, CommentPlacement, OutputFacts, PathSegment, ValueFacts,
 };
-use crate::value::UclValue;
+use crate::value::Value;
 
 /// An output format of spec §10.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -131,13 +131,13 @@ impl<'a> Emitter<'a> {
     }
 
     /// The text of `value` in the emitter's format.
-    pub fn emit(&self, value: &UclValue) -> String {
+    pub fn emit(&self, value: &Value<'_>) -> String {
         self.run(value).out
     }
 
     /// The text of `value` in round-trip mode, or a description of the first value that has no
     /// form that reads back exactly.
-    pub(crate) fn try_emit(&self, value: &UclValue) -> Result<String, String> {
+    pub(crate) fn try_emit(&self, value: &Value<'_>) -> Result<String, String> {
         let writer = self.run(value);
         match writer.error {
             Some(error) => Err(error),
@@ -145,7 +145,7 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    fn run(&self, value: &UclValue) -> Writer<'a> {
+    fn run(&self, value: &Value<'_>) -> Writer<'a> {
         let exact = self.mode == Mode::RoundTrip;
         let comments = match (self.format, self.comments) {
             (Format::Config, Some((comments, attached))) if !exact => {
@@ -168,7 +168,7 @@ impl<'a> Emitter<'a> {
             json: exact && matches!(self.format, Format::Json | Format::JsonCompact),
             error: None,
         };
-        if exact && !matches!(value, UclValue::Object(_) | UclValue::Array(_)) {
+        if exact && !matches!(value, Value::Object(_) | Value::Array(_)) {
             writer.fail(format!(
                 "a root {}: a UCL document is an object or an array (spec §1.1)",
                 value.type_name()
@@ -193,22 +193,22 @@ impl<'a> Emitter<'a> {
 
 /// `value` as pretty JSON (spec §10.4), without output facts: keys as they are in `value`
 /// ([`to_config`] says what that leaves out).
-pub fn to_json(value: &UclValue) -> String {
+pub fn to_json(value: &Value<'_>) -> String {
     Emitter::new(Format::Json).emit(value)
 }
 
 /// `value` as JSON without whitespace (spec §10.4), without output facts, as [`to_json`].
-pub fn to_json_compact(value: &UclValue) -> String {
+pub fn to_json_compact(value: &Value<'_>) -> String {
     Emitter::new(Format::JsonCompact).emit(value)
 }
 
 /// `value` in the UCL config format (spec §10.5), without output facts: every string in the JSON
 /// form, keys as they are in `value` and quoted by [`key_needs_quoting`].
 ///
-/// A [`UclValue`] does not record how its document was written, so this output ignores it:
-/// single-quoted strings and heredocs are written in the JSON form, keys lose the spelling and
-/// quoting they were written with (spec §10.1), and copies made by `.inherit` get the key of
-/// their entry. libucl writes those as they were parsed, and so does
+/// A [`UclValue`](crate::UclValue) does not record how its document was written, so this output
+/// ignores it: single-quoted strings and heredocs are written in the JSON form, keys lose the
+/// spelling and quoting they were written with (spec §10.1), and copies made by `.inherit` get
+/// the key of their entry. libucl writes those as they were parsed, and so does
 /// [`Parser::emitter`](crate::parse::Parser::emitter), which uses the output facts of the
 /// parser's last parse:
 ///
@@ -221,13 +221,13 @@ pub fn to_json_compact(value: &UclValue) -> String {
 /// assert_eq!(emit::to_config(&value), "name = \"web\";\n");
 /// assert_eq!(parser.emitter(Format::Config).emit(&value), "name = 'web';\n");
 /// ```
-pub fn to_config(value: &UclValue) -> String {
+pub fn to_config(value: &Value<'_>) -> String {
     Emitter::new(Format::Config).emit(value)
 }
 
 /// `value` in libucl's YAML format (spec §10.6), without output facts, as [`to_config`]:
 /// strings in the JSON form and keys quoted by [`key_needs_quoting`].
-pub fn to_yaml(value: &UclValue) -> String {
+pub fn to_yaml(value: &Value<'_>) -> String {
     Emitter::new(Format::Yaml).emit(value)
 }
 
@@ -402,30 +402,28 @@ impl<'a> Writer<'a> {
     /// config format may use single quotes (`config`); the other formats use double quotes. In
     /// JSON, a float and a time are JSON numbers, the time as its seconds, which read back as a
     /// float.
-    fn exact_scalar(&mut self, value: &UclValue, config: bool) {
+    fn exact_scalar(&mut self, value: &Value<'_>, config: bool) {
         let result = match value {
-            UclValue::Integer(i) => {
+            Value::Integer(i) => {
                 use std::fmt::Write;
                 let _ = write!(self.out, "{i}");
                 Ok(())
             }
-            UclValue::Float(f) if self.json => {
-                number::write_json_number(&mut self.out, *f, "float")
-            }
-            UclValue::Time(t) if self.json => number::write_json_number(&mut self.out, *t, "time"),
-            UclValue::Float(f) => number::write_exact_float(&mut self.out, *f),
-            UclValue::Time(t) => number::write_exact_time(&mut self.out, *t),
-            UclValue::String(s) if config => text::write_exact_config_string(&mut self.out, s),
-            UclValue::String(s) => text::write_exact_double_quoted(&mut self.out, s),
-            UclValue::Boolean(b) => {
+            Value::Float(f) if self.json => number::write_json_number(&mut self.out, *f, "float"),
+            Value::Time(t) if self.json => number::write_json_number(&mut self.out, *t, "time"),
+            Value::Float(f) => number::write_exact_float(&mut self.out, *f),
+            Value::Time(t) => number::write_exact_time(&mut self.out, *t),
+            Value::String(s) if config => text::write_exact_config_string(&mut self.out, s),
+            Value::String(s) => text::write_exact_double_quoted(&mut self.out, s),
+            Value::Boolean(b) => {
                 self.out.push_str(if *b { "true" } else { "false" });
                 Ok(())
             }
-            UclValue::Null => {
+            Value::Null => {
                 self.out.push_str("null");
                 Ok(())
             }
-            UclValue::Object(_) | UclValue::Array(_) => {
+            Value::Object(_) | Value::Array(_) => {
                 unreachable!("containers are written by the format")
             }
         };
@@ -435,21 +433,21 @@ impl<'a> Writer<'a> {
     }
 
     /// A scalar in the form every format shares (spec §10.2), strings in the JSON form.
-    fn scalar(&mut self, value: &UclValue) {
+    fn scalar(&mut self, value: &Value<'_>) {
         if self.mode == Mode::RoundTrip {
             self.exact_scalar(value, false);
             return;
         }
         match value {
-            UclValue::Integer(i) => {
+            Value::Integer(i) => {
                 use std::fmt::Write;
                 let _ = write!(self.out, "{i}");
             }
-            UclValue::Float(f) | UclValue::Time(f) => number::write_float(&mut self.out, *f),
-            UclValue::String(s) => text::write_json_string(&mut self.out, s),
-            UclValue::Boolean(b) => self.out.push_str(if *b { "true" } else { "false" }),
-            UclValue::Null => self.out.push_str("null"),
-            UclValue::Object(_) | UclValue::Array(_) => {
+            Value::Float(f) | Value::Time(f) => number::write_float(&mut self.out, *f),
+            Value::String(s) => text::write_json_string(&mut self.out, s),
+            Value::Boolean(b) => self.out.push_str(if *b { "true" } else { "false" }),
+            Value::Null => self.out.push_str("null"),
+            Value::Object(_) | Value::Array(_) => {
                 unreachable!("containers are written by the format")
             }
         }

@@ -20,7 +20,9 @@ use super::registered::{Host, MacroCall as HandlerCall, MacroError, Registered, 
 use super::string;
 use super::vars::Expander;
 use super::{Error, ErrorKind, MAX_ARGUMENT_DEPTH, MAX_INCLUDE_DEPTH, PathSegment};
-use crate::value::{DuplicateStrategy, Entry, ParserFlags, Slot, Str, UclObject, UclValue};
+use crate::value::{
+    DuplicateStrategy, Entry, KeyCopy, Object, ParserFlags, Slot, Str, UclObject, UclValue, Value,
+};
 
 /// The macros of §9.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,7 +198,7 @@ impl<'a> Resolved<'a> {
     pub(crate) fn array(&self, name: &str) -> Option<&'a [UclValue]> {
         self.get(name)
             .and_then(UclValue::as_array)
-            .map(Vec::as_slice)
+            .map(|items| items.as_slice())
     }
 }
 
@@ -253,7 +255,7 @@ fn ends_bare_value(b: u8) -> bool {
 
 /// The position of `name` in `object`: the key itself or, with `ignore_case`, a key that
 /// differs from it only in ASCII case (§12.1).
-pub(super) fn find_key(object: &UclObject, name: &str, ignore_case: bool) -> Option<usize> {
+pub(super) fn find_key(object: &Object<'_>, name: &str, ignore_case: bool) -> Option<usize> {
     object.index_of(name).or_else(|| {
         ignore_case
             .then(|| object.keys().position(|k| k.eq_ignore_ascii_case(name)))
@@ -285,7 +287,7 @@ enum Named {
     Builtin(MacroKind),
 }
 
-impl Core<'_, '_, '_, '_> {
+impl<'t> Core<'_, 't, '_, '_, '_> {
     /// A `.` where a key could start is a macro (§9.1): `.NAME (ARGUMENTS)? VALUE` (§9.2).
     ///
     /// - A NAME that runs to the end of input is ignored, whatever it is.
@@ -505,9 +507,10 @@ impl Core<'_, '_, '_, '_> {
             table.ran.set(true);
         }
         // A context macro gets the root as built so far, with the open containers (§13.2).
-        let root = registered
-            .context
-            .then(|| self.filled_copy(&[]).unwrap_or(UclValue::Null));
+        let root = registered.context.then(|| {
+            self.filled_copy(&[])
+                .map_or(UclValue::Null, Value::into_owned)
+        });
         let root_priority = self.root_priority;
         let (outcome, text_error) = {
             let root = root.as_ref().map(|root| (root, root_priority));
@@ -645,15 +648,15 @@ impl Core<'_, '_, '_, '_> {
             .expect("the source was just found");
         let source_pos = Pos::Entry {
             entry: source_index,
-            key: Str::from(&source_key),
+            key: KeyCopy::from(&source_key),
             slot: 0,
         };
         let source = [PathSegment::Key {
-            key: source_key,
+            key: source_key.to_string(),
             index: 0,
         }];
         let count = match self.value_at(&source) {
-            Some(UclValue::Object(object)) => object.len(),
+            Some(Value::Object(object)) => object.len(),
             _ => {
                 return Err(self.error(
                     ErrorKind::InheritSourceNotObject { name: name.clone() },
@@ -664,7 +667,7 @@ impl Core<'_, '_, '_, '_> {
         for i in 0..count {
             let Some(key) = self
                 .value_at(&source)
-                .and_then(UclValue::as_object)
+                .and_then(Value::as_object)
                 .and_then(|object| object.get_index(i))
                 .map(|(key, _)| key.clone())
             else {
@@ -679,19 +682,19 @@ impl Core<'_, '_, '_, '_> {
     /// now, with any containers open inside them: all of them, or the first only when it is an
     /// object or an array (QUESTIONS.md #24). The same rule holds at every level inside the
     /// copies, in objects and in the objects of arrays (§9.7, QUESTIONS.md #77).
-    fn inherited_slots(&self, source: &[PathSegment], index: usize) -> Option<Vec<Slot>> {
+    fn inherited_slots(&self, source: &[PathSegment], index: usize) -> Option<Vec<Slot<'t>>> {
         let (key, entry) = self.value_at(source)?.as_object()?.get_index(index)?;
         let count = match entry.first() {
-            UclValue::Object(_) | UclValue::Array(_) => 1,
+            Value::Object(_) | Value::Array(_) => 1,
             _ => entry.len(),
         };
         let mut slots = Vec::with_capacity(count);
         for (slot_index, slot) in entry.slots()[..count].iter().enumerate() {
             let value = match slot.value() {
-                UclValue::Object(_) | UclValue::Array(_) => {
+                Value::Object(_) | Value::Array(_) => {
                     let mut path = source.to_vec();
                     path.push(PathSegment::Key {
-                        key: key.clone(),
+                        key: key.to_string(),
                         index: slot_index,
                     });
                     let mut copy = self.filled_copy(&path)?;
@@ -715,7 +718,7 @@ impl Core<'_, '_, '_, '_> {
     /// see [`Core::check_nesting`]).
     fn copy_entry(
         &mut self,
-        key: String,
+        key: Str<'t>,
         index: usize,
         replace: bool,
         (source, source_pos): (&[PathSegment], &Pos),
@@ -746,7 +749,7 @@ impl Core<'_, '_, '_, '_> {
                         source_pos.clone(),
                         Pos::Entry {
                             entry: index,
-                            key: Str::from(&key),
+                            key: KeyCopy::from(&key),
                             slot: slot_index,
                         },
                     ];
@@ -795,7 +798,7 @@ impl Core<'_, '_, '_, '_> {
         for (offset, subtree) in copied_facts.into_iter().enumerate().take(count) {
             let Some(node) = self.facts_node_below(&[Pos::Entry {
                 entry: target_entry,
-                key: Str::from(&target),
+                key: KeyCopy::from(&target),
                 slot: first_index + offset,
             }]) else {
                 return Ok(());
@@ -806,7 +809,7 @@ impl Core<'_, '_, '_, '_> {
                 .iter()
                 .find(|(rest, _, _)| rest.is_empty())
                 .and_then(|(_, f, _)| f.key_spelling.clone())
-                .unwrap_or_else(|| key.clone());
+                .unwrap_or_else(|| key.to_string());
             facts.graft(node, subtree);
             facts.update(node, |f| {
                 f.key_spelling = (spelling != target).then_some(spelling)
@@ -816,7 +819,7 @@ impl Core<'_, '_, '_, '_> {
     }
 }
 
-impl Host for Core<'_, '_, '_, '_> {
+impl Host for Core<'_, '_, '_, '_, '_> {
     fn add_entry(
         &mut self,
         key: String,
@@ -858,7 +861,7 @@ impl Host for Core<'_, '_, '_, '_> {
             .is_some_and(super::OutputFacts::records_locations)
             && let Some(node) = self.facts_node_below(&[Pos::Entry {
                 entry,
-                key: Str::from(key),
+                key: KeyCopy::from(key),
                 slot: index,
             }])
         {
@@ -1398,7 +1401,7 @@ e { .inherit \"d\" }",
             .parse(b"d { a = 1; a = 2 }\ne { .inherit(replace=true) \"d\"; a = 3 }")
             .unwrap();
         let a = &obj(&obj(&v)["e"])["a"];
-        assert_eq!(a.as_array().map(Vec::len), Some(3));
+        assert_eq!(a.as_array().map(|a| a.len()), Some(3));
         // Under NO_IMPLICIT_ARRAYS, a repeat collects only the entry's first value
         // (QUESTIONS.md #25).
         let v = Parser::with_flags(ParserFlags::NO_IMPLICIT_ARRAYS)
@@ -1526,7 +1529,7 @@ e { .inherit \"d\" }",
         let deep = |depth: usize| {
             let mut value = UclValue::Integer(1);
             for _ in 0..depth {
-                value = UclValue::Array(vec![value]);
+                value = UclValue::Array(vec![value].into());
             }
             value
         };
@@ -1678,7 +1681,7 @@ e { .inherit \"d\" }",
         let args = arguments("replace = true, replace = false");
         assert_eq!(args.exact_bool("replace"), Some(true));
         assert_eq!(
-            Arguments::from_root(UclValue::Array(vec![])).exact_bool("replace"),
+            Arguments::from_root(UclValue::Array(vec![].into())).exact_bool("replace"),
             None
         );
     }

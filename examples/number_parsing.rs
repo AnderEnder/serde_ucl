@@ -81,7 +81,7 @@ fn typed_values() -> Result<(), UclError> {
     let int = UclValue::Integer;
     let float = UclValue::Float;
     let time = UclValue::Time;
-    let string = |s: &str| UclValue::String(s.to_string());
+    let string = |s: &str| UclValue::String(s.into());
     let expected = [
         ("integer", int(42)),
         ("negative", int(-17)),

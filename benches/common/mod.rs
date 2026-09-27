@@ -130,6 +130,14 @@ pub struct Small {
     pub debug: bool,
 }
 
+/// [`Small`] borrowing its string from the input.
+#[derive(Debug, Deserialize)]
+pub struct SmallBorrowed<'a> {
+    pub name: &'a str,
+    pub port: u16,
+    pub debug: bool,
+}
+
 /// The typed form of [`config`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -155,4 +163,37 @@ pub struct Service {
     pub tags: Vec<String>,
     pub headers: BTreeMap<String, String>,
     pub script: String,
+}
+
+/// [`Config`] borrowing its keys and strings from the input: each appears in [`config`] as it
+/// is, so none is copied.
+#[derive(Debug, Deserialize)]
+pub struct ConfigBorrowed<'a> {
+    #[serde(borrow)]
+    pub global: GlobalBorrowed<'a>,
+    #[serde(borrow)]
+    pub services: BTreeMap<&'a str, ServiceBorrowed<'a>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GlobalBorrowed<'a> {
+    pub workers: u32,
+    pub pid_file: &'a str,
+    pub log_level: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ServiceBorrowed<'a> {
+    pub enabled: bool,
+    pub listen: &'a str,
+    #[serde(borrow)]
+    pub upstream: Vec<&'a str>,
+    pub timeout: f64,
+    pub max_body: u64,
+    pub ratio: f64,
+    #[serde(borrow)]
+    pub tags: Vec<&'a str>,
+    #[serde(borrow)]
+    pub headers: BTreeMap<&'a str, &'a str>,
+    pub script: &'a str,
 }

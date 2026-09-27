@@ -870,7 +870,7 @@ impl<'a> Readback<'a> {
                 for (key, entry) in object {
                     for (index, value) in entry.values().enumerate() {
                         path.push(PathSegment::Key {
-                            key: key.clone(),
+                            key: key.to_string(),
                             index,
                         });
                         if index == 0 || self.written == Written::Config {
@@ -956,7 +956,7 @@ impl<'a> Readback<'a> {
             let at = |index: usize| {
                 let mut at = path.to_vec();
                 at.push(PathSegment::Key {
-                    key: key.clone(),
+                    key: key.to_string(),
                     index,
                 });
                 at

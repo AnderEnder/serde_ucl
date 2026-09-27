@@ -8,17 +8,17 @@
 //! when there are more (clean-room work item C11). A node without children allocates nothing.
 
 use super::PathSegment;
-use crate::value::Str;
+use crate::value::KeyCopy;
 use std::collections::HashMap;
 
 /// The most keyed children, and the most element children, kept in a vector.
 const SMALL: usize = 8;
 
-/// A key as the children of a node are looked up by: a `str`, or a [`Str`], whose bytes are
+/// A key as the children of a node are looked up by: a `str`, or a [`KeyCopy`], whose bytes are
 /// compared without checking them again (clean-room work item C13).
 pub(crate) trait KeyRef {
     fn bytes(&self) -> &[u8];
-    fn to_key(&self) -> Str;
+    fn to_key(&self) -> KeyCopy;
 }
 
 impl KeyRef for str {
@@ -26,8 +26,8 @@ impl KeyRef for str {
         self.as_bytes()
     }
 
-    fn to_key(&self) -> Str {
-        Str::from(self)
+    fn to_key(&self) -> KeyCopy {
+        KeyCopy::from(self)
     }
 }
 
@@ -36,24 +36,34 @@ impl KeyRef for String {
         self.as_bytes()
     }
 
-    fn to_key(&self) -> Str {
-        Str::from(self)
+    fn to_key(&self) -> KeyCopy {
+        KeyCopy::from(self)
     }
 }
 
-impl KeyRef for Str {
+impl KeyRef for crate::value::Str<'_> {
     fn bytes(&self) -> &[u8] {
         self.as_bytes()
     }
 
-    fn to_key(&self) -> Str {
+    fn to_key(&self) -> KeyCopy {
+        KeyCopy::from(self)
+    }
+}
+
+impl KeyRef for KeyCopy {
+    fn bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
+
+    fn to_key(&self) -> KeyCopy {
         self.clone()
     }
 }
 
 /// A key of the map of a node with many keyed children, which is looked up by the key's bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ByteKey(Str);
+struct ByteKey(KeyCopy);
 
 impl std::hash::Hash for ByteKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -78,7 +88,7 @@ pub(crate) struct Children {
 #[derive(Debug, Clone)]
 enum Keyed {
     /// The node of value `index` of entry `key` is `child` in an item `(key, index, child)`.
-    Small(Vec<(Str, usize, usize)>),
+    Small(Vec<(KeyCopy, usize, usize)>),
     /// The node of value `index` of entry `key` is `map[key][index]`.
     Large(HashMap<ByteKey, Vec<Option<usize>>>),
 }

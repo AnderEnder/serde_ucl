@@ -586,7 +586,7 @@ fn gen_value(rng: &mut Rng, depth: usize) -> UclValue {
         0 => UclValue::Integer(gen_int(rng)),
         1 => UclValue::Float(gen_float(rng)),
         2 => UclValue::Time(gen_time(rng)),
-        3 | 4 => UclValue::String(gen_string(rng)),
+        3 | 4 => UclValue::String(gen_string(rng).into()),
         5 => UclValue::Boolean(rng.chance(50)),
         6 => UclValue::Null,
         7 | 8 => UclValue::Object(gen_object(rng, depth - 1)),
@@ -1023,13 +1023,13 @@ fn json_tree(value: &UclValue) -> JsonTree {
     match value {
         UclValue::Object(obj) => JsonTree::Object(
             obj.iter()
-                .flat_map(|(k, e)| e.values().map(move |v| (k.clone(), json_tree(v))))
+                .flat_map(|(k, e)| e.values().map(move |v| (k.to_string(), json_tree(v))))
                 .collect(),
         ),
         UclValue::Array(items) => JsonTree::Array(items.iter().map(json_tree).collect()),
         UclValue::Integer(i) => JsonTree::Int((*i).into()),
         UclValue::Float(f) | UclValue::Time(f) => JsonTree::Float(f.to_bits()),
-        UclValue::String(s) => JsonTree::Str(s.clone()),
+        UclValue::String(s) => JsonTree::Str(s.to_string()),
         UclValue::Boolean(b) => JsonTree::Bool(*b),
         UclValue::Null => JsonTree::Null,
     }
@@ -1334,7 +1334,7 @@ fn strings(values: &[&str]) -> UclValue {
     UclValue::Array(
         values
             .iter()
-            .map(|s| UclValue::String((*s).to_owned()))
+            .map(|s| UclValue::String((*s).into()))
             .collect(),
     )
 }
@@ -1424,11 +1424,11 @@ fn corpus() -> Vec<CorpusEntry> {
     multi.append("m", UclValue::Integer(2));
     multi.append("s", UclValue::String("x".into()));
     multi.append("s", UclValue::Integer(1));
-    multi.append("a", UclValue::Array(vec![UclValue::Integer(1)]));
+    multi.append("a", UclValue::Array(vec![UclValue::Integer(1)].into()));
     multi.append("a", UclValue::Integer(2));
     multi.append("o", obj([]));
     multi.append("o", obj([("k", UclValue::Integer(1))]));
-    multi.append("e", UclValue::Array(vec![]));
+    multi.append("e", UclValue::Array(vec![].into()));
     multi.append("e", UclValue::Time(3.0));
     multi.append("e", UclValue::Null);
     let mut inner = UclObject::new();
@@ -1437,7 +1437,7 @@ fn corpus() -> Vec<CorpusEntry> {
     multi.append("nested", UclValue::Object(inner.clone()));
     multi.append(
         "list",
-        UclValue::Array(vec![UclValue::Object(inner), UclValue::Array(vec![])]),
+        UclValue::Array(vec![UclValue::Object(inner), UclValue::Array(vec![].into())].into()),
     );
     let key_list = [
         "a", "A1", "1", "_x", "/p", "é", "日本", "a-b.c/d", "a b", "-a", ".include", ".x", "a;b",
@@ -1529,7 +1529,7 @@ fn corpus() -> Vec<CorpusEntry> {
         entry(
             "strings",
             obj([
-                ("bytes", UclValue::String(control)),
+                ("bytes", UclValue::String(control.into())),
                 (
                     "forms",
                     strings(&[
@@ -1563,7 +1563,7 @@ fn corpus() -> Vec<CorpusEntry> {
                         "$abi",
                     ]),
                 ),
-                ("long", UclValue::String(long)),
+                ("long", UclValue::String(long.into())),
             ]),
             &FORMATS,
         ),
@@ -1601,31 +1601,37 @@ fn corpus() -> Vec<CorpusEntry> {
                         "b",
                         obj([(
                             "c",
-                            UclValue::Array(vec![
-                                UclValue::Array(vec![UclValue::Array(vec![])]),
-                                obj([]),
-                                obj([("d", UclValue::String("deep".into()))]),
-                            ]),
+                            UclValue::Array(
+                                vec![
+                                    UclValue::Array(vec![UclValue::Array(vec![].into())].into()),
+                                    obj([]),
+                                    obj([("d", UclValue::String("deep".into()))]),
+                                ]
+                                .into(),
+                            ),
                         )]),
                     )]),
                 ),
                 ("empty_object", obj([])),
-                ("empty_array", UclValue::Array(vec![])),
+                ("empty_array", UclValue::Array(vec![].into())),
             ]),
             &FORMATS,
         ),
         entry(
             "root_array",
-            UclValue::Array(vec![
-                UclValue::Integer(1),
-                UclValue::String("two".into()),
-                obj([("three", UclValue::Float(3.0))]),
-                UclValue::Array(vec![UclValue::Time(4.0)]),
-                UclValue::Null,
-            ]),
+            UclValue::Array(
+                vec![
+                    UclValue::Integer(1),
+                    UclValue::String("two".into()),
+                    obj([("three", UclValue::Float(3.0))]),
+                    UclValue::Array(vec![UclValue::Time(4.0)].into()),
+                    UclValue::Null,
+                ]
+                .into(),
+            ),
             &FORMATS,
         ),
-        entry("root_array_empty", UclValue::Array(vec![]), &FORMATS),
+        entry("root_array_empty", UclValue::Array(vec![].into()), &FORMATS),
         entry("root_object_empty", obj([]), &FORMATS),
     ]
 }
@@ -1841,10 +1847,10 @@ fn values_without_a_form_are_errors() {
 fn nesting_limit() {
     // spec §11.2: at most 1024 containers open at once, the root included.
     let nested = |containers: usize| {
-        let mut value = UclValue::Array(vec![]);
+        let mut value = UclValue::Array(vec![].into());
         for i in 1..containers {
             value = if i % 2 == 0 {
-                UclValue::Array(vec![value])
+                UclValue::Array(vec![value].into())
             } else {
                 obj([("k", value)])
             };
@@ -1885,7 +1891,7 @@ fn forms_of_each_format() {
     value.append("m", UclValue::Integer(1));
     value.append("m", UclValue::Float(f64::NEG_INFINITY));
     value.append("s", UclValue::String("$ABI it's".into()));
-    value.append("a b", UclValue::Array(vec![UclValue::Null]));
+    value.append("a b", UclValue::Array(vec![UclValue::Null].into()));
     let value = UclValue::Object(value);
     assert_eq!(
         serde_ucl::to_string(&value).unwrap(),
@@ -1931,13 +1937,16 @@ fn ucl_value_through_other_serde_formats() {
     let expected = obj([
         (
             "a",
-            UclValue::Array(vec![
-                UclValue::Integer(1),
-                UclValue::String("x".into()),
-                UclValue::Null,
-                UclValue::Boolean(true),
-                UclValue::Float(2.5),
-            ]),
+            UclValue::Array(
+                vec![
+                    UclValue::Integer(1),
+                    UclValue::String("x".into()),
+                    UclValue::Null,
+                    UclValue::Boolean(true),
+                    UclValue::Float(2.5),
+                ]
+                .into(),
+            ),
         ),
         ("b", obj([])),
     ]);
@@ -1961,10 +1970,13 @@ fn ucl_value_through_other_serde_formats() {
     let field: Field = from_value(parsed).unwrap();
     assert_eq!(
         field.m,
-        UclValue::Array(vec![
-            UclValue::Integer(1),
-            UclValue::Array(vec![UclValue::Integer(2)])
-        ])
+        UclValue::Array(
+            vec![
+                UclValue::Integer(1),
+                UclValue::Array(vec![UclValue::Integer(2)].into())
+            ]
+            .into()
+        )
     );
     assert_eq!(field.t, UclValue::Time(1.5));
 }

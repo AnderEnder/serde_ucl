@@ -141,7 +141,7 @@ fn duplicate_strategies() -> Result<(), UclError> {
         "no-implicit-arrays: {}",
         parser.emitter(Format::JsonCompact).emit(&value)
     );
-    assert_eq!(object(&value)["port"].as_array().map(Vec::len), Some(2));
+    assert_eq!(object(&value)["port"].as_array().map(|a| a.len()), Some(2));
     Ok(())
 }
 

@@ -617,7 +617,7 @@ fn seen(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
     let mut seen = UclObject::new();
     seen.insert(
         "data",
-        UclValue::String(String::from_utf8_lossy(call.value()).into_owned()),
+        UclValue::String(String::from_utf8_lossy(call.value()).into_owned().into()),
     );
     seen.insert("args", call.arguments().cloned().unwrap_or(UclValue::Null));
     call.add("seen", UclValue::Object(seen))

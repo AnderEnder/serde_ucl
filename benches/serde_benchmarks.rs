@@ -22,6 +22,10 @@ fn bench_deserialize(c: &mut Criterion) {
     group.bench_function("from_str", |b| {
         b.iter(|| serde_ucl::from_str::<Config>(black_box(&input)).unwrap())
     });
+    // The same into a target that borrows its keys and strings from the input.
+    group.bench_function("from_str-borrowed", |b| {
+        b.iter(|| serde_ucl::from_str::<common::ConfigBorrowed>(black_box(&input)).unwrap())
+    });
     // The document-level deserializer, which records the paths of errors as it goes.
     group.bench_function("UclDeserializer", |b| {
         b.iter(|| Config::deserialize(serde_ucl::UclDeserializer::new(black_box(&input))).unwrap())
@@ -44,6 +48,9 @@ fn bench_deserialize_small(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(input.len() as u64));
     group.bench_function("from_str", |b| {
         b.iter(|| serde_ucl::from_str::<common::Small>(black_box(input)).unwrap())
+    });
+    group.bench_function("from_str-borrowed", |b| {
+        b.iter(|| serde_ucl::from_str::<common::SmallBorrowed>(black_box(input)).unwrap())
     });
     group.finish();
 }

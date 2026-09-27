@@ -201,12 +201,43 @@ How values map onto serde (the `de` module documentation has the full table):
 - `null` into an `Option` is `None`. Enums are externally tagged: a string names a unit variant,
   and an object with one key a data variant.
 - Keys can be read into integer, `bool`, `char` and float map keys.
-- Values are owned: a borrowed `&str` field fails. Use `String` or `Cow<str>`.
+- Targets that borrow take keys and strings from the text without a copy: `&str` fields,
+  `Cow<str>` fields with `#[serde(borrow)]`, and `&str` map keys. That works for the text entry
+  points that borrow their input (`from_str`, `from_slice`, `UclDeserializer`), for every key and
+  string that appears in the text as it is. One that does not (an escaped or expanded string, a
+  key that `KEY_LOWERCASE` changes, a string from an included file) is owned in a `Cow`, and
+  fails for a `&str`.
+
+```rust
+use serde::Deserialize;
+use std::borrow::Cow;
+
+#[derive(Deserialize)]
+struct Server<'a> {
+    name: &'a str,
+    #[serde(borrow)]
+    motd: Cow<'a, str>,
+    #[serde(borrow)]
+    note: Cow<'a, str>,
+}
+
+fn main() -> Result<(), serde_ucl::UclError> {
+    let text = String::from("name = web\nmotd = \"hello\"\nnote = \"tab\\there\"\n");
+    let server: Server = serde_ucl::from_str(&text)?;
+    assert_eq!(server.name, "web");
+    // Borrowed from `text`, as written.
+    assert!(matches!(server.motd, Cow::Borrowed("hello")));
+    // The escape makes a new string.
+    assert!(matches!(server.note, Cow::Owned(ref s) if s == "tab\there"));
+    Ok(())
+}
+```
 
 ## The value tree
 
-`UclValue` is libucl's object model: `Object(UclObject)`, `Array(Vec<UclValue>)`,
-`Integer(i64)`, `Float(f64)`, `Time(f64)` (seconds), `String`, `Boolean` and `Null`. A
+`UclValue` is libucl's object model: `Object(UclObject)`, `Array(UclArray)`, `Integer(i64)`,
+`Float(f64)`, `Time(f64)` (seconds), `String(Str)`, `Boolean` and `Null`. `UclArray` derefs to a
+vector of values, and `Str`, a string that the value owns, to `str`. A
 `UclObject` keeps its keys in order. Each key holds an `Entry` of one or more values, and each
 value is a `Slot` with its priority and whether `.inherit` copied it. Indexing an object, or
 `get`, gives the first value of a key, and `get_all` gives every value. `from_str::<UclValue>`
@@ -231,8 +262,10 @@ fn main() -> Result<(), serde_ucl::UclError> {
 ```
 
 `UclObject` also offers insertion and removal, iteration, and `insert_with_strategy`, which
-applies libucl's duplicate rules. Cloning and serde conversion take the same stack at any depth
-of nesting.
+applies libucl's duplicate rules. Cloning, comparing, dropping and serde conversion take the same
+stack at any depth of nesting. `UclValue` is `Value<'static>`: a `Value<'a>` may borrow its keys
+and strings from text that lives for `'a`, which the serde entry points use internally, and
+`Value::into_owned` turns it into a `UclValue`.
 
 ## Writing
 

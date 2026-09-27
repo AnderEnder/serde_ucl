@@ -1,7 +1,20 @@
-//! Deserializing a [`UclValue`] into Rust values: [`from_value`], the value deserializer behind
+//! Deserializing a [`Value`] into Rust values: [`from_value`], the value deserializer behind
 //! every serde entry point of the crate, and `Deserialize` for [`UclValue`] and [`UclObject`].
 //! Nothing here depends on a parser. The mapping is described in the documentation of
 //! [`crate::de`].
+//!
+//! Borrowing. The value may borrow its keys and strings from the text it was parsed from, which
+//! the text entry points arrange (clean-room work item C13): a borrowed string is offered to a
+//! visitor that asks for a `&str` with `visit_borrowed_str`, so that `&'de str` and
+//! `Cow<'de, str>` targets take it without a copy. What each method offers:
+//!
+//! - A string value: `deserialize_str` offers a borrowed string with `visit_borrowed_str`; every
+//!   other method, and every string that is not borrowed, is offered with `visit_string`, as
+//!   before.
+//! - A key: `deserialize_str`, `deserialize_identifier` and `deserialize_any` offer a borrowed
+//!   key with `visit_borrowed_str`; a key that is not borrowed is offered as before
+//!   (`visit_string` without paths, `visit_str` with them), and `deserialize_string` always
+//!   offers `visit_string`.
 //!
 //! Depth. `Deserialize for UclValue` takes the whole value from the crate's deserializer in one
 //! step ([`crate::handoff`]), so a `UclValue` is read at any depth with the same stack. Other
@@ -9,13 +22,13 @@
 //! deserializer counts the maps and sequences it enters and fails past
 //! [`MAX_SERDE_NESTING`](crate::de::MAX_SERDE_NESTING).
 //!
-//! Errors. The deserializer comes in two variants, `ValueDeserializer<false>` and
-//! `ValueDeserializer<true>`. The second builds the path of an error as it goes up from the value
-//! it is about: each map and sequence access it passes through puts its step in front of the
-//! error's path (`UclError::add_step`). For that it keeps each key until its value is read, and
-//! lends keys to the target, which gets a copy when it asks for an owned string. The first does
-//! none of this, and is what the text entry points use first: when it fails, they parse the
-//! document again and run the second one ([`crate::de`]). [`crate::UclDeserializer`], which
+//! Errors. The deserializer comes in two variants, `ValueDeserializer<'_, false>` and
+//! `ValueDeserializer<'_, true>`. The second builds the path of an error as it goes up from the
+//! value it is about: each map and sequence access it passes through puts its step in front of
+//! the error's path (`UclError::add_step`). For that it keeps each key until its value is read,
+//! and lends keys to the target, which gets a copy when it asks for an owned string. The first
+//! does none of this, and is what the text entry points use first: when it fails, they parse
+//! the document again and run the second one ([`crate::de`]). [`crate::UclDeserializer`], which
 //! cannot run its visitor twice, uses the second one; [`from_value`], which consumes its value,
 //! the first.
 
@@ -23,7 +36,7 @@ use crate::de::enter;
 use crate::error::{Step, UclError};
 use crate::handoff;
 use crate::ser::marker;
-use crate::value::{Entry, UclArray, UclObject, UclValue};
+use crate::value::{Array, Entry, Object, Str, UclObject, UclValue, Value};
 use serde::de::{self, Deserialize, DeserializeOwned, DeserializeSeed, Unexpected, Visitor};
 use std::fmt;
 
@@ -72,54 +85,85 @@ fn float_to_u64(f: f64) -> Option<u64> {
     }
 }
 
-fn unexpected(value: &UclValue) -> Unexpected<'_> {
+fn unexpected<'u>(value: &'u Value<'_>) -> Unexpected<'u> {
     match value {
-        UclValue::String(s) => Unexpected::Str(s),
-        UclValue::Integer(i) => Unexpected::Signed(*i),
-        UclValue::Float(f) => Unexpected::Float(*f),
-        UclValue::Time(_) => Unexpected::Other("time value"),
-        UclValue::Boolean(b) => Unexpected::Bool(*b),
-        UclValue::Null => Unexpected::Unit,
-        UclValue::Object(_) => Unexpected::Map,
-        UclValue::Array(_) => Unexpected::Seq,
+        Value::String(s) => Unexpected::Str(s),
+        Value::Integer(i) => Unexpected::Signed(*i),
+        Value::Float(f) => Unexpected::Float(*f),
+        Value::Time(_) => Unexpected::Other("time value"),
+        Value::Boolean(b) => Unexpected::Bool(*b),
+        Value::Null => Unexpected::Unit,
+        Value::Object(_) => Unexpected::Map,
+        Value::Array(_) => Unexpected::Seq,
     }
 }
 
-fn invalid_type<'de, V: Visitor<'de>>(value: &UclValue, visitor: &V) -> UclError {
+fn invalid_type<'de, V: Visitor<'de>>(value: &Value<'_>, visitor: &V) -> UclError {
     de::Error::invalid_type(unexpected(value), visitor)
 }
 
-/// Deserializer for one UCL value. With `PATHS`, errors get the path of the value they are about.
-pub(crate) struct ValueDeserializer<const PATHS: bool> {
-    value: UclValue,
+/// What gives `Deserialize for UclValue` the owned value it takes, from the value a deserializer
+/// holds ([`crate::handoff`]): the value itself when it is owned, and a copy of what it borrows
+/// when it borrows ([`Value::into_owned`]).
+type Owner<'v> = fn(Value<'v>) -> UclValue;
+
+/// Deserializer for one UCL value, which may borrow from text that lives for `'v`. With
+/// `PATHS`, errors get the path of the value they are about.
+pub(crate) struct ValueDeserializer<'v, const PATHS: bool> {
+    value: Value<'v>,
     /// How many maps and sequences hold the value: 0 for the document.
     depth: usize,
+    owner: Owner<'v>,
 }
 
-impl<const PATHS: bool> ValueDeserializer<PATHS> {
+impl<const PATHS: bool> ValueDeserializer<'static, PATHS> {
+    /// A deserializer for an owned value, which `Deserialize for UclValue` takes as it is.
     pub(crate) fn new(value: UclValue) -> Self {
-        Self::nested(value, 0)
+        Self {
+            value,
+            depth: 0,
+            owner: std::convert::identity,
+        }
+    }
+}
+
+impl<'v, const PATHS: bool> ValueDeserializer<'v, PATHS> {
+    /// A deserializer for a value that may borrow its keys and strings; `Deserialize for
+    /// UclValue` takes a copy of what it borrows.
+    pub(crate) fn borrowed(value: Value<'v>) -> Self {
+        Self {
+            value,
+            depth: 0,
+            owner: Value::into_owned,
+        }
     }
 
-    fn nested(value: UclValue, depth: usize) -> Self {
-        Self { value, depth }
+    fn nested(value: Value<'v>, depth: usize, owner: Owner<'v>) -> Self {
+        Self {
+            value,
+            depth,
+            owner,
+        }
     }
 
     /// Visits `object`, a value inside `depth` maps and sequences, as a map.
     ///
-    /// Past the limit, the object is dropped with a heap stack ([`crate::value::discard`]): it
-    /// may be as deep as the parser allows, and a drop that recursed would add its depth to the
-    /// stack of the recursion that stops here. The same holds for arrays.
+    /// Past the limit, the object is dropped, which does not recurse ([`Value`]): it may be as
+    /// deep as the parser allows, and a drop that recursed would add its depth to the stack of
+    /// the recursion that stops here. The same holds for arrays.
     fn visit_object<'de, V: Visitor<'de>>(
-        object: UclObject,
+        object: Object<'v>,
         depth: usize,
         visitor: V,
-        keys: Keys,
-    ) -> Result<V::Value, UclError> {
+        (keys, owner): (Keys, Owner<'v>),
+    ) -> Result<V::Value, UclError>
+    where
+        'v: 'de,
+    {
         match enter(depth) {
-            Ok(depth) => visitor.visit_map(MapAccess::<PATHS>::new(object, depth, keys)),
+            Ok(depth) => visitor.visit_map(MapAccess::<PATHS>::new(object, depth, keys, owner)),
             Err(e) => {
-                crate::value::discard(UclValue::Object(object));
+                crate::value::discard(Value::Object(object));
                 Err(e)
             }
         }
@@ -129,47 +173,52 @@ impl<const PATHS: bool> ValueDeserializer<PATHS> {
     /// the array holds one value offered as a sequence of one, and an error of its element is the
     /// error of that value.
     fn visit_array<'de, V: Visitor<'de>>(
-        array: UclArray,
+        array: Array<'v>,
         depth: usize,
         visitor: V,
-        single: bool,
-    ) -> Result<V::Value, UclError> {
+        (single, owner): (bool, Owner<'v>),
+    ) -> Result<V::Value, UclError>
+    where
+        'v: 'de,
+    {
         match enter(depth) {
-            Ok(depth) => visitor.visit_seq(SeqAccess::<PATHS>::new(array, depth, single)),
+            Ok(depth) => visitor.visit_seq(SeqAccess::<PATHS>::new(array, depth, single, owner)),
             Err(e) => {
-                crate::value::discard(UclValue::Array(array));
+                crate::value::discard(Value::Array(array));
                 Err(e)
             }
         }
     }
 }
 
-impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> {
+impl<'de, 'v: 'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<'v, PATHS> {
     type Error = UclError;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::String(s) => visitor.visit_string(s),
-            UclValue::Integer(i) => visitor.visit_i64(i),
-            UclValue::Float(f) | UclValue::Time(f) => visitor.visit_f64(f),
-            UclValue::Boolean(b) => visitor.visit_bool(b),
-            UclValue::Null => visitor.visit_unit(),
-            UclValue::Object(obj) => Self::visit_object(obj, self.depth, visitor, Keys::Object),
-            UclValue::Array(arr) => Self::visit_array(arr, self.depth, visitor, false),
+            Value::String(s) => visitor.visit_string(s.into_string()),
+            Value::Integer(i) => visitor.visit_i64(i),
+            Value::Float(f) | Value::Time(f) => visitor.visit_f64(f),
+            Value::Boolean(b) => visitor.visit_bool(b),
+            Value::Null => visitor.visit_unit(),
+            Value::Object(obj) => {
+                Self::visit_object(obj, self.depth, visitor, (Keys::Object, self.owner))
+            }
+            Value::Array(arr) => Self::visit_array(arr, self.depth, visitor, (false, self.owner)),
         }
     }
 
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Boolean(b) => visitor.visit_bool(b),
+            Value::Boolean(b) => visitor.visit_bool(b),
             other => Err(invalid_type(&other, &visitor)),
         }
     }
 
     fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Integer(i) => visitor.visit_i64(i),
-            UclValue::Float(f) | UclValue::Time(f) => match float_to_i64(f) {
+            Value::Integer(i) => visitor.visit_i64(i),
+            Value::Float(f) | Value::Time(f) => match float_to_i64(f) {
                 Some(i) => visitor.visit_i64(i),
                 None => Err(de::Error::invalid_value(Unexpected::Float(f), &visitor)),
             },
@@ -180,8 +229,8 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
     fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
             // Negative values are rejected by the visitor's own range check.
-            UclValue::Integer(i) => visitor.visit_i64(i),
-            UclValue::Float(f) | UclValue::Time(f) => match float_to_u64(f) {
+            Value::Integer(i) => visitor.visit_i64(i),
+            Value::Float(f) | Value::Time(f) => match float_to_u64(f) {
                 Some(u) => visitor.visit_u64(u),
                 None => Err(de::Error::invalid_value(Unexpected::Float(f), &visitor)),
             },
@@ -228,15 +277,15 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
 
     fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Float(f) | UclValue::Time(f) => visitor.visit_f64(f),
-            UclValue::Integer(i) => visitor.visit_f64(i as f64),
+            Value::Float(f) | Value::Time(f) => visitor.visit_f64(f),
+            Value::Integer(i) => visitor.visit_f64(i as f64),
             other => Err(invalid_type(&other, &visitor)),
         }
     }
 
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::String(s) => {
+            Value::String(s) => {
                 let mut chars = s.chars();
                 match (chars.next(), chars.next()) {
                     (Some(c), None) => visitor.visit_char(c),
@@ -247,13 +296,22 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
         }
     }
 
+    /// A string borrowed from the text is offered with `visit_borrowed_str`, so that a target
+    /// that borrows takes it without a copy; any other string as [`Self::deserialize_string`]
+    /// offers it.
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
-        self.deserialize_string(visitor)
+        match self.value {
+            Value::String(s) => match s.as_borrowed() {
+                Some(text) => visitor.visit_borrowed_str(text),
+                None => visitor.visit_string(s.into_string()),
+            },
+            other => Err(invalid_type(&other, &visitor)),
+        }
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::String(s) => visitor.visit_string(s),
+            Value::String(s) => visitor.visit_string(s.into_string()),
             other => Err(invalid_type(&other, &visitor)),
         }
     }
@@ -262,8 +320,10 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
     /// [`crate::ser`] writes them.
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::String(s) => visitor.visit_string(s),
-            UclValue::Array(array) => Self::visit_array(array, self.depth, visitor, false),
+            Value::String(s) => visitor.visit_string(s.into_string()),
+            Value::Array(array) => {
+                Self::visit_array(array, self.depth, visitor, (false, self.owner))
+            }
             other => Err(invalid_type(&other, &visitor)),
         }
     }
@@ -274,14 +334,14 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Null => visitor.visit_none(),
+            Value::Null => visitor.visit_none(),
             _ => visitor.visit_some(self),
         }
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Null => visitor.visit_unit(),
+            Value::Null => visitor.visit_unit(),
             other => Err(invalid_type(&other, &visitor)),
         }
     }
@@ -296,7 +356,8 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
 
     /// A newtype struct reads as its content. `Deserialize for UclValue` asks for the private
     /// name [`marker::VALUE`], and gets the whole value, moved as it is, times, multi-value
-    /// entries, priorities and marks included (see [`crate::handoff`]).
+    /// entries, priorities and marks included (see [`crate::handoff`]); a value that borrows
+    /// from the text is copied into one that does not first.
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         self,
         name: &'static str,
@@ -305,7 +366,7 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
         if name != marker::VALUE {
             return visitor.visit_newtype_struct(self);
         }
-        handoff::put(self.value);
+        handoff::put((self.owner)(self.value));
         let result = visitor.visit_enum(TreeAccess);
         // `ValueVisitor` has taken the value; any other visitor leaves it.
         drop(handoff::take());
@@ -314,11 +375,15 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Array(array) => Self::visit_array(array, self.depth, visitor, false),
+            Value::Array(array) => {
+                Self::visit_array(array, self.depth, visitor, (false, self.owner))
+            }
             // An object is not a sequence: reading its values would drop the keys.
-            UclValue::Object(_) => Err(de::Error::invalid_type(Unexpected::Map, &visitor)),
+            Value::Object(_) => Err(de::Error::invalid_type(Unexpected::Map, &visitor)),
             // One-or-many: a key written once reads like a key written several times.
-            single => Self::visit_array(vec![single], self.depth, visitor, true),
+            single => {
+                Self::visit_array(vec![single].into(), self.depth, visitor, (true, self.owner))
+            }
         }
     }
 
@@ -341,17 +406,17 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
         match self.value {
-            UclValue::Object(object) => {
-                Self::visit_object(object, self.depth, visitor, Keys::Object)
+            Value::Object(object) => {
+                Self::visit_object(object, self.depth, visitor, (Keys::Object, self.owner))
             }
             // An array reads as a map from string indices
-            UclValue::Array(array) => {
+            Value::Array(array) => {
                 let object = array
                     .into_iter()
                     .enumerate()
                     .map(|(i, v)| (i.to_string(), v))
                     .collect();
-                Self::visit_object(object, self.depth, visitor, Keys::Indices)
+                Self::visit_object(object, self.depth, visitor, (Keys::Indices, self.owner))
             }
             other => Err(invalid_type(&other, &visitor)),
         }
@@ -374,19 +439,20 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
     ) -> Result<V::Value, UclError> {
         match self.value {
             // Unit variant
-            UclValue::String(s) => visitor.visit_enum(EnumAccess::<PATHS>::unit(s)),
+            Value::String(s) => visitor.visit_enum(EnumAccess::<PATHS>::unit(s, self.owner)),
             // Data variant: an object with a single key, which counts as a map
-            UclValue::Object(mut obj) if obj.len() == 1 => match enter(self.depth) {
+            Value::Object(mut obj) if obj.len() == 1 => match enter(self.depth) {
                 Ok(depth) => {
                     let (name, entry) = obj.remove_index(0).unwrap();
-                    visitor.visit_enum(EnumAccess::<PATHS>::data(name, entry, depth))
+                    let access = EnumAccess::<PATHS>::data(name, entry, depth, self.owner);
+                    visitor.visit_enum(access)
                 }
                 Err(e) => {
-                    crate::value::discard(UclValue::Object(obj));
+                    crate::value::discard(Value::Object(obj));
                     Err(e)
                 }
             },
-            UclValue::Object(obj) => Err(de::Error::invalid_length(
+            Value::Object(obj) => Err(de::Error::invalid_length(
                 obj.len(),
                 &"an object with exactly one key (the variant name)",
             )),
@@ -404,47 +470,47 @@ impl<'de, const PATHS: bool> de::Deserializer<'de> for ValueDeserializer<PATHS> 
 }
 
 /// Sequence access over an explicit array (or the values of an implicit one).
-pub(crate) struct SeqAccess<const PATHS: bool> {
-    items: std::vec::IntoIter<UclValue>,
+pub(crate) struct SeqAccess<'v, const PATHS: bool> {
+    items: std::vec::IntoIter<Value<'v>>,
     /// The nesting of the sequence, which holds the elements.
     depth: usize,
     /// The number of elements, for the index of an element that fails; `None` for one value
     /// offered as a sequence of one, whose errors are those of the value.
     len: Option<usize>,
+    owner: Owner<'v>,
 }
 
-impl<const PATHS: bool> SeqAccess<PATHS> {
-    fn new(array: UclArray, depth: usize, single: bool) -> Self {
+impl<'v, const PATHS: bool> SeqAccess<'v, PATHS> {
+    fn new(array: Array<'v>, depth: usize, single: bool, owner: Owner<'v>) -> Self {
         Self {
             len: (!single).then_some(array.len()),
             items: array.into_iter(),
             depth,
+            owner,
         }
     }
 }
 
-impl<'de, const PATHS: bool> de::SeqAccess<'de> for SeqAccess<PATHS> {
+impl<'de, 'v: 'de, const PATHS: bool> de::SeqAccess<'de> for SeqAccess<'v, PATHS> {
     type Error = UclError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, UclError>
     where
         T: DeserializeSeed<'de>,
     {
-        match self.items.next() {
-            Some(value) if !PATHS => seed
-                .deserialize(ValueDeserializer::<PATHS>::nested(value, self.depth))
-                .map(Some),
-            Some(value) => {
-                let mut result =
-                    seed.deserialize(ValueDeserializer::<PATHS>::nested(value, self.depth));
-                // The step goes in front of the error's path as the error goes up.
-                if let (Err(e), Some(len)) = (&mut result, self.len) {
-                    e.add_step(Step::Index(len - self.items.len() - 1));
-                }
-                result.map(Some)
-            }
-            None => Ok(None),
+        let Some(value) = self.items.next() else {
+            return Ok(None);
+        };
+        let value = ValueDeserializer::<PATHS>::nested(value, self.depth, self.owner);
+        if !PATHS {
+            return seed.deserialize(value).map(Some);
         }
+        let mut result = seed.deserialize(value);
+        // The step goes in front of the error's path as the error goes up.
+        if let (Err(e), Some(len)) = (&mut result, self.len) {
+            e.add_step(Step::Index(len - self.items.len() - 1));
+        }
+        result.map(Some)
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -462,25 +528,27 @@ enum Keys {
 }
 
 /// Map access over an object. A key with several values reads as a sequence of them.
-struct MapAccess<const PATHS: bool> {
-    entries: indexmap::map::IntoIter<String, Entry>,
+struct MapAccess<'v, const PATHS: bool> {
+    entries: indexmap::map::IntoIter<Str<'v>, Entry<'v>>,
     /// The entry whose key was read last, until its value is read.
-    entry: Option<Entry>,
+    entry: Option<Entry<'v>>,
     /// The key read last, for the path of an error in its value (with `PATHS`).
-    key: String,
+    key: Str<'v>,
     /// The nesting of the map, which holds the values.
     depth: usize,
     keys: Keys,
+    owner: Owner<'v>,
 }
 
-impl<const PATHS: bool> MapAccess<PATHS> {
-    fn new(object: UclObject, depth: usize, keys: Keys) -> Self {
+impl<'v, const PATHS: bool> MapAccess<'v, PATHS> {
+    fn new(object: Object<'v>, depth: usize, keys: Keys, owner: Owner<'v>) -> Self {
         Self {
             entries: object.into_iter(),
             entry: None,
-            key: String::new(),
+            key: Str::new(),
             depth,
             keys,
+            owner,
         }
     }
 
@@ -497,55 +565,54 @@ impl<const PATHS: bool> MapAccess<PATHS> {
     }
 }
 
-impl<'de, const PATHS: bool> de::MapAccess<'de> for MapAccess<PATHS> {
+impl<'de, 'v: 'de, const PATHS: bool> de::MapAccess<'de> for MapAccess<'v, PATHS> {
     type Error = UclError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, UclError>
     where
         K: DeserializeSeed<'de>,
     {
-        match self.entries.next() {
-            Some((key, entry)) if !PATHS => {
-                self.entry = Some(entry);
-                seed.deserialize(OwnedKey { key }).map(Some)
-            }
-            Some((key, entry)) => {
-                let mut result = seed.deserialize(KeyDeserializer { key: &key });
-                if let Err(e) = &mut result {
-                    e.add_step(self.step(&key, true, false));
-                }
-                self.entry = Some(entry);
-                self.key = key;
-                result.map(Some)
-            }
-            None => Ok(None),
+        let Some((key, entry)) = self.entries.next() else {
+            return Ok(None);
+        };
+        self.entry = Some(entry);
+        if !PATHS {
+            let key = OwnedKey {
+                key,
+                owner: self.owner,
+            };
+            return seed.deserialize(key).map(Some);
         }
+        let mut result = seed.deserialize(KeyDeserializer {
+            key: &key,
+            owner: self.owner,
+        });
+        if let Err(e) = &mut result {
+            e.add_step(self.step(&key, true, false));
+        }
+        self.key = key;
+        result.map(Some)
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, UclError>
     where
         V: DeserializeSeed<'de>,
     {
-        match self.entry.take() {
-            Some(entry) if !PATHS => seed.deserialize(ValueDeserializer::<PATHS>::nested(
-                entry.into_value(),
-                self.depth,
-            )),
-            Some(entry) => {
-                let multi = entry.is_multi();
-                let mut result = seed.deserialize(ValueDeserializer::<PATHS>::nested(
-                    entry.into_value(),
-                    self.depth,
-                ));
-                if let Err(e) = &mut result {
-                    e.add_step(self.step(&self.key, false, multi));
-                }
-                result
-            }
-            None => Err(<UclError as de::Error>::custom(
+        let Some(entry) = self.entry.take() else {
+            return Err(<UclError as de::Error>::custom(
                 "map value requested before its key",
-            )),
+            ));
+        };
+        let multi = PATHS && entry.is_multi();
+        let value = ValueDeserializer::<PATHS>::nested(entry.into_value(), self.depth, self.owner);
+        if !PATHS {
+            return seed.deserialize(value);
         }
+        let mut result = seed.deserialize(value);
+        if let Err(e) = &mut result {
+            e.add_step(self.step(&self.key, false, multi));
+        }
+        result
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -555,75 +622,95 @@ impl<'de, const PATHS: bool> de::MapAccess<'de> for MapAccess<PATHS> {
 
 /// Enum access: the variant name, and its data for a non-unit variant: the value of the entry
 /// `{ name = data }`, or its values if it has several.
-struct EnumAccess<const PATHS: bool> {
-    name: String,
-    data: Option<Entry>,
+struct EnumAccess<'v, const PATHS: bool> {
+    name: Str<'v>,
+    data: Option<Entry<'v>>,
     /// How many maps and sequences hold the data: the object `{ name = data }` among them.
     depth: usize,
+    owner: Owner<'v>,
 }
 
-impl<const PATHS: bool> EnumAccess<PATHS> {
-    fn unit(name: String) -> Self {
+impl<'v, const PATHS: bool> EnumAccess<'v, PATHS> {
+    fn unit(name: Str<'v>, owner: Owner<'v>) -> Self {
         Self {
             name,
             data: None,
             depth: 0,
+            owner,
         }
     }
 
-    fn data(name: String, data: Entry, depth: usize) -> Self {
+    fn data(name: Str<'v>, data: Entry<'v>, depth: usize, owner: Owner<'v>) -> Self {
         Self {
             name,
             data: Some(data),
             depth,
+            owner,
         }
     }
 }
 
-impl<'de, const PATHS: bool> de::EnumAccess<'de> for EnumAccess<PATHS> {
+impl<'de, 'v: 'de, const PATHS: bool> de::EnumAccess<'de> for EnumAccess<'v, PATHS> {
     type Error = UclError;
-    type Variant = VariantAccess<PATHS>;
+    type Variant = VariantAccess<'v, PATHS>;
 
-    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, VariantAccess<PATHS>), UclError>
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, VariantAccess<'v, PATHS>), UclError>
     where
         V: DeserializeSeed<'de>,
     {
         let multi = self.data.as_ref().is_some_and(Entry::is_multi);
         let data = self.data.map(Entry::into_value);
-        if !PATHS || data.is_none() {
-            let name = ValueDeserializer::<PATHS>::new(UclValue::String(self.name));
+        let (depth, owner) = (self.depth, self.owner);
+        let Some(data) = data else {
+            // A unit variant: the name is a string value.
+            let name = ValueDeserializer::<PATHS>::nested(Value::String(self.name), 0, owner);
             let access = VariantAccess {
-                data,
+                data: None,
                 multi,
-                depth: self.depth,
-                name: String::new(),
+                depth,
+                name: Str::new(),
+                owner,
             };
             return Ok((seed.deserialize(name)?, access));
-        }
+        };
         // The variant of `{ name = data }` is its key.
-        let variant = seed
-            .deserialize(KeyDeserializer { key: &self.name })
-            .map_err(|e| e.at_key(&self.name))?;
+        let (variant, name) = if PATHS {
+            let variant = seed
+                .deserialize(KeyDeserializer {
+                    key: &self.name,
+                    owner,
+                })
+                .map_err(|e| e.at_key(&self.name))?;
+            (variant, self.name)
+        } else {
+            let key = OwnedKey {
+                key: self.name,
+                owner,
+            };
+            (seed.deserialize(key)?, Str::new())
+        };
         let access = VariantAccess {
-            data,
+            data: Some(data),
             multi,
-            depth: self.depth,
-            name: self.name,
+            depth,
+            name,
+            owner,
         };
         Ok((variant, access))
     }
 }
 
-struct VariantAccess<const PATHS: bool> {
-    data: Option<UclValue>,
+struct VariantAccess<'v, const PATHS: bool> {
+    data: Option<Value<'v>>,
     /// The data is the values of `{ name = … }`, which has several.
     multi: bool,
     depth: usize,
     /// The key of `{ name = data }`, for the paths of the data's errors.
-    name: String,
+    name: Str<'v>,
+    owner: Owner<'v>,
 }
 
-impl<const PATHS: bool> VariantAccess<PATHS> {
+impl<const PATHS: bool> VariantAccess<'_, PATHS> {
     /// Puts the step to the data in front of the path of `result`'s error.
     fn locate<T>(&self, mut result: Result<T, UclError>) -> Result<T, UclError> {
         if PATHS && let Err(e) = &mut result {
@@ -637,7 +724,7 @@ impl<const PATHS: bool> VariantAccess<PATHS> {
     }
 }
 
-impl<'de, const PATHS: bool> de::VariantAccess<'de> for VariantAccess<PATHS> {
+impl<'de, 'v: 'de, const PATHS: bool> de::VariantAccess<'de> for VariantAccess<'v, PATHS> {
     type Error = UclError;
 
     fn unit_variant(self) -> Result<(), UclError> {
@@ -656,8 +743,8 @@ impl<'de, const PATHS: bool> de::VariantAccess<'de> for VariantAccess<PATHS> {
     {
         match self.data.take() {
             Some(value) => {
-                let result =
-                    seed.deserialize(ValueDeserializer::<PATHS>::nested(value, self.depth));
+                let value = ValueDeserializer::<PATHS>::nested(value, self.depth, self.owner);
+                let result = seed.deserialize(value);
                 self.locate(result)
             }
             None => Err(de::Error::invalid_type(
@@ -672,13 +759,19 @@ impl<'de, const PATHS: bool> de::VariantAccess<'de> for VariantAccess<PATHS> {
         V: Visitor<'de>,
     {
         let result = match self.data.take() {
-            Some(UclValue::Array(array)) => {
-                ValueDeserializer::<PATHS>::visit_array(array, self.depth, visitor, false)
-            }
+            Some(Value::Array(array)) => ValueDeserializer::<PATHS>::visit_array(
+                array,
+                self.depth,
+                visitor,
+                (false, self.owner),
+            ),
             // A single value is a tuple with one element
-            Some(value) => {
-                ValueDeserializer::<PATHS>::visit_array(vec![value], self.depth, visitor, true)
-            }
+            Some(value) => ValueDeserializer::<PATHS>::visit_array(
+                vec![value].into(),
+                self.depth,
+                visitor,
+                (true, self.owner),
+            ),
             None => {
                 return Err(de::Error::invalid_type(
                     Unexpected::UnitVariant,
@@ -698,9 +791,12 @@ impl<'de, const PATHS: bool> de::VariantAccess<'de> for VariantAccess<PATHS> {
         V: Visitor<'de>,
     {
         let result = match self.data.take() {
-            Some(UclValue::Object(object)) => {
-                ValueDeserializer::<PATHS>::visit_object(object, self.depth, visitor, Keys::Object)
-            }
+            Some(Value::Object(object)) => ValueDeserializer::<PATHS>::visit_object(
+                object,
+                self.depth,
+                visitor,
+                (Keys::Object, self.owner),
+            ),
             Some(value) => Err(de::Error::invalid_type(
                 unexpected(&value),
                 &"struct variant",
@@ -730,22 +826,6 @@ macro_rules! forward_to {
     };
 }
 
-/// Deserializer for an object key. A key is a string, but a target that wants an integer, a
-/// float, a `bool` or a `char` gets the key's text parsed as one, so that maps such as
-/// `BTreeMap<u32, T>` read back what [`crate::ser`] writes for them.
-///
-/// The key is lent, not given: the map access keeps it for the path of an error in its value.
-/// A target that asks for an owned string gets a copy.
-struct KeyDeserializer<'a> {
-    key: &'a str,
-}
-
-impl KeyDeserializer<'_> {
-    fn value(self) -> ValueDeserializer<false> {
-        ValueDeserializer::<false>::new(UclValue::String(self.key.to_owned()))
-    }
-}
-
 /// Parses the key with `$ty` and visits the result with `$visit`.
 macro_rules! parse_key {
     ($($method:ident => $ty:ty, $visit:ident;)*) => {
@@ -760,23 +840,52 @@ macro_rules! parse_key {
     };
 }
 
-impl<'de> de::Deserializer<'de> for KeyDeserializer<'_> {
+/// Deserializer for an object key. A key is a string, but a target that wants an integer, a
+/// float, a `bool` or a `char` gets the key's text parsed as one, so that maps such as
+/// `BTreeMap<u32, T>` read back what [`crate::ser`] writes for them.
+///
+/// The key is lent, not given: the map access keeps it for the path of an error in its value.
+/// A target that asks for an owned string gets a copy; one that asks for a `&str` gets the key
+/// borrowed from the text when it is.
+struct KeyDeserializer<'k, 'v> {
+    key: &'k Str<'v>,
+    owner: Owner<'v>,
+}
+
+impl<'v> KeyDeserializer<'_, 'v> {
+    fn value(self) -> ValueDeserializer<'v, false> {
+        ValueDeserializer::nested(Value::String(self.key.clone()), 0, self.owner)
+    }
+
+    /// The key for a target that asks for a `&str`: borrowed when it is borrowed from the text.
+    fn visit_key<'de, V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError>
+    where
+        'v: 'de,
+    {
+        match self.key.as_borrowed() {
+            Some(text) => visitor.visit_borrowed_str(text),
+            None => visitor.visit_str(self.key),
+        }
+    }
+}
+
+impl<'de, 'v: 'de> de::Deserializer<'de> for KeyDeserializer<'_, 'v> {
     type Error = UclError;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
-        visitor.visit_str(self.key)
+        self.visit_key(visitor)
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
-        visitor.visit_str(self.key)
+        self.visit_key(visitor)
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
-        visitor.visit_string(self.key.to_owned())
+        visitor.visit_string(self.key.to_string())
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
-        visitor.visit_str(self.key)
+        self.visit_key(visitor)
     }
 
     parse_key! {
@@ -824,21 +933,46 @@ impl<'de> de::Deserializer<'de> for KeyDeserializer<'_> {
 }
 
 /// [`KeyDeserializer`] for a key given away: the map access without paths does not keep keys.
-struct OwnedKey {
-    key: String,
+struct OwnedKey<'v> {
+    key: Str<'v>,
+    owner: Owner<'v>,
 }
 
-impl OwnedKey {
-    fn value(self) -> ValueDeserializer<false> {
-        ValueDeserializer::new(UclValue::String(self.key))
+impl<'v> OwnedKey<'v> {
+    fn value(self) -> ValueDeserializer<'v, false> {
+        ValueDeserializer::nested(Value::String(self.key), 0, self.owner)
+    }
+
+    /// The key for a target that asks for a `&str` or an identifier: borrowed when it is
+    /// borrowed from the text, and given away otherwise.
+    fn visit_key<'de, V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError>
+    where
+        'v: 'de,
+    {
+        match self.key.as_borrowed() {
+            Some(text) => visitor.visit_borrowed_str(text),
+            None => visitor.visit_string(self.key.into_string()),
+        }
     }
 }
 
-impl<'de> de::Deserializer<'de> for OwnedKey {
+impl<'de, 'v: 'de> de::Deserializer<'de> for OwnedKey<'v> {
     type Error = UclError;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
-        visitor.visit_string(self.key)
+        self.visit_key(visitor)
+    }
+
+    fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
+        self.visit_key(visitor)
+    }
+
+    fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
+        visitor.visit_string(self.key.into_string())
+    }
+
+    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, UclError> {
+        self.visit_key(visitor)
     }
 
     parse_key! {
@@ -871,8 +1005,6 @@ impl<'de> de::Deserializer<'de> for OwnedKey {
 
     forward_to! { value;
         deserialize_char()
-        deserialize_str()
-        deserialize_string()
         deserialize_bytes()
         deserialize_byte_buf()
         deserialize_unit()
@@ -883,7 +1015,6 @@ impl<'de> de::Deserializer<'de> for OwnedKey {
         deserialize_map()
         deserialize_struct(name: &'static str, fields: &'static [&'static str])
         deserialize_enum(name: &'static str, variants: &'static [&'static str])
-        deserialize_identifier()
         deserialize_ignored_any()
     }
 }
@@ -961,7 +1092,7 @@ impl<'de> Deserialize<'de> for UclObject {
     /// A [`UclValue`] that must be an object.
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match UclValue::deserialize(deserializer)? {
-            UclValue::Object(object) => Ok(object),
+            Value::Object(object) => Ok(object),
             other => Err(de::Error::invalid_type(unexpected(&other), &"a UCL object")),
         }
     }
@@ -978,56 +1109,56 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_bool<E: de::Error>(self, v: bool) -> Result<UclValue, E> {
-        Ok(UclValue::Boolean(v))
+        Ok(Value::Boolean(v))
     }
 
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<UclValue, E> {
-        Ok(UclValue::Integer(v))
+        Ok(Value::Integer(v))
     }
 
     fn visit_i128<E: de::Error>(self, v: i128) -> Result<UclValue, E> {
         i64::try_from(v)
-            .map(UclValue::Integer)
+            .map(Value::Integer)
             .map_err(|_| E::invalid_value(Unexpected::Other("128-bit integer"), &self))
     }
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<UclValue, E> {
         i64::try_from(v)
-            .map(UclValue::Integer)
+            .map(Value::Integer)
             .map_err(|_| E::invalid_value(Unexpected::Unsigned(v), &"an integer up to i64::MAX"))
     }
 
     fn visit_u128<E: de::Error>(self, v: u128) -> Result<UclValue, E> {
         i64::try_from(v)
-            .map(UclValue::Integer)
+            .map(Value::Integer)
             .map_err(|_| E::invalid_value(Unexpected::Other("128-bit integer"), &self))
     }
 
     fn visit_f64<E: de::Error>(self, v: f64) -> Result<UclValue, E> {
-        Ok(UclValue::Float(v))
+        Ok(Value::Float(v))
     }
 
     fn visit_str<E: de::Error>(self, v: &str) -> Result<UclValue, E> {
-        Ok(UclValue::String(v.to_owned()))
+        Ok(Value::String(v.into()))
     }
 
     fn visit_string<E: de::Error>(self, v: String) -> Result<UclValue, E> {
-        Ok(UclValue::String(v))
+        Ok(Value::String(v.into()))
     }
 
     fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<UclValue, E> {
         match std::str::from_utf8(v) {
-            Ok(s) => Ok(UclValue::String(s.to_owned())),
+            Ok(s) => Ok(Value::String(s.into())),
             Err(_) => Err(E::invalid_value(Unexpected::Bytes(v), &"UTF-8 text")),
         }
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<UclValue, E> {
-        Ok(UclValue::Null)
+        Ok(Value::Null)
     }
 
     fn visit_none<E: de::Error>(self) -> Result<UclValue, E> {
-        Ok(UclValue::Null)
+        Ok(Value::Null)
     }
 
     fn visit_some<D: de::Deserializer<'de>>(self, deserializer: D) -> Result<UclValue, D::Error> {
@@ -1046,7 +1177,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
         while let Some(item) = seq.next_element()? {
             items.push(item);
         }
-        Ok(UclValue::Array(items))
+        Ok(Value::Array(items.into()))
     }
 
     fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<UclValue, A::Error> {
@@ -1054,7 +1185,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
         while let Some((key, value)) = map.next_entry::<String, UclValue>()? {
             object.append(key, value);
         }
-        Ok(UclValue::Object(object))
+        Ok(Value::Object(object))
     }
 
     /// The crate's deserializer answers with the variant [`marker::TREE`] and the value in

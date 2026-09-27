@@ -84,8 +84,17 @@ impl<'a> Expander<'a> {
     /// If no reference is replaced, the text is returned exactly as written, `$$` included
     /// (spec §7.5). Otherwise `$$` stands for `$`.
     pub(crate) fn expand(&mut self, text: Vec<u8>) -> Vec<u8> {
+        match self.expand_bytes(&text) {
+            Some(expanded) => expanded,
+            None => text,
+        }
+    }
+
+    /// [`Expander::expand`] of `text`, or `None` when no reference was replaced, so that the
+    /// text stays exactly as written (clean-room work item C13: it can then be borrowed).
+    pub(crate) fn expand_bytes(&mut self, text: &[u8]) -> Option<Vec<u8>> {
         if !self.enabled || !text.contains(&b'$') {
-            return text;
+            return None;
         }
         let mut out = Vec::with_capacity(text.len());
         let mut replaced = false;
@@ -151,7 +160,7 @@ impl<'a> Expander<'a> {
                 }
             }
         }
-        if replaced { out } else { text }
+        replaced.then_some(out)
     }
 
     /// A registered variable whose name equals `name`, or the handler's answer (spec §7.3, §7.7).
