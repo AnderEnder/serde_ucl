@@ -46,28 +46,98 @@ fn simple_escape(b: u8) -> u8 {
     }
 }
 
+/// The classes of bytes in a double-quoted string ([`DOUBLE_QUOTED`]).
+const STOP: u8 = 1;
+const NEEDS_QUOTING: u8 = 2;
+const DOLLAR: u8 = 4;
+
+/// For each byte, its classes in a double-quoted string: [`STOP`] for a byte that ends a run of
+/// plain bytes (`"`, `\\` and the control bytes up to 0x1E), [`NEEDS_QUOTING`] for a byte that
+/// makes a key need quoting, and [`DOLLAR`] for `$`. One lookup tests a byte for every class, the
+/// idea of logos's byte-class tables (`logos-codegen`, `src/generator/tables.rs`); clean-room
+/// work item C11.
+static DOUBLE_QUOTED: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut b = 0;
+    while b < 256 {
+        let byte = b as u8;
+        let mut class = 0;
+        if byte == b'"' || byte == b'\\' || byte <= 0x1E {
+            class |= STOP;
+        }
+        if crate::emit::byte_needs_quoting(byte) {
+            class |= NEEDS_QUOTING;
+        }
+        if byte == b'$' {
+            class |= DOLLAR;
+        }
+        table[b] = class;
+        b += 1;
+    }
+    table
+};
+
+/// A double-quoted string read by [`double_quoted_scan`].
+#[derive(Debug)]
+pub(crate) struct DoubleQuoted {
+    /// The decoded bytes.
+    pub(crate) bytes: Vec<u8>,
+    /// The offset just after the closing quote.
+    pub(crate) end: usize,
+    /// The string has a backslash escape.
+    pub(crate) escaped: bool,
+    /// Outside its escapes, the string has a byte that makes a key need quoting
+    /// ([`crate::emit::key_needs_quoting`]). Without escapes, that is whether the decoded bytes
+    /// need quoting as a key.
+    pub(crate) needs_quoting: bool,
+    /// Outside its escapes, the string has a `$`.
+    pub(crate) dollar: bool,
+}
+
 /// Reads the double-quoted string whose opening quote is at `src[start]` (spec §6.1). Returns
 /// the decoded bytes and the offset just after the closing quote.
+pub(crate) fn double_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
+    double_quoted_scan(src, start).map(|q| (q.bytes, q.end))
+}
+
+/// [`double_quoted`], with what the reading saw on the way, so that the caller does not read the
+/// string again for it.
 ///
 /// Bytes that need no decoding are copied a run at a time, up to the next `"`, `\\` or control
 /// byte (the idea of `serde_json`'s `SliceRead::parse_str_bytes`, `src/read.rs`, and of
 /// `toml_edit`'s `basic_chars`, `src/parser/strings.rs`; clean-room work item C11).
-pub(crate) fn double_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
+pub(crate) fn double_quoted_scan(src: &[u8], start: usize) -> Result<DoubleQuoted, Error> {
     let mut out = Vec::new();
     let mut i = start + 1;
+    let mut seen = 0u8;
+    let mut escaped = false;
     loop {
-        let run = src[i..]
-            .iter()
-            .position(|&b| b == b'"' || b == b'\\' || b <= 0x1E)
-            .map_or(src.len(), |n| i + n);
+        let mut run = i;
+        while let Some(&b) = src.get(run) {
+            let class = DOUBLE_QUOTED[usize::from(b)];
+            if class & STOP != 0 {
+                break;
+            }
+            seen |= class;
+            run += 1;
+        }
         out.extend_from_slice(&src[i..run]);
         i = run;
         let Some(&b) = src.get(i) else {
             return Err(error(src, start, ErrorKind::UnterminatedString));
         };
         match b {
-            b'"' => return Ok((out, i + 1)),
+            b'"' => {
+                return Ok(DoubleQuoted {
+                    bytes: out,
+                    end: i + 1,
+                    escaped,
+                    needs_quoting: seen & NEEDS_QUOTING != 0,
+                    dollar: seen & DOLLAR != 0,
+                });
+            }
             b'\\' => {
+                escaped = true;
                 let Some(&next) = src.get(i + 1) else {
                     return Err(error(src, start, ErrorKind::UnterminatedString));
                 };
@@ -343,6 +413,30 @@ mod tests {
         double_quoted(s.as_bytes(), 0)
             .map(|(b, _)| String::from_utf8_lossy(&b).into_owned())
             .map_err(|e| e.kind().clone())
+    }
+
+    #[test]
+    fn double_quoted_byte_classes() {
+        for b in 0..=255u8 {
+            let class = DOUBLE_QUOTED[usize::from(b)];
+            assert_eq!(
+                class & STOP != 0,
+                b == b'"' || b == b'\\' || b <= 0x1E,
+                "{b:#x}"
+            );
+            assert_eq!(class & DOLLAR != 0, b == b'$', "{b:#x}");
+            if b.is_ascii() {
+                let key = char::from(b).to_string();
+                let needs = crate::emit::key_needs_quoting(&key);
+                assert_eq!(class & NEEDS_QUOTING != 0, needs, "{b:#x}");
+            } else {
+                assert_eq!(class & NEEDS_QUOTING, 0, "{b:#x}");
+            }
+        }
+        let read = double_quoted_scan(br#""a b$\t""#, 0).unwrap();
+        assert!(read.escaped && read.needs_quoting && read.dollar);
+        let read = double_quoted_scan(br#""ab""#, 0).unwrap();
+        assert!(!read.escaped && !read.needs_quoting && !read.dollar);
     }
 
     #[test]

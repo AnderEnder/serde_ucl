@@ -666,6 +666,15 @@ pub(super) fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
 }
 
+/// The extent of an unquoted value ([`Core::unquoted_extent`]).
+struct Extent {
+    end: usize,
+    /// The value has a backslash.
+    backslash: bool,
+    /// The value has a `$` that is not the byte after a backslash.
+    dollar: bool,
+}
+
 /// The keywords of §4.5, compared with the whole unquoted value.
 fn keyword(raw: &[u8]) -> Option<UclValue> {
     let is = |word: &str| raw.eq_ignore_ascii_case(word.as_bytes());
@@ -2607,23 +2616,26 @@ impl Core<'_, '_, '_, '_> {
     fn read_key(&mut self) -> Result<Key, Error> {
         let at = self.pos;
         let lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
+        // Whether a quoted key without escapes needs quoting, as its reading saw.
+        let mut plain_needs_quoting = false;
         let (bytes, quoted, escaped) = match self.peek() {
             Some(b'"') => {
-                let (bytes, end) = string::double_quoted(self.src, at)?;
-                if bytes.is_empty() {
+                let read = string::double_quoted_scan(self.src, at)?;
+                if read.bytes.is_empty() {
                     return Err(self.error(ErrorKind::EmptyKey, at));
                 }
+                let end = read.end;
                 self.pos = end;
-                let escaped = self.src[at + 1..end - 1].contains(&b'\\');
+                plain_needs_quoting = read.needs_quoting;
                 if lowercase {
                     // §12.1, *Quirk*: the key is lowercased as written, then its escapes are
                     // decoded. A `\U` that becomes `\u` is decoded like an unquoted value's
                     // (§4.8), as the oracle does (QUESTIONS.md #20).
                     let mut raw = self.src[at + 1..end - 1].to_vec();
                     raw.make_ascii_lowercase();
-                    (string::decode_unquoted(&raw).0, true, escaped)
+                    (string::decode_unquoted(&raw).0, true, read.escaped)
                 } else {
-                    (bytes, true, escaped)
+                    (read.bytes, true, read.escaped)
                 }
             }
             Some(b'\'') => return Err(self.error(ErrorKind::SingleQuotedKey, at)),
@@ -2656,8 +2668,15 @@ impl Core<'_, '_, '_, '_> {
         if lowercase && !quoted {
             name.make_ascii_lowercase();
         }
-        // Fact 3 of spec §10.1. The bytes of a bare key are none of those that need quoting.
-        let needs_quoting = quoted && key_needs_quoting(&name);
+        // Fact 3 of spec §10.1. The bytes of a bare key are none of those that need quoting. A
+        // quoted key without escapes is its bytes as written, lowercasing aside, which changes
+        // no byte that needs quoting.
+        let needs_quoting = match (quoted, escaped) {
+            (false, _) => false,
+            (true, false) => plain_needs_quoting,
+            (true, true) => key_needs_quoting(&name),
+        };
+        debug_assert_eq!(needs_quoting, quoted && key_needs_quoting(&name));
         debug_assert!(
             quoted || !key_needs_quoting(&name),
             "a bare key never needs quoting"
@@ -2950,9 +2969,14 @@ impl Core<'_, '_, '_, '_> {
         let at = self.pos;
         match self.peek() {
             Some(b'"') => {
-                let (bytes, end) = string::double_quoted(self.src, at)?;
-                self.pos = end;
-                let bytes = self.expander.expand(bytes);
+                let read = string::double_quoted_scan(self.src, at)?;
+                self.pos = read.end;
+                // Only a `$` as written, or one an escape made, can start a reference.
+                let bytes = if read.dollar || read.escaped {
+                    self.expander.expand(read.bytes)
+                } else {
+                    read.bytes
+                };
                 Ok((
                     UclValue::String(self.text(bytes, at)?),
                     true,
@@ -3012,7 +3036,11 @@ impl Core<'_, '_, '_, '_> {
                 Number::Text => {}
             }
         }
-        let end = self.unquoted_extent(start);
+        let Extent {
+            end,
+            backslash,
+            dollar,
+        } = self.unquoted_extent(start);
         self.pos = end;
         let mut trimmed = end;
         while trimmed > start && matches!(self.src[trimmed - 1], b' ' | b'\t') {
@@ -3022,11 +3050,19 @@ impl Core<'_, '_, '_, '_> {
         if raw.is_empty() {
             return Err(self.error(ErrorKind::MissingValue, start));
         }
-        if let Some(value) = keyword(raw) {
+        // Every keyword has two to five letters.
+        if (2..=5).contains(&raw.len())
+            && let Some(value) = keyword(raw)
+        {
             return Ok((value, true));
         }
-        // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*).
-        let (bytes, expand) = string::decode_unquoted(raw);
+        // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*). Without
+        // a backslash there is nothing to decode, and every `$` counts.
+        let (bytes, expand) = if backslash {
+            string::decode_unquoted(raw)
+        } else {
+            (raw.to_vec(), dollar)
+        };
         let bytes = if expand {
             self.expander.expand(bytes)
         } else {
@@ -3037,12 +3073,15 @@ impl Core<'_, '_, '_, '_> {
 
     /// The end of the unquoted value starting at `start` (§4.1, §4.2): the first line break,
     /// NUL, `,`, `;`, `#`, `/*`, or `}` or `]` without a match earlier in the value. A backslash
-    /// takes the byte after it into the value.
-    fn unquoted_extent(&self, start: usize) -> usize {
+    /// takes the byte after it into the value. Also whether the value has a backslash, and a `$`
+    /// that does not follow one, so that the caller need not read it again for them.
+    fn unquoted_extent(&self, start: usize) -> Extent {
         let src = self.src;
         let mut i = start;
         let mut braces = 0usize;
         let mut brackets = 0usize;
+        let mut backslash = false;
+        let mut dollar = false;
         while let Some(&b) = src.get(i) {
             match b {
                 b'\n' | b'\r' | 0 | b',' | b';' | b'#' => break,
@@ -3053,11 +3092,21 @@ impl Core<'_, '_, '_, '_> {
                 b']' if brackets == 0 => break,
                 b'}' => braces -= 1,
                 b']' => brackets -= 1,
-                b'\\' if i + 1 < src.len() => i += 1,
+                b'\\' => {
+                    backslash = true;
+                    if i + 1 < src.len() {
+                        i += 1;
+                    }
+                }
+                b'$' => dollar = true,
                 _ => {}
             }
             i += 1;
         }
-        i
+        Extent {
+            end: i,
+            backslash,
+            dollar,
+        }
     }
 }
