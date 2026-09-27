@@ -267,3 +267,35 @@ from the same text. The spec side reruns the libucl comparison after the work it
    maintenance, the Rust version it needs, what it adds to compile time and size, and what it pulls
    in. For `unsafe` code, it covers the invariants it relies on and how they would be checked
    (tests, Miri, the fuzzer).
+
+## C12 — Value model, small documents and compile-time work (owner request of 2026-09-27)
+
+After C11, the owner chose the candidates of the C11 report (`target/perf/C11-report.md`, §5)
+that C11 item 7 allows, the fixed cost of a small parse, and work that can move to compile time.
+The hasher stays the standard library's: `foldhash` is not approved.
+
+1. Output facts are recorded without copying keys or looking them up by name, for example by
+   entry position or on the values (report §5.1: 14 % of `parse/config/1000` and 21 % of
+   `parse/nested-mixed-1000`).
+2. Keys without one allocation each, for example short keys stored inline (report §5.2).
+3. Small objects without a hash table (report §5.3). Large objects stay linear
+   (`tests/scaling.rs`).
+4. Small documents: the fixed cost of a parse (report §5.4). A three-entry document makes 19
+   allocations, 13 of them fixed setup, and takes 0.99 µs against `serde_json`'s 81 ns.
+5. Compile-time work (owner question):
+   - byte-class tables built at compile time, for the scans that do not use one yet;
+   - lookups resolved at compile time, such as keywords and suffixes;
+   - hot paths specialised through const generics on settings that stay fixed for a whole
+     parse: recording facts, saving comments, lowercasing keys.
+
+   Each is kept only where it measures a gain, and the report records its cost in code size and
+   compile time.
+6. Each change is measured on its own and committed only if it gains, with the criterion result
+   before and after in its commit message. The report, `target/perf/C12-report.md`, compares
+   against the start of C12 and lists what was tried and reverted.
+7. C11 items 4, 5, 7 and 8 still hold:
+   - behaviour and output do not change;
+   - the serde interface stays, and other public API may change, marked `!` and listed under
+     `## Unreleased`;
+   - new dependencies and `unsafe` code are proposals only;
+   - the checks of item 4, the fuzz run included, pass after the last change.
