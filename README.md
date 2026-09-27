@@ -29,7 +29,7 @@ Release 0.3.0 renamed the package, the library and the repository to `serde_ucl`
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [UCL as libucl reads it](#ucl-as-libucl-reads-it)
+- [UCL syntax pitfalls](#ucl-syntax-pitfalls)
 - [Compatibility with libucl](#compatibility-with-libucl)
 - [Reading](#reading)
 - [The value tree](#the-value-tree)
@@ -112,30 +112,34 @@ tls {
 }
 ```
 
-## UCL as libucl reads it
+## UCL syntax pitfalls
 
-libucl's reading of UCL differs in places from what some UCL guides describe. The main rules
-(`docs/spec/` has all of them):
+The crate reads UCL exactly as libucl does, including rules that often surprise people who know
+UCL from other guides or formats. The main ones (`docs/spec/` has all of them):
 
 - An entry is a key, an optional `=` or `:`, and a value. It ends at a line break, `;` or `,`.
   `key value` works as in nginx.
 - Comments are `#` and `/* … */`, which nest. `//` does not start a comment.
-- An unquoted value runs to the end of the line, `;`, `,`, `#` or `/*`, spaces included:
-  `k = 1 2 3` is the string `"1 2 3"`.
+- An unquoted value runs to the end of the line, `;`, `,`, `#` or `/*`, with the spaces inside
+  it: `k = 1 2 3` is the string `"1 2 3"`. Spaces at its end are dropped.
 - `true`, `yes`, `on` and `false`, `no`, `off` are booleans in any letter case. `null`, `nan` and
   `inf` are recognised in lowercase only.
 - Numbers take the multipliers `k`, `m`, `g` (powers of 1000) and `kb`, `mb`, `gb` (powers of
   1024), and the time suffixes `ms`, `s`, `min`, `h`, `d`, `w` and `y`. `m` means mega. A time is
   a value type of its own, a number of seconds.
 - A suffix must be followed directly by a line break, `;`, `,`, `#`, `}`, `]` or the end of input.
-  Otherwise the value is a string: in `timeout = 30s # comment` the value is `"30s"`.
-- Double-quoted strings take escapes and expand variables. Single-quoted strings are literal.
-  Heredocs are written `<<EOF` … `EOF`, with an uppercase terminator.
+  Otherwise the value is a string: in `timeout = 30s # comment` the value is `"30s"`. A number
+  without a suffix may have spaces before a `#` (`n = 1 # comment` is `1`), but any number
+  followed by `/*` is a string, with or without spaces between: `n = 1 /* comment */` is `"1"`.
+- Double-quoted strings take escapes; single-quoted strings are literal. Heredocs are written
+  `<<EOF` … `EOF`, with an uppercase terminator.
+- Variables (`$NAME`, `${NAME}`) are expanded in double-quoted strings and in unquoted values, not
+  in single-quoted strings. Expansion always gives a string, an unknown variable is left as
+  written, and there is no `${NAME:-default}` form.
 - `key name { … }` nests: `server web { port = 80 }` is `server { web { port = 80 } }`.
 - A repeated key keeps every value (libucl's *implicit array*). serde reads the values as a
   sequence, so the field must be a `Vec`, or the parser must keep one value
   (`DuplicateStrategy::Rewrite` or priorities).
-- Variable expansion always gives a string. There is no `${NAME:-default}` form.
 
 ## Compatibility with libucl
 
