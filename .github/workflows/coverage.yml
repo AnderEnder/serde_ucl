@@ -26,7 +26,7 @@ jobs:
       # Secrets cannot be tested in `if:`; an unset secret is an empty string here.
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -54,14 +54,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: target/coverage/
           if-no-files-found: ignore
       - name: Upload to Codecov
         if: env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ env.CODECOV_TOKEN }}
           files: target/coverage/lcov.info
