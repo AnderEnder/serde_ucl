@@ -30,6 +30,7 @@ use crate::value::{
 };
 use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 use std::path::Path;
 
 /// The settings of one input unit.
@@ -677,7 +678,13 @@ struct Extent {
     dollar: bool,
 }
 
-/// The keywords of §4.5, compared with the whole unquoted value.
+/// The lengths of the keywords of §4.5: [`Core::unquoted`] calls [`keyword`] only for a value of
+/// such a length. It must cover every word `keyword` accepts; `tests::keyword_lengths` checks
+/// the words of §4.5.
+const KEYWORD_LEN: RangeInclusive<usize> = 2..=5;
+
+/// The keywords of §4.5, compared with the whole unquoted value. A word added here also goes in
+/// `tests::KEYWORDS`, so that the test checks [`KEYWORD_LEN`] covers it.
 fn keyword(raw: &[u8]) -> Option<UclValue> {
     let is = |word: &str| raw.eq_ignore_ascii_case(word.as_bytes());
     if is("true") || is("yes") || is("on") {
@@ -3077,8 +3084,8 @@ impl Core<'_, '_, '_, '_> {
         if raw.is_empty() {
             return Err(self.error(ErrorKind::MissingValue, start));
         }
-        // Every keyword has two to five letters.
-        if (2..=5).contains(&raw.len())
+        // Other lengths cannot be a keyword.
+        if KEYWORD_LEN.contains(&raw.len())
             && let Some(value) = keyword(raw)
         {
             return Ok((value, true));
@@ -3141,6 +3148,32 @@ impl Core<'_, '_, '_, '_> {
             end: i,
             backslash,
             dollar,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The keywords of §4.5, as `keyword` accepts them.
+    const KEYWORDS: [&str; 9] = [
+        "true", "yes", "on", "false", "no", "off", "null", "nan", "inf",
+    ];
+
+    /// [`Core::unquoted`] skips [`keyword`] for a value whose length is outside [`KEYWORD_LEN`],
+    /// so a keyword outside it would never match.
+    #[test]
+    fn keyword_lengths() {
+        for word in KEYWORDS {
+            assert!(
+                keyword(word.as_bytes()).is_some(),
+                "{word:?} is not a keyword"
+            );
+            assert!(
+                KEYWORD_LEN.contains(&word.len()),
+                "{word:?} is outside KEYWORD_LEN {KEYWORD_LEN:?}"
+            );
         }
     }
 }
