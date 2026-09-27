@@ -8,10 +8,64 @@
 //! when there are more (clean-room work item C11). A node without children allocates nothing.
 
 use super::PathSegment;
+use crate::value::Str;
 use std::collections::HashMap;
 
 /// The most keyed children, and the most element children, kept in a vector.
 const SMALL: usize = 8;
+
+/// A key as the children of a node are looked up by: a `str`, or a [`Str`], whose bytes are
+/// compared without checking them again (clean-room work item C13).
+pub(crate) trait KeyRef {
+    fn bytes(&self) -> &[u8];
+    fn to_key(&self) -> Str;
+}
+
+impl KeyRef for str {
+    fn bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
+
+    fn to_key(&self) -> Str {
+        Str::from(self)
+    }
+}
+
+impl KeyRef for String {
+    fn bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
+
+    fn to_key(&self) -> Str {
+        Str::from(self)
+    }
+}
+
+impl KeyRef for Str {
+    fn bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
+
+    fn to_key(&self) -> Str {
+        self.clone()
+    }
+}
+
+/// A key of the map of a node with many keyed children, which is looked up by the key's bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ByteKey(Str);
+
+impl std::hash::Hash for ByteKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.as_bytes().hash(state);
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for ByteKey {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
 
 /// The children of a node, identified by the caller's node numbers.
 #[derive(Debug, Clone, Default)]
@@ -24,9 +78,9 @@ pub(crate) struct Children {
 #[derive(Debug, Clone)]
 enum Keyed {
     /// The node of value `index` of entry `key` is `child` in an item `(key, index, child)`.
-    Small(Vec<(String, usize, usize)>),
+    Small(Vec<(Str, usize, usize)>),
     /// The node of value `index` of entry `key` is `map[key][index]`.
-    Large(HashMap<String, Vec<Option<usize>>>),
+    Large(HashMap<ByteKey, Vec<Option<usize>>>),
 }
 
 impl Default for Keyed {
@@ -51,13 +105,13 @@ impl Default for Elements {
 
 impl Children {
     /// The node of value `index` of entry `key`.
-    pub(crate) fn key(&self, key: &str, index: usize) -> Option<usize> {
+    pub(crate) fn key<K: KeyRef + ?Sized>(&self, key: &K, index: usize) -> Option<usize> {
         match &self.keys {
             Keyed::Small(items) => items
                 .iter()
-                .find(|(k, i, _)| *i == index && k == key)
+                .find(|(k, i, _)| *i == index && k.as_bytes() == key.bytes())
                 .map(|&(_, _, child)| child),
-            Keyed::Large(map) => map.get(key)?.get(index).copied().flatten(),
+            Keyed::Large(map) => map.get(key.bytes())?.get(index).copied().flatten(),
         }
     }
 
@@ -74,7 +128,7 @@ impl Children {
 
     pub(crate) fn get(&self, segment: &PathSegment) -> Option<usize> {
         match segment {
-            PathSegment::Key { key, index } => self.key(key, *index),
+            PathSegment::Key { key, index } => self.key(key.as_str(), *index),
             PathSegment::Index(index) => self.element(*index),
         }
     }
@@ -82,33 +136,36 @@ impl Children {
     /// Makes `child` the node of `segment`.
     pub(crate) fn insert(&mut self, segment: &PathSegment, child: usize) {
         match segment {
-            PathSegment::Key { key, index } => self.insert_key(key, *index, child),
+            PathSegment::Key { key, index } => self.insert_key(key.as_str(), *index, child),
             PathSegment::Index(index) => self.insert_element(*index, child),
         }
     }
 
     /// Makes `child` the node of value `index` of entry `key`. The key is copied only when the
     /// value has no node yet.
-    pub(crate) fn insert_key(&mut self, key: &str, index: usize, child: usize) {
+    pub(crate) fn insert_key<K: KeyRef + ?Sized>(&mut self, key: &K, index: usize, child: usize) {
         match &mut self.keys {
             Keyed::Small(items) => {
-                if let Some(item) = items.iter_mut().find(|(k, i, _)| *i == index && k == key) {
+                if let Some(item) = items
+                    .iter_mut()
+                    .find(|(k, i, _)| *i == index && k.as_bytes() == key.bytes())
+                {
                     item.2 = child;
                 } else if items.len() < SMALL {
-                    items.push((key.to_owned(), index, child));
+                    items.push((key.to_key(), index, child));
                 } else {
-                    let mut map: HashMap<String, Vec<Option<usize>>> = HashMap::new();
+                    let mut map: HashMap<ByteKey, Vec<Option<usize>>> = HashMap::new();
                     for (key, index, child) in items.drain(..) {
-                        set_value(map.entry(key).or_default(), index, child);
+                        set_value(map.entry(ByteKey(key)).or_default(), index, child);
                     }
-                    set_value(map.entry(key.to_owned()).or_default(), index, child);
+                    set_value(map.entry(ByteKey(key.to_key())).or_default(), index, child);
                     self.keys = Keyed::Large(map);
                 }
             }
             Keyed::Large(map) => {
-                let values = match map.get_mut(key) {
+                let values = match map.get_mut(key.bytes()) {
                     Some(values) => values,
-                    None => map.entry(key.to_owned()).or_default(),
+                    None => map.entry(ByteKey(key.to_key())).or_default(),
                 };
                 set_value(values, index, child);
             }
@@ -139,10 +196,12 @@ impl Children {
     pub(crate) fn take_value(&mut self, key: &str, index: usize) -> Option<usize> {
         match &mut self.keys {
             Keyed::Small(items) => {
-                let at = items.iter().position(|(k, i, _)| *i == index && k == key)?;
+                let at = items
+                    .iter()
+                    .position(|(k, i, _)| *i == index && k.as_bytes() == key.as_bytes())?;
                 Some(items.remove(at).2)
             }
-            Keyed::Large(map) => map.get_mut(key)?.get_mut(index)?.take(),
+            Keyed::Large(map) => map.get_mut(key.as_bytes())?.get_mut(index)?.take(),
         }
     }
 
@@ -153,7 +212,7 @@ impl Children {
             Keyed::Small(items) => {
                 let mut taken = Vec::new();
                 items.retain(|(k, index, child)| {
-                    let keep = k != key;
+                    let keep = k.as_bytes() != key.as_bytes();
                     if !keep {
                         taken.push((*index, *child));
                     }
@@ -162,7 +221,7 @@ impl Children {
                 taken.sort_unstable();
                 taken
             }
-            Keyed::Large(map) => map.remove(key).map_or_else(Vec::new, |values| {
+            Keyed::Large(map) => map.remove(key.as_bytes()).map_or_else(Vec::new, |values| {
                 values
                     .into_iter()
                     .enumerate()
@@ -173,22 +232,23 @@ impl Children {
     }
 
     /// Every child with its segment, in no particular order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (PathSegment, usize)> + '_ {
+    #[cfg(test)]
+    fn iter(&self) -> impl Iterator<Item = (PathSegment, usize)> + '_ {
         let mut all = Vec::new();
         match &self.keys {
             Keyed::Small(items) => all.extend(items.iter().map(|(key, index, child)| {
                 let segment = PathSegment::Key {
-                    key: key.clone(),
+                    key: key.to_string(),
                     index: *index,
                 };
                 (segment, *child)
             })),
             Keyed::Large(map) => {
-                for (key, values) in map {
+                for (ByteKey(key), values) in map {
                     for (index, child) in values.iter().enumerate() {
                         if let Some(child) = child {
                             let segment = PathSegment::Key {
-                                key: key.clone(),
+                                key: key.to_string(),
                                 index,
                             };
                             all.push((segment, *child));

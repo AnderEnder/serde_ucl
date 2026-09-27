@@ -310,3 +310,26 @@ The hasher stays the standard library's: `foldhash` is not approved.
    copy, as with `serde_json`. That is a new capability of the serde interface, so it is a
    proposal for the owner. So is any change to which visitor methods owned targets receive. For
    owned targets, results stay exactly as they are.
+
+## C13 — C12's open items (owner decisions of 2026-09-27)
+
+C12 items 1, 2, 3, 5 and 8 and the rest of item 4 (file variables and the base directory), done
+under these decisions:
+
+1. Item 1, facts by entry position. Output facts are looked up by the position of an entry and
+   checked against the key name at that position. On a mismatch, the emitter writes that value as
+   if it had no facts: for example, when a caller removed an earlier entry after the parse and
+   emits with the parser's facts. Output for values that were not changed stays byte-identical.
+   Where a test shows today's behaviour for a changed value, report what differs.
+2. Item 8, zero-copy, with borrowing allowed:
+   - Serde targets that borrow (`&'de str`, `Cow<'de, str>` with `#[serde(borrow)]`, borrowed
+     map keys) borrow the keys and strings that appear in the caller's input as they are.
+   - A string that does not appear as it is (escaped, expanded, lowercased, or from an included
+     file) becomes owned in a `Cow`. For `&'de str` it fails, as today.
+   - Owned targets behave exactly as today.
+   - This is a new capability of the serde interface: a `feat` commit, an entry under
+     `## Unreleased`, and a README example that runs as a doctest.
+3. C12 items 2, 3, 5, 6 and 7 hold as written. So do C11 items 4, 5, 7 and 8. The hasher stays
+   the standard library's.
+4. The report is `target/perf/C13-report.md`. It compares against the start of C13 and against
+   0.3.0, and lists what was tried and reverted.

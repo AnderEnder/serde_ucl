@@ -15,11 +15,12 @@
 
 use super::core::{Core, Settings, is_space, parse_nested};
 use super::error::position_at;
+use super::facts::{self, Pos};
 use super::registered::{Host, MacroCall as HandlerCall, MacroError, Registered, Repr};
 use super::string;
 use super::vars::Expander;
 use super::{Error, ErrorKind, MAX_ARGUMENT_DEPTH, MAX_INCLUDE_DEPTH, PathSegment};
-use crate::value::{DuplicateStrategy, Entry, ParserFlags, Slot, UclObject, UclValue};
+use crate::value::{DuplicateStrategy, Entry, ParserFlags, Slot, Str, UclObject, UclValue};
 
 /// The macros of §9.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -642,6 +643,11 @@ impl Core<'_, '_, '_, '_> {
             .get_index(source_index)
             .map(|(key, _)| key.clone())
             .expect("the source was just found");
+        let source_pos = Pos::Entry {
+            entry: source_index,
+            key: Str::from(&source_key),
+            slot: 0,
+        };
         let source = [PathSegment::Key {
             key: source_key,
             index: 0,
@@ -664,7 +670,7 @@ impl Core<'_, '_, '_, '_> {
             else {
                 break;
             };
-            self.copy_entry(key, i, replace, &source, call.at)?;
+            self.copy_entry(key, i, replace, (&source, &source_pos), call.at)?;
         }
         Ok(())
     }
@@ -699,9 +705,9 @@ impl Core<'_, '_, '_, '_> {
         Some(slots)
     }
 
-    /// Adds entry `index`, whose key is `key`, of the object at `source`, copied by `.inherit`,
-    /// to the current object. The copies keep the output facts of the values they copy (spec
-    /// §10.1).
+    /// Adds entry `index`, whose key is `key`, of the object at `source` (its path and its
+    /// position in the root), copied by `.inherit`, to the current object. The copies keep the
+    /// output facts of the values they copy (spec §10.1).
     ///
     /// A copy that would be nested more than the parser's `.inherit` depth limit allows, the root
     /// included, is an error at `at`, the macro
@@ -712,7 +718,7 @@ impl Core<'_, '_, '_, '_> {
         key: String,
         index: usize,
         replace: bool,
-        source: &[PathSegment],
+        (source, source_pos): (&[PathSegment], &Pos),
         at: usize,
     ) -> Result<(), Error> {
         let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
@@ -735,15 +741,21 @@ impl Core<'_, '_, '_, '_> {
             slots
                 .iter()
                 .enumerate()
-                .map(|(index, slot)| {
-                    let mut path = source.to_vec();
-                    path.push(PathSegment::Key {
-                        key: key.clone(),
-                        index,
-                    });
-                    let mut subtree = facts.subtree(&path);
+                .map(|(slot_index, slot)| {
+                    let path = [
+                        source_pos.clone(),
+                        Pos::Entry {
+                            entry: index,
+                            key: Str::from(&key),
+                            slot: slot_index,
+                        },
+                    ];
+                    let Some(node) = facts.node_at(&path) else {
+                        return Vec::new();
+                    };
+                    let mut subtree = facts.subtree(node);
                     // Not the facts of values that the first-value rule left out of the copy.
-                    subtree.retain(|(rest, _, _)| super::core::get(slot.value(), rest).is_some());
+                    subtree.retain(|(rest, _, _)| facts::get(slot.value(), rest).is_some());
                     subtree
                 })
                 .collect()
@@ -753,7 +765,7 @@ impl Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("macros are read inside objects");
-        let (target, first_index) = match existing {
+        let (target, target_entry, first_index) = match existing {
             None => {
                 let mut slots = slots
                     .into_iter()
@@ -762,7 +774,7 @@ impl Core<'_, '_, '_, '_> {
                 let mut entry = Entry::from_slot(first);
                 slots.for_each(|slot| entry.push_slot(slot));
                 object.insert_entry(key.clone(), entry);
-                (key.clone(), 0)
+                (key.clone(), object.len() - 1, 0)
             }
             Some(index) if replace => {
                 let (name, entry) = object
@@ -770,7 +782,7 @@ impl Core<'_, '_, '_, '_> {
                     .expect("the index was just found");
                 let first_index = entry.len();
                 slots.into_iter().for_each(|slot| entry.push_slot(slot));
-                (name.clone(), first_index)
+                (name.clone(), index, first_index)
             }
             Some(_) => return Ok(()),
         };
@@ -781,9 +793,10 @@ impl Core<'_, '_, '_, '_> {
             return Ok(());
         }
         for (offset, subtree) in copied_facts.into_iter().enumerate().take(count) {
-            let Some(node) = self.facts_node_below(&[PathSegment::Key {
-                key: target.clone(),
-                index: first_index + offset,
+            let Some(node) = self.facts_node_below(&[Pos::Entry {
+                entry: target_entry,
+                key: Str::from(&target),
+                slot: first_index + offset,
             }]) else {
                 return Ok(());
             };
@@ -828,21 +841,26 @@ impl Host for Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("macros are read inside objects");
-        let index = match object.entry_mut(&key) {
-            Some(entry) => {
+        let (entry, index) = match object.index_of(&key) {
+            Some(position) => {
+                let (_, entry) = object.get_index_mut(position).expect("just found");
                 entry.push_slot(Slot::new(value, priority));
-                entry.len() - 1
+                (position, entry.len() - 1)
             }
             None => {
                 object.insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
-                0
+                (object.len() - 1, 0)
             }
         };
         if self
             .facts
             .as_ref()
             .is_some_and(super::OutputFacts::records_locations)
-            && let Some(node) = self.facts_node_below(&[PathSegment::Key { key, index }])
+            && let Some(node) = self.facts_node_below(&[Pos::Entry {
+                entry,
+                key: Str::from(key),
+                slot: index,
+            }])
         {
             // A value a handler adds was written where the macro is.
             let facts = self.facts.as_mut().expect("checked above");

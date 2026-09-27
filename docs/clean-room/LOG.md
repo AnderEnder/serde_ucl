@@ -2620,3 +2620,33 @@
     (`target/perf/c12/fuzz-run.log`). `git status` clean afterwards.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-27 — Role: implementation team (clean-implementer). Item: C13, review follow-up (the
+  fallback of `UclObject::entry_at_mut` relied on std hashing a `str` as its bytes and `0xff`).
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `docs/clean-room/WORKLIST.md` (this
+    branch's has no C13 section; the scope came from the task and the footers of the two C13
+    commits), `docs/clean-room/LOG.md` (format of entries); the messages and `--stat` of
+    `9b19549` and `86acc78`; `src/value.rs`, `src/value/text.rs`, `src/parse/tree.rs`,
+    `src/parse/core.rs` (`Step`, the only `key_hash` caller), `Cargo.toml` (features),
+    `CHANGELOG.md` (grep for hashing). No spec section was needed: behaviour does not change
+    (latest tag `spec-v13`). Searches: `grep` over named directories and files only (`src/`,
+    `src/parse/`, `src/emit/`, `src/value/`, `src/value.rs`, `CHANGELOG.md`,
+    `docs/clean-room/WORKLIST.md`, `docs/clean-room/LOG.md`). One `grep -rn ... src/` had an
+    unquoted `--include=*.rs`, which zsh tried to expand as a glob in the worktree root before
+    grep ran ("no matches found"); nothing matched and nothing was read, and later patterns were
+    avoided or quoted. Guard refusals: none.
+  - Change: the fallback looks the key up as a `str` (`Str::as_str`, `IndexMap::get_index_of`)
+    instead of by `KeyBytes`, whose hash equalled the `str`'s only through std's current
+    `Hasher::write_str` default. The fast path is unchanged. Nothing else needed a `Str` to hash
+    like a `str` (the path trees hash `[u8]` on both sides; `cargo check --all-targets` with the
+    default features, and `cargo check --lib` with no default features and with `load`, confirmed
+    it), so `KeyBytes` and `impl Hash for Str` were removed and the docs updated. A unit test,
+    `value::tests::entry_at_mut_finds_a_key_at_its_position_or_elsewhere`, covers the lookup;
+    replacing the fallback with `None` made it fail. No benchmark was run.
+  - Checks: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` clean; `cargo test --lib`
+    205 passed; `cargo test --test conformance` 3 passed; `cargo doc --no-deps` with
+    `-D warnings` clean (with `--document-private-items`, only the existing warning in
+    `src/parse/glob.rs`).
+  - Commits: `7ab22e4` (fix(value): look up a moved key by its str, not its byte hash), and this
+    entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

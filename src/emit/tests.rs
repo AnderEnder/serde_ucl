@@ -188,6 +188,46 @@ fn facts_follow_values_the_parser_moves() {
 }
 
 #[test]
+fn facts_of_values_changed_after_the_parse() {
+    // WORKLIST C13 decision 1: facts are found by the position of a value's entry and checked
+    // against the key there. A value whose position now holds another key is written as if it
+    // had no facts; values at their own positions keep theirs.
+    let (parser, mut value) = parse("a = 'x'\nb = 'y'\nc = [p, 'q']\n", ParserFlags::DEFAULT);
+    let config = |value: &UclValue| parser.emitter(Format::Config).emit(value);
+    assert_eq!(
+        config(&value),
+        "a = 'x';\nb = 'y';\nc [\n    \"p\",\n    'q',\n]\n"
+    );
+    let object = value.as_object_mut().unwrap();
+    *object.get_mut("a").unwrap() = UclValue::String("new".into());
+    assert_eq!(
+        config(&value),
+        "a = 'new';\nb = 'y';\nc [\n    \"p\",\n    'q',\n]\n"
+    );
+    // Removing `a` moves `b` and `c` to positions whose facts were recorded for other keys.
+    let object = value.as_object_mut().unwrap();
+    object.remove("a");
+    assert_eq!(
+        config(&value),
+        "b = \"y\";\nc [\n    \"p\",\n    \"q\",\n]\n"
+    );
+    // A key added again goes at the end, where no facts were recorded.
+    let object = value.as_object_mut().unwrap();
+    object.insert("a", UclValue::String("w".into()));
+    assert_eq!(
+        config(&value),
+        "b = \"y\";\nc [\n    \"p\",\n    \"q\",\n]\na = \"w\";\n"
+    );
+    // A renamed key keeps its position, but not its facts.
+    let (parser, mut value) = parse("a = 'x'\nb = 'y'\n", ParserFlags::DEFAULT);
+    value.as_object_mut().unwrap().rename_key("b", "B");
+    assert_eq!(
+        parser.emitter(Format::Config).emit(&value),
+        "a = 'x';\nB = \"y\";\n"
+    );
+}
+
+#[test]
 fn collection_keys_and_merge_quirk_layouts() {
     // spec-v7 §10.1: the key of a `no-implicit-arrays` collection never needs quoting, whatever
     // its values' keys were; a scalar that replaces the collection under `merge` keeps that key,

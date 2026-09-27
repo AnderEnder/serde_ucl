@@ -25,9 +25,9 @@ impl Writer<'_> {
 
     /// Every value of every entry of `object`, each with its own key (§10.1, §10.5).
     fn config_entries(&mut self, object: &UclObject, depth: usize) {
-        for (key, entry) in object.iter() {
+        for (position, (key, entry)) in object.iter().enumerate() {
             for (index, value) in entry.values().enumerate() {
-                self.enter_key(key, index);
+                self.enter_entry(position, key, index);
                 self.config_entry(key, value, depth);
                 self.leave();
             }

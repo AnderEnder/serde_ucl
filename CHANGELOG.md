@@ -4,6 +4,21 @@ All notable changes to this crate are recorded here.
 
 ## Unreleased
 
+### Breaking API changes
+
+- Output facts are found by the position of a value in the parsed document: the position of its
+  entry in its object and of its element in its array (clean-room work item C13). An emitter
+  uses the facts of an entry's value only when the entry at that position still has the key it
+  had in the parse, so a value changed after the parse so that another key is at its position is
+  written as if it had no facts. For example, after `remove` of an entry, the entries after it
+  lose their single quotes and key spellings in config output; before, facts followed the keys
+  by name, and a key removed and added again took the old value's facts. Values at their own
+  positions, and every unchanged document, are written as before.
+  `OutputFacts::insert(path, facts)` becomes `OutputFacts::insert(root, path, facts)`: it
+  takes the value the facts are for, to find the positions of `path`, and returns false when
+  `root` has no value there. `OutputFacts::get` and `OutputFacts::iter` still take and give key
+  paths.
+
 ### Faster parsing
 
 Parsing is about 1.6 to 2 times as fast as in 0.3.0 (clean-room work item C11). On an Apple

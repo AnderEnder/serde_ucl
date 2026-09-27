@@ -20,6 +20,10 @@ use smallvec::SmallVec;
 use std::fmt;
 use std::hash::BuildHasher;
 
+mod text;
+
+pub(crate) use text::Str;
+
 /// Explicit array (`[...]`).
 pub type UclArray = Vec<UclValue>;
 
@@ -863,6 +867,17 @@ impl UclObject {
         self.entries.contains_key(key)
     }
 
+    /// The entry of `key`, a [`Str`], which is expected at position `index`: found there by
+    /// comparing bytes, without hashing the key or checking its UTF-8, when it is, and otherwise
+    /// looked up by the key as a `str` (clean-room work item C13).
+    pub(crate) fn entry_at_mut(&mut self, index: usize, key: &Str) -> Option<&mut Entry> {
+        let index = match self.entries.get_index(index) {
+            Some((k, _)) if k.as_bytes() == key.as_bytes() => index,
+            _ => self.entries.get_index_of(key.as_str())?,
+        };
+        self.entries.get_index_mut(index).map(|(_, entry)| entry)
+    }
+
     /// The first value of `key`, as libucl's `ucl_object_lookup` returns it.
     pub fn get(&self, key: &str) -> Option<&UclValue> {
         self.entries.get(key).map(Entry::first)
@@ -907,7 +922,7 @@ impl UclObject {
     /// The hash of `key` in this object, for [`UclObject::index_of_hashed`] and
     /// [`UclObject::push_hashed`]: a key that the parser looks up and then inserts is hashed
     /// once (clean-room work item C11).
-    pub(crate) fn key_hash(&self, key: &str) -> u64 {
+    pub(crate) fn key_hash<K: std::hash::Hash + ?Sized>(&self, key: &K) -> u64 {
         self.entries.hasher().hash_one(key)
     }
 
@@ -1320,6 +1335,38 @@ mod tests {
         insert(&mut obj, "b", int(2), 0, DuplicateStrategy::Append);
         insert(&mut obj, "a", int(3), 0, DuplicateStrategy::Append);
         assert_eq!(obj.keys().collect::<Vec<_>>(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn entry_at_mut_finds_a_key_at_its_position_or_elsewhere() {
+        // A short ASCII key, a short non-ASCII one and a long one: inline and heap copies.
+        let keys = ["a", "é-ü", "a key longer than twenty-two bytes"];
+        let mut obj = UclObject::new();
+        for (i, key) in keys.iter().enumerate() {
+            obj.insert(*key, int(i as i64));
+        }
+        for (i, key) in keys.iter().enumerate() {
+            let copy = Str::from(*key);
+            // At its position, at another key's, and past the end.
+            for index in [i, (i + 1) % keys.len(), keys.len()] {
+                let entry = obj.entry_at_mut(index, &copy);
+                assert_eq!(
+                    entry.map(|e| e.first()),
+                    Some(&int(i as i64)),
+                    "{key:?} {index}"
+                );
+            }
+        }
+        for absent in ["b", "é", "a key longer than twenty-two bytes!"] {
+            let copy = Str::from(absent);
+            for index in 0..=keys.len() {
+                assert!(
+                    obj.entry_at_mut(index, &copy).is_none(),
+                    "{absent:?} {index}"
+                );
+            }
+        }
+        assert!(UclObject::new().entry_at_mut(0, &Str::from("a")).is_none());
     }
 
     #[test]

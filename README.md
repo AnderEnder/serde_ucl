@@ -660,7 +660,9 @@ functions `emit::to_config`, `emit::to_json`, `emit::to_json_compact` and `emit:
 value without them: a `UclValue` does not record how it was written, so strings come out in the
 JSON form and keys as they are stored, quoted in the config and YAML formats where
 `emit::key_needs_quoting` says. To write a parsed document as libucl would, use
-`Parser::emitter` after the parse.
+`Parser::emitter` after the parse. The facts are found by the positions of values in the parsed
+document: after removing an entry from an object, the entries after it are written as if they
+had no facts.
 
 ```rust
 use serde_ucl::emit::Format;
