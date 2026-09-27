@@ -1,7 +1,6 @@
 //! [`Str`], the string type of the parser's copies of keys.
 
 use std::fmt;
-use std::hash::{Hash, Hasher};
 
 /// The longest string kept inline, without a heap allocation: 22 bytes, which with the length
 /// and the variant's tag make a [`Str`] as large as a `String`, 24 bytes.
@@ -13,9 +12,10 @@ const INLINE: usize = 22;
 /// allocation each (clean-room work item C13; the C11 research notes on small-string keys,
 /// after compact_str and kstring).
 ///
-/// The copies are compared as bytes, and hashed as the `str` they hold hashes, so an inline
-/// copy's UTF-8 is checked only when its text is asked for ([`Str::as_str`]), which the hot paths
-/// do not do.
+/// The copies are compared as bytes, so an inline copy's UTF-8 is checked only when its text is
+/// asked for ([`Str::as_str`]), which the hot paths do not do. `Str` does not implement `Hash`: a
+/// map that holds copies hashes their bytes on both sides, and a lookup among an object's `String`
+/// keys goes through [`Str::as_str`].
 #[derive(Clone)]
 pub(crate) struct Str(Repr);
 
@@ -98,26 +98,6 @@ impl PartialEq for Str {
 
 impl Eq for Str {}
 
-impl Hash for Str {
-    /// As the `str` it holds hashes ([`KeyBytes`]).
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        KeyBytes(self.as_bytes()).hash(state);
-    }
-}
-
-/// The bytes of a key, hashed as a `str` of them hashes: `str` hashes with `Hasher::write_str`,
-/// which is its bytes and then `0xff`, since stable Rust lets no hasher change it (the method is
-/// unstable); a unit test checks it. Hashing the bytes directly saves checking an inline string's
-/// UTF-8 (clean-room work item C13).
-pub(crate) struct KeyBytes<'a>(pub(crate) &'a [u8]);
-
-impl Hash for KeyBytes<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write(self.0);
-        state.write_u8(0xff);
-    }
-}
-
 impl fmt::Debug for Str {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.as_str(), f)
@@ -133,7 +113,6 @@ impl fmt::Display for Str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::hash::BuildHasher;
 
     #[test]
     fn inline_up_to_22_bytes() {
@@ -151,8 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn hashes_and_formats_as_str() {
-        let hasher = std::collections::hash_map::RandomState::new();
+    fn formats_as_str() {
         for s in [
             "",
             "k",
@@ -160,8 +138,6 @@ mod tests {
             "a key longer than twenty-two bytes",
         ] {
             let key = Str::from(s);
-            assert_eq!(hasher.hash_one(&key), hasher.hash_one(s));
-            assert_eq!(hasher.hash_one(KeyBytes(s.as_bytes())), hasher.hash_one(s));
             assert_eq!(format!("{key:?}"), format!("{s:?}"));
             assert_eq!(key.to_string(), s);
         }
