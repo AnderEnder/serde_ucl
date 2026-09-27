@@ -2,7 +2,10 @@
 
 All notable changes to this crate are recorded here.
 
-## Unreleased
+## 0.4.0 - 2026-09-27
+
+Parsing is about twice as fast as in 0.3.0, and small documents much faster. Output facts
+are found by position, which changes the parse API; the serde interface is unchanged.
 
 ### Breaking API changes
 
