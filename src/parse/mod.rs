@@ -196,6 +196,9 @@ pub struct Parser {
     macros: registered::MacroTable,
     /// The [`Uncertain`] rules the last parse reached, as bits.
     uncertain: Cell<u8>,
+    /// The input limit and the bytes read by the current parse, which its include states share;
+    /// kept here so that a parse does not allocate it (clean-room work item C12).
+    budget: include::Budget,
 }
 
 /// Behaviour that the spec leaves uncertain (spec README, *Uncertain behaviour*) and that the
@@ -281,13 +284,14 @@ impl Parser {
             max_input_bytes: None,
             inherit_depth_limit: DEFAULT_INHERIT_DEPTH_LIMIT,
             comments: Vec::new(),
-            attached: comments::CommentGroups::default(),
+            attached: comments::CommentGroups::empty(),
             attached_paths: OnceCell::new(),
             facts: OutputFacts::new(),
             records_facts: true,
             handler_answers: Vec::new(),
             macros: registered::MacroTable::default(),
             uncertain: Cell::new(0),
+            budget: include::Budget::new(None),
         }
     }
 
@@ -634,6 +638,7 @@ impl Parser {
             handler_answers,
             macros,
             uncertain,
+            budget,
         } = self;
         handler_answers.clear();
         uncertain.set(0);
@@ -663,6 +668,7 @@ impl Parser {
             attached,
             facts,
             records_facts: *records_facts,
+            budget,
         })
     }
 
@@ -801,7 +807,7 @@ impl Parser {
             &*self.loader,
             base,
             self.search_path.clone(),
-            budget,
+            &budget,
             (!self.macros.is_empty()).then_some(&self.macros),
         );
         includes.files.push(file);

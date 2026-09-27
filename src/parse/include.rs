@@ -34,7 +34,6 @@ use crate::value::{DuplicateStrategy, UclValue};
 use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 /// The input limit of one parse ([`super::Parser::set_max_input_bytes`]) and the bytes read so
 /// far, the document included. The include state of the document and those of its macro
@@ -47,11 +46,11 @@ pub(crate) struct Budget {
 
 impl Budget {
     /// A budget of `limit` bytes, none of them used yet.
-    pub(crate) fn new(limit: Option<u64>) -> Rc<Self> {
-        Rc::new(Self {
+    pub(crate) fn new(limit: Option<u64>) -> Self {
+        Self {
             limit,
             used: Cell::new(0),
-        })
+        }
     }
 
     /// Counts an input of `len` bytes given as bytes; `false` if it goes over the limit.
@@ -94,7 +93,7 @@ pub(crate) struct Includes<'l> {
     /// rest of the parse (spec §13.1, *How many inputs*), and so do included files that stop
     /// silently.
     pub(crate) files: Vec<Option<PathBuf>>,
-    pub(crate) budget: Rc<Budget>,
+    pub(crate) budget: &'l Budget,
     /// The macros the application registered (spec §13.2); `None` in macro argument documents,
     /// which know only the built-in macros.
     pub(crate) macros: Option<&'l MacroTable>,
@@ -115,7 +114,7 @@ impl<'l> Includes<'l> {
         loader: &'l dyn Loader,
         base: PathBuf,
         search: Option<Vec<String>>,
-        budget: Rc<Budget>,
+        budget: &'l Budget,
         macros: Option<&'l MacroTable>,
     ) -> Self {
         Self {
@@ -149,7 +148,7 @@ impl<'l> Includes<'l> {
             self.loader,
             self.base.clone(),
             self.default_search.clone(),
-            Rc::clone(&self.budget),
+            self.budget,
             None,
         );
         includes.files.push(None);

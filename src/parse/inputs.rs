@@ -201,6 +201,8 @@ pub(crate) struct Parts<'p> {
     pub(crate) facts: &'p mut OutputFacts,
     /// Whether output facts are recorded (`Parser::skip_output_facts`).
     pub(crate) records_facts: bool,
+    /// The parser's input budget, reset for the parse.
+    pub(crate) budget: &'p mut Budget,
 }
 
 /// The directory relative paths of an input resolve against (WORKLIST C8b decision 4): the base
@@ -281,9 +283,10 @@ impl<'p> Inputs<'p> {
             attached,
             facts,
             records_facts,
+            budget,
         } = parts;
         comments.clear();
-        *attached = CommentGroups::default();
+        *attached = CommentGroups::empty();
         facts.clear();
         macros.ran.set(false);
         let expander = Expander::new(
@@ -291,11 +294,12 @@ impl<'p> Inputs<'p> {
             handler,
             !flags.contains(ParserFlags::DISABLE_MACRO),
         );
+        *budget = Budget::new(max_input_bytes);
         let mut includes = Includes::new(
             loader,
             PathBuf::new(),
             search_path,
-            Budget::new(max_input_bytes),
+            budget,
             (!macros.is_empty()).then_some(macros),
         );
         includes.uncertain = Some(uncertain);

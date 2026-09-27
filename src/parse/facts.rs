@@ -105,10 +105,13 @@ impl Locations {
 /// The output facts of a parsed document, by value path: what [`crate::emit::Emitter`] needs to
 /// write the document as libucl does (spec §10.1). [`super::Parser::output_facts`] gives those of
 /// the last parse.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OutputFacts {
     /// The tree of paths; `nodes[ROOT]` is the root. A node taken out of the tree stays in the
-    /// vector, unused, until [`OutputFacts::clear`].
+    /// vector, unused, until [`OutputFacts::clear`]. Empty until the first node is needed
+    /// ([`OutputFacts::nodes_mut`]), so that a parse that records nothing allocates nothing
+    /// for its facts (clean-room work item C12); an empty vector stands for a root without
+    /// facts or children.
     nodes: Vec<Node>,
     /// The number of nodes in the tree whose facts are not the default.
     recorded: usize,
@@ -122,16 +125,6 @@ pub(crate) type ValuePath = Vec<PathSegment>;
 /// ([`OutputFacts::subtree`]).
 pub(crate) type Subtree = Vec<(ValuePath, ValueFacts, Option<Location>)>;
 
-impl Default for OutputFacts {
-    fn default() -> Self {
-        Self {
-            nodes: vec![Node::default()],
-            recorded: 0,
-            locations: None,
-        }
-    }
-}
-
 impl PartialEq for OutputFacts {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
@@ -144,6 +137,19 @@ impl OutputFacts {
     /// No facts.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Node `node`; `None` only for the root before any node was added.
+    fn node(&self, node: NodeId) -> Option<&Node> {
+        self.nodes.get(node)
+    }
+
+    /// The nodes, with the root added if there is none yet.
+    fn nodes_mut(&mut self) -> &mut Vec<Node> {
+        if self.nodes.is_empty() {
+            self.nodes.push(Node::default());
+        }
+        &mut self.nodes
     }
 
     /// True if no value has a fact recorded.
@@ -173,7 +179,9 @@ impl OutputFacts {
         let mut recorded = Vec::with_capacity(self.recorded);
         let mut stack = vec![(ROOT, Vec::new())];
         while let Some((node, path)) = stack.pop() {
-            let n = &self.nodes[node];
+            let Some(n) = self.node(node) else {
+                continue;
+            };
             for (segment, child) in n.children.iter() {
                 let mut path = path.clone();
                 path.push(segment);
@@ -254,7 +262,7 @@ impl OutputFacts {
         let mut node = ROOT;
         let mut found = locations.get(ROOT).map(|at| (at, path.is_empty()));
         for (depth, segment) in path.iter().enumerate() {
-            let Some(child) = self.nodes[node].children.get(segment) else {
+            let Some(child) = self.node(node).and_then(|n| n.children.get(segment)) else {
                 break;
             };
             node = child;
@@ -278,24 +286,24 @@ impl OutputFacts {
 
     /// The facts recorded at `node`, if any.
     pub(crate) fn facts_of(&self, node: NodeId) -> Option<&ValueFacts> {
-        let facts = &self.nodes[node].facts;
+        let facts = &self.node(node)?.facts;
         (!facts.is_default()).then_some(facts)
     }
 
     /// The node of value `index` of entry `key` of the object at `node`, if there is one.
     pub(crate) fn child_key(&self, node: NodeId, key: &str, index: usize) -> Option<NodeId> {
-        self.nodes[node].children.key(key, index)
+        self.node(node)?.children.key(key, index)
     }
 
     /// The node of element `index` of the array at `node`, if there is one.
     pub(crate) fn child_element(&self, node: NodeId, index: usize) -> Option<NodeId> {
-        self.nodes[node].children.element(index)
+        self.node(node)?.children.element(index)
     }
 
     /// The node of `path`, if there is one.
     fn node_at(&self, path: &[PathSegment]) -> Option<NodeId> {
         path.iter()
-            .try_fold(ROOT, |node, segment| self.nodes[node].children.get(segment))
+            .try_fold(ROOT, |node, segment| self.node(node)?.children.get(segment))
     }
 
     /// The node of `segment` below `node`, added if there is none.
@@ -309,23 +317,25 @@ impl OutputFacts {
     /// The node of value `index` of entry `key` of the object at `node`, added if there is
     /// none. The key is copied only for a new node.
     pub(crate) fn key_child_or_insert(&mut self, node: NodeId, key: &str, index: usize) -> NodeId {
-        if let Some(child) = self.nodes[node].children.key(key, index) {
+        let nodes = self.nodes_mut();
+        if let Some(child) = nodes[node].children.key(key, index) {
             return child;
         }
-        let child = self.nodes.len();
-        self.nodes.push(Node::default());
-        self.nodes[node].children.insert_key(key, index, child);
+        let child = nodes.len();
+        nodes.push(Node::default());
+        nodes[node].children.insert_key(key, index, child);
         child
     }
 
     /// The node of element `index` of the array at `node`, added if there is none.
     pub(crate) fn element_child_or_insert(&mut self, node: NodeId, index: usize) -> NodeId {
-        if let Some(child) = self.nodes[node].children.element(index) {
+        let nodes = self.nodes_mut();
+        if let Some(child) = nodes[node].children.element(index) {
             return child;
         }
-        let child = self.nodes.len();
-        self.nodes.push(Node::default());
-        self.nodes[node].children.insert_element(index, child);
+        let child = nodes.len();
+        nodes.push(Node::default());
+        nodes[node].children.insert_element(index, child);
         child
     }
 
@@ -336,21 +346,23 @@ impl OutputFacts {
     }
 
     fn set(&mut self, node: NodeId, facts: ValueFacts) {
-        let was = !self.nodes[node].facts.is_default();
+        let nodes = self.nodes_mut();
+        let was = !nodes[node].facts.is_default();
         let now = !facts.is_default();
+        nodes[node].facts = facts;
         self.recorded = self.recorded + usize::from(now) - usize::from(was);
-        self.nodes[node].facts = facts;
     }
 
     /// Changes the facts of the value at `node` with `change`.
     pub(crate) fn update(&mut self, node: NodeId, change: impl FnOnce(&mut ValueFacts)) {
-        let mut facts = self.nodes[node].facts.clone();
+        let mut facts = self.nodes_mut()[node].facts.clone();
         change(&mut facts);
         self.set(node, facts);
     }
 
     /// Takes the node `node` and everything below it out of the tree.
     fn drop_subtree(&mut self, node: NodeId) {
+        self.nodes_mut();
         let mut stack = vec![node];
         while let Some(node) = stack.pop() {
             let n = &mut self.nodes[node];
@@ -363,7 +375,7 @@ impl OutputFacts {
 
     /// Removes the facts of everything inside the value at `node`, but not its own.
     pub(crate) fn clear_below(&mut self, node: NodeId) {
-        for child in self.nodes[node].children.take_all() {
+        for child in self.nodes_mut()[node].children.take_all() {
             self.drop_subtree(child);
         }
     }
@@ -371,7 +383,7 @@ impl OutputFacts {
     /// Values of entry `key` in the object at `object` were replaced: value `slot`, or all of
     /// them. Their facts, and those of anything inside them, are dropped.
     pub(crate) fn replaced(&mut self, object: NodeId, key: &str, slot: Option<usize>) {
-        let children = &mut self.nodes[object].children;
+        let children = &mut self.nodes_mut()[object].children;
         let dropped: Vec<NodeId> = match slot {
             Some(slot) => children.take_value(key, slot).into_iter().collect(),
             None => children
@@ -391,15 +403,16 @@ impl OutputFacts {
     pub(crate) fn collected(&mut self, object: NodeId, key: &str, count: usize) {
         let moved: Vec<(usize, NodeId)> = (0..count)
             .filter_map(|index| {
-                let child = self.nodes[object].children.take_value(key, index)?;
+                let child = self.nodes_mut()[object].children.take_value(key, index)?;
                 Some((index, child))
             })
             .collect();
         if moved.is_empty() {
             return;
         }
-        let array = self.nodes.len();
-        self.nodes.push(Node::default());
+        let nodes = self.nodes_mut();
+        let array = nodes.len();
+        nodes.push(Node::default());
         if let Some(locations) = &mut self.locations {
             let at = locations.get(moved[0].1);
             locations.set(array, at);
@@ -424,8 +437,13 @@ impl OutputFacts {
         let mut facts = Vec::new();
         let mut stack = vec![(node, Vec::new())];
         while let Some((node, path)) = stack.pop() {
-            let n = &self.nodes[node];
             let at = self.locations.as_ref().and_then(|l| l.get(node));
+            let Some(n) = self.node(node) else {
+                if at.is_some() {
+                    facts.push((path, ValueFacts::default(), at));
+                }
+                continue;
+            };
             if !n.facts.is_default() || at.is_some() {
                 facts.push((path.clone(), n.facts.clone(), at));
             }
