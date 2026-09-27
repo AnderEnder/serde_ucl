@@ -105,8 +105,12 @@ impl<'a> Emitter<'a> {
     }
 
     /// Uses `facts`, recorded when the value was parsed, for the forms of strings and keys
-    /// (spec §10.1). The paths in `facts` must be those of the value given to
-    /// [`Emitter::emit`].
+    /// (spec §10.1). The facts of a value are found by its position in the value given to
+    /// [`Emitter::emit`], the position of its entry in its object and of its element in its
+    /// array, and those of an entry's value are used only when the entry at that position has
+    /// the key it had when the facts were recorded. A value changed after the parse so that
+    /// another key is at its position, as when an earlier entry was removed, is written as if
+    /// it had no facts; values at their own positions keep theirs.
     pub fn with_facts(mut self, facts: &'a OutputFacts) -> Self {
         self.facts = Some(facts);
         self
@@ -318,12 +322,14 @@ impl<'a> Writer<'a> {
         *self.cursor.last().expect("the root is entered")
     }
 
-    /// Enters value `index` of the entry `key`.
-    fn enter_key(&mut self, key: &str, index: usize) {
+    /// Enters value `slot` of the entry at position `entry` of the object being written, whose
+    /// key is `key`. Its facts are found by the position, when the key there is `key`
+    /// ([`OutputFacts`]); its comments by the key.
+    fn enter_entry(&mut self, entry: usize, key: &str, slot: usize) {
         if self.track {
             let (fact, comment) = self.here();
-            let fact = fact.and_then(|n| self.facts?.child_key(n, key, index));
-            let comment = comment.and_then(|n| self.comments.nodes[n].children.key(key, index));
+            let fact = fact.and_then(|n| self.facts?.child_entry(n, entry, key, slot));
+            let comment = comment.and_then(|n| self.comments.nodes[n].children.key(key, slot));
             self.cursor.push((fact, comment));
         }
     }

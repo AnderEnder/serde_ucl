@@ -609,17 +609,23 @@ impl Core<'_, '_, '_, '_> {
         // The string counts as a heredoc for config output (§9.6, §10.5). The key follows the
         // emitter's default rule for quoting (§10.1), so it needs no fact.
         let multiline = value.is_string() && params.bool("multiline") == Some(true);
-        self.current()
+        let object = self
+            .current()
             .as_object_mut()
-            .expect("macros are read inside objects")
-            .insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
+            .expect("macros are read inside objects");
+        object.insert_entry(key.clone(), Entry::from_slot(Slot::new(value, priority)));
+        let entry = object.index_of(&key).expect("the entry was just added");
         let locating = self
             .facts
             .as_ref()
             .is_some_and(super::OutputFacts::records_locations);
+        let pos = super::facts::Pos::Entry {
+            entry,
+            key: crate::value::Str::from(key),
+            slot: 0,
+        };
         if (multiline || locating)
-            && let Some(node) =
-                self.facts_node_below(&[crate::parse::PathSegment::Key { key, index: 0 }])
+            && let Some(node) = self.facts_node_below(&[pos])
         {
             let facts = self.facts.as_mut().expect("checked above");
             if multiline {

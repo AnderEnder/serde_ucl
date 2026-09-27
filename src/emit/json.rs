@@ -28,13 +28,13 @@ impl Writer<'_> {
     fn yaml_root(&mut self, object: &UclObject) {
         if self.mode == Mode::RoundTrip {
             let mut first = true;
-            for (key, entry) in object.iter() {
+            for (position, (key, entry)) in object.iter().enumerate() {
                 for (index, value) in entry.values().enumerate() {
                     if !first {
                         self.out.push('\n');
                     }
                     first = false;
-                    self.exact_member(key, index, value, 0, Style::Yaml);
+                    self.exact_member((position, key), index, value, 0, Style::Yaml);
                 }
             }
             return;
@@ -44,7 +44,7 @@ impl Writer<'_> {
                 self.out
                     .push_str(if entry.is_multi() { ",\n" } else { "\n" });
             }
-            self.member(key, entry, 0, Style::Yaml);
+            self.member((i, key), entry, 0, Style::Yaml);
         }
     }
 
@@ -84,7 +84,7 @@ impl Writer<'_> {
                         self.newline(style);
                     }
                     self.line_indent(depth + 1, style);
-                    self.exact_member(key, index, value, depth + 1, style);
+                    self.exact_member((i, key), index, value, depth + 1, style);
                 }
                 continue;
             }
@@ -93,7 +93,7 @@ impl Writer<'_> {
                 self.newline(style);
             }
             self.line_indent(depth + 1, style);
-            self.member(key, entry, depth + 1, style);
+            self.member((i, key), entry, depth + 1, style);
         }
         self.newline(style);
         self.line_indent(depth, style);
@@ -122,10 +122,16 @@ impl Writer<'_> {
         self.out.push(']');
     }
 
-    /// `key: value` of an object member whose line is indented `depth` levels. The key is that
-    /// of the entry's first value (§10.1).
-    fn member(&mut self, key: &str, entry: &Entry, depth: usize, style: Style) {
-        self.enter_key(key, 0);
+    /// `key: value` of an object member whose line is indented `depth` levels, for the entry at
+    /// position `position` of its object. The key is that of the entry's first value (§10.1).
+    fn member(
+        &mut self,
+        (position, key): (usize, &str),
+        entry: &Entry,
+        depth: usize,
+        style: Style,
+    ) {
+        self.enter_entry(position, key, 0);
         self.member_key(key, style);
         self.leave();
         self.out.push(':');
@@ -133,7 +139,7 @@ impl Writer<'_> {
             self.out.push(' ');
         }
         if !entry.is_multi() {
-            self.enter_key(key, 0);
+            self.enter_entry(position, key, 0);
             self.json_value(entry.first(), depth, style);
             self.leave();
             return;
@@ -141,12 +147,12 @@ impl Writer<'_> {
         let first = entry.first();
         if first.is_array() {
             // Only the first value is written when it is an explicit array (§10.7, *Quirk*).
-            self.enter_key(key, 0);
+            self.enter_entry(position, key, 0);
             self.json_value(first, depth, style);
             self.leave();
             return;
         }
-        self.enter_key(key, 0);
+        self.enter_entry(position, key, 0);
         let kept_layout = self.facts().is_some_and(|f| f.normal_layout);
         self.leave();
         let normal = kept_layout
@@ -165,7 +171,7 @@ impl Writer<'_> {
                 self.newline(style);
             }
             self.line_indent(depth + 1, style);
-            self.enter_key(key, i);
+            self.enter_entry(position, key, i);
             self.json_value(value, depth + 1, style);
             self.leave();
         }
@@ -176,17 +182,17 @@ impl Writer<'_> {
         self.out.push(']');
     }
 
-    /// Round-trip mode: `key: value` for value `index` of the entry `key`, whose line is indented
-    /// `depth` levels.
+    /// Round-trip mode: `key: value` for value `index` of the entry at position `position`,
+    /// whose key is `key`, and whose line is indented `depth` levels.
     fn exact_member(
         &mut self,
-        key: &str,
+        (position, key): (usize, &str),
         index: usize,
         value: &UclValue,
         depth: usize,
         style: Style,
     ) {
-        self.enter_key(key, index);
+        self.enter_entry(position, key, index);
         self.member_key(key, style);
         self.out.push(':');
         if style != Style::Compact {

@@ -17,7 +17,7 @@
 
 use super::comments::{CommentGroups, Notes, PathRef, ValuePath};
 use super::error::position_at;
-use super::facts::{self, NodeId, OutputFacts};
+use super::facts::{self, NodeId, OutputFacts, Pos};
 use super::include::Includes;
 use super::number::{self, Number};
 use super::string;
@@ -467,9 +467,11 @@ impl Step {
     /// the nodes on the way if missing.
     fn descend_facts(&self, facts: &mut OutputFacts, node: NodeId) -> NodeId {
         match self {
-            Step::Entry { key, slot, .. } => facts.key_child_or_insert(node, key, *slot),
-            Step::Collected { key, index, .. } => {
-                let entry = facts.key_child_or_insert(node, key, 0);
+            Step::Entry { entry, key, slot } => {
+                facts.entry_child_or_insert(node, *entry, key, *slot)
+            }
+            Step::Collected { entry, key, index } => {
+                let entry = facts.entry_child_or_insert(node, *entry, key, 0);
                 facts.element_child_or_insert(entry, *index)
             }
             Step::Element(index) => facts.element_child_or_insert(node, *index),
@@ -1317,12 +1319,12 @@ impl Core<'_, '_, '_, '_> {
         self.frames[index].facts_node.get().copied().flatten()
     }
 
-    /// The node in the output facts of the value at `segment` in the top container, added if
+    /// The node in the output facts of the value at `path` in the top container, added if
     /// missing; `None` as for [`Core::facts_node`].
-    pub(super) fn facts_node_below(&mut self, segments: &[PathSegment]) -> Option<NodeId> {
+    pub(super) fn facts_node_below(&mut self, path: &[Pos]) -> Option<NodeId> {
         let object = self.facts_node()?;
         let facts = self.facts.as_mut().expect("facts are recorded");
-        Some(facts.descend_or_insert(object, segments))
+        Some(facts.descend_or_insert(object, path))
     }
 
     /// The path of the top container from the root, or `None` when it is not part of the
@@ -1474,10 +1476,10 @@ impl Core<'_, '_, '_, '_> {
             self.key_error(key, ErrorKind::DuplicateKey { key: name })
         })?;
         if track {
-            self.values_moved(&key.name, before, placement, after);
+            self.values_moved(key.entry, &key.name, before, placement, after);
         }
         if matches!(placement, Placement::Collected(_)) && !was_collected {
-            self.collection_key(&key.name);
+            self.collection_key(key.entry, &key.name);
         }
         if let Some(written) = &written
             && existed
@@ -1550,10 +1552,10 @@ impl Core<'_, '_, '_, '_> {
         let name = stored_key_name(&self.frames, &self.root, key);
         let facts = self.facts.as_mut().expect("facts are recorded");
         let node = if collected {
-            let entry = facts.key_child_or_insert(object, name, 0);
+            let entry = facts.entry_child_or_insert(object, key.entry, name, 0);
             facts.element_child_or_insert(entry, slot)
         } else {
-            facts.key_child_or_insert(object, name, slot)
+            facts.entry_child_or_insert(object, key.entry, name, slot)
         };
         if placed.in_place {
             facts.clear_below(node);
@@ -1570,18 +1572,20 @@ impl Core<'_, '_, '_, '_> {
         facts.locate(node, at, Some(key.at));
     }
 
-    /// Entry `key` of the current object has just become a `NO_IMPLICIT_ARRAYS` collection
-    /// (§8.5). The array's key never needs quoting, whatever the keys of its values were, and is
-    /// spelled as the entry's key, that of its first value (spec §10.1, *Quirk*).
-    fn collection_key(&mut self, key: &str) {
+    /// The entry at position `entry`, whose key is `key`, of the current object has just become
+    /// a `NO_IMPLICIT_ARRAYS` collection (§8.5). The array's key never needs quoting, whatever
+    /// the keys of its values were, and is spelled as the entry's key, that of its first value
+    /// (spec §10.1, *Quirk*).
+    fn collection_key(&mut self, entry: usize, key: &str) {
         if self.facts.is_none() || !key_needs_quoting(key) {
             return;
         }
-        let segment = PathSegment::Key {
-            key: key.to_owned(),
-            index: 0,
+        let pos = Pos::Entry {
+            entry,
+            key: Str::from(key),
+            slot: 0,
         };
-        let Some(node) = self.facts_node_below(&[segment]) else {
+        let Some(node) = self.facts_node_below(&[pos]) else {
             return;
         };
         let facts = self.facts.as_mut().expect("checked above");
@@ -1603,24 +1607,25 @@ impl Core<'_, '_, '_, '_> {
         }
     }
 
-    /// Values of entry `key` of the object at `object` were replaced: value `slot`, or all.
-    fn replaced_values(&mut self, object: &Places, key: &str, slot: Option<usize>) {
+    /// Values of the entry at position `entry`, whose key is `key`, of the object at `object`
+    /// were replaced: value `slot`, or all.
+    fn replaced_values(&mut self, object: &Places, entry: usize, key: &str, slot: Option<usize>) {
         if let (Some(notes), Some(path)) = (&mut self.notes, &object.path) {
             notes.replaced(path, key, slot);
         }
         if let (Some(facts), Some(node)) = (&mut self.facts, object.node) {
-            facts.replaced(node, key, slot);
+            facts.replaced(node, entry, slot);
         }
     }
 
-    /// Entry `key` of the object at `object` became a `NO_IMPLICIT_ARRAYS` collection of its
-    /// first `count` values.
-    fn collected_values(&mut self, object: &Places, key: &str, count: usize) {
+    /// The entry at position `entry`, whose key is `key`, of the object at `object` became a
+    /// `NO_IMPLICIT_ARRAYS` collection of its first `count` values.
+    fn collected_values(&mut self, object: &Places, entry: usize, key: &str, count: usize) {
         if let (Some(notes), Some(path)) = (&mut self.notes, &object.path) {
             notes.collected(path, key, count);
         }
         if let (Some(facts), Some(node)) = (&mut self.facts, object.node) {
-            facts.collected(node, key, count);
+            facts.collected(node, entry, key, count);
         }
     }
 
@@ -1658,6 +1663,7 @@ impl Core<'_, '_, '_, '_> {
     /// entry's length now.
     fn values_moved(
         &mut self,
+        entry: usize,
         key: &str,
         before: Option<Before>,
         placement: Placement,
@@ -1678,15 +1684,15 @@ impl Core<'_, '_, '_, '_> {
             Placement::Slot(slot) => {
                 let object = self.object_places();
                 let slot = (after != 1).then_some(slot);
-                self.replaced_values(&object, key, slot);
+                self.replaced_values(&object, entry, key, slot);
             }
             Placement::Collected(_) if !collected => {
                 let object = self.object_places();
                 // Only the first value goes into the collection (QUESTIONS.md #25).
                 for slot in 1..len {
-                    self.replaced_values(&object, key, Some(slot));
+                    self.replaced_values(&object, entry, key, Some(slot));
                 }
-                self.collected_values(&object, key, 1);
+                self.collected_values(&object, entry, key, 1);
             }
             Placement::Collected(_) | Placement::Merged | Placement::Dropped => {}
         }
@@ -1778,7 +1784,7 @@ impl Core<'_, '_, '_, '_> {
         if !origin.has_string_facts() && !facts.records_locations() {
             return;
         }
-        let Some(node) = self.facts_node_below(&[PathSegment::Index(index)]) else {
+        let Some(node) = self.facts_node_below(&[Pos::Element(index)]) else {
             return;
         };
         let facts = self.facts.as_mut().expect("checked above");
@@ -2292,17 +2298,19 @@ impl Core<'_, '_, '_, '_> {
             // of the other values are lost with them (§12.5; oracle runs).
             let object = self.object_places();
             for slot in 1..len {
-                self.replaced_values(&object, &key, Some(slot));
+                self.replaced_values(&object, entry, &key, Some(slot));
             }
-            self.collected_values(&object, &key, 1);
+            self.collected_values(&object, entry, &key, 1);
         }
+        let entry_pos = Pos::Entry {
+            entry,
+            key: Str::from(&key),
+            slot: 0,
+        };
         if (found.is_none() || moved_from.is_some())
             && self.facts.is_some()
             && key_needs_quoting(&key)
-            && let Some(node) = self.facts_node_below(&[PathSegment::Key {
-                key: key.clone(),
-                index: 0,
-            }])
+            && let Some(node) = self.facts_node_below(std::slice::from_ref(&entry_pos))
         {
             // A key that `.include` creates never needs quoting (spec §10.1, *Quirk*); nor does
             // the key of an array it creates in place of the key's values (oracle runs,
@@ -2316,18 +2324,14 @@ impl Core<'_, '_, '_, '_> {
             .is_some_and(OutputFacts::records_locations)
         {
             // The containers the macro creates were written where the macro was.
-            let entry = PathSegment::Key {
-                key: key.clone(),
-                index: 0,
-            };
             if found.is_none()
-                && let Some(node) = self.facts_node_below(std::slice::from_ref(&entry))
+                && let Some(node) = self.facts_node_below(std::slice::from_ref(&entry_pos))
             {
                 let facts = self.facts.as_mut().expect("checked above");
                 facts.locate(node, at, Some(at));
             }
             if let Some(index) = element
-                && let Some(node) = self.facts_node_below(&[entry, PathSegment::Index(index)])
+                && let Some(node) = self.facts_node_below(&[entry_pos, Pos::Element(index)])
             {
                 let facts = self.facts.as_mut().expect("checked above");
                 facts.locate(node, at, None);

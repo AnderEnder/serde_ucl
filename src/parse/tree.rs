@@ -31,6 +31,16 @@ impl KeyRef for str {
     }
 }
 
+impl KeyRef for String {
+    fn bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
+
+    fn to_key(&self) -> Str {
+        Str::from(self)
+    }
+}
+
 impl KeyRef for Str {
     fn bytes(&self) -> &[u8] {
         self.as_bytes()
@@ -222,7 +232,8 @@ impl Children {
     }
 
     /// Every child with its segment, in no particular order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (PathSegment, usize)> + '_ {
+    #[cfg(test)]
+    fn iter(&self) -> impl Iterator<Item = (PathSegment, usize)> + '_ {
         let mut all = Vec::new();
         match &self.keys {
             Keyed::Small(items) => all.extend(items.iter().map(|(key, index, child)| {
