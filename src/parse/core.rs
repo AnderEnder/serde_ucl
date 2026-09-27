@@ -138,6 +138,7 @@ impl Document {
         includes.open_units.push(unit);
         let mut core = Core {
             src,
+            utf8: std::str::from_utf8(src).ok(),
             pos: 0,
             settings,
             expander,
@@ -236,6 +237,7 @@ impl Document {
             );
             let mut core = Core {
                 src: b"",
+                utf8: Some(""),
                 pos: 0,
                 settings: pending.settings,
                 expander: &mut expander,
@@ -696,6 +698,10 @@ fn keyword(raw: &[u8]) -> Option<UclValue> {
 /// include macros and `.load` in `super::include`.
 pub(super) struct Core<'s, 'e, 'v, 'l> {
     pub(super) src: &'s [u8],
+    /// `src` as text when all of it is valid UTF-8, checked once: keys and strings taken from
+    /// it as written need no check of their own ([`Core::slice_string`]; clean-room work item
+    /// C11).
+    utf8: Option<&'s str>,
     pub(super) pos: usize,
     /// The settings of the input unit; `.priority` changes its priority (§9.5).
     pub(super) settings: Settings,
@@ -838,6 +844,15 @@ impl Core<'_, '_, '_, '_> {
 
     fn text(&self, bytes: Vec<u8>, at: usize) -> Result<String, Error> {
         String::from_utf8(bytes).map_err(|_| self.error(ErrorKind::InvalidUtf8, at))
+    }
+
+    /// `src[from..to]` as a string, for a token that starts at `at`: [`Core::text`] of those
+    /// bytes, without checking them again when the whole input unit is valid UTF-8.
+    fn slice_string(&self, from: usize, to: usize, at: usize) -> Result<String, Error> {
+        match self.utf8.and_then(|text| text.get(from..to)) {
+            Some(text) => Ok(text.to_owned()),
+            None => self.text(self.src[from..to].to_vec(), at),
+        }
     }
 
     // ----- whitespace and comments (§2) ----------------------------------------------------
@@ -1984,6 +1999,7 @@ impl Core<'_, '_, '_, '_> {
         self.includes.open_units.push(unit);
         let mut inner = Core {
             src: input,
+            utf8: std::str::from_utf8(input).ok(),
             pos: 0,
             settings,
             expander: &mut *self.expander,
@@ -2618,24 +2634,31 @@ impl Core<'_, '_, '_, '_> {
         let lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
         // Whether a quoted key without escapes needs quoting, as its reading saw.
         let mut plain_needs_quoting = false;
-        let (bytes, quoted, escaped) = match self.peek() {
+        // The key's bytes: decoded, or `None` for those of `src[from..to]` as written.
+        let (bytes, (from, to), quoted, escaped) = match self.peek() {
             Some(b'"') => {
                 let read = string::double_quoted_scan(self.src, at)?;
-                if read.bytes.is_empty() {
+                let end = read.end;
+                let empty = match &read.bytes {
+                    Some(bytes) => bytes.is_empty(),
+                    None => end - 1 == at + 1,
+                };
+                if empty {
                     return Err(self.error(ErrorKind::EmptyKey, at));
                 }
-                let end = read.end;
                 self.pos = end;
                 plain_needs_quoting = read.needs_quoting;
+                let escaped = read.escaped();
                 if lowercase {
                     // §12.1, *Quirk*: the key is lowercased as written, then its escapes are
                     // decoded. A `\U` that becomes `\u` is decoded like an unquoted value's
                     // (§4.8), as the oracle does (QUESTIONS.md #20).
                     let mut raw = self.src[at + 1..end - 1].to_vec();
                     raw.make_ascii_lowercase();
-                    (string::decode_unquoted(&raw).0, true, read.escaped)
+                    let bytes = Some(string::decode_unquoted(&raw).0);
+                    (bytes, (0, 0), true, escaped)
                 } else {
-                    (read.bytes, true, read.escaped)
+                    (read.bytes, (at + 1, end - 1), true, escaped)
                 }
             }
             Some(b'\'') => return Err(self.error(ErrorKind::SingleQuotedKey, at)),
@@ -2643,7 +2666,7 @@ impl Core<'_, '_, '_, '_> {
                 while self.peek().is_some_and(is_key_byte) {
                     self.pos += 1;
                 }
-                (self.src[at..self.pos].to_vec(), false, false)
+                (None, (at, self.pos), false, false)
             }
             _ => {
                 return Err(self.error(
@@ -2664,7 +2687,10 @@ impl Core<'_, '_, '_, '_> {
                 });
             }
         }
-        let mut name = self.text(bytes, at)?;
+        let mut name = match bytes {
+            Some(bytes) => self.text(bytes, at)?,
+            None => self.slice_string(from, to, at)?,
+        };
         if lowercase && !quoted {
             name.make_ascii_lowercase();
         }
@@ -2970,18 +2996,19 @@ impl Core<'_, '_, '_, '_> {
         match self.peek() {
             Some(b'"') => {
                 let read = string::double_quoted_scan(self.src, at)?;
-                self.pos = read.end;
+                let end = read.end;
+                self.pos = end;
                 // Only a `$` as written, or one an escape made, can start a reference.
-                let bytes = if read.dollar || read.escaped {
-                    self.expander.expand(read.bytes)
+                let text = if read.dollar || read.escaped() {
+                    let bytes = read
+                        .bytes
+                        .unwrap_or_else(|| self.src[at + 1..end - 1].to_vec());
+                    let bytes = self.expander.expand(bytes);
+                    self.text(bytes, at)?
                 } else {
-                    read.bytes
+                    self.slice_string(at + 1, end - 1, at)?
                 };
-                Ok((
-                    UclValue::String(self.text(bytes, at)?),
-                    true,
-                    Origin::default(),
-                ))
+                Ok((UclValue::String(text), true, Origin::default()))
             }
             Some(b'\'') => {
                 let (bytes, end) = string::single_quoted(self.src, at)?;
@@ -3058,6 +3085,13 @@ impl Core<'_, '_, '_, '_> {
         }
         // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*). Without
         // a backslash there is nothing to decode, and every `$` counts.
+        if !backslash && !dollar {
+            // The value as written.
+            return Ok((
+                UclValue::String(self.slice_string(start, trimmed, start)?),
+                false,
+            ));
+        }
         let (bytes, expand) = if backslash {
             string::decode_unquoted(raw)
         } else {

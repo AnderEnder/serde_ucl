@@ -80,12 +80,11 @@ static DOUBLE_QUOTED: [u8; 256] = {
 /// A double-quoted string read by [`double_quoted_scan`].
 #[derive(Debug)]
 pub(crate) struct DoubleQuoted {
-    /// The decoded bytes.
-    pub(crate) bytes: Vec<u8>,
+    /// The decoded bytes of a string with a backslash escape; `None` for a string without one,
+    /// whose bytes are those between its quotes, `src[start + 1..end - 1]`, not copied yet.
+    pub(crate) bytes: Option<Vec<u8>>,
     /// The offset just after the closing quote.
     pub(crate) end: usize,
-    /// The string has a backslash escape.
-    pub(crate) escaped: bool,
     /// Outside its escapes, the string has a byte that makes a key need quoting
     /// ([`crate::emit::key_needs_quoting`]). Without escapes, that is whether the decoded bytes
     /// need quoting as a key.
@@ -97,7 +96,18 @@ pub(crate) struct DoubleQuoted {
 /// Reads the double-quoted string whose opening quote is at `src[start]` (spec §6.1). Returns
 /// the decoded bytes and the offset just after the closing quote.
 pub(crate) fn double_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
-    double_quoted_scan(src, start).map(|q| (q.bytes, q.end))
+    let read = double_quoted_scan(src, start)?;
+    let bytes = read
+        .bytes
+        .unwrap_or_else(|| src[start + 1..read.end - 1].to_vec());
+    Ok((bytes, read.end))
+}
+
+impl DoubleQuoted {
+    /// The string has a backslash escape.
+    pub(crate) fn escaped(&self) -> bool {
+        self.bytes.is_some()
+    }
 }
 
 /// [`double_quoted`], with what the reading saw on the way, so that the caller does not read the
@@ -106,11 +116,15 @@ pub(crate) fn double_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize)
 /// Bytes that need no decoding are copied a run at a time, up to the next `"`, `\\` or control
 /// byte (the idea of `serde_json`'s `SliceRead::parse_str_bytes`, `src/read.rs`, and of
 /// `toml_edit`'s `basic_chars`, `src/parser/strings.rs`; clean-room work item C11).
+///
+/// The bytes are copied only from the first escape on: a string without one is left in the input
+/// for the caller to take as it is.
 pub(crate) fn double_quoted_scan(src: &[u8], start: usize) -> Result<DoubleQuoted, Error> {
-    let mut out = Vec::new();
-    let mut i = start + 1;
+    let content = start + 1;
+    // The decoded bytes, from the first escape on.
+    let mut decoded: Option<Vec<u8>> = None;
+    let mut i = content;
     let mut seen = 0u8;
-    let mut escaped = false;
     loop {
         let mut run = i;
         while let Some(&b) = src.get(run) {
@@ -121,7 +135,9 @@ pub(crate) fn double_quoted_scan(src: &[u8], start: usize) -> Result<DoubleQuote
             seen |= class;
             run += 1;
         }
-        out.extend_from_slice(&src[i..run]);
+        if let Some(out) = &mut decoded {
+            out.extend_from_slice(&src[i..run]);
+        }
         i = run;
         let Some(&b) = src.get(i) else {
             return Err(error(src, start, ErrorKind::UnterminatedString));
@@ -129,15 +145,15 @@ pub(crate) fn double_quoted_scan(src: &[u8], start: usize) -> Result<DoubleQuote
         match b {
             b'"' => {
                 return Ok(DoubleQuoted {
-                    bytes: out,
+                    bytes: decoded,
                     end: i + 1,
-                    escaped,
                     needs_quoting: seen & NEEDS_QUOTING != 0,
                     dollar: seen & DOLLAR != 0,
                 });
             }
             b'\\' => {
-                escaped = true;
+                // Until the first escape, the plain bytes were left in the input.
+                let out = decoded.get_or_insert_with(|| src[content..i].to_vec());
                 let Some(&next) = src.get(i + 1) else {
                     return Err(error(src, start, ErrorKind::UnterminatedString));
                 };
@@ -158,7 +174,7 @@ pub(crate) fn double_quoted_scan(src: &[u8], start: usize) -> Result<DoubleQuote
                         })
                         .flatten()
                         .ok_or_else(|| error(src, i, ErrorKind::InvalidUnicodeEscape))?;
-                    push_code_point(&mut out, cp);
+                    push_code_point(out, cp);
                     i += 6;
                 } else {
                     out.push(simple_escape(next));
@@ -434,9 +450,11 @@ mod tests {
             }
         }
         let read = double_quoted_scan(br#""a b$\t""#, 0).unwrap();
-        assert!(read.escaped && read.needs_quoting && read.dollar);
+        assert!(read.escaped() && read.needs_quoting && read.dollar);
+        assert_eq!(read.bytes.as_deref(), Some(&b"a b$\t"[..]));
         let read = double_quoted_scan(br#""ab""#, 0).unwrap();
-        assert!(!read.escaped && !read.needs_quoting && !read.dollar);
+        assert!(!read.escaped() && !read.needs_quoting && !read.dollar);
+        assert_eq!(read.bytes, None);
     }
 
     #[test]
