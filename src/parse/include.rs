@@ -31,6 +31,7 @@ use super::macros::{MacroCall, MacroKind, priority_bits};
 use super::registered::MacroTable;
 use super::{Error, ErrorKind, MAX_INCLUDE_DEPTH};
 use crate::value::{DuplicateStrategy, UclValue};
+use smallvec::SmallVec;
 use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -91,8 +92,9 @@ pub(crate) struct Includes<'l> {
     /// macro parses in place, the file of the unit before it, if any (oracle runs, QUESTIONS.md
     /// #59). An include of the last one's file includes itself (§9.4). Inputs stay open for the
     /// rest of the parse (spec §13.1, *How many inputs*), and so do included files that stop
-    /// silently.
-    pub(crate) files: Vec<Option<PathBuf>>,
+    /// silently. The first two are kept inline, so that a parse of one document allocates
+    /// nothing for them (clean-room work item C12), as are the first four of `open_units`.
+    pub(crate) files: SmallVec<[Option<PathBuf>; 2]>,
     pub(crate) budget: &'l Budget,
     /// The macros the application registered (spec §13.2); `None` in macro argument documents,
     /// which know only the built-in macros.
@@ -100,7 +102,7 @@ pub(crate) struct Includes<'l> {
     /// The number of input units opened so far, which gives each its own identity.
     units: usize,
     /// The input units being parsed, outermost first; the others have ended (spec §9.4).
-    pub(crate) open_units: Vec<usize>,
+    pub(crate) open_units: SmallVec<[usize; 4]>,
     /// Where the parse records the [`super::Uncertain`] rules it reaches.
     pub(crate) uncertain: Option<&'l Cell<u8>>,
     /// How deep a copy made by `.inherit` may nest a value, the root included
@@ -122,11 +124,11 @@ impl<'l> Includes<'l> {
             base,
             search: search.clone(),
             default_search: search,
-            files: Vec::new(),
+            files: SmallVec::new(),
             budget,
             macros,
             units: 0,
-            open_units: Vec::new(),
+            open_units: SmallVec::new(),
             uncertain: None,
             inherit_limit: super::DEFAULT_INHERIT_DEPTH_LIMIT,
         }
