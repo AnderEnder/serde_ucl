@@ -299,3 +299,14 @@ The hasher stays the standard library's: `foldhash` is not approved.
      `## Unreleased`;
    - new dependencies and `unsafe` code are proposals only;
    - the checks of item 4, the fuzz run included, pass after the last change.
+8. Zero-copy (owner question): keys and strings that appear in the caller's input as they are
+   (no escape, no variable, no lowercasing, not from an included file) borrowed instead of copied.
+   Measure it, or a prototype of it, in two forms:
+   - an internal borrowed tree behind the serde entry points, with the public value model
+     unchanged;
+   - a borrowed public value model (`UclValue<'a>`), allowed by C11 item 7.
+
+   Serde targets that borrow (`&'de str`, `Cow<'de, str>`) would then deserialize without a
+   copy, as with `serde_json`. That is a new capability of the serde interface, so it is a
+   proposal for the owner. So is any change to which visitor methods owned targets receive. For
+   owned targets, results stay exactly as they are.
