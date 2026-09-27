@@ -256,11 +256,10 @@ impl<'t> Document<'t> {
     /// is returned with the saved comments.
     pub(crate) fn finish(mut self) -> Result<Finished<'t>, Box<(Error, Vec<Comment>)>> {
         if let Boundary::Value(pending) = std::mem::replace(&mut self.boundary, Boundary::Entry) {
-            let mut expander = Expander::new(Vec::new(), None, false);
+            let mut expander = Expander::new(super::vars::Variables::new(), None, false);
             let loader = super::MemoryLoader::new();
             let budget = super::include::Budget::new(None);
-            let mut includes =
-                Includes::new(&loader, std::path::PathBuf::new(), None, &budget, None);
+            let mut includes = Includes::new(&loader, Path::new("").into(), None, &budget, None);
             let mut core = Core {
                 src: b"",
                 utf8: Some(""),

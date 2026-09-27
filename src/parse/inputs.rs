@@ -10,7 +10,7 @@ use super::core::{Document, Settings};
 use super::include::{Budget, Includes, Read};
 use super::loader::Loader;
 use super::registered::MacroTable;
-use super::vars::{self, Expander};
+use super::vars::{self, Expander, Variables};
 use super::{Comment, Error, ErrorKind, MAX_INCLUDE_DEPTH, OutputFacts};
 use crate::error::Position;
 use crate::value::{DuplicateStrategy, MAX_PRIORITY, ParserFlags, UclValue, Value};
@@ -180,6 +180,7 @@ pub(crate) struct Reader<'p, 't> {
     strategy: DuplicateStrategy,
     variables: &'p IndexMap<String, String>,
     base_dir: Option<&'p Path>,
+    loader_dir: Option<&'p Path>,
     expander: Expander<'p>,
     includes: Includes<'p>,
     /// `None` once the parse has failed.
@@ -197,6 +198,9 @@ pub(crate) struct Parts<'p> {
     pub(crate) variables: &'p IndexMap<String, String>,
     pub(crate) handler: Option<Box<vars::Handler<'p>>>,
     pub(crate) loader: &'p dyn Loader,
+    /// The loader's current directory, when it is known without asking the loader: that of the
+    /// parser's default loader, which never changes ([`input_base`]).
+    pub(crate) loader_dir: Option<&'p Path>,
     pub(crate) base_dir: Option<&'p Path>,
     pub(crate) search_path: Option<Vec<String>>,
     pub(crate) max_input_bytes: Option<u64>,
@@ -214,16 +218,32 @@ pub(crate) struct Parts<'p> {
 
 /// The directory relative paths of an input resolve against (WORKLIST C8b decision 4): the base
 /// directory; without one, the directory of an input given as the file `file`, or for one given
-/// as bytes the loader's current directory.
-pub(crate) fn input_base(
-    base_dir: Option<&Path>,
+/// as bytes the loader's current directory, which `loader_dir` is when it is known without
+/// asking the loader (the parser's default loader's, which never changes). Borrowed where it can
+/// be, so that a parse of bytes allocates nothing for it (clean-room work item C13).
+pub(crate) fn input_base<'p>(
+    base_dir: Option<&'p Path>,
     loader: &dyn Loader,
+    loader_dir: Option<&'p Path>,
     file: Option<&Path>,
-) -> PathBuf {
-    match (base_dir, file) {
-        (Some(dir), _) => dir.to_path_buf(),
-        (None, Some(file)) => file.parent().map(Path::to_path_buf).unwrap_or_default(),
-        (None, None) => loader.current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+) -> Cow<'p, Path> {
+    match (base_dir, file, loader_dir) {
+        (Some(dir), _, _) => Cow::Borrowed(dir),
+        (None, Some(file), _) => {
+            Cow::Owned(file.parent().map(Path::to_path_buf).unwrap_or_default())
+        }
+        (None, None, Some(dir)) => Cow::Borrowed(dir),
+        (None, None, None) => {
+            Cow::Owned(loader.current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        }
+    }
+}
+
+/// `base` as the text of `CURDIR` (spec §7.8), borrowed when `base` is.
+pub(crate) fn base_text<'p>(base: &Cow<'p, Path>) -> Cow<'p, str> {
+    match base {
+        Cow::Borrowed(path) => path.to_string_lossy(),
+        Cow::Owned(path) => Cow::Owned(path.to_string_lossy().into_owned()),
     }
 }
 
@@ -231,29 +251,33 @@ pub(crate) fn input_base(
 /// `None`, given as bytes, in lookup order (spec §7.1): the file variables first, then the
 /// registered ones. For a file, `FILENAME` is its path and `CURDIR` its directory, whatever
 /// registered variables of those names say; for bytes, `FILENAME` is `undef` and `CURDIR` is
-/// `base`, unless `NO_FILEVARS` is set, and registered variables of those names override them.
-pub(crate) fn first_variables(
+/// `curdir`, the base directory's text, unless `NO_FILEVARS` is set, and registered variables of
+/// those names override them. Names, `undef` and registered variables are borrowed.
+pub(crate) fn first_variables<'p>(
     flags: ParserFlags,
-    registered: &IndexMap<String, String>,
+    registered: &'p IndexMap<String, String>,
     file: Option<&Path>,
-    base: &Path,
-) -> Vec<(String, String)> {
-    let filevars = match file {
+    curdir: Cow<'p, str>,
+) -> Variables<'p> {
+    let filevars: Option<(Cow<'p, str>, Cow<'p, str>)> = match file {
         Some(file) => Some((
-            file.to_string_lossy().into_owned(),
-            file.parent()
-                .map(|d| d.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            Cow::Owned(file.to_string_lossy().into_owned()),
+            Cow::Owned(
+                file.parent()
+                    .map(|d| d.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
         )),
-        None => (!flags.contains(ParserFlags::NO_FILEVARS))
-            .then(|| ("undef".to_string(), base.to_string_lossy().into_owned())),
+        None => {
+            (!flags.contains(ParserFlags::NO_FILEVARS)).then_some((Cow::Borrowed("undef"), curdir))
+        }
     };
     // Built as a vector directly: the names are unique, so only a registered `FILENAME` or
     // `CURDIR` can meet a name already there, and takes its place as a map's insert would.
-    let mut variables = Vec::with_capacity(registered.len() + 2);
+    let mut variables = Variables::with_capacity(registered.len() + 2);
     if let Some((filename, curdir)) = filevars {
-        variables.push(("FILENAME".to_string(), filename));
-        variables.push(("CURDIR".to_string(), curdir));
+        variables.push((Cow::Borrowed("FILENAME"), filename));
+        variables.push((Cow::Borrowed("CURDIR"), curdir));
     }
     for (name, value) in registered {
         let is_filevar = name == "FILENAME" || name == "CURDIR";
@@ -264,8 +288,8 @@ pub(crate) fn first_variables(
         };
         match existing {
             Some(_) if file.is_some() => {}
-            Some(at) => variables[at].1.clone_from(value),
-            None => variables.push((name.clone(), value.clone())),
+            Some(at) => variables[at].1 = Cow::Borrowed(value),
+            None => variables.push((Cow::Borrowed(name), Cow::Borrowed(value))),
         }
     }
     variables
@@ -313,6 +337,7 @@ impl<'p, 't> Reader<'p, 't> {
             variables,
             handler,
             loader,
+            loader_dir,
             base_dir,
             search_path,
             max_input_bytes,
@@ -330,14 +355,14 @@ impl<'p, 't> Reader<'p, 't> {
         facts.clear();
         macros.ran.set(false);
         let expander = Expander::new(
-            Vec::new(),
+            Variables::new(),
             handler,
             !flags.contains(ParserFlags::DISABLE_MACRO),
         );
         *budget = Budget::new(max_input_bytes);
         let mut includes = Includes::new(
             loader,
-            PathBuf::new(),
+            Cow::Borrowed(Path::new("")),
             search_path,
             budget,
             (!macros.is_empty()).then_some(macros),
@@ -355,6 +380,7 @@ impl<'p, 't> Reader<'p, 't> {
             strategy,
             variables,
             base_dir,
+            loader_dir,
             expander,
             includes,
             document: Some(document),
@@ -422,7 +448,7 @@ impl<'p, 't> Reader<'p, 't> {
             }
             Source::File(path) => {
                 let loader = self.includes.loader;
-                let path = input_base(self.base_dir, loader, None).join(path);
+                let path = input_base(self.base_dir, loader, self.loader_dir, None).join(path);
                 let io = |e: std::io::Error| {
                     let message = format!("{}: {e}", path.display());
                     Error::new(ErrorKind::Io { message }, Position::new())
@@ -439,14 +465,10 @@ impl<'p, 't> Reader<'p, 't> {
             }
         };
         let loader = self.includes.loader;
-        self.includes.base = input_base(self.base_dir, loader, file.as_deref());
+        let base = input_base(self.base_dir, loader, self.loader_dir, file.as_deref());
         if self.includes.files.is_empty() {
-            let variables = first_variables(
-                self.flags,
-                self.variables,
-                file.as_deref(),
-                &self.includes.base,
-            );
+            let curdir = base_text(&base);
+            let variables = first_variables(self.flags, self.variables, file.as_deref(), curdir);
             self.expander.set_variables(variables);
         } else if let Some(file) = &file {
             let curdir = file
@@ -456,6 +478,7 @@ impl<'p, 't> Reader<'p, 't> {
             self.expander
                 .set_file_vars(file.to_string_lossy().into_owned(), curdir);
         }
+        self.includes.base = base;
         // An input given as bytes goes on in the file of the input before it (oracle runs,
         // QUESTIONS.md #59).
         let current = file.or_else(|| self.includes.files.last().cloned().flatten());

@@ -456,17 +456,12 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         }
         let text = &self.src[open + 1..end - 1];
         let flags = self.settings.flags;
-        let variables = if flags.contains(ParserFlags::NO_FILEVARS) {
-            Vec::new()
-        } else {
-            vec![
-                ("FILENAME".to_string(), "undef".to_string()),
-                (
-                    "CURDIR".to_string(),
-                    self.includes.base.to_string_lossy().into_owned(),
-                ),
-            ]
-        };
+        let mut variables = super::vars::Variables::new();
+        if !flags.contains(ParserFlags::NO_FILEVARS) {
+            let curdir = self.includes.base.to_string_lossy().into_owned();
+            variables.push(("FILENAME".into(), "undef".into()));
+            variables.push(("CURDIR".into(), curdir.into()));
+        }
         let mut expander =
             Expander::new(variables, None, !flags.contains(ParserFlags::DISABLE_MACRO));
         let mut includes = self.includes.for_arguments();

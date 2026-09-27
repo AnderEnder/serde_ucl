@@ -238,6 +238,13 @@ fn not_found(path: &Path) -> io::Error {
     )
 }
 
+impl MemoryLoader {
+    /// The current directory, borrowed ([`Loader::current_dir`] gives a copy).
+    pub(crate) fn dir(&self) -> &Path {
+        &self.current_dir
+    }
+}
+
 impl Loader for MemoryLoader {
     fn current_dir(&self) -> io::Result<PathBuf> {
         Ok(self.current_dir.clone())

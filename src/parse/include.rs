@@ -32,6 +32,7 @@ use super::registered::MacroTable;
 use super::{Error, ErrorKind, MAX_INCLUDE_DEPTH};
 use crate::value::{DuplicateStrategy, UclValue};
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -80,7 +81,7 @@ pub(crate) struct Includes<'l> {
     pub(crate) loader: &'l dyn Loader,
     /// The directory relative paths resolve against, and `CURDIR` of a document given as bytes
     /// (project decision 6). It is set for each input (WORKLIST C8b decision 4).
-    pub(crate) base: PathBuf,
+    pub(crate) base: Cow<'l, Path>,
     /// The `path` list in effect: set by any include macro, it stays for the rest of the parse
     /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
     /// ([`super::Parser::set_search_path`]).
@@ -114,7 +115,7 @@ impl<'l> Includes<'l> {
     /// The state for a parse with no input read yet, with the parser's search path `search`.
     pub(crate) fn new(
         loader: &'l dyn Loader,
-        base: PathBuf,
+        base: Cow<'l, Path>,
         search: Option<Vec<String>>,
         budget: &'l Budget,
         macros: Option<&'l MacroTable>,

@@ -604,11 +604,18 @@ impl Parser {
         self.loader.as_deref().unwrap_or(&*DEFAULT_LOADER)
     }
 
+    /// The current directory of the loader when it is the default one, which never changes, so
+    /// that it need not be asked for a copy ([`inputs::input_base`]).
+    fn loader_dir(&self) -> Option<&Path> {
+        self.loader.is_none().then(|| DEFAULT_LOADER.dir())
+    }
+
     /// The directory that relative paths in a document given as bytes, and a relative path given
     /// to [`Parser::parse_file`], resolve against: the base directory, or the loader's current
     /// directory.
     fn base(&self) -> PathBuf {
-        inputs::input_base(self.base_dir.as_deref(), self.loader(), None)
+        let (base_dir, loader_dir) = (self.base_dir.as_deref(), self.loader_dir());
+        inputs::input_base(base_dir, self.loader(), loader_dir, None).into_owned()
     }
 
     /// Starts a parse of several inputs into one result (spec §13.1): give it each input with
@@ -678,6 +685,7 @@ impl Parser {
             strategy: *strategy,
             variables,
             handler: recording,
+            loader_dir: loader.is_none().then(|| DEFAULT_LOADER.dir()),
             loader: loader.as_deref().unwrap_or(&*DEFAULT_LOADER),
             base_dir: base_dir.as_deref(),
             search_path: search_path.clone(),
@@ -857,9 +865,15 @@ impl Parser {
             #[cfg(feature = "fs")]
             Source::File { canonical, input } => (*input, Some(canonical.clone())),
         };
-        let base = inputs::input_base(self.base_dir.as_deref(), self.loader(), file.as_deref());
+        let base = inputs::input_base(
+            self.base_dir.as_deref(),
+            self.loader(),
+            self.loader_dir(),
+            file.as_deref(),
+        );
+        let curdir = inputs::base_text(&base);
         let variables =
-            inputs::first_variables(self.flags, &self.variables, file.as_deref(), &base);
+            inputs::first_variables(self.flags, &self.variables, file.as_deref(), curdir);
         let mut answers = self.handler_answers.iter();
         let replay = move |_: &str| answers.next().cloned().flatten();
         let mut expander = vars::Expander::new(
