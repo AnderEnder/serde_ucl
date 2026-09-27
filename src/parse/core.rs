@@ -1323,8 +1323,9 @@ impl Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("entries are parsed inside objects");
-        // The key is looked up once, and its entry, if any, found by position from then on.
-        let index = object.index_of(&key.name);
+        // The key is hashed once, and its entry, if any, found by position from then on.
+        let hash = object.key_hash(&key.name);
+        let index = object.index_of_hashed(hash, &key.name);
         let entry = index.map(|index| object.get_index(index).expect("just found").1);
         let is_container = |v: &UclValue| v.is_object() || v.is_array();
         // Under `merge`, a scalar that follows a container takes its place in the entry (§8.4,
@@ -1361,7 +1362,8 @@ impl Core<'_, '_, '_, '_> {
             None => {
                 key.stored = Some(object.len());
                 let name = std::mem::take(&mut key.name);
-                object.insert_slot_at(None, name, slot, strategy, flags)
+                object.push_hashed(hash, name, Entry::from_slot(slot));
+                Ok(Placement::Slot(0))
             }
             Some(_) => object.insert_slot_at(index, key.name.as_str(), slot, strategy, flags),
         };

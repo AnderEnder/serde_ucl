@@ -14,8 +14,11 @@
 //! [`UclObject::insert_with_strategy`].
 
 use indexmap::IndexMap;
+use indexmap::map::RawEntryApiV1;
+use indexmap::map::raw_entry_v1::RawEntryMut;
 use smallvec::SmallVec;
 use std::fmt;
+use std::hash::BuildHasher;
 
 /// Explicit array (`[...]`).
 pub type UclArray = Vec<UclValue>;
@@ -897,6 +900,39 @@ impl UclObject {
     /// The position of `key` in insertion order.
     pub fn index_of(&self, key: &str) -> Option<usize> {
         self.entries.get_index_of(key)
+    }
+
+    /// The hash of `key` in this object, for [`UclObject::index_of_hashed`] and
+    /// [`UclObject::push_hashed`]: a key that the parser looks up and then inserts is hashed
+    /// once (clean-room work item C11).
+    pub(crate) fn key_hash(&self, key: &str) -> u64 {
+        self.entries.hasher().hash_one(key)
+    }
+
+    /// [`UclObject::index_of`] for a key whose hash is `hash` ([`UclObject::key_hash`]).
+    pub(crate) fn index_of_hashed(&self, hash: u64, key: &str) -> Option<usize> {
+        self.entries
+            .raw_entry_v1()
+            .index_from_hash(hash, |k| k == key)
+    }
+
+    /// Adds `key`, whose hash is `hash` ([`UclObject::key_hash`]), with `entry` at the end. The
+    /// caller has found that the key is not in the object; if it were, its entry would be
+    /// replaced in place, as [`UclObject::insert_entry`] does.
+    pub(crate) fn push_hashed(&mut self, hash: u64, key: String, entry: Entry) {
+        match self
+            .entries
+            .raw_entry_mut_v1()
+            .from_hash(hash, |k| *k == key)
+        {
+            RawEntryMut::Vacant(vacant) => {
+                vacant.insert_hashed_nocheck(hash, key, entry);
+            }
+            RawEntryMut::Occupied(mut occupied) => {
+                debug_assert!(false, "push_hashed of a key already present");
+                *occupied.get_mut() = entry;
+            }
+        }
     }
 
     /// Changes the spelling of key `old` to `new`, keeping its position and entry. Returns false
