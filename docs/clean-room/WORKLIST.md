@@ -390,6 +390,12 @@ serde_json reproducible.
      unchanged. Dependencies and `unsafe` stay proposals (C11 item 8).
 4. The README's figures are refreshed from the new documents where they add information.
 
+Owner decision of 2026-09-28, on item 3:
+
+1. Every change is measured against the latest release, 0.5.0 (tag `v0.5.0`), not against 0.3.0
+   or the start of C13. The ablations of item 3 use 0.5.0's code as their baseline, and the
+   report and any figures in `CHANGELOG.md` compare with 0.5.0 only.
+
 ## C15 — libucl-compatible C API (owner request of 2026-09-28; after C14, not started)
 
 A C API compatible with libucl's, so that C programs written for libucl can use the crate. Owner
