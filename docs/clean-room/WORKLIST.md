@@ -392,9 +392,13 @@ serde_json reproducible.
 
 Owner decision of 2026-09-28, on item 3:
 
-1. Every change is measured against the latest release, 0.5.0 (tag `v0.5.0`), not against 0.3.0
-   or the start of C13. The ablations of item 3 use 0.5.0's code as their baseline, and the
-   report and any figures in `CHANGELOG.md` compare with 0.5.0 only.
+1. Every change is measured against the previous release, 0.5.0 (tag `v0.5.0`), not against
+   0.3.0 or the start of C13. The ablations of item 3 use 0.5.0's code as their baseline.
+2. The results set this version against 0.5.0, libucl and serde_json. The implementation team
+   measures against 0.5.0 with the crate's benchmarks, and adds serde_json where its benchmarks
+   can time it, such as parsing the JSON documents into `serde_json::Value`. The spec team's
+   comparison (`scripts/bench-compare.sh`) runs this version, 0.5.0, libucl and serde_json in
+   turns.
 
 ## C15 — libucl-compatible C API (owner request of 2026-09-28; after C14, not started)
 
