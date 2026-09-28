@@ -861,8 +861,8 @@ The [examples](examples/) are programs that check their results with assertions
 
 Three [criterion](https://docs.rs/criterion) benchmarks cover parsing, the emitters and serde
 ([benches/README.md](benches/README.md)). Run them with `cargo bench`; criterion's options go
-after `--`, as in `cargo bench -- --noplot`. One run on an Apple M4 Max
-with rustc 1.98.1, median times:
+after `--`, as in `cargo bench -- --noplot`. One run of 0.3.0 on an Apple M4 Max with rustc
+1.98.1, median times:
 
 | Group | Document | Time | Throughput |
 | --- | --- | --- | --- |
@@ -874,6 +874,39 @@ with rustc 1.98.1, median times:
 | `serde/deserialize-1000/from_value` | the parsed tree into a struct | 775 µs | 628 MiB/s |
 | `serde/deserialize-error-1000/from_str` | as above, failing on the last value | 15.0 ms | 32.5 MiB/s |
 | `serde/serialize-1000/to_string` | the struct in the config format | 2.59 ms | 182 MiB/s of output |
+
+### Against libucl and serde_json
+
+The benchmarks' documents (`benches/common/mod.rs`, the three entries also as JSON) parsed by
+serde_ucl 0.4.0, by libucl at the reference commit (CMake Release build, `-O3`) and by serde_json
+1.0.151, on an Apple M4 Max with rustc 1.98.1 and the release settings of `Cargo.toml` (fat LTO,
+one codegen unit). Each time is the median of three rounds, each the median of 31 samples of at
+least 5 ms of repetitions, and includes freeing the result.
+
+Parsing into each library's value tree (`parse::parse`; libucl's `ucl_parser_add_chunk` and
+`ucl_parser_get_object`; `serde_json::Value`):
+
+| Document | serde_ucl | libucl | serde_json |
+| --- | ---: | ---: | ---: |
+| JSON, 10,000 records (1.4 MiB) | 18.3 ms | 25.1 ms | 9.9 ms |
+| JSON, 1,000 records (142 KiB) | 1.76 ms | 2.36 ms | 0.93 ms |
+| configuration, 1,000 services (499 KiB) | 2.62 ms | 3.35 ms | – |
+| three entries, UCL | 0.73 µs | 9.1 µs | – |
+| three entries, JSON | 0.77 µs | 8.9 µs | 0.21 µs |
+
+Deserializing into a struct with owned fields (`from_str`):
+
+| Document | serde_ucl | serde_json |
+| --- | ---: | ---: |
+| JSON, 10,000 records | 19.6 ms | 4.7 ms |
+| JSON, 1,000 records | 1.86 ms | 0.47 ms |
+| three entries, JSON | 0.81 µs | 0.08 µs |
+
+serde_ucl parses 1.3 to 1.4 times as fast as libucl on the larger documents, and 12 times as fast
+on the small ones, where creating a libucl parser takes most of the time. serde_json builds its
+value 1.9 times as fast on the larger documents and 3.7 times on the small one, and fills a struct
+4 to 10 times as fast: it deserializes straight from the text, while serde_ucl first builds the
+whole UCL value, which repeated keys, priorities and `.inherit` need.
 
 ## Repository layout
 
