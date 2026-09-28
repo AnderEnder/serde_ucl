@@ -2,6 +2,18 @@
 
 All notable changes to this crate are recorded here.
 
+## Unreleased
+
+### Benchmarks
+
+- Irregular configurations from a seeded generator, whose keys, section sizes, order, depth and
+  strings vary, and the JSON documents `twitter.json`, `citm_catalog.json` and `canada.json`,
+  which `benches/fetch-documents.sh` fetches at a pinned commit with SHA-256 checks. New groups
+  `parse/irregular`, `parse/json-corpus`, `parse/corpus`, `serde/irregular-*`,
+  `serde/json-corpus-*` and `serde/corpus-*`; the corpus groups read the configurations in
+  `benches/corpus/`. `benches/check-documents.sh` checks every document against libucl
+  (clean-room work item C14).
+
 ## 0.5.0 - 2026-09-28
 
 Serde targets can borrow keys and strings from the input, and parsing and deserialization are

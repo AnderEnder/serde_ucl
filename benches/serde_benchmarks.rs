@@ -8,8 +8,12 @@
 mod common;
 
 use common::Config;
-use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::measurement::WallTime;
+use criterion::{
+    BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main,
+};
 use serde::Deserialize;
+use serde::de::IgnoredAny;
 use serde_ucl::UclValue;
 use std::hint::black_box;
 use std::time::Duration;
@@ -125,12 +129,62 @@ fn bench_nested(c: &mut Criterion) {
     group.finish();
 }
 
+/// Deserializes `input` into a `UclValue`, which takes an owned parse, and into `IgnoredAny`,
+/// which takes a borrowed one (clean-room work item C13).
+fn untyped(group: &mut BenchmarkGroup<'_, WallTime>, input: &str) {
+    group.bench_function("UclValue", |b| {
+        b.iter(|| serde_ucl::from_str::<UclValue>(black_box(input)).unwrap())
+    });
+    group.bench_function("IgnoredAny", |b| {
+        b.iter(|| serde_ucl::from_str::<IgnoredAny>(black_box(input)).unwrap())
+    });
+}
+
+/// The irregular configurations of `common::IRREGULAR`.
+fn bench_irregular(c: &mut Criterion) {
+    for (name, seed, size) in common::IRREGULAR {
+        let input = common::irregular(seed, size);
+        let mut group = c.benchmark_group(format!("serde/irregular-{name}"));
+        group.throughput(Throughput::Bytes(input.len() as u64));
+        untyped(&mut group, &input);
+        group.finish();
+    }
+}
+
+/// A group per document, named `<prefix>-<document>`. A document that does not deserialize is
+/// skipped with a message.
+fn bench_documents(c: &mut Criterion, prefix: &str, documents: Vec<common::Document>) {
+    for document in documents {
+        if let Err(e) = serde_ucl::from_str::<UclValue>(&document.text) {
+            eprintln!("{prefix}: skipping {}: {e}", document.path.display());
+            continue;
+        }
+        let mut group = c.benchmark_group(format!("{prefix}-{}", document.name));
+        group.throughput(Throughput::Bytes(document.text.len() as u64));
+        untyped(&mut group, &document.text);
+        group.finish();
+    }
+}
+
+/// The JSON documents in `target/bench-corpus/` (`benches/fetch-documents.sh`).
+fn bench_json_corpus(c: &mut Criterion) {
+    let prefix = "serde/json-corpus";
+    bench_documents(c, prefix, common::json_documents(prefix));
+}
+
+/// The configurations in `benches/corpus/`.
+fn bench_corpus(c: &mut Criterion) {
+    let prefix = "serde/corpus";
+    bench_documents(c, prefix, common::corpus_documents(prefix));
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(30)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = bench_deserialize, bench_deserialize_small, bench_deserialize_error, bench_serialize, bench_nested
+    targets = bench_deserialize, bench_deserialize_small, bench_deserialize_error, bench_serialize, bench_nested,
+        bench_irregular, bench_json_corpus, bench_corpus
 }
 criterion_main!(benches);

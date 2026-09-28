@@ -104,12 +104,72 @@ fn bench_variables(c: &mut Criterion) {
     group.finish();
 }
 
+/// The irregular configurations of `common::IRREGULAR`.
+fn bench_irregular(c: &mut Criterion) {
+    let mut group = c.benchmark_group("parse/irregular");
+    for (name, seed, size) in common::IRREGULAR {
+        let input = common::irregular(seed, size);
+        group.throughput(Throughput::Bytes(input.len() as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(name), &input, |b, input| {
+            let mut parser = Parser::new();
+            b.iter(|| parser.parse(black_box(input.as_bytes())).unwrap());
+        });
+    }
+    group.finish();
+}
+
+/// A group of one benchmark per document. A document that does not parse is skipped with a
+/// message, and so is the group if no document is left.
+fn bench_documents(c: &mut Criterion, name: &str, documents: Vec<common::Document>) {
+    let documents: Vec<common::Document> = documents
+        .into_iter()
+        .filter(
+            |document| match Parser::new().parse(document.text.as_bytes()) {
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!("{name}: skipping {}: {e}", document.path.display());
+                    false
+                }
+            },
+        )
+        .collect();
+    if documents.is_empty() {
+        return;
+    }
+    let mut group = c.benchmark_group(name);
+    for document in &documents {
+        group.throughput(Throughput::Bytes(document.text.len() as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(&document.name),
+            &document.text,
+            |b, input| {
+                let mut parser = Parser::new();
+                b.iter(|| parser.parse(black_box(input.as_bytes())).unwrap());
+            },
+        );
+    }
+    group.finish();
+}
+
+/// The JSON documents in `target/bench-corpus/` (`benches/fetch-documents.sh`).
+fn bench_json_corpus(c: &mut Criterion) {
+    let name = "parse/json-corpus";
+    bench_documents(c, name, common::json_documents(name));
+}
+
+/// The configurations in `benches/corpus/`.
+fn bench_corpus(c: &mut Criterion) {
+    let name = "parse/corpus";
+    bench_documents(c, name, common::corpus_documents(name));
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(30)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = bench_config, bench_small, bench_flags, bench_json, bench_nested, bench_variables
+    targets = bench_config, bench_small, bench_flags, bench_json, bench_nested, bench_variables,
+        bench_irregular, bench_json_corpus, bench_corpus
 }
 criterion_main!(benches);
