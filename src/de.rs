@@ -34,6 +34,14 @@
 //! as from a value that owns its strings. [`from_reader`], [`from_file`] and the functions that
 //! take owned targets borrow from the input they read too, which saves copying keys.
 //!
+//! A target that takes the whole value, [`UclValue`](crate::UclValue) or
+//! [`UclObject`](crate::UclObject) (or a type that deserializes as one, such as a
+//! `Box<UclValue>`), is parsed into a value that owns its strings, which it takes without a copy.
+//! To find such a target, [`from_str`], [`from_slice`], [`from_reader`], [`from_file`] and the
+//! `from_str_with_*` functions run its `Deserialize` once before the parse, on a deserializer
+//! that fails its first request, and look at what that request was; that run reads nothing.
+//! [`UclDeserializer`] parses when the target makes its first request, and so needs no such run.
+//!
 //! ```
 //! use serde::Deserialize;
 //! use std::collections::HashMap;
@@ -104,7 +112,8 @@
 //! deserialize the target again from that result, recording the path of an error. They use that
 //! second error when it is the same error as the first; a target that fails differently the
 //! second time, or not at all, leaves the first error without a path or position. So on failure
-//! the target's `Deserialize` runs twice, and the second parse asks the loader for the included
+//! the target's `Deserialize` runs twice after the parse (and once before it, cut short, see
+//! [Borrowing](self#borrowing)), and the second parse asks the loader for the included
 //! files again (a file that changed in between can move the position, or lose it); it does not
 //! call the variable handler, but gives its answers from the first parse again.
 //!
@@ -146,7 +155,9 @@ pub(crate) fn enter(depth: usize) -> Result<usize, UclError> {
 use crate::error::UclError;
 use crate::parse::{Parser, ParserBuilder, Source};
 use serde::de::{self, Deserialize, DeserializeOwned, Visitor};
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
 #[cfg(feature = "fs")]
 use std::path::Path;
@@ -219,17 +230,70 @@ fn locate(parser: &mut Parser, source: &Source<'_>, error: UclError, borrow: boo
     error
 }
 
-/// Whether `T` takes the whole parsed value: [`UclValue`](crate::UclValue) and
-/// [`UclObject`](crate::UclObject) do. For them the text entry points parse into an owned value,
-/// which is handed over as it is; every other target gets a value that borrows from the text, so
-/// that a target that borrows can take keys and strings without a copy (clean-room work item
-/// C13). This is only a speed choice: a value that borrows deserializes into these two types as
-/// well, through a copy. Type names are not guaranteed to be unique, but no other type is named
-/// as these two are, and a type that went unrecognised would only lose the speed.
-fn takes_whole_value<T: ?Sized>() -> bool {
-    let name = std::any::type_name::<T>();
-    name == std::any::type_name::<crate::UclValue>()
-        || name == std::any::type_name::<crate::UclObject>()
+/// Whether `T` takes the whole parsed value: [`UclValue`](crate::UclValue),
+/// [`UclObject`](crate::UclObject), and types that deserialize as one of them, such as a
+/// `Box<UclValue>` or a `#[serde(transparent)]` wrapper. For them the text entry points parse
+/// into an owned value, which is handed over as it is; every other target gets a value that
+/// borrows from the text, so that a target that borrows can take keys and strings without a copy
+/// (clean-room work item C13).
+///
+/// The answer comes from what `T` asks for, not from its name: `T::deserialize` runs on a
+/// [`Probe`], which fails every request, and `T` takes the whole value when its first request
+/// is the private newtype struct [`marker::VALUE`](crate::ser::marker::VALUE), the request of
+/// `Deserialize for UclValue`. Such a `T` gets its value through [`crate::handoff`], owned in
+/// either case, so parsing owned does not change its result. A `T` that asks for something else
+/// first, such as an `Option<UclValue>`, gets the borrowed value, and a `UclValue` inside it gets
+/// a copy ([`Value::into_owned`](crate::value::Value::into_owned)): a whole value that goes
+/// unrecognised costs only that copy.
+fn takes_whole_value<'de, T: Deserialize<'de>>() -> bool {
+    let first = Cell::new(false);
+    // The probe fails every request; whatever `T` makes of that is dropped.
+    drop(T::deserialize(Probe(&first)));
+    first.get()
+}
+
+/// The deserializer of [`takes_whole_value`]: it records whether the first request it gets is
+/// the newtype struct [`marker::VALUE`](crate::ser::marker::VALUE), and fails every request.
+struct Probe<'c>(&'c Cell<bool>);
+
+/// The error of a [`Probe`], which carries nothing, so that probing allocates nothing.
+#[derive(Debug)]
+struct Probed;
+
+impl fmt::Display for Probed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("probed for a whole value")
+    }
+}
+
+impl std::error::Error for Probed {}
+
+impl de::Error for Probed {
+    fn custom<M: fmt::Display>(_message: M) -> Self {
+        Probed
+    }
+}
+
+impl<'de> de::Deserializer<'de> for Probe<'_> {
+    type Error = Probed;
+
+    fn deserialize_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Probed> {
+        Err(Probed)
+    }
+
+    fn deserialize_newtype_struct<V: Visitor<'de>>(
+        self,
+        name: &'static str,
+        _visitor: V,
+    ) -> Result<V::Value, Probed> {
+        self.0.set(name == crate::ser::marker::VALUE);
+        Err(Probed)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+        option unit unit_struct seq tuple tuple_struct map struct enum identifier ignored_any
+    }
 }
 
 /// Parses `input` with `parser` and deserializes a `T` from the result, as the text entry
@@ -1065,6 +1129,100 @@ mod tests {
         );
         assert_eq!(with_flags["t"], "10s");
         assert_eq!(with_flags["v"], "x");
+    }
+
+    /// `takes_whole_value` answers from the first request a target makes, not from its name.
+    #[test]
+    fn whole_value_targets_are_found_by_their_first_request() {
+        use crate::value::UclObject;
+
+        #[derive(Deserialize)]
+        #[serde(transparent)]
+        struct Wrapper(UclValue);
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Holder<'a> {
+            name: &'a str,
+            extra: UclValue,
+        }
+
+        /// Asks the deserializer for nothing.
+        struct Silent;
+        impl<'de> Deserialize<'de> for Silent {
+            fn deserialize<D: de::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+                Ok(Silent)
+            }
+        }
+
+        /// Asks for a whole value, and replaces any error with its own.
+        struct Rewrites(UclValue);
+        impl<'de> Deserialize<'de> for Rewrites {
+            fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                UclValue::deserialize(deserializer)
+                    .map(Rewrites)
+                    .map_err(|_| de::Error::custom("rewritten"))
+            }
+        }
+
+        assert!(takes_whole_value::<UclValue>());
+        assert!(takes_whole_value::<UclObject>());
+        assert!(takes_whole_value::<Box<UclValue>>());
+        assert!(takes_whole_value::<Wrapper>());
+        assert!(takes_whole_value::<Rewrites>());
+        assert!(!takes_whole_value::<Option<UclValue>>());
+        assert!(!takes_whole_value::<Vec<UclValue>>());
+        assert!(!takes_whole_value::<HashMap<String, UclValue>>());
+        assert!(!takes_whole_value::<Holder<'_>>());
+        assert!(!takes_whole_value::<serde_json::Value>());
+        assert!(!takes_whole_value::<String>());
+        assert!(!takes_whole_value::<&str>());
+        assert!(!takes_whole_value::<Silent>());
+
+        // Each gets what it got before the probe: the value, or the parse error.
+        let text = "name = web\nextra { a = 1 }";
+        let whole: UclValue = from_str(text).unwrap();
+        assert_eq!(*from_str::<Box<UclValue>>(text).unwrap(), whole);
+        assert_eq!(from_str::<Wrapper>(text).unwrap().0, whole);
+        assert_eq!(from_str::<Rewrites>(text).unwrap().0, whole);
+        assert_eq!(from_str::<Holder<'_>>(text).unwrap().name, "web");
+        for bad in ["a = {", "a = [1,"] {
+            assert!(matches!(from_str::<Silent>(bad), Err(UclError::Syntax(_))));
+            assert!(matches!(
+                from_str::<Rewrites>(bad),
+                Err(UclError::Syntax(_))
+            ));
+        }
+    }
+
+    /// A whole value that `takes_whole_value` does not recognise, here inside an `Option`, is
+    /// parsed borrowed and copied when the target takes it: the target gets the value the
+    /// `UclValue` target gets, the priorities and `.inherit` marks of its values, the values of
+    /// a repeated key, times and key order included. The copy is the only cost.
+    #[test]
+    fn an_unrecognised_whole_value_costs_only_a_copy() {
+        let text = "base {\n  x = \"s\"\n  y = [1, 2]\n}\n\
+                    derived {\n  .inherit \"base\"\n  z = 'q'\n}\n\
+                    k = 1\n.priority 5\nk = x\nk = y\nt = 10s\n";
+        assert!(takes_whole_value::<UclValue>());
+        assert!(!takes_whole_value::<Option<UclValue>>());
+        let whole: UclValue = from_str(text).unwrap();
+        let copied = from_str::<Option<UclValue>>(text)
+            .unwrap()
+            .expect("an object");
+        assert_eq!(copied, whole);
+        // `==` ignores key order; `Debug` shows it, with each value's priority and marks.
+        assert_eq!(format!("{copied:?}"), format!("{whole:?}"));
+
+        // The document has what the comparison is about.
+        let object = whole.as_object().unwrap();
+        let k = object.entry("k").unwrap();
+        let priorities: Vec<u8> = k.slots().iter().map(|slot| slot.priority()).collect();
+        assert_eq!(priorities, [5, 5]);
+        let derived = object["derived"].as_object().unwrap();
+        assert!(derived.entry("x").unwrap().slots()[0].is_inherited());
+        assert!(!derived.entry("z").unwrap().slots()[0].is_inherited());
+        assert_eq!(object["t"], UclValue::Time(10.0));
     }
 
     #[test]
