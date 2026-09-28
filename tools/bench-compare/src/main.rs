@@ -10,6 +10,10 @@
 //! Every line of `run` is `tool|kind|document|seconds`: `kind` is `parse` (into the library's
 //! value tree, freed each time), `parse-nofree` (the values kept and freed after the timing),
 //! `typed` and `typed-borrowed` (`from_str` into a struct whose strings are owned or borrowed).
+//!
+//! `BENCH_COMPARE_LABEL` names the serde_ucl this binary was built with (default `serde_ucl`).
+//! `scripts/bench-compare.sh` builds a second copy against the previous release and runs it as
+//! `serde_ucl@VERSION`; that copy leaves serde_json out, which the first one times.
 
 #[path = "../../../benches/common/mod.rs"]
 mod common;
@@ -153,32 +157,37 @@ fn read(path: &Path) -> String {
 }
 
 fn run(dir: &Path, corpus: Option<&Path>) {
+    let ucl = std::env::var("BENCH_COMPARE_LABEL").unwrap_or_else(|_| "serde_ucl".into());
+    // A copy built against an earlier serde_ucl times only that serde_ucl.
+    let json = !ucl.contains('@');
     for (name, _) in documents() {
         let doc = read(&dir.join(name));
         let t = time(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).is_ok());
-        println!("serde_ucl|parse|{name}|{t:.9}");
+        println!("{ucl}|parse|{name}|{t:.9}");
         let t = time_keep(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).unwrap());
-        println!("serde_ucl|parse-nofree|{name}|{t:.9}");
-        if name.ends_with(".json") {
+        println!("{ucl}|parse-nofree|{name}|{t:.9}");
+        if json && name.ends_with(".json") {
             let t = time(|| serde_json::from_str::<serde_json::Value>(black_box(&doc)).is_ok());
             println!("serde_json|parse|{name}|{t:.9}");
         }
         if name.starts_with("json") {
             let t = time(|| serde_ucl::from_str::<Items>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed|{name}|{t:.9}");
+            println!("{ucl}|typed|{name}|{t:.9}");
             let t = time(|| serde_ucl::from_str::<ItemsBorrowed>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed-borrowed|{name}|{t:.9}");
-            let t = time(|| serde_json::from_str::<Items>(black_box(&doc)).is_ok());
-            println!("serde_json|typed|{name}|{t:.9}");
-            let t = time(|| serde_json::from_str::<ItemsBorrowed>(black_box(&doc)).is_ok());
-            println!("serde_json|typed-borrowed|{name}|{t:.9}");
+            println!("{ucl}|typed-borrowed|{name}|{t:.9}");
+            if json {
+                let t = time(|| serde_json::from_str::<Items>(black_box(&doc)).is_ok());
+                println!("serde_json|typed|{name}|{t:.9}");
+                let t = time(|| serde_json::from_str::<ItemsBorrowed>(black_box(&doc)).is_ok());
+                println!("serde_json|typed-borrowed|{name}|{t:.9}");
+            }
         }
         if name.starts_with("small") {
             let t = time(|| serde_ucl::from_str::<Small>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed|{name}|{t:.9}");
+            println!("{ucl}|typed|{name}|{t:.9}");
             let t = time(|| serde_ucl::from_str::<SmallBorrowed>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed-borrowed|{name}|{t:.9}");
-            if name.ends_with(".json") {
+            println!("{ucl}|typed-borrowed|{name}|{t:.9}");
+            if json && name.ends_with(".json") {
                 let t = time(|| serde_json::from_str::<Small>(black_box(&doc)).is_ok());
                 println!("serde_json|typed|{name}|{t:.9}");
                 let t = time(|| serde_json::from_str::<SmallBorrowed>(black_box(&doc)).is_ok());
@@ -205,9 +214,9 @@ fn run(dir: &Path, corpus: Option<&Path>) {
             parser.parse(black_box(doc.as_bytes()))
         };
         let t = time(|| parse().is_ok());
-        println!("serde_ucl|parse|{name}|{t:.9}");
+        println!("{ucl}|parse|{name}|{t:.9}");
         let t = time_keep(|| parse().unwrap());
-        println!("serde_ucl|parse-nofree|{name}|{t:.9}");
+        println!("{ucl}|parse-nofree|{name}|{t:.9}");
     }
 }
 
@@ -269,63 +278,142 @@ fn summarize(files: &[PathBuf]) {
                 .push(seconds);
         }
     }
-    let median = |tool: &str, kind: &str, doc: &str| -> String {
-        match values.get(&(tool.into(), kind.into(), doc.into())) {
-            Some(v) => {
-                let mut v = v.clone();
-                v.sort_by(f64::total_cmp);
-                let m = if v.len() % 2 == 1 {
-                    v[v.len() / 2]
-                } else {
-                    (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2.0
-                };
-                format_time(m)
+    let median = |tool: &str, kind: &str, doc: &str| -> Option<f64> {
+        let mut v = values.get(&(tool.into(), kind.into(), doc.into()))?.clone();
+        v.sort_by(f64::total_cmp);
+        Some(if v.len() % 2 == 1 {
+            v[v.len() / 2]
+        } else {
+            (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2.0
+        })
+    };
+    let time = |tool: &str, kind: &str, doc: &str| -> String {
+        median(tool, kind, doc).map_or_else(|| "–".into(), format_time)
+    };
+    // This serde_ucl against the previous one: the change in time.
+    let change = |base: &str, kind: &str, doc: &str| -> String {
+        match (median("serde_ucl", kind, doc), median(base, kind, doc)) {
+            (Some(now), Some(before)) => {
+                let percent = (now / before - 1.0) * 100.0;
+                let sign = if percent < 0.0 { "−" } else { "+" };
+                format!("{sign}{:.0}%", percent.abs())
             }
-            None => "–".into(),
+            _ => "–".into(),
         }
     };
+    // The previous release, when the script ran one: tools named `serde_ucl@VERSION`.
+    let base = values
+        .keys()
+        .map(|(tool, _, _)| tool.as_str())
+        .find(|tool| tool.starts_with("serde_ucl@"))
+        .map(str::to_owned);
     let rounds = values.values().map(Vec::len).max().unwrap_or(0);
     let plural = if rounds == 1 { "" } else { "s" };
     println!("Medians over {rounds} round{plural}; each time includes freeing the result.\n");
-    println!("| Document | serde_ucl | libucl | serde_json |");
-    println!("| --- | ---: | ---: | ---: |");
-    for doc in &order {
-        println!(
-            "| {} | {} | {} | {} |",
-            label(doc),
-            median("serde_ucl", "parse", doc),
-            median("libucl", "parse", doc),
-            median("serde_json", "parse", doc)
-        );
+    match &base {
+        Some(base) => {
+            let version = &base["serde_ucl@".len()..];
+            println!("| Document | serde_ucl | {version} | change | libucl | serde_json |");
+            println!("| --- | ---: | ---: | ---: | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse", doc),
+                    time(base, "parse", doc),
+                    change(base, "parse", doc),
+                    time("libucl", "parse", doc),
+                    time("serde_json", "parse", doc)
+                );
+            }
+        }
+        None => {
+            println!("| Document | serde_ucl | libucl | serde_json |");
+            println!("| --- | ---: | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse", doc),
+                    time("libucl", "parse", doc),
+                    time("serde_json", "parse", doc)
+                );
+            }
+        }
     }
     println!("\nThe same without freeing the value in the timing (freed after each sample):\n");
-    println!("| Document | serde_ucl | libucl |");
-    println!("| --- | ---: | ---: |");
-    for doc in &order {
-        println!(
-            "| {} | {} | {} |",
-            label(doc),
-            median("serde_ucl", "parse-nofree", doc),
-            median("libucl", "parse-nofree", doc)
-        );
+    match &base {
+        Some(base) => {
+            let version = &base["serde_ucl@".len()..];
+            println!("| Document | serde_ucl | {version} | change | libucl |");
+            println!("| --- | ---: | ---: | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse-nofree", doc),
+                    time(base, "parse-nofree", doc),
+                    change(base, "parse-nofree", doc),
+                    time("libucl", "parse-nofree", doc)
+                );
+            }
+        }
+        None => {
+            println!("| Document | serde_ucl | libucl |");
+            println!("| --- | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse-nofree", doc),
+                    time("libucl", "parse-nofree", doc)
+                );
+            }
+        }
     }
     println!();
-    println!(
-        "| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |"
-    );
-    println!("| --- | ---: | ---: | ---: | ---: |");
-    for doc in &order {
-        if !values.contains_key(&("serde_json".into(), "typed".into(), doc.clone())) {
-            continue;
+    let typed: Vec<&String> = order
+        .iter()
+        .filter(|doc| values.contains_key(&("serde_json".into(), "typed".into(), (*doc).clone())))
+        .collect();
+    match &base {
+        Some(base) => {
+            let version = &base["serde_ucl@".len()..];
+            println!(
+                "| Document | serde_ucl, owned | {version}, owned | change | serde_ucl, borrowed | {version}, borrowed | change | serde_json, owned | serde_json, borrowed |"
+            );
+            println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+            for doc in typed {
+                println!(
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "typed", doc),
+                    time(base, "typed", doc),
+                    change(base, "typed", doc),
+                    time("serde_ucl", "typed-borrowed", doc),
+                    time(base, "typed-borrowed", doc),
+                    change(base, "typed-borrowed", doc),
+                    time("serde_json", "typed", doc),
+                    time("serde_json", "typed-borrowed", doc)
+                );
+            }
         }
-        println!(
-            "| {} | {} | {} | {} | {} |",
-            label(doc),
-            median("serde_ucl", "typed", doc),
-            median("serde_ucl", "typed-borrowed", doc),
-            median("serde_json", "typed", doc),
-            median("serde_json", "typed-borrowed", doc)
-        );
+        None => {
+            println!(
+                "| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |"
+            );
+            println!("| --- | ---: | ---: | ---: | ---: |");
+            for doc in typed {
+                println!(
+                    "| {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "typed", doc),
+                    time("serde_ucl", "typed-borrowed", doc),
+                    time("serde_json", "typed", doc),
+                    time("serde_json", "typed-borrowed", doc)
+                );
+            }
+        }
     }
 }
 
