@@ -20,8 +20,56 @@
 //! | key into an integer, `bool`, `char` or float target | the key's text parsed as one |
 //! | string, or array of integers 0–255, into bytes | the bytes |
 //!
-//! Values are owned: a target that borrows from the input, such as a `&str` field, is an error
-//! (`invalid type: string "…", expected a borrowed string`); use `String` or `Cow<str>`.
+//! # Borrowing
+//!
+//! [`from_str`], [`from_slice`] and [`UclDeserializer`] parse into a value whose keys and strings
+//! borrow from the input wherever they appear in it as they are, so that targets that borrow take
+//! them without a copy (clean-room work item C13): `&str` fields, `Cow<str>` fields with
+//! `#[serde(borrow)]`, and `&str` map keys. A key or string that does not appear in the input as
+//! it is has no borrowed form: an escaped string, one in which a variable reference was replaced
+//! (spec §7), a key that `KEY_LOWERCASE` changes (§12.1), and anything from an included file or
+//! from text a registered macro has parsed in place. A `Cow` target takes such a string owned,
+//! and a `&str` target fails on it (`invalid type: string "…", expected a borrowed string`), with
+//! the path and position of the value. Owned targets (`String` and the rest) get the same values
+//! as from a value that owns its strings. [`from_reader`], [`from_file`] and the functions that
+//! take owned targets borrow from the input they read too, which saves copying keys.
+//!
+//! The document is parsed when the target makes its first request of the deserializer, and that
+//! request decides how (clean-room work item C13, decision 6). A target that takes the whole
+//! value, [`UclValue`](crate::UclValue) or [`UclObject`](crate::UclObject) (or a type that
+//! deserializes as one, such as a `Box<UclValue>` or a `#[serde(transparent)]` wrapper), asks for
+//! it first and gets a value that owns its strings, which it takes without a copy. Every other
+//! target gets a value that borrows from the input; a `UclValue` inside it, such as that of an
+//! `Option<UclValue>`, gets a copy. So the target's `Deserialize` runs once on a document that
+//! parses and deserializes.
+//!
+//! When the document does not parse, the target's first request fails with the parse error, and
+//! [`from_str`], [`from_slice`], [`from_reader`], [`from_file`] and the `from_str_with_*`
+//! functions return that parse error, with its kind, position and file, whatever the target made
+//! of it: a target that replaces the error, or ignores it and returns a value, still gets the
+//! parse error, and so does a target that makes no request at all (the document is then parsed
+//! after its `Deserialize` returns). [`UclDeserializer`] also parses at the first request, but
+//! returns what the target returns.
+//!
+//! ```
+//! use serde::Deserialize;
+//! use std::collections::HashMap;
+//!
+//! #[derive(Deserialize)]
+//! struct Config<'a> {
+//!     name: &'a str,
+//!     #[serde(borrow)]
+//!     labels: HashMap<&'a str, &'a str>,
+//! }
+//!
+//! let text = "name = web\nlabels { tier = front; zone = \"eu-1\" }";
+//! let config: Config = serde_ucl::from_str(text)?;
+//! assert_eq!(config.name, "web");
+//! assert_eq!(config.labels["zone"], "eu-1");
+//! // An escaped string has no borrowed form.
+//! assert!(serde_ucl::from_str::<Config>("name = \"w\\u0065b\"\nlabels {}").is_err());
+//! # Ok::<(), serde_ucl::UclError>(())
+//! ```
 //!
 //! `Deserialize for UclValue` keeps what the table flattens: from this crate's deserializer it
 //! takes the value itself, so a time stays a time, an entry with several values keeps them all,
@@ -175,10 +223,10 @@ impl<'a> UclDeserializer<'a> {
 /// [`Parser::parse_located`].
 #[cold]
 #[inline(never)]
-fn locate(parser: &mut Parser, source: &Source<'_>, error: UclError) -> UclError {
+fn locate(parser: &mut Parser, source: &Source<'_>, error: UclError, borrow: bool) -> UclError {
     let mut error = error.in_document();
     if let UclError::Deserialize(e) = &mut error
-        && let Some((_, facts)) = parser.parse_located(source)
+        && let Some((_, facts)) = parser.parse_located(source, borrow)
     {
         let (path, key) = e.locate_request();
         if let Some((position, file)) = facts.position_of(path, key, source.input()) {
@@ -188,50 +236,239 @@ fn locate(parser: &mut Parser, source: &Source<'_>, error: UclError) -> UclError
     error
 }
 
+/// Parses the document of `source` with `parser` at the first request `T` makes, and
+/// deserializes a `T` from the result: what the text entry points do (clean-room work item C13,
+/// decision 6). With the result, whether the value borrowed from the input (`None` when the
+/// target made no request or the parse failed), for the tests.
+///
+/// The request decides the parse ([`FirstRequest`]): a target that takes the whole value gets an
+/// owned one, every other target one that borrows from the input. `T::deserialize` runs once,
+/// and a second time only to explain a deserialization error ([`explain`]; nothing is recorded
+/// for one while deserialization succeeds). A parse error is the result whatever `T` did with
+/// the copy of it that it received. For a target that made no request, the document is parsed
+/// after it returns, so that a document that does not parse still fails.
+fn deserialize_source<'de, T: Deserialize<'de>>(
+    parser: &mut Parser,
+    source: &Source<'de>,
+) -> (Result<T, UclError>, Option<bool>) {
+    let mut parsed = Parsed::No;
+    let result = T::deserialize(FirstRequest {
+        parser: &mut *parser,
+        source,
+        parsed: &mut parsed,
+    });
+    match parsed {
+        Parsed::Yes { borrow } => (
+            result.map_err(|e| explain::<T>(parser, source, e, borrow)),
+            Some(borrow),
+        ),
+        Parsed::Failed(error) => (Err(error.into()), None),
+        Parsed::No => match parse_borrowed(parser, source) {
+            Ok(_) => (
+                result.map_err(|e| explain::<T>(parser, source, e, true)),
+                None,
+            ),
+            Err(error) => (Err(error.into()), None),
+        },
+    }
+}
+
+/// Where the parse of a [`FirstRequest`] stands.
+enum Parsed {
+    /// The target has made no request.
+    No,
+    /// The document was parsed at the target's first request; `borrow` says whether the value
+    /// borrows from the input.
+    Yes { borrow: bool },
+    /// The parse failed. The target received a copy of the error; the entry point returns this.
+    Failed(crate::parse::Error),
+}
+
+/// The deserializer that the text entry points give the target ([`deserialize_source`]). It
+/// parses the document at the target's first request, as [`UclDeserializer`] does: into an
+/// owned value when that request is the private newtype struct
+/// [`marker::VALUE`](crate::ser::marker::VALUE), which `Deserialize for UclValue` makes (and so
+/// `UclObject`, `Box<UclValue>` and `#[serde(transparent)]` wrappers of them), and into a value
+/// that borrows from the input for any other request. A target that makes the `VALUE` request
+/// takes its value through [`crate::handoff`], which gives it an owned value either way, so the
+/// owned parse only saves the copy ([`Value::into_owned`](crate::value::Value::into_owned)) that
+/// a borrowed one would need. A whole value behind another first request, such as an
+/// `Option<UclValue>`, gets the borrowed value and that copy.
+struct FirstRequest<'p, 'de> {
+    parser: &'p mut Parser,
+    source: &'p Source<'de>,
+    parsed: &'p mut Parsed,
+}
+
+impl<'de> FirstRequest<'_, 'de> {
+    /// The document parsed into an owned value, for a target that takes the whole value.
+    fn owned(self) -> Result<ValueDeserializer<'static, false>, UclError> {
+        let result = parse_owned(self.parser, self.source);
+        record(self.parsed, result, false).map(ValueDeserializer::new)
+    }
+
+    /// The document parsed into a value that borrows from the input.
+    ///
+    /// Inlined, with [`record`] and [`parse_borrowed`], into each request that parses, so that
+    /// the parser's entry is inlined there too: without it, `from_str` of a three-entry
+    /// document into a typed struct took 2% to 3% longer (C13 measurements).
+    #[inline(always)]
+    fn borrowed(self) -> Result<ValueDeserializer<'de, false>, UclError> {
+        let result = parse_borrowed(self.parser, self.source);
+        record(self.parsed, result, true).map(ValueDeserializer::borrowed)
+    }
+}
+
+/// Records the outcome of the parse of a [`FirstRequest`] in `parsed`. On failure the error is
+/// kept for the entry point, and the target gets a copy.
+#[inline(always)]
+fn record<V>(
+    parsed: &mut Parsed,
+    result: Result<V, crate::parse::Error>,
+    borrow: bool,
+) -> Result<V, UclError> {
+    match result {
+        Ok(value) => {
+            *parsed = Parsed::Yes { borrow };
+            Ok(value)
+        }
+        Err(error) => {
+            let copy = error.clone();
+            *parsed = Parsed::Failed(error);
+            Err(copy.into())
+        }
+    }
+}
+
+/// `source` parsed into an owned value.
+fn parse_owned(
+    parser: &mut Parser,
+    source: &Source<'_>,
+) -> Result<crate::UclValue, crate::parse::Error> {
+    match source {
+        Source::Bytes(input) => parser.parse(input),
+        #[cfg(feature = "fs")]
+        Source::File { canonical, input } => parser.parse_read_file(canonical.clone(), input),
+    }
+}
+
+/// `source` parsed into a value that borrows from its input.
+#[inline(always)]
+fn parse_borrowed<'de>(
+    parser: &mut Parser,
+    source: &Source<'de>,
+) -> Result<crate::value::Value<'de>, crate::parse::Error> {
+    match source {
+        Source::Bytes(input) => parser.parse_borrowed(input),
+        #[cfg(feature = "fs")]
+        Source::File { canonical, input } => {
+            parser.parse_read_file_borrowed(canonical.clone(), input)
+        }
+    }
+}
+
+/// Forwards each `Deserializer` method of [`FirstRequest`] to the value deserializer of the
+/// document, parsed so that it borrows from the input.
+macro_rules! parse_at_first_request {
+    ($($method:ident($($arg:ident: $ty:ty),*))*) => {
+        $(
+            fn $method<V>(self, $($arg: $ty,)* visitor: V) -> Result<V::Value, UclError>
+            where
+                V: Visitor<'de>,
+            {
+                self.borrowed()?.$method($($arg,)* visitor)
+            }
+        )*
+    };
+}
+
+impl<'de> de::Deserializer<'de> for FirstRequest<'_, 'de> {
+    type Error = UclError;
+
+    /// `Deserialize for UclValue` asks for the private newtype struct `marker::VALUE`: the
+    /// document is then parsed into an owned value, which is handed over as it is.
+    fn deserialize_newtype_struct<V>(
+        self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, UclError>
+    where
+        V: Visitor<'de>,
+    {
+        if name == crate::ser::marker::VALUE {
+            self.owned()?.deserialize_newtype_struct(name, visitor)
+        } else {
+            self.borrowed()?.deserialize_newtype_struct(name, visitor)
+        }
+    }
+
+    parse_at_first_request! {
+        deserialize_any()
+        deserialize_bool()
+        deserialize_i8()
+        deserialize_i16()
+        deserialize_i32()
+        deserialize_i64()
+        deserialize_i128()
+        deserialize_u8()
+        deserialize_u16()
+        deserialize_u32()
+        deserialize_u64()
+        deserialize_u128()
+        deserialize_f32()
+        deserialize_f64()
+        deserialize_char()
+        deserialize_str()
+        deserialize_string()
+        deserialize_bytes()
+        deserialize_byte_buf()
+        deserialize_option()
+        deserialize_unit()
+        deserialize_unit_struct(name: &'static str)
+        deserialize_seq()
+        deserialize_tuple(len: usize)
+        deserialize_tuple_struct(name: &'static str, len: usize)
+        deserialize_map()
+        deserialize_struct(name: &'static str, fields: &'static [&'static str])
+        deserialize_enum(name: &'static str, variants: &'static [&'static str])
+        deserialize_identifier()
+        deserialize_ignored_any()
+    }
+}
+
 /// Parses `input` with `parser` and deserializes a `T` from the result, as the text entry
-/// points do ([`deserialize_parsed`]).
+/// points do ([`deserialize_source`]).
 fn deserialize_bytes<'de, T: Deserialize<'de>>(
     mut parser: Parser,
-    input: &[u8],
+    input: &'de [u8],
 ) -> Result<T, UclError> {
     // The parser is dropped after deserialization, so nobody reads its output facts.
     parser.skip_output_facts();
-    let value = parser.parse(input)?;
-    deserialize_parsed(&mut parser, &Source::Bytes(input), value)
+    deserialize_source(&mut parser, &Source::Bytes(input)).0
 }
 
-/// Deserializes a `T` from `value`, the result of the last parse of `parser`, whose input was
-/// `source`. Nothing is recorded for an error while this succeeds; when it fails, see
-/// [`explain`].
-fn deserialize_parsed<'de, T: Deserialize<'de>>(
-    parser: &mut Parser,
-    source: &Source<'_>,
-    value: crate::value::UclValue,
-) -> Result<T, UclError> {
-    T::deserialize(ValueDeserializer::<false>::new(value))
-        .map_err(|e| explain::<T>(parser, source, e))
-}
-
-/// `error`, from [`deserialize_parsed`], with the path and position of its value: the document
-/// is parsed again, recording where values were written (`Parser::parse_located`), and a `T` is
-/// deserialized again from that result, recording paths. The second run's error is used when it
-/// is the same error; otherwise `error` is returned without a path.
+/// `error`, from [`deserialize_source`], with the path and position of its value: the document
+/// is parsed again, recording where values were written (`Parser::parse_located`), borrowing
+/// from the text as the first parse did so that a target that borrows fails in the same place,
+/// and a `T` is deserialized again from that result, recording paths. The second run's error is
+/// used when it is the same error; otherwise `error` is returned without a path.
 #[cold]
 #[inline(never)]
 fn explain<'de, T: Deserialize<'de>>(
     parser: &mut Parser,
-    source: &Source<'_>,
+    source: &Source<'de>,
     error: UclError,
+    borrow: bool,
 ) -> UclError {
     let error = error.in_document();
     let UclError::Deserialize(first) = &error else {
         return error;
     };
     let message = first.error().to_string();
-    let Some((value, facts)) = parser.parse_located(source) else {
+    let Some((value, facts)) = parser.parse_located(source, borrow) else {
         return error;
     };
-    match T::deserialize(ValueDeserializer::<true>::new(value)).map(drop) {
+    match T::deserialize(ValueDeserializer::<true>::borrowed(value)).map(drop) {
         Err(again) => match again.in_document() {
             UclError::Deserialize(mut e) if e.error().to_string() == message => {
                 let (path, key) = e.locate_request();
@@ -247,8 +484,9 @@ fn explain<'de, T: Deserialize<'de>>(
 }
 
 /// Forwards each `Deserializer` method of `UclDeserializer` to the value deserializer, after
-/// parsing the document. The visitor cannot be run twice, so this deserializer records paths as
-/// it goes; an error of deserialization gets the position of its value.
+/// parsing the document into a value that borrows from it. The visitor cannot be run twice, so
+/// this deserializer records paths as it goes; an error of deserialization gets the position of
+/// its value.
 macro_rules! forward_to_value {
     ($($method:ident($($arg:ident: $ty:ty),*))*) => {
         $(
@@ -259,10 +497,10 @@ macro_rules! forward_to_value {
                 // The deserializer owns the parser and consumes it here, so nobody reads its
                 // output facts.
                 self.parser.skip_output_facts();
-                let value = self.parser.parse(self.input)?;
-                ValueDeserializer::<true>::new(value)
+                let value = self.parser.parse_borrowed(self.input)?;
+                ValueDeserializer::<true>::borrowed(value)
                     .$method($($arg,)* visitor)
-                    .map_err(|e| locate(&mut self.parser, &Source::Bytes(self.input), e))
+                    .map_err(|e| locate(&mut self.parser, &Source::Bytes(self.input), e, true))
             }
         )*
     };
@@ -270,6 +508,35 @@ macro_rules! forward_to_value {
 
 impl<'de> de::Deserializer<'de> for UclDeserializer<'de> {
     type Error = UclError;
+
+    /// `Deserialize for UclValue` asks for the private newtype struct `marker::VALUE`: the
+    /// document is then parsed into an owned value, which is handed over as it is.
+    fn deserialize_newtype_struct<V>(
+        mut self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, UclError>
+    where
+        V: Visitor<'de>,
+    {
+        self.parser.skip_output_facts();
+        let source = Source::Bytes(self.input);
+        let result = if name == crate::ser::marker::VALUE {
+            let value = self.parser.parse(self.input)?;
+            ValueDeserializer::<true>::new(value).deserialize_newtype_struct(name, visitor)
+        } else {
+            let value = self.parser.parse_borrowed(self.input)?;
+            ValueDeserializer::<true>::borrowed(value).deserialize_newtype_struct(name, visitor)
+        };
+        result.map_err(|e| {
+            locate(
+                &mut self.parser,
+                &source,
+                e,
+                name != crate::ser::marker::VALUE,
+            )
+        })
+    }
 
     forward_to_value! {
         deserialize_any()
@@ -294,7 +561,6 @@ impl<'de> de::Deserializer<'de> for UclDeserializer<'de> {
         deserialize_option()
         deserialize_unit()
         deserialize_unit_struct(name: &'static str)
-        deserialize_newtype_struct(name: &'static str)
         deserialize_seq()
         deserialize_tuple(len: usize)
         deserialize_tuple_struct(name: &'static str, len: usize)
@@ -369,12 +635,11 @@ where
     let (canonical, input) = parser
         .read_file(path.as_ref())
         .map_err(|(path, e)| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
-    let value = parser.parse_read_file(canonical.clone(), &input)?;
     let source = Source::File {
         canonical,
         input: &input,
     };
-    deserialize_parsed(&mut parser, &source, value)
+    deserialize_source(&mut parser, &source).0
 }
 
 /// Deserializes a `T` from UCL text, parsed with a default [`Parser`] on which `variables` are
@@ -456,7 +721,7 @@ mod tests {
     use std::collections::HashMap;
 
     /// The value deserializer over a prepared value (no parsing).
-    fn with_value(value: UclValue) -> ValueDeserializer<true> {
+    fn with_value(value: UclValue) -> ValueDeserializer<'static, true> {
         ValueDeserializer::new(value)
     }
 
@@ -690,10 +955,13 @@ mod tests {
         let named: Named = from_str("section { a = 1; b = 2 }").unwrap();
         assert_eq!(named.section.len(), 2);
         let repeated: Vec<HashMap<String, u32>> =
-            <Vec<HashMap<String, u32>>>::deserialize(with_value(UclValue::Array(vec![
-                UclValue::Object([("a", UclValue::Integer(1))].into_iter().collect()),
-                UclValue::Object([("b", UclValue::Integer(2))].into_iter().collect()),
-            ])))
+            <Vec<HashMap<String, u32>>>::deserialize(with_value(UclValue::Array(
+                vec![
+                    UclValue::Object([("a", UclValue::Integer(1))].into_iter().collect()),
+                    UclValue::Object([("b", UclValue::Integer(2))].into_iter().collect()),
+                ]
+                .into(),
+            )))
             .unwrap();
         assert_eq!(repeated.len(), 2);
     }
@@ -973,6 +1241,104 @@ mod tests {
         );
         assert_eq!(with_flags["t"], "10s");
         assert_eq!(with_flags["v"], "x");
+    }
+
+    /// Which parse `deserialize_source` made for a `T` from `text`: `Some(false)` owned,
+    /// `Some(true)` borrowed, `None` for a target that made no request or a failed parse.
+    fn parse_chosen<'de, T: Deserialize<'de>>(text: &'de str) -> Option<bool> {
+        let mut parser = Parser::new();
+        parser.skip_output_facts();
+        deserialize_source::<T>(&mut parser, &Source::Bytes(text.as_bytes())).1
+    }
+
+    /// The parse is chosen at the target's first request (decision 6): owned for a target that
+    /// asks for the whole value, borrowed for every other one, whatever the target's name.
+    #[test]
+    fn whole_value_targets_get_an_owned_parse_at_their_first_request() {
+        use crate::value::UclObject;
+
+        #[derive(Deserialize)]
+        #[serde(transparent)]
+        struct Wrapper(UclValue);
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Holder<'a> {
+            name: &'a str,
+            extra: UclValue,
+        }
+
+        /// Asks the deserializer for nothing.
+        struct Silent;
+        impl<'de> Deserialize<'de> for Silent {
+            fn deserialize<D: de::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+                Ok(Silent)
+            }
+        }
+
+        /// Asks for a whole value, and replaces any error with its own.
+        struct Rewrites(UclValue);
+        impl<'de> Deserialize<'de> for Rewrites {
+            fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                UclValue::deserialize(deserializer)
+                    .map(Rewrites)
+                    .map_err(|_| de::Error::custom("rewritten"))
+            }
+        }
+
+        let text = "name = web\nextra { a = 1 }";
+        assert_eq!(parse_chosen::<UclValue>(text), Some(false));
+        assert_eq!(parse_chosen::<UclObject>(text), Some(false));
+        assert_eq!(parse_chosen::<Box<UclValue>>(text), Some(false));
+        assert_eq!(parse_chosen::<Wrapper>(text), Some(false));
+        assert_eq!(parse_chosen::<Rewrites>(text), Some(false));
+        assert_eq!(parse_chosen::<Option<UclValue>>(text), Some(true));
+        assert_eq!(parse_chosen::<Vec<UclValue>>(text), Some(true));
+        assert_eq!(parse_chosen::<HashMap<String, UclValue>>(text), Some(true));
+        assert_eq!(parse_chosen::<Holder<'_>>(text), Some(true));
+        assert_eq!(parse_chosen::<serde_json::Value>(text), Some(true));
+        // These fail on the document, after a borrowed parse.
+        assert_eq!(parse_chosen::<String>(text), Some(true));
+        assert_eq!(parse_chosen::<&str>(text), Some(true));
+        assert_eq!(parse_chosen::<Silent>(text), None);
+        assert_eq!(parse_chosen::<UclValue>("a = {"), None);
+
+        // Each gets the value it got before: the whole value, or what it borrows.
+        let whole: UclValue = from_str(text).unwrap();
+        assert_eq!(*from_str::<Box<UclValue>>(text).unwrap(), whole);
+        assert_eq!(from_str::<Wrapper>(text).unwrap().0, whole);
+        assert_eq!(from_str::<Rewrites>(text).unwrap().0, whole);
+        assert_eq!(from_str::<Holder<'_>>(text).unwrap().name, "web");
+    }
+
+    /// A whole value behind another first request, here inside an `Option`, is parsed borrowed
+    /// and copied when the target takes it: the target gets the value the
+    /// `UclValue` target gets, the priorities and `.inherit` marks of its values, the values of
+    /// a repeated key, times and key order included. The copy is the only cost.
+    #[test]
+    fn an_unrecognised_whole_value_costs_only_a_copy() {
+        let text = "base {\n  x = \"s\"\n  y = [1, 2]\n}\n\
+                    derived {\n  .inherit \"base\"\n  z = 'q'\n}\n\
+                    k = 1\n.priority 5\nk = x\nk = y\nt = 10s\n";
+        assert_eq!(parse_chosen::<UclValue>(text), Some(false));
+        assert_eq!(parse_chosen::<Option<UclValue>>(text), Some(true));
+        let whole: UclValue = from_str(text).unwrap();
+        let copied = from_str::<Option<UclValue>>(text)
+            .unwrap()
+            .expect("an object");
+        assert_eq!(copied, whole);
+        // `==` ignores key order; `Debug` shows it, with each value's priority and marks.
+        assert_eq!(format!("{copied:?}"), format!("{whole:?}"));
+
+        // The document has what the comparison is about.
+        let object = whole.as_object().unwrap();
+        let k = object.entry("k").unwrap();
+        let priorities: Vec<u8> = k.slots().iter().map(|slot| slot.priority()).collect();
+        assert_eq!(priorities, [5, 5]);
+        let derived = object["derived"].as_object().unwrap();
+        assert!(derived.entry("x").unwrap().slots()[0].is_inherited());
+        assert!(!derived.entry("z").unwrap().slots()[0].is_inherited());
+        assert_eq!(object["t"], UclValue::Time(10.0));
     }
 
     #[test]

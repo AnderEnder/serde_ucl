@@ -1,5 +1,16 @@
 //! Variable expansion (spec §7).
 
+use smallvec::SmallVec;
+use std::borrow::Cow;
+
+/// A variable: its name and value, borrowed where they can be, from the parser's registered
+/// variables or from constants (clean-room work item C13).
+pub(crate) type Variable<'a> = (Cow<'a, str>, Cow<'a, str>);
+
+/// The variables in lookup order (spec §7.1). The two file variables fit inline, so that a parse
+/// that registers no variables allocates nothing for them (clean-room work item C13).
+pub(crate) type Variables<'a> = SmallVec<[Variable<'a>; 2]>;
+
 /// A variable handler as the expander calls it: [`super::VariableHandler`], or a closure of the
 /// parser around it.
 pub(crate) type Handler<'a> = dyn FnMut(&str) -> Option<String> + 'a;
@@ -7,7 +18,7 @@ pub(crate) type Handler<'a> = dyn FnMut(&str) -> Option<String> + 'a;
 /// Expands `$NAME`, `${NAME}` and `$$` in string values.
 pub(crate) struct Expander<'a> {
     /// Registered variables in lookup order (spec §7.1).
-    variables: Vec<(String, String)>,
+    variables: Variables<'a>,
     handler: Option<Box<Handler<'a>>>,
     enabled: bool,
 }
@@ -15,13 +26,13 @@ pub(crate) struct Expander<'a> {
 /// The file variables' values from before an included file set them (see
 /// [`Expander::enter_file`]); `None` for one that was not defined.
 #[derive(Debug)]
-pub(crate) struct SavedFileVars([Option<String>; 2]);
+pub(crate) struct SavedFileVars<'a>([Option<Cow<'a, str>>; 2]);
 
 const FILE_VARS: [&str; 2] = ["FILENAME", "CURDIR"];
 
 impl<'a> Expander<'a> {
     pub(crate) fn new(
-        variables: Vec<(String, String)>,
+        variables: Variables<'a>,
         handler: Option<Box<Handler<'a>>>,
         enabled: bool,
     ) -> Self {
@@ -33,7 +44,7 @@ impl<'a> Expander<'a> {
     }
 
     /// Replaces the variables, in lookup order.
-    pub(crate) fn set_variables(&mut self, variables: Vec<(String, String)>) {
+    pub(crate) fn set_variables(&mut self, variables: Variables<'a>) {
         self.variables = variables;
     }
 
@@ -43,8 +54,10 @@ impl<'a> Expander<'a> {
     pub(crate) fn set_file_vars(&mut self, filename: String, curdir: String) {
         for (name, value) in FILE_VARS.into_iter().zip([filename, curdir]) {
             match self.variables.iter_mut().find(|(n, _)| n == name) {
-                Some(slot) => slot.1 = value,
-                None => self.variables.push((name.to_string(), value)),
+                Some(slot) => slot.1 = Cow::Owned(value),
+                None => self
+                    .variables
+                    .push((Cow::Borrowed(name), Cow::Owned(value))),
             }
         }
     }
@@ -52,7 +65,7 @@ impl<'a> Expander<'a> {
     /// Sets `FILENAME` and `CURDIR` for an included file (spec §9.4), whatever the registered
     /// variables and `NO_FILEVARS` say. As the oracle does, they move to the end of the lookup
     /// order, after every registered variable, and stay there (QUESTIONS.md #28).
-    pub(crate) fn enter_file(&mut self, filename: String, curdir: String) -> SavedFileVars {
+    pub(crate) fn enter_file(&mut self, filename: String, curdir: String) -> SavedFileVars<'a> {
         let mut saved = [None, None];
         for (slot, (name, value)) in saved
             .iter_mut()
@@ -61,7 +74,8 @@ impl<'a> Expander<'a> {
             if let Some(i) = self.variables.iter().position(|(n, _)| n == name) {
                 *slot = Some(self.variables.remove(i).1);
             }
-            self.variables.push((name.to_string(), value));
+            self.variables
+                .push((Cow::Borrowed(name), Cow::Owned(value)));
         }
         SavedFileVars(saved)
     }
@@ -69,7 +83,7 @@ impl<'a> Expander<'a> {
     /// Gives `FILENAME` and `CURDIR` back the values they had before [`Expander::enter_file`].
     /// One that was not defined then keeps the included file's value (spec §9.4, §12.7,
     /// *Quirk*).
-    pub(crate) fn leave_file(&mut self, saved: SavedFileVars) {
+    pub(crate) fn leave_file(&mut self, saved: SavedFileVars<'a>) {
         for (name, value) in FILE_VARS.into_iter().zip(saved.0) {
             if let (Some(value), Some(slot)) =
                 (value, self.variables.iter_mut().find(|(n, _)| n == name))
@@ -84,8 +98,17 @@ impl<'a> Expander<'a> {
     /// If no reference is replaced, the text is returned exactly as written, `$$` included
     /// (spec §7.5). Otherwise `$$` stands for `$`.
     pub(crate) fn expand(&mut self, text: Vec<u8>) -> Vec<u8> {
+        match self.expand_bytes(&text) {
+            Some(expanded) => expanded,
+            None => text,
+        }
+    }
+
+    /// [`Expander::expand`] of `text`, or `None` when no reference was replaced, so that the
+    /// text stays exactly as written (clean-room work item C13: it can then be borrowed).
+    pub(crate) fn expand_bytes(&mut self, text: &[u8]) -> Option<Vec<u8>> {
         if !self.enabled || !text.contains(&b'$') {
-            return text;
+            return None;
         }
         let mut out = Vec::with_capacity(text.len());
         let mut replaced = false;
@@ -151,17 +174,18 @@ impl<'a> Expander<'a> {
                 }
             }
         }
-        if replaced { out } else { text }
+        replaced.then_some(out)
     }
 
     /// A registered variable whose name equals `name`, or the handler's answer (spec §7.3, §7.7).
-    fn lookup_braced(&mut self, name: &[u8]) -> Option<String> {
+    /// A registered variable's value is lent, not copied (clean-room work item C13).
+    fn lookup_braced(&mut self, name: &[u8]) -> Option<Cow<'_, str>> {
         if let Some((_, value)) = self.variables.iter().find(|(n, _)| n.as_bytes() == name) {
-            return Some(value.clone());
+            return Some(Cow::Borrowed(value));
         }
         let handler = self.handler.as_mut()?;
         let name = std::str::from_utf8(name).ok()?;
-        handler(name)
+        handler(name).map(Cow::Owned)
     }
 }
 
@@ -169,15 +193,15 @@ impl<'a> Expander<'a> {
 mod tests {
     use super::*;
 
-    fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    fn vars<'a>(pairs: &[(&str, &str)]) -> Variables<'a> {
         pairs
             .iter()
-            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .map(|(n, v)| (Cow::Owned(n.to_string()), Cow::Owned(v.to_string())))
             .collect()
     }
 
-    fn expand(variables: &[(String, String)], text: &str) -> String {
-        let mut e = Expander::new(variables.to_vec(), None, true);
+    fn expand(variables: &Variables<'_>, text: &str) -> String {
+        let mut e = Expander::new(variables.clone(), None, true);
         String::from_utf8(e.expand(text.as_bytes().to_vec())).unwrap()
     }
 

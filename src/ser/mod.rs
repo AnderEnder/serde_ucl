@@ -109,10 +109,11 @@
 //!
 //! # Depth
 //!
-//! A [`UclValue`] or [`UclObject`], also as a field of another type, is copied as it is, with
-//! the same stack at any depth: [`to_value`] of one gives an equal value, priorities and marks
-//! included, and the text functions write any such value up to 1024 containers deep (spec
-//! §11.2), which every value the parser returns is unless its `.inherit` depth limit is raised
+//! A [`UclValue`] or [`UclObject`](crate::UclObject), also as a field of another type, is copied
+//! as it is, with the same stack at any depth: [`to_value`] of one gives an equal value,
+//! priorities and marks included, and the text functions write any such value up to 1024
+//! containers deep (spec §11.2), which every value the parser returns is unless its `.inherit`
+//! depth limit is raised
 //! ([`Parser::set_inherit_depth_limit`](crate::parse::Parser::set_inherit_depth_limit)). Deeper
 //! text could not be parsed again. Any other type is serialized by recursion through its `Serialize` impl, one
 //! level per map or sequence, and there serialization enters at most
@@ -132,7 +133,7 @@ mod serializer;
 use crate::emit::{Emitter, Format};
 use crate::error::{SerdeError, UclError};
 use crate::handoff;
-use crate::value::{Entry, UclObject, UclValue};
+use crate::value::{Entry, Object, UclValue, Value};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serializer::ValueSerializer;
 use std::io;
@@ -202,7 +203,7 @@ pub fn to_writer<W: io::Write, T: ?Sized + Serialize>(
     Ok(())
 }
 
-impl Serialize for UclValue {
+impl Serialize for Value<'_> {
     /// The crate's serializers copy the value as it is, in one step at any depth: times,
     /// multi-value entries, priorities and marks included. Other serializers see a newtype
     /// struct with a private name, which most formats write as its content, around the value:
@@ -214,7 +215,7 @@ impl Serialize for UclValue {
     }
 }
 
-impl Serialize for UclObject {
+impl Serialize for Object<'_> {
     /// As `Serialize for UclValue` serializes the object.
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_newtype_struct(marker::VALUE, &Tree::Object(self))
@@ -225,17 +226,17 @@ impl Serialize for UclObject {
 /// `Serialize for UclObject` write. Asked by the crate's serializer, it hands a copy of the
 /// value over (see [`crate::handoff`]); for any other serializer, it writes the value's
 /// structure.
-enum Tree<'a> {
-    Value(&'a UclValue),
-    Object(&'a UclObject),
+enum Tree<'v, 'a> {
+    Value(&'v Value<'a>),
+    Object(&'v Object<'a>),
 }
 
-impl Serialize for Tree<'_> {
+impl Serialize for Tree<'_, '_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if handoff::wanted() {
             handoff::put(match *self {
-                Tree::Value(value) => value.clone(),
-                Tree::Object(object) => UclValue::Object(object.clone()),
+                Tree::Value(value) => value.owned_copy(),
+                Tree::Object(object) => UclValue::Object(object.owned_copy()),
             });
             return serializer.serialize_unit();
         }
@@ -247,28 +248,28 @@ impl Serialize for Tree<'_> {
 }
 
 /// A value as serde's data model has it, for serializers other than the crate's.
-struct Structure<'a>(&'a UclValue);
+struct Structure<'v, 'a>(&'v Value<'a>);
 
-impl Serialize for Structure<'_> {
+impl Serialize for Structure<'_, '_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self.0 {
-            UclValue::Object(object) => ObjectStructure(object).serialize(serializer),
-            UclValue::Array(items) => serializer.collect_seq(items.iter().map(Structure)),
-            UclValue::Integer(i) => serializer.serialize_i64(*i),
-            UclValue::Float(f) => serializer.serialize_f64(*f),
-            UclValue::Time(t) => serializer.serialize_newtype_struct(marker::TIME, t),
-            UclValue::String(s) => serializer.serialize_str(s),
-            UclValue::Boolean(b) => serializer.serialize_bool(*b),
-            UclValue::Null => serializer.serialize_unit(),
+            Value::Object(object) => ObjectStructure(object).serialize(serializer),
+            Value::Array(items) => serializer.collect_seq(items.iter().map(Structure)),
+            Value::Integer(i) => serializer.serialize_i64(*i),
+            Value::Float(f) => serializer.serialize_f64(*f),
+            Value::Time(t) => serializer.serialize_newtype_struct(marker::TIME, t),
+            Value::String(s) => serializer.serialize_str(s),
+            Value::Boolean(b) => serializer.serialize_bool(*b),
+            Value::Null => serializer.serialize_unit(),
         }
     }
 }
 
 /// An object as a map from each key to its value; the values of a key that has several are the
 /// private newtype struct [`marker::MULTI`] around the sequence of them.
-struct ObjectStructure<'a>(&'a UclObject);
+struct ObjectStructure<'v, 'a>(&'v Object<'a>);
 
-impl Serialize for ObjectStructure<'_> {
+impl Serialize for ObjectStructure<'_, '_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (key, entry) in self.0.iter() {
@@ -283,17 +284,17 @@ impl Serialize for ObjectStructure<'_> {
 }
 
 /// The values of a multi-value entry, as the private newtype struct [`marker::MULTI`].
-struct MultiValue<'a>(&'a Entry);
+struct MultiValue<'v, 'a>(&'v Entry<'a>);
 
-impl Serialize for MultiValue<'_> {
+impl Serialize for MultiValue<'_, '_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_newtype_struct(marker::MULTI, &Values(self.0))
     }
 }
 
-struct Values<'a>(&'a Entry);
+struct Values<'v, 'a>(&'v Entry<'a>);
 
-impl Serialize for Values<'_> {
+impl Serialize for Values<'_, '_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self.0.values().map(Structure))
     }

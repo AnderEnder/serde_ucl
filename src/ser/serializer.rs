@@ -124,11 +124,11 @@ impl ser::Serializer for ValueSerializer {
     }
 
     fn serialize_char(self, v: char) -> Result<UclValue, UclError> {
-        Ok(UclValue::String(v.to_string()))
+        Ok(UclValue::String(v.into()))
     }
 
     fn serialize_str(self, v: &str) -> Result<UclValue, UclError> {
-        Ok(UclValue::String(v.to_owned()))
+        Ok(UclValue::String(v.into()))
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<UclValue, UclError> {
@@ -275,7 +275,7 @@ impl SeqSerializer {
     }
 
     fn finish(self) -> UclValue {
-        UclValue::Array(self.items)
+        UclValue::Array(self.items.into())
     }
 }
 

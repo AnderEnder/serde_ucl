@@ -190,7 +190,31 @@ pub(crate) fn double_quoted_scan(src: &[u8], start: usize) -> Result<DoubleQuote
 /// the content and the offset just after the closing quote.
 ///
 /// Bytes other than `'` and `\\` are copied a run at a time, as in [`double_quoted`].
+#[cfg(test)]
 pub(crate) fn single_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize), Error> {
+    let (bytes, end) = single_quoted_scan(src, start)?;
+    Ok((
+        bytes.unwrap_or_else(|| src[start + 1..end - 1].to_vec()),
+        end,
+    ))
+}
+
+/// [`single_quoted`], without a copy for a string that has no backslash: its bytes are then
+/// `src[start + 1..end - 1]`, and `None` is returned for them.
+pub(crate) fn single_quoted_scan(
+    src: &[u8],
+    start: usize,
+) -> Result<(Option<Vec<u8>>, usize), Error> {
+    let content = start + 1;
+    let close = src[content..]
+        .iter()
+        .position(|&b| b == b'\'' || b == b'\\')
+        .map(|n| content + n);
+    if let Some(close) = close
+        && src[close] == b'\''
+    {
+        return Ok((None, close + 1));
+    }
     let mut out = Vec::new();
     let mut i = start + 1;
     loop {
@@ -204,7 +228,7 @@ pub(crate) fn single_quoted(src: &[u8], start: usize) -> Result<(Vec<u8>, usize)
             return Err(error(src, start, ErrorKind::UnterminatedString));
         };
         if b == b'\'' {
-            return Ok((out, i + 1));
+            return Ok((Some(out), i + 1));
         }
         // A backslash.
         match src.get(i + 1) {
@@ -257,7 +281,8 @@ pub(crate) fn heredoc_opener_cut_by_end(src: &[u8], start: usize) -> bool {
 /// A heredoc read by [`heredoc`].
 #[derive(Debug)]
 pub(crate) struct Heredoc {
-    pub(crate) content: Vec<u8>,
+    /// The content: `src[content]`, as written.
+    pub(crate) content: std::ops::Range<usize>,
     /// The offset where the input continues after the heredoc.
     pub(crate) end: usize,
     /// Whether variables are expanded in the content (spec §7.2): always when NAME is not
@@ -302,7 +327,7 @@ pub(crate) fn heredoc(src: &[u8], start: usize) -> Result<Heredoc, Error> {
         let after_name = line + name.len();
         if src[line..].starts_with(name) && ends_terminator(src, after_name) {
             return Ok(Heredoc {
-                content: src[content_start..line - 1].to_vec(),
+                content: content_start..line - 1,
                 end: after_name,
                 expand: true,
             });
@@ -312,7 +337,7 @@ pub(crate) fn heredoc(src: &[u8], start: usize) -> Result<Heredoc, Error> {
             if letters > name.len() && ends_terminator(src, line + letters) {
                 let kept = letters - name.len() - 1;
                 return Ok(Heredoc {
-                    content: src[content_start..line + kept].to_vec(),
+                    content: content_start..line + kept,
                     end: line + letters,
                     expand: true,
                 });
@@ -343,7 +368,7 @@ fn empty_name_heredoc(src: &[u8], start: usize, content_start: usize) -> Result<
         .map(|n| first_end + 1 + n)
         .ok_or_else(unterminated)?;
     Ok(Heredoc {
-        content: src[content_start..end - 1].to_vec(),
+        content: content_start..end - 1,
         end,
         expand: src[content_start..first_end].contains(&b'$'),
     })
@@ -515,7 +540,7 @@ mod tests {
 
     fn hd(s: &str) -> Result<(String, usize), ErrorKind> {
         heredoc(s.as_bytes(), 0)
-            .map(|h| (String::from_utf8(h.content).unwrap(), h.end))
+            .map(|h| (s[h.content].to_owned(), h.end))
             .map_err(|e| e.kind().clone())
     }
 

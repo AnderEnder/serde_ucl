@@ -10,7 +10,6 @@ use serde_ucl::{
     ParserFlags, UclDeserializer, UclError, from_file, from_reader, from_slice, from_str,
     from_value,
 };
-use std::borrow::Cow;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
@@ -299,31 +298,6 @@ fn non_utf8_keys_and_strings_are_errors() {
     assert_eq!(err.position().map(|p| p.line), Some(2));
     let value: Value = from_slice(b"# comment \xff\xfe\nk = 1\n/* \xff */\n").unwrap();
     assert_eq!(value, json!({"k": 1}));
-}
-
-#[test]
-fn borrowed_str_fields_are_an_error() {
-    // Values are owned, so a target that borrows from the input cannot be filled.
-    #[derive(Debug, Deserialize)]
-    #[allow(
-        dead_code,
-        reason = "a deserialization target; the test checks the error"
-    )]
-    struct Borrowed<'a> {
-        name: &'a str,
-    }
-    let err = from_str::<Borrowed>("name = x").unwrap_err();
-    assert!(err.to_string().contains("borrowed"), "{err}");
-
-    // `String` and `Cow<str>` work.
-    #[derive(Debug, Deserialize)]
-    struct Owned<'a> {
-        name: String,
-        #[serde(borrow)]
-        alias: Cow<'a, str>,
-    }
-    let owned: Owned = from_str("name = x\nalias = y").unwrap();
-    assert_eq!((owned.name.as_str(), owned.alias.as_ref()), ("x", "y"));
 }
 
 #[test]

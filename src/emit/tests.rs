@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::parse::{MemoryLoader, Parser};
-use crate::value::{DuplicateStrategy, ParserFlags, UclObject};
+use crate::value::{DuplicateStrategy, ParserFlags, UclObject, UclValue};
 
 fn parse(input: &str, flags: ParserFlags) -> (Parser, UclValue) {
     let mut parser = Parser::with_flags(flags);

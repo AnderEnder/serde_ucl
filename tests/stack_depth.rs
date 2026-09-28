@@ -297,7 +297,7 @@ fn ucl_value_deeper_than_the_parser_limit() {
     on_small_stack(|| {
         let mut value = UclValue::Integer(1);
         for _ in 0..=MAX_NESTING {
-            value = UclValue::Array(vec![value]);
+            value = UclValue::Array(vec![value].into());
         }
         let copy = serde_ucl::to_value(&value).unwrap();
         assert!(same(&copy, &value));

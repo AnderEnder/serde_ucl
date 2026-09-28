@@ -32,6 +32,7 @@ use super::registered::MacroTable;
 use super::{Error, ErrorKind, MAX_INCLUDE_DEPTH};
 use crate::value::{DuplicateStrategy, UclValue};
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -80,7 +81,7 @@ pub(crate) struct Includes<'l> {
     pub(crate) loader: &'l dyn Loader,
     /// The directory relative paths resolve against, and `CURDIR` of a document given as bytes
     /// (project decision 6). It is set for each input (WORKLIST C8b decision 4).
-    pub(crate) base: PathBuf,
+    pub(crate) base: Cow<'l, Path>,
     /// The `path` list in effect: set by any include macro, it stays for the rest of the parse
     /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
     /// ([`super::Parser::set_search_path`]).
@@ -114,7 +115,7 @@ impl<'l> Includes<'l> {
     /// The state for a parse with no input read yet, with the parser's search path `search`.
     pub(crate) fn new(
         loader: &'l dyn Loader,
-        base: PathBuf,
+        base: Cow<'l, Path>,
         search: Option<Vec<String>>,
         budget: &'l Budget,
         macros: Option<&'l MacroTable>,
@@ -245,7 +246,7 @@ fn duplicate_strategy(name: Option<&str>) -> DuplicateStrategy {
     }
 }
 
-impl Core<'_, '_, '_, '_> {
+impl<'t> Core<'_, 't, '_, '_, '_> {
     /// The path a macro's value names: the value up to its first NUL byte, if it has one (spec
     /// §9.2, *Quirk: a NUL byte in VALUE*; §9.3). It must be UTF-8.
     fn macro_path(&self, call: &MacroCall) -> Result<String, Error> {
@@ -596,7 +597,7 @@ impl Core<'_, '_, '_, '_> {
             }
             let text = String::from_utf8(text)
                 .map_err(|_| self.error(ErrorKind::InvalidUtf8, call.value_at))?;
-            UclValue::String(text)
+            UclValue::String(text.into())
         } else if target.eq_ignore_ascii_case("int") {
             UclValue::Integer(leading_integer(&bytes))
         } else {
@@ -621,7 +622,7 @@ impl Core<'_, '_, '_, '_> {
             .is_some_and(super::OutputFacts::records_locations);
         let pos = super::facts::Pos::Entry {
             entry,
-            key: crate::value::Str::from(key),
+            key: crate::value::KeyCopy::from(key),
             slot: 0,
         };
         if (multiline || locating)
@@ -750,7 +751,7 @@ mod tests {
     }
 
     fn keys(v: &UclValue) -> Vec<String> {
-        obj(v).keys().cloned().collect()
+        obj(v).keys().map(|k| k.to_string()).collect()
     }
 
     const A: (&str, &str) = ("/c/files/a.inc", "x = 1\ny = \"inc\"\n");
@@ -996,7 +997,7 @@ mod tests {
             "x = 5\n.include(key=\"x\", target=\"array\\u0000q\") \"files/a.inc\"",
         )
         .unwrap();
-        assert_eq!(obj(&v)["x"].as_array().map(Vec::len), Some(2));
+        assert_eq!(obj(&v)["x"].as_array().map(|a| a.len()), Some(2));
         #[cfg(feature = "load")]
         {
             let v = run(&files, ".load(key=\"s\\u0000t\") \"text.txt\"").unwrap();

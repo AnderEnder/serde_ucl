@@ -179,7 +179,7 @@ fn seen_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
     let mut seen = UclObject::new();
     seen.insert(
         "data",
-        UclValue::String(String::from_utf8_lossy(call.value()).into_owned()),
+        UclValue::String(String::from_utf8_lossy(call.value()).into_owned().into()),
     );
     let args = call.arguments().map_or(UclValue::Null, test_macro_copy);
     seen.insert("args", args);
@@ -287,7 +287,7 @@ fn dump_node(
                 let mut values = Vec::new();
                 for (index, slot) in entry.slots().iter().enumerate() {
                     path.push(PathSegment::Key {
-                        key: k.clone(),
+                        key: k.to_string(),
                         index,
                     });
                     values.push(dump_node(slot.value(), slot.priority(), path, comments));

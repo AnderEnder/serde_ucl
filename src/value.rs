@@ -12,97 +12,140 @@
 //! Each value in an entry carries the priority of the chunk it came from (0–15, as in libucl) and
 //! whether it was copied by `.inherit`. Both only matter while duplicate keys are resolved; see
 //! [`UclObject::insert_with_strategy`].
+//!
+//! # Borrowed and owned values
+//!
+//! [`Value<'a>`] is a value whose keys and strings may borrow from text that lives for `'a`
+//! ([`Str`]); [`UclValue`] is `Value<'static>`, a value that owns them (or borrows only
+//! `'static` text). The parser ([`crate::parse`]) and every other function of the crate that
+//! gives a value give a `UclValue`. The serde entry points parse the caller's text into a value
+//! that borrows from it, so that targets that borrow, such as `&str` and `Cow<str>` fields, can
+//! take keys and strings without a copy ([`crate::de`]). [`Value::into_owned`] turns a borrowed
+//! value into an owned one.
+//!
+//! Cloning, comparing, dropping and [`Value::into_owned`] do not recurse: they take the same
+//! stack at any depth of nesting.
 
-use indexmap::IndexMap;
-use indexmap::map::RawEntryApiV1;
-use indexmap::map::raw_entry_v1::RawEntryMut;
-use smallvec::SmallVec;
 use std::fmt;
-use std::hash::BuildHasher;
 
+mod map;
+mod string;
 mod text;
 
-pub(crate) use text::Str;
+use map::Map;
+pub(crate) use map::Probe;
+pub use map::{Entries, IntoIter, Iter, IterMut, Keys};
+pub use string::Str;
+pub(crate) use text::KeyCopy;
 
-/// Explicit array (`[...]`).
-pub type UclArray = Vec<UclValue>;
-
-/// A UCL value.
+/// A UCL value whose keys and strings may borrow from text that lives for `'a` (see the
+/// [module documentation](self#borrowed-and-owned-values)).
 ///
-/// Cloning and comparing do not recurse: they take the same stack at any depth of nesting.
-/// Dropping a value, and formatting it with `Debug`, recurse once per level.
+/// Cloning, comparing and dropping do not recurse: they take the same stack at any depth of
+/// nesting. Formatting it with `Debug` recurses once per level.
 #[derive(Debug)]
-pub enum UclValue {
-    Object(UclObject),
-    Array(UclArray),
+pub enum Value<'a> {
+    Object(Object<'a>),
+    Array(Array<'a>),
     Integer(i64),
     Float(f64),
     /// Time in seconds (`10s`, `5min`, `10ms`): libucl's `UCL_TIME`.
     Time(f64),
-    String(String),
+    String(Str<'a>),
     Boolean(bool),
     Null,
 }
+
+/// A UCL value that owns its keys and strings: what the parser gives.
+pub type UclValue = Value<'static>;
+
+/// An object that owns its keys and strings.
+pub type UclObject = Object<'static>;
+
+/// An explicit array that owns its keys and strings.
+pub type UclArray = Array<'static>;
 
 /// Written out rather than derived, which would recurse once per level of nesting: `.inherit`
 /// copies values nested as deep as the parser allows (spec §9.7, §11.2), and a derived clone of
 /// such a value overflows a 2 MiB stack in a debug build. The copy keeps each value's priority
 /// and marks.
-impl Clone for UclValue {
+impl Clone for Value<'_> {
     fn clone(&self) -> Self {
-        match self {
-            UclValue::Object(_) | UclValue::Array(_) => clone_tree(self),
-            UclValue::Integer(i) => UclValue::Integer(*i),
-            UclValue::Float(f) => UclValue::Float(*f),
-            UclValue::Time(t) => UclValue::Time(*t),
-            UclValue::String(s) => UclValue::String(s.clone()),
-            UclValue::Boolean(b) => UclValue::Boolean(*b),
-            UclValue::Null => UclValue::Null,
-        }
+        copy_value(self, Str::clone)
+    }
+}
+
+/// A copy of `value` whose strings and keys are `text` of `value`'s: clones, or owned copies.
+fn copy_value<'a, 'b>(value: &Value<'a>, text: fn(&Str<'a>) -> Str<'b>) -> Value<'b> {
+    match value {
+        Value::Object(_) | Value::Array(_) => clone_tree(value, text),
+        scalar => copy_scalar(scalar, text),
+    }
+}
+
+/// A copy of `scalar`, as [`copy_value`] makes it.
+fn copy_scalar<'a, 'b>(scalar: &Value<'a>, text: fn(&Str<'a>) -> Str<'b>) -> Value<'b> {
+    match scalar {
+        Value::Integer(i) => Value::Integer(*i),
+        Value::Float(f) => Value::Float(*f),
+        Value::Time(t) => Value::Time(*t),
+        Value::String(s) => Value::String(text(s)),
+        Value::Boolean(b) => Value::Boolean(*b),
+        Value::Null => Value::Null,
+        Value::Object(_) | Value::Array(_) => unreachable!("not a scalar"),
     }
 }
 
 /// Written out rather than derived, which would recurse once per level of nesting: `==` compares
-/// as the derived comparisons of [`UclValue`], [`UclObject`], [`Entry`] and [`Slot`] would, with a
-/// heap stack. Values of different kinds differ; floats and times compare as `f64` (a NaN equals
+/// as the derived comparisons of [`Value`], [`Object`], [`Entry`] and [`Slot`] would, with a heap
+/// stack. Values of different kinds differ; floats and times compare as `f64` (a NaN equals
 /// nothing); objects compare as maps, their keys in any order; the values of an entry compare in
-/// order, each with its priority and marks.
-impl PartialEq for UclValue {
-    fn eq(&self, other: &Self) -> bool {
+/// order, each with its priority and marks. Borrowed and owned strings compare by their text.
+impl<'b> PartialEq<Value<'b>> for Value<'_> {
+    fn eq(&self, other: &Value<'b>) -> bool {
         let mut pending = Vec::new();
         push_values(self, other, &mut pending) && equal_pending(pending)
     }
 }
 
-/// See [`UclValue`]'s `PartialEq`.
-impl PartialEq for UclObject {
-    fn eq(&self, other: &Self) -> bool {
+/// See [`Value`]'s `PartialEq`.
+impl<'b> PartialEq<Object<'b>> for Object<'_> {
+    fn eq(&self, other: &Object<'b>) -> bool {
         let mut pending = Vec::new();
         push_objects(self, other, &mut pending) && equal_pending(pending)
     }
 }
 
-/// See [`UclValue`]'s `PartialEq`.
-impl PartialEq for Entry {
-    fn eq(&self, other: &Self) -> bool {
+/// See [`Value`]'s `PartialEq`: element by element.
+impl<'b> PartialEq<Array<'b>> for Array<'_> {
+    fn eq(&self, other: &Array<'b>) -> bool {
+        let mut pending = Vec::new();
+        pending.extend(self.0.iter().zip(&other.0));
+        self.0.len() == other.0.len() && equal_pending(pending)
+    }
+}
+
+/// See [`Value`]'s `PartialEq`.
+impl<'b> PartialEq<Entry<'b>> for Entry<'_> {
+    fn eq(&self, other: &Entry<'b>) -> bool {
         let mut pending = Vec::new();
         push_entries(self, other, &mut pending) && equal_pending(pending)
     }
 }
 
-/// See [`UclValue`]'s `PartialEq`.
-impl PartialEq for Slot {
-    fn eq(&self, other: &Self) -> bool {
+/// See [`Value`]'s `PartialEq`.
+impl<'b> PartialEq<Slot<'b>> for Slot<'_> {
+    fn eq(&self, other: &Slot<'b>) -> bool {
         let mut pending = Vec::new();
         push_slots(self, other, &mut pending) && equal_pending(pending)
     }
 }
 
 /// Pairs of values still to compare.
-type Pending<'a> = Vec<(&'a UclValue, &'a UclValue)>;
+type Pending<'p, 'a, 'b> = Vec<(&'p Value<'a>, &'p Value<'b>)>;
 
 /// Whether every pair in `pending`, and every pair of values inside them, is equal.
-fn equal_pending(mut pending: Pending<'_>) -> bool {
+fn equal_pending(mut pending: Pending<'_, '_, '_>) -> bool {
     while let Some((a, b)) = pending.pop() {
         if !push_values(a, b, &mut pending) {
             return false;
@@ -112,58 +155,75 @@ fn equal_pending(mut pending: Pending<'_>) -> bool {
 }
 
 /// Compares `a` and `b` without the values inside them, which it pushes to `pending` in pairs.
-fn push_values<'a>(a: &'a UclValue, b: &'a UclValue, pending: &mut Pending<'a>) -> bool {
+fn push_values<'p, 'a, 'b>(
+    a: &'p Value<'a>,
+    b: &'p Value<'b>,
+    pending: &mut Pending<'p, 'a, 'b>,
+) -> bool {
     match (a, b) {
-        (UclValue::Object(x), UclValue::Object(y)) => push_objects(x, y, pending),
-        (UclValue::Array(x), UclValue::Array(y)) => {
-            pending.extend(x.iter().zip(y));
-            x.len() == y.len()
+        (Value::Object(x), Value::Object(y)) => push_objects(x, y, pending),
+        (Value::Array(x), Value::Array(y)) => {
+            pending.extend(x.0.iter().zip(&y.0));
+            x.0.len() == y.0.len()
         }
-        (UclValue::Integer(x), UclValue::Integer(y)) => x == y,
-        (UclValue::Float(x), UclValue::Float(y)) | (UclValue::Time(x), UclValue::Time(y)) => x == y,
-        (UclValue::String(x), UclValue::String(y)) => x == y,
-        (UclValue::Boolean(x), UclValue::Boolean(y)) => x == y,
-        (UclValue::Null, UclValue::Null) => true,
+        (Value::Integer(x), Value::Integer(y)) => x == y,
+        (Value::Float(x), Value::Float(y)) | (Value::Time(x), Value::Time(y)) => x == y,
+        (Value::String(x), Value::String(y)) => x.as_str() == y.as_str(),
+        (Value::Boolean(x), Value::Boolean(y)) => x == y,
+        (Value::Null, Value::Null) => true,
         _ => false,
     }
 }
 
-fn push_objects<'a>(x: &'a UclObject, y: &'a UclObject, pending: &mut Pending<'a>) -> bool {
+fn push_objects<'p, 'a, 'b>(
+    x: &'p Object<'a>,
+    y: &'p Object<'b>,
+    pending: &mut Pending<'p, 'a, 'b>,
+) -> bool {
     x.entries.len() == y.entries.len()
         && x.entries.iter().all(|(key, entry)| {
             y.entries
-                .get(key)
+                .get(key.as_str())
                 .is_some_and(|other| push_entries(entry, other, pending))
         })
 }
 
-fn push_entries<'a>(x: &'a Entry, y: &'a Entry, pending: &mut Pending<'a>) -> bool {
+fn push_entries<'p, 'a, 'b>(
+    x: &'p Entry<'a>,
+    y: &'p Entry<'b>,
+    pending: &mut Pending<'p, 'a, 'b>,
+) -> bool {
     x.slots.len() == y.slots.len()
         && x.slots
             .iter()
-            .zip(&y.slots)
+            .zip(y.slots.iter())
             .all(|(s, t)| push_slots(s, t, pending))
 }
 
-fn push_slots<'a>(s: &'a Slot, t: &'a Slot, pending: &mut Pending<'a>) -> bool {
+fn push_slots<'p, 'a, 'b>(
+    s: &'p Slot<'a>,
+    t: &'p Slot<'b>,
+    pending: &mut Pending<'p, 'a, 'b>,
+) -> bool {
     pending.push((&s.value, &t.value));
     (s.priority, s.inherited, s.collected) == (t.priority, t.inherited, t.collected)
 }
 
-/// A copy of the container `root`, built with a heap stack: every value is copied after the
-/// values inside it, which wait on `done` in order until their container is built.
-fn clone_tree(root: &UclValue) -> UclValue {
-    enum Step<'a> {
+/// A copy of the container `root`, as [`copy_value`] makes it, built with a heap stack: every
+/// value is copied after the values inside it, which wait on `done` in order until their
+/// container is built.
+fn clone_tree<'a, 'b>(root: &Value<'a>, text: fn(&Str<'a>) -> Str<'b>) -> Value<'b> {
+    enum Step<'r, 'a> {
         /// Copy this value: a scalar at once, a container after its values.
-        Copy(&'a UclValue),
+        Copy(&'r Value<'a>),
         /// Build the copy of this container from the copies of its values on `done`.
-        Build(&'a UclValue),
+        Build(&'r Value<'a>),
     }
     let mut todo = vec![Step::Copy(root)];
-    let mut done: Vec<UclValue> = Vec::new();
+    let mut done: Vec<Value<'b>> = Vec::new();
     while let Some(step) = todo.pop() {
         match step {
-            Step::Copy(value @ UclValue::Object(object)) => {
+            Step::Copy(value @ Value::Object(object)) => {
                 todo.push(Step::Build(value));
                 todo.extend(
                     object
@@ -173,31 +233,27 @@ fn clone_tree(root: &UclValue) -> UclValue {
                         .map(Step::Copy),
                 );
             }
-            Step::Copy(value @ UclValue::Array(items)) => {
+            Step::Copy(value @ Value::Array(items)) => {
                 todo.push(Step::Build(value));
                 todo.extend(items.iter().rev().map(Step::Copy));
             }
-            Step::Copy(scalar) => done.push(scalar.clone()),
-            Step::Build(UclValue::Object(object)) => {
+            Step::Copy(scalar) => done.push(copy_scalar(scalar, text)),
+            Step::Build(Value::Object(object)) => {
                 let count = object.entries().map(Entry::len).sum::<usize>();
                 let mut values = done.split_off(done.len() - count).into_iter();
-                let entries = object
-                    .entries
-                    .iter()
-                    .map(|(key, entry)| {
-                        let slots = entry
-                            .slots
-                            .iter()
-                            .map(|slot| slot.with_value(values.next().expect("copied")))
-                            .collect();
-                        (key.clone(), Entry { slots })
-                    })
-                    .collect();
-                done.push(UclValue::Object(UclObject { entries }));
+                let mut entries = Map::with_capacity(object.entries.len());
+                for (key, entry) in object.entries.iter() {
+                    let slots = entry
+                        .slots
+                        .iter()
+                        .map(|slot| slot.with_value(values.next().expect("copied")));
+                    entries.push_unique(text(key), Entry::from_slots(slots));
+                }
+                done.push(Value::Object(Object { entries }));
             }
-            Step::Build(UclValue::Array(items)) => {
+            Step::Build(Value::Array(items)) => {
                 let elements = done.split_off(done.len() - items.len());
-                done.push(UclValue::Array(elements));
+                done.push(Value::Array(Array(elements)));
             }
             Step::Build(_) => unreachable!("only containers are built"),
         }
@@ -205,58 +261,152 @@ fn clone_tree(root: &UclValue) -> UclValue {
     done.pop().expect("the root was copied")
 }
 
-/// Drops `value` with a heap stack. Dropping a value recurses once per level of nesting, which
-/// matters where the call stack is already deep, or the value deeper than the parser allows.
-pub(crate) fn discard(value: UclValue) {
-    let mut stack = vec![value];
-    while let Some(value) = stack.pop() {
-        match value {
-            UclValue::Object(object) => stack.extend(
-                object
-                    .into_iter()
-                    .flat_map(|(_, entry)| entry.into_values()),
-            ),
-            UclValue::Array(items) => stack.extend(items),
+/// `root` with every key and string it borrows copied, built with a heap stack as
+/// [`clone_tree`] builds a copy, but taking the values out of `root` rather than copying them.
+fn owned_tree(root: Value<'_>) -> UclValue {
+    /// The shape of a container whose values are being made owned: the keys of an object with
+    /// the priority and marks of each value, or the length of an array.
+    enum Shape {
+        Object(Vec<(Str<'static>, Vec<Slot<'static>>)>, usize),
+        Array(usize),
+    }
+    enum Step<'a> {
+        Take(Value<'a>),
+        Build(Shape),
+    }
+    let mut todo = vec![Step::Take(root)];
+    let mut done: Vec<UclValue> = Vec::new();
+    while let Some(step) = todo.pop() {
+        match step {
+            Step::Take(Value::Object(mut object)) => {
+                let entries = std::mem::take(&mut object.entries);
+                let mut shape = Vec::with_capacity(entries.len());
+                let mut values = Vec::new();
+                for (key, entry) in entries {
+                    let marks = entry
+                        .slots
+                        .iter()
+                        .map(|slot| slot.with_value(Value::Null))
+                        .collect();
+                    shape.push((key.into_owned(), marks));
+                    values.extend(entry.into_values());
+                }
+                let count = values.len();
+                todo.push(Step::Build(Shape::Object(shape, count)));
+                todo.extend(values.into_iter().rev().map(Step::Take));
+            }
+            Step::Take(Value::Array(mut items)) => {
+                let items = std::mem::take(&mut items.0);
+                todo.push(Step::Build(Shape::Array(items.len())));
+                todo.extend(items.into_iter().rev().map(Step::Take));
+            }
+            Step::Take(scalar) => done.push(match scalar {
+                Value::Integer(i) => Value::Integer(i),
+                Value::Float(f) => Value::Float(f),
+                Value::Time(t) => Value::Time(t),
+                Value::String(s) => Value::String(s.into_owned()),
+                Value::Boolean(b) => Value::Boolean(b),
+                Value::Null => Value::Null,
+                Value::Object(_) | Value::Array(_) => unreachable!("containers are taken apart"),
+            }),
+            Step::Build(Shape::Object(shape, count)) => {
+                let mut values = done.split_off(done.len() - count).into_iter();
+                let mut entries = Map::with_capacity(shape.len());
+                for (key, marks) in shape {
+                    let slots = marks
+                        .into_iter()
+                        .map(|mark| mark.with_value(values.next().expect("made owned")));
+                    entries.push_unique(key, Entry::from_slots(slots));
+                }
+                done.push(Value::Object(Object { entries }));
+            }
+            Step::Build(Shape::Array(len)) => {
+                let elements = done.split_off(done.len() - len);
+                done.push(Value::Array(Array(elements)));
+            }
+        }
+    }
+    done.pop().expect("the root was made owned")
+}
+
+/// Whether dropping `value` could recurse: it is a container that holds something.
+fn holds_values(value: &Value<'_>) -> bool {
+    match value {
+        Value::Object(object) => !object.entries.is_empty(),
+        Value::Array(items) => !items.0.is_empty(),
+        _ => false,
+    }
+}
+
+/// Moves the containers that hold values out of the values of `object`'s entries onto
+/// `stack`, leaving `null` in their place, so that dropping `object` recurses no further.
+fn take_nested<'a>(object: &mut Object<'a>, stack: &mut Vec<Value<'a>>) {
+    for entry in object.entries.values_mut() {
+        for slot in entry.slots.as_mut_slice() {
+            if holds_values(&slot.value) {
+                stack.push(std::mem::replace(&mut slot.value, Value::Null));
+            }
+        }
+    }
+}
+
+/// [`take_nested`] for the elements of an array.
+fn take_nested_elements<'a>(items: &mut [Value<'a>], stack: &mut Vec<Value<'a>>) {
+    for item in items {
+        if holds_values(item) {
+            stack.push(std::mem::replace(item, Value::Null));
+        }
+    }
+}
+
+/// Drops the containers on `stack` one at a time, each after the containers inside it have been
+/// moved onto `stack` too, so that no drop recurses.
+fn drop_stack(mut stack: Vec<Value<'_>>) {
+    while let Some(mut value) = stack.pop() {
+        match &mut value {
+            Value::Object(object) => take_nested(object, &mut stack),
+            Value::Array(items) => take_nested_elements(&mut items.0, &mut stack),
             _ => {}
         }
     }
 }
 
+/// Drops `value` with a heap stack ([`Value`] drops that way).
+pub(crate) fn discard(value: Value<'_>) {
+    drop(value);
+}
+
 /// Keeps only the first value of each entry whose first value is an object or an array, in
 /// every object inside `value`, `value` itself included: the rule of `.inherit` copies at every
 /// level of the copy (spec §9.7). Entries whose first value is anything else keep all their
-/// values. Walks with a heap stack, and discards the values it removes the same way.
-pub(crate) fn keep_first_container_values(value: &mut UclValue) {
+/// values. Walks with a heap stack.
+pub(crate) fn keep_first_container_values(value: &mut Value<'_>) {
     let mut stack = vec![value];
-    let mut removed = Vec::new();
     while let Some(value) = stack.pop() {
         match value {
-            UclValue::Object(object) => {
+            Value::Object(object) => {
                 for entry in object.entries.values_mut() {
-                    if entry.slots.len() > 1 && is_container(&entry.slots[0].value) {
-                        removed.extend(entry.slots.drain(1..).map(Slot::into_value));
+                    if entry.slots.len() > 1 && is_container(&entry.slots.as_slice()[0].value) {
+                        entry.slots.truncate_to_first();
                     }
-                    stack.extend(entry.slots.iter_mut().map(Slot::value_mut));
+                    stack.extend(entry.slots.as_mut_slice().iter_mut().map(Slot::value_mut));
                 }
             }
-            UclValue::Array(items) => stack.extend(items.iter_mut()),
+            Value::Array(items) => stack.extend(items.0.iter_mut()),
             _ => {}
         }
-    }
-    for value in removed {
-        discard(value);
     }
 }
 
 /// The most containers (objects and arrays) nested inside one another in `value`, itself
 /// included: 0 for a scalar, 1 for a container that holds only scalars. Counted with a heap
 /// stack.
-pub(crate) fn nesting(value: &UclValue) -> usize {
+pub(crate) fn nesting(value: &Value<'_>) -> usize {
     let mut deepest = 0;
     let mut stack = vec![(value, 1)];
     while let Some((value, depth)) = stack.pop() {
         match value {
-            UclValue::Object(object) => {
+            Value::Object(object) => {
                 deepest = deepest.max(depth);
                 stack.extend(
                     object
@@ -265,7 +415,7 @@ pub(crate) fn nesting(value: &UclValue) -> usize {
                         .map(|v| (v, depth + 1)),
                 );
             }
-            UclValue::Array(items) => {
+            Value::Array(items) => {
                 deepest = deepest.max(depth);
                 stack.extend(items.iter().map(|v| (v, depth + 1)));
             }
@@ -275,60 +425,60 @@ pub(crate) fn nesting(value: &UclValue) -> usize {
     deepest
 }
 
-impl UclValue {
+impl<'a> Value<'a> {
     /// Returns true if the value is an object
     pub fn is_object(&self) -> bool {
-        matches!(self, UclValue::Object(_))
+        matches!(self, Value::Object(_))
     }
 
     /// Returns true if the value is an explicit array
     pub fn is_array(&self) -> bool {
-        matches!(self, UclValue::Array(_))
+        matches!(self, Value::Array(_))
     }
 
     /// Returns true if the value is a string
     pub fn is_string(&self) -> bool {
-        matches!(self, UclValue::String(_))
+        matches!(self, Value::String(_))
     }
 
     /// Returns true if the value is a time
     pub fn is_time(&self) -> bool {
-        matches!(self, UclValue::Time(_))
+        matches!(self, Value::Time(_))
     }
 
     /// Returns true if this is a Null variant
     pub fn is_null(&self) -> bool {
-        matches!(self, UclValue::Null)
+        matches!(self, Value::Null)
     }
 
     /// Returns the object if this is an Object variant
-    pub fn as_object(&self) -> Option<&UclObject> {
+    pub fn as_object(&self) -> Option<&Object<'a>> {
         match self {
-            UclValue::Object(obj) => Some(obj),
+            Value::Object(obj) => Some(obj),
             _ => None,
         }
     }
 
     /// Returns the object mutably if this is an Object variant
-    pub fn as_object_mut(&mut self) -> Option<&mut UclObject> {
+    pub fn as_object_mut(&mut self) -> Option<&mut Object<'a>> {
         match self {
-            UclValue::Object(obj) => Some(obj),
+            Value::Object(obj) => Some(obj),
             _ => None,
         }
     }
 
     /// Returns the array if this is an Array variant
-    pub fn as_array(&self) -> Option<&UclArray> {
+    pub fn as_array(&self) -> Option<&Array<'a>> {
         match self {
-            UclValue::Array(arr) => Some(arr),
+            Value::Array(arr) => Some(arr),
             _ => None,
         }
     }
 
     /// Returns the array mutably if this is an Array variant
-    pub fn as_array_mut(&mut self) -> Option<&mut UclArray> {
+    pub fn as_array_mut(&mut self) -> Option<&mut Array<'a>> {
         match self {
-            UclValue::Array(arr) => Some(arr),
+            Value::Array(arr) => Some(arr),
             _ => None,
         }
     }
@@ -336,7 +486,7 @@ impl UclValue {
     /// Returns the string if this is a String variant
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            UclValue::String(s) => Some(s),
+            Value::String(s) => Some(s.as_str()),
             _ => None,
         }
     }
@@ -344,7 +494,7 @@ impl UclValue {
     /// Returns the integer if this is an Integer variant
     pub fn as_integer(&self) -> Option<i64> {
         match self {
-            UclValue::Integer(i) => Some(*i),
+            Value::Integer(i) => Some(*i),
             _ => None,
         }
     }
@@ -352,7 +502,7 @@ impl UclValue {
     /// Returns the float if this is a Float variant
     pub fn as_float(&self) -> Option<f64> {
         match self {
-            UclValue::Float(f) => Some(*f),
+            Value::Float(f) => Some(*f),
             _ => None,
         }
     }
@@ -360,7 +510,7 @@ impl UclValue {
     /// Returns the number of seconds if this is a Time variant
     pub fn as_time(&self) -> Option<f64> {
         match self {
-            UclValue::Time(t) => Some(*t),
+            Value::Time(t) => Some(*t),
             _ => None,
         }
     }
@@ -368,7 +518,7 @@ impl UclValue {
     /// Returns the boolean if this is a Boolean variant
     pub fn as_bool(&self) -> Option<bool> {
         match self {
-            UclValue::Boolean(b) => Some(*b),
+            Value::Boolean(b) => Some(*b),
             _ => None,
         }
     }
@@ -376,14 +526,33 @@ impl UclValue {
     /// Name of the value's type, as libucl spells it (`ucl_object_type_to_string`).
     pub fn type_name(&self) -> &'static str {
         match self {
-            UclValue::Object(_) => "object",
-            UclValue::Array(_) => "array",
-            UclValue::Integer(_) => "int",
-            UclValue::Float(_) => "float",
-            UclValue::Time(_) => "time",
-            UclValue::String(_) => "string",
-            UclValue::Boolean(_) => "boolean",
-            UclValue::Null => "null",
+            Value::Object(_) => "object",
+            Value::Array(_) => "array",
+            Value::Integer(_) => "int",
+            Value::Float(_) => "float",
+            Value::Time(_) => "time",
+            Value::String(_) => "string",
+            Value::Boolean(_) => "boolean",
+            Value::Null => "null",
+        }
+    }
+
+    /// A copy of the value that borrows nothing: [`Value::into_owned`] of a clone, in one step.
+    pub(crate) fn owned_copy(&self) -> UclValue {
+        copy_value(self, |s| s.clone().into_owned())
+    }
+
+    /// The value with every key and string it borrows copied, so that it borrows nothing, with
+    /// the same stack at any depth. Priorities and marks are kept.
+    pub fn into_owned(self) -> UclValue {
+        match self {
+            Value::Object(_) | Value::Array(_) => owned_tree(self),
+            Value::Integer(i) => Value::Integer(i),
+            Value::Float(f) => Value::Float(f),
+            Value::Time(t) => Value::Time(t),
+            Value::String(s) => Value::String(s.into_owned()),
+            Value::Boolean(b) => Value::Boolean(b),
+            Value::Null => Value::Null,
         }
     }
 }
@@ -527,17 +696,17 @@ pub enum Placement {
 
 /// One value of an [`Entry`], with its priority and `.inherit` flag.
 #[derive(Debug, Clone)]
-pub struct Slot {
-    value: UclValue,
+pub struct Slot<'a> {
+    value: Value<'a>,
     priority: u8,
     inherited: bool,
     /// Set on an explicit array built from repeated keys under `NO_IMPLICIT_ARRAYS`.
     collected: bool,
 }
 
-impl Slot {
+impl<'a> Slot<'a> {
     /// A value with the given priority (masked to 0–15).
-    pub fn new(value: UclValue, priority: u8) -> Self {
+    pub fn new(value: Value<'a>, priority: u8) -> Self {
         Self {
             value,
             priority: priority & MAX_PRIORITY,
@@ -548,13 +717,13 @@ impl Slot {
 
     /// A value copied from another object by `.inherit`.
     #[cfg(test)]
-    pub(crate) fn inherited(value: UclValue, priority: u8) -> Self {
+    pub(crate) fn inherited(value: Value<'a>, priority: u8) -> Self {
         Self::new(value, priority).into_inherited()
     }
 
     /// An explicit array that collects a key's repeats under `NO_IMPLICIT_ARRAYS` (spec §8.5),
     /// at priority 0.
-    pub(crate) fn collection(value: UclValue) -> Self {
+    pub(crate) fn collection(value: Value<'a>) -> Self {
         Self {
             collected: true,
             ..Self::new(value, 0)
@@ -562,8 +731,13 @@ impl Slot {
     }
 
     /// A slot with this slot's priority and marks that holds `value`.
-    pub(crate) fn with_value(&self, value: UclValue) -> Self {
-        Self { value, ..*self }
+    pub(crate) fn with_value<'b>(&self, value: Value<'b>) -> Slot<'b> {
+        Slot {
+            value,
+            priority: self.priority,
+            inherited: self.inherited,
+            collected: self.collected,
+        }
     }
 
     /// The slot marked as copied by `.inherit` (spec §9.7). Its value, priority and
@@ -575,15 +749,15 @@ impl Slot {
         }
     }
 
-    pub fn value(&self) -> &UclValue {
+    pub fn value(&self) -> &Value<'a> {
         &self.value
     }
 
-    pub fn value_mut(&mut self) -> &mut UclValue {
+    pub fn value_mut(&mut self) -> &mut Value<'a> {
         &mut self.value
     }
 
-    pub fn into_value(self) -> UclValue {
+    pub fn into_value(self) -> Value<'a> {
         self.value
     }
 
@@ -603,23 +777,133 @@ impl Slot {
     }
 }
 
-/// The values of one key: always at least one. More than one is an implicit array.
-#[derive(Debug, Clone)]
-pub struct Entry {
-    slots: SmallVec<[Slot; 1]>,
+/// The slots of an [`Entry`]: one kept in place, more in a vector, so that an entry of one value
+/// allocates nothing for it. Written out rather than a `SmallVec`, which would make [`Value`]
+/// invariant in its lifetime: an owned value could not then go into a borrowed tree.
+#[derive(Clone)]
+enum Slots<'a> {
+    One(Slot<'a>),
+    Many(Vec<Slot<'a>>),
 }
 
-impl Entry {
+impl fmt::Debug for Slots<'_> {
+    /// As a list of the slots, the form of the `SmallVec` this replaces.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.as_slice()).finish()
+    }
+}
+
+impl<'a> Slots<'a> {
+    fn as_slice(&self) -> &[Slot<'a>] {
+        match self {
+            Slots::One(slot) => std::slice::from_ref(slot),
+            Slots::Many(slots) => slots,
+        }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [Slot<'a>] {
+        match self {
+            Slots::One(slot) => std::slice::from_mut(slot),
+            Slots::Many(slots) => slots,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Slots::One(_) => 1,
+            Slots::Many(slots) => slots.len(),
+        }
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, Slot<'a>> {
+        self.as_slice().iter()
+    }
+
+    fn push(&mut self, slot: Slot<'a>) {
+        match self {
+            Slots::Many(slots) => slots.push(slot),
+            Slots::One(_) => {
+                let Slots::One(first) = std::mem::replace(self, Slots::Many(Vec::new())) else {
+                    unreachable!("matched above")
+                };
+                *self = Slots::Many(vec![first, slot]);
+            }
+        }
+    }
+
+    /// Keeps the first slot only.
+    fn truncate_to_first(&mut self) {
+        if let Slots::Many(slots) = self {
+            slots.truncate(1);
+        }
+    }
+
+    /// The first slot, taking the others with it.
+    fn into_first(self) -> Slot<'a> {
+        match self {
+            Slots::One(slot) => slot,
+            Slots::Many(slots) => slots.into_iter().next().expect("an entry holds a value"),
+        }
+    }
+
+    fn into_iter(self) -> SlotsIntoIter<'a> {
+        match self {
+            Slots::One(slot) => SlotsIntoIter::One(Some(slot)),
+            Slots::Many(slots) => SlotsIntoIter::Many(slots.into_iter()),
+        }
+    }
+}
+
+/// The slots of an entry, by value.
+enum SlotsIntoIter<'a> {
+    One(Option<Slot<'a>>),
+    Many(std::vec::IntoIter<Slot<'a>>),
+}
+
+impl<'a> Iterator for SlotsIntoIter<'a> {
+    type Item = Slot<'a>;
+
+    fn next(&mut self) -> Option<Slot<'a>> {
+        match self {
+            SlotsIntoIter::One(slot) => slot.take(),
+            SlotsIntoIter::Many(slots) => slots.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            SlotsIntoIter::One(slot) => (usize::from(slot.is_some()), Some(1)),
+            SlotsIntoIter::Many(slots) => slots.size_hint(),
+        }
+    }
+}
+
+/// The values of one key: always at least one. More than one is an implicit array.
+#[derive(Debug, Clone)]
+pub struct Entry<'a> {
+    slots: Slots<'a>,
+}
+
+impl<'a> Entry<'a> {
     /// An entry with one value at priority 0.
-    pub fn new(value: UclValue) -> Self {
+    pub fn new(value: Value<'a>) -> Self {
         Self::from_slot(Slot::new(value, 0))
     }
 
     /// An entry with one slot.
-    pub fn from_slot(slot: Slot) -> Self {
-        let mut slots = SmallVec::new();
-        slots.push(slot);
-        Self { slots }
+    pub fn from_slot(slot: Slot<'a>) -> Self {
+        Self {
+            slots: Slots::One(slot),
+        }
+    }
+
+    /// An entry of `slots`, of which there is at least one.
+    fn from_slots(mut slots: impl Iterator<Item = Slot<'a>>) -> Self {
+        let mut entry = Entry::from_slot(slots.next().expect("an entry holds a value"));
+        for slot in slots {
+            entry.slots.push(slot);
+        }
+        entry
     }
 
     /// Number of values (1 unless this is an implicit array).
@@ -638,65 +922,75 @@ impl Entry {
     }
 
     /// The first value, which is what libucl's `ucl_object_lookup` returns.
-    pub fn first(&self) -> &UclValue {
-        &self.slots[0].value
+    pub fn first(&self) -> &Value<'a> {
+        &self.slots.as_slice()[0].value
     }
 
     /// The first value, mutably.
-    pub fn first_mut(&mut self) -> &mut UclValue {
-        &mut self.slots[0].value
+    pub fn first_mut(&mut self) -> &mut Value<'a> {
+        &mut self.slots.as_mut_slice()[0].value
     }
 
     /// The last value.
-    pub fn last(&self) -> &UclValue {
-        &self.slots[self.slots.len() - 1].value
+    pub fn last(&self) -> &Value<'a> {
+        let slots = self.slots.as_slice();
+        &slots[slots.len() - 1].value
     }
 
     /// All values in insertion order.
-    pub fn values(&self) -> Values<'_> {
+    pub fn values(&self) -> Values<'_, 'a> {
         Values(self.slots.iter())
     }
 
     /// All values with their priority and flags.
-    pub fn slots(&self) -> &[Slot] {
-        &self.slots
+    pub fn slots(&self) -> &[Slot<'a>] {
+        self.slots.as_slice()
     }
 
     /// Value `index` of the entry, mutably.
-    pub fn value_at_mut(&mut self, index: usize) -> Option<&mut UclValue> {
-        self.slots.get_mut(index).map(|s| &mut s.value)
+    pub fn value_at_mut(&mut self, index: usize) -> Option<&mut Value<'a>> {
+        self.slots
+            .as_mut_slice()
+            .get_mut(index)
+            .map(|s| &mut s.value)
     }
 
     /// Adds a value to the entry at priority 0, making it an implicit array.
-    pub fn push(&mut self, value: UclValue) {
+    pub fn push(&mut self, value: Value<'a>) {
         self.slots.push(Slot::new(value, 0));
     }
 
     /// Adds a slot to the entry.
-    pub fn push_slot(&mut self, slot: Slot) {
+    pub fn push_slot(&mut self, slot: Slot<'a>) {
         self.slots.push(slot);
     }
 
     /// The single value, or an explicit array of all values for an implicit array.
     ///
     /// This is the view serde and JSON-like consumers get: a repeated key reads as a sequence.
-    pub fn into_value(mut self) -> UclValue {
-        if self.slots.len() == 1 {
-            // `pop` moves the one slot out; an iterator over the slots would move them all into
-            // itself first (clean-room work item C11).
-            self.slots.pop().expect("one slot").value
-        } else {
-            UclValue::Array(self.slots.into_iter().map(|s| s.value).collect())
+    pub fn into_value(self) -> Value<'a> {
+        match self.slots {
+            Slots::One(slot) => slot.value,
+            Slots::Many(slots) => Value::Array(Array(slots.into_iter().map(|s| s.value).collect())),
         }
     }
 
     /// All values in insertion order.
-    pub fn into_values(self) -> impl Iterator<Item = UclValue> {
+    pub fn into_values(self) -> impl Iterator<Item = Value<'a>> {
         self.slots.into_iter().map(|s| s.value)
     }
 
-    fn head(&self) -> &Slot {
-        &self.slots[0]
+    /// The entry with every key and string it borrows copied ([`Value::into_owned`]).
+    pub fn into_owned(self) -> Entry<'static> {
+        let slots = self.slots.into_iter().map(|slot| {
+            let marks = slot.with_value(Value::Null);
+            marks.with_value(slot.value.into_owned())
+        });
+        Entry::from_slots(slots)
+    }
+
+    fn head(&self) -> &Slot<'a> {
+        &self.slots.as_slice()[0]
     }
 
     /// Resolves a repeated key by priority (spec §8.3), comparing with the first value: a higher
@@ -706,7 +1000,7 @@ impl Entry {
     fn add_by_priority(
         &mut self,
         key: &str,
-        slot: Slot,
+        slot: Slot<'a>,
         replace_inherited: bool,
         flags: ParserFlags,
     ) -> Result<Placement, DuplicateKeyError> {
@@ -734,24 +1028,22 @@ impl Entry {
     /// - The collection array has priority 0, whatever its elements' priorities, so a later value
     ///   with a priority above 0 replaces it.
     /// - If `merge` has replaced the collection array with a scalar, a later repeat is an error.
-    fn collect(&mut self, key: &str, slot: Slot) -> Result<Placement, DuplicateKeyError> {
+    fn collect(&mut self, key: &str, slot: Slot<'a>) -> Result<Placement, DuplicateKeyError> {
         if self.head().collected {
-            return match &mut self.slots[0].value {
-                UclValue::Array(items) => {
-                    items.push(slot.value);
-                    Ok(Placement::Collected(items.len() - 1))
+            return match &mut self.slots.as_mut_slice()[0].value {
+                Value::Array(items) => {
+                    items.0.push(slot.value);
+                    Ok(Placement::Collected(items.0.len() - 1))
                 }
                 _ => Err(DuplicateKeyError {
                     key: key.to_owned(),
                 }),
             };
         }
-        let head = std::mem::take(&mut self.slots)
-            .into_iter()
-            .next()
-            .expect("an entry holds at least one value");
-        let items: UclArray = vec![head.value, slot.value];
-        *self = Entry::from_slot(Slot::collection(UclValue::Array(items)));
+        let slots = std::mem::replace(&mut self.slots, Slots::Many(Vec::new()));
+        let head = slots.into_first();
+        let items = Array(vec![head.value, slot.value]);
+        *self = Entry::from_slot(Slot::collection(Value::Array(items)));
         Ok(Placement::Collected(1))
     }
 
@@ -770,10 +1062,10 @@ impl Entry {
     fn merge(
         &mut self,
         key: &str,
-        slot: Slot,
+        slot: Slot<'a>,
         flags: ParserFlags,
     ) -> Result<Placement, DuplicateKeyError> {
-        let head = &mut self.slots[0];
+        let head = &mut self.slots.as_mut_slice()[0];
         if !is_container(&head.value) {
             return self.add_by_priority(key, slot, false, flags);
         }
@@ -782,11 +1074,11 @@ impl Entry {
             return Ok(Placement::Slot(0));
         }
         match (&mut head.value, slot.value) {
-            (UclValue::Object(target), UclValue::Object(source)) => {
+            (Value::Object(target), Value::Object(source)) => {
                 for (name, entry) in source {
-                    for inner in entry.slots {
+                    for inner in entry.slots.into_iter() {
                         target.insert_slot_with_strategy(
-                            name.as_str(),
+                            name.clone(),
                             inner,
                             DuplicateStrategy::Merge,
                             flags,
@@ -795,8 +1087,8 @@ impl Entry {
                 }
                 Ok(Placement::Merged)
             }
-            (UclValue::Array(target), UclValue::Array(source)) => {
-                target.extend(source);
+            (Value::Array(target), Value::Array(source)) => {
+                target.0.extend(source);
                 Ok(Placement::Merged)
             }
             _ => Err(DuplicateKeyError {
@@ -806,16 +1098,16 @@ impl Entry {
     }
 }
 
-fn is_container(value: &UclValue) -> bool {
-    matches!(value, UclValue::Object(_) | UclValue::Array(_))
+fn is_container(value: &Value<'_>) -> bool {
+    matches!(value, Value::Object(_) | Value::Array(_))
 }
 
 /// Iterator over the values of an [`Entry`].
 #[derive(Debug, Clone)]
-pub struct Values<'a>(std::slice::Iter<'a, Slot>);
+pub struct Values<'v, 'a>(std::slice::Iter<'v, Slot<'a>>);
 
-impl<'a> Iterator for Values<'a> {
-    type Item = &'a UclValue;
+impl<'v, 'a> Iterator for Values<'v, 'a> {
+    type Item = &'v Value<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|s| &s.value)
@@ -826,31 +1118,158 @@ impl<'a> Iterator for Values<'a> {
     }
 }
 
-impl DoubleEndedIterator for Values<'_> {
+impl DoubleEndedIterator for Values<'_, '_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.0.next_back().map(|s| &s.value)
     }
 }
 
-impl ExactSizeIterator for Values<'_> {}
+impl ExactSizeIterator for Values<'_, '_> {}
+
+/// An explicit array (`[...]`): a vector of values, which it derefs to.
+///
+/// Dropping an array does not recurse (see [`Value`]).
+#[derive(Clone, Default)]
+pub struct Array<'a>(Vec<Value<'a>>);
+
+impl fmt::Debug for Array<'_> {
+    /// As the list of its values.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(&self.0).finish()
+    }
+}
+
+impl<'a> Array<'a> {
+    /// An empty array.
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// An empty array with room for `capacity` values.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Vec::with_capacity(capacity))
+    }
+
+    /// The values, as a vector.
+    pub fn into_vec(mut self) -> Vec<Value<'a>> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+impl Drop for Array<'_> {
+    /// Without recursion: the containers inside go through a heap stack, which is allocated only
+    /// when there is one.
+    fn drop(&mut self) {
+        let mut stack = Vec::new();
+        take_nested_elements(&mut self.0, &mut stack);
+        if !stack.is_empty() {
+            drop_stack(stack);
+        }
+    }
+}
+
+impl<'a> std::ops::Deref for Array<'a> {
+    type Target = Vec<Value<'a>>;
+
+    fn deref(&self) -> &Vec<Value<'a>> {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Array<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a> From<Vec<Value<'a>>> for Array<'a> {
+    fn from(values: Vec<Value<'a>>) -> Self {
+        Self(values)
+    }
+}
+
+impl<'a> From<Array<'a>> for Vec<Value<'a>> {
+    fn from(array: Array<'a>) -> Self {
+        array.into_vec()
+    }
+}
+
+impl<'a> FromIterator<Value<'a>> for Array<'a> {
+    fn from_iter<I: IntoIterator<Item = Value<'a>>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl<'a> IntoIterator for Array<'a> {
+    type Item = Value<'a>;
+    type IntoIter = std::vec::IntoIter<Value<'a>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
+    }
+}
+
+impl<'v, 'a> IntoIterator for &'v Array<'a> {
+    type Item = &'v Value<'a>;
+    type IntoIter = std::slice::Iter<'v, Value<'a>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a> Extend<Value<'a>> for Array<'a> {
+    fn extend<I: IntoIterator<Item = Value<'a>>>(&mut self, iter: I) {
+        self.0.extend(iter);
+    }
+}
+
+impl<'b> PartialEq<Vec<Value<'b>>> for Array<'_> {
+    /// As arrays compare.
+    fn eq(&self, other: &Vec<Value<'b>>) -> bool {
+        let mut pending = Vec::new();
+        pending.extend(self.0.iter().zip(other));
+        self.0.len() == other.len() && equal_pending(pending)
+    }
+}
 
 /// A UCL object: keys in insertion order, each with one or more values.
 ///
 /// Equality ignores key order, like `IndexMap`; the order of values inside an entry matters.
-/// Comparing does not recurse ([`UclValue`]).
-#[derive(Debug, Clone, Default)]
-pub struct UclObject {
-    entries: IndexMap<String, Entry>,
+/// Comparing and dropping do not recurse ([`Value`]).
+#[derive(Clone, Default)]
+pub struct Object<'a> {
+    entries: Map<'a>,
 }
 
-impl UclObject {
+impl fmt::Debug for Object<'_> {
+    /// As the struct `UclObject` with its entries, the form of the owned objects of 0.3.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UclObject")
+            .field("entries", &self.entries)
+            .finish()
+    }
+}
+
+impl Drop for Object<'_> {
+    /// Without recursion, as an [`Array`] drops.
+    fn drop(&mut self) {
+        let mut stack = Vec::new();
+        take_nested(self, &mut stack);
+        if !stack.is_empty() {
+            drop_stack(stack);
+        }
+    }
+}
+
+impl<'a> Object<'a> {
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            entries: IndexMap::with_capacity(capacity),
+            entries: Map::with_capacity(capacity),
         }
     }
 
@@ -864,13 +1283,13 @@ impl UclObject {
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
-        self.entries.contains_key(key)
+        self.entries.get_index_of(key).is_some()
     }
 
-    /// The entry of `key`, a [`Str`], which is expected at position `index`: found there by
+    /// The entry of `key`, a [`KeyCopy`], which is expected at position `index`: found there by
     /// comparing bytes, without hashing the key or checking its UTF-8, when it is, and otherwise
     /// looked up by the key as a `str` (clean-room work item C13).
-    pub(crate) fn entry_at_mut(&mut self, index: usize, key: &Str) -> Option<&mut Entry> {
+    pub(crate) fn entry_at_mut(&mut self, index: usize, key: &KeyCopy) -> Option<&mut Entry<'a>> {
         let index = match self.entries.get_index(index) {
             Some((k, _)) if k.as_bytes() == key.as_bytes() => index,
             _ => self.entries.get_index_of(key.as_str())?,
@@ -879,38 +1298,38 @@ impl UclObject {
     }
 
     /// The first value of `key`, as libucl's `ucl_object_lookup` returns it.
-    pub fn get(&self, key: &str) -> Option<&UclValue> {
+    pub fn get(&self, key: &str) -> Option<&Value<'a>> {
         self.entries.get(key).map(Entry::first)
     }
 
     /// The first value of `key`, mutably.
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut UclValue> {
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value<'a>> {
         self.entries.get_mut(key).map(Entry::first_mut)
     }
 
     /// Every value of `key` in insertion order; empty if the key is absent.
-    pub fn get_all(&self, key: &str) -> Values<'_> {
+    pub fn get_all(&self, key: &str) -> Values<'_, 'a> {
         match self.entries.get(key) {
             Some(entry) => entry.values(),
             None => Values([].iter()),
         }
     }
 
-    pub fn entry(&self, key: &str) -> Option<&Entry> {
+    pub fn entry(&self, key: &str) -> Option<&Entry<'a>> {
         self.entries.get(key)
     }
 
-    pub fn entry_mut(&mut self, key: &str) -> Option<&mut Entry> {
+    pub fn entry_mut(&mut self, key: &str) -> Option<&mut Entry<'a>> {
         self.entries.get_mut(key)
     }
 
     /// The key and entry at position `index` in insertion order.
-    pub fn get_index(&self, index: usize) -> Option<(&String, &Entry)> {
+    pub fn get_index(&self, index: usize) -> Option<(&Str<'a>, &Entry<'a>)> {
         self.entries.get_index(index)
     }
 
     /// The key and entry at position `index` in insertion order, the entry mutable.
-    pub fn get_index_mut(&mut self, index: usize) -> Option<(&String, &mut Entry)> {
+    pub fn get_index_mut(&mut self, index: usize) -> Option<(&Str<'a>, &mut Entry<'a>)> {
         self.entries.get_index_mut(index)
     }
 
@@ -919,42 +1338,21 @@ impl UclObject {
         self.entries.get_index_of(key)
     }
 
-    /// The hash of `key` in this object, for [`UclObject::index_of_hashed`] and
-    /// [`UclObject::push_hashed`]: a key that the parser looks up and then inserts is hashed
-    /// once (clean-room work item C11).
-    pub(crate) fn key_hash<K: std::hash::Hash + ?Sized>(&self, key: &K) -> u64 {
-        self.entries.hasher().hash_one(key)
+    /// Where `key` is in this object, or would go, for [`Object::push_probed`]: a key that the
+    /// parser looks up and then inserts is searched for, or hashed, once (clean-room work items
+    /// C11 and C13).
+    pub(crate) fn probe(&self, key: &str) -> Probe {
+        self.entries.probe(key)
     }
 
-    /// [`UclObject::index_of`] for a key whose hash is `hash` ([`UclObject::key_hash`]).
-    pub(crate) fn index_of_hashed(&self, hash: u64, key: &str) -> Option<usize> {
-        self.entries
-            .raw_entry_v1()
-            .index_from_hash(hash, |k| k == key)
-    }
-
-    /// Adds `key`, whose hash is `hash` ([`UclObject::key_hash`]), with `entry` at the end. The
-    /// caller has found that the key is not in the object; if it were, its entry would be
-    /// replaced in place, as [`UclObject::insert_entry`] does.
-    pub(crate) fn push_hashed(&mut self, hash: u64, key: String, entry: Entry) {
-        match self
-            .entries
-            .raw_entry_mut_v1()
-            .from_hash(hash, |k| *k == key)
-        {
-            RawEntryMut::Vacant(vacant) => {
-                vacant.insert_hashed_nocheck(hash, key, entry);
-            }
-            RawEntryMut::Occupied(mut occupied) => {
-                debug_assert!(false, "push_hashed of a key already present");
-                *occupied.get_mut() = entry;
-            }
-        }
+    /// Adds `key`, which [`Object::probe`] found absent, with `entry` at the end.
+    pub(crate) fn push_probed(&mut self, probe: Probe, key: Str<'a>, entry: Entry<'a>) {
+        self.entries.push_probed(probe, key, entry);
     }
 
     /// Changes the spelling of key `old` to `new`, keeping its position and entry. Returns false
     /// if `old` is absent or `new` is another key already present.
-    pub fn rename_key(&mut self, old: &str, new: impl Into<String>) -> bool {
+    pub fn rename_key(&mut self, old: &str, new: impl Into<Str<'a>>) -> bool {
         match self.entries.get_index_of(old) {
             Some(index) => self.entries.replace_index(index, new.into()).is_ok(),
             None => false,
@@ -963,19 +1361,19 @@ impl UclObject {
 
     /// Sets `key` to a single value, replacing every existing value. An existing key keeps its
     /// position.
-    pub fn insert(&mut self, key: impl Into<String>, value: UclValue) -> Option<Entry> {
+    pub fn insert(&mut self, key: impl Into<Str<'a>>, value: Value<'a>) -> Option<Entry<'a>> {
         self.entries.insert(key.into(), Entry::new(value))
     }
 
     /// Sets `key` to `entry`, replacing an existing entry in place.
-    pub fn insert_entry(&mut self, key: impl Into<String>, entry: Entry) -> Option<Entry> {
+    pub fn insert_entry(&mut self, key: impl Into<Str<'a>>, entry: Entry<'a>) -> Option<Entry<'a>> {
         self.entries.insert(key.into(), entry)
     }
 
     /// Adds a value to `key`: a new key, or one more value of an existing key (implicit array).
-    pub fn append(&mut self, key: impl Into<String>, value: UclValue) {
+    pub fn append(&mut self, key: impl Into<Str<'a>>, value: Value<'a>) {
         let key = key.into();
-        match self.entries.get_mut(&key) {
+        match self.entries.get_mut(key.as_str()) {
             Some(entry) => entry.push(value),
             None => {
                 self.entries.insert(key, Entry::new(value));
@@ -984,41 +1382,62 @@ impl UclObject {
     }
 
     /// Removes `key`, keeping the order of the others.
-    pub fn remove(&mut self, key: &str) -> Option<Entry> {
+    pub fn remove(&mut self, key: &str) -> Option<Entry<'a>> {
         self.entries.shift_remove(key)
     }
 
     /// Removes and returns the entry at `index`, keeping the order of the others.
-    pub fn remove_index(&mut self, index: usize) -> Option<(String, Entry)> {
+    pub fn remove_index(&mut self, index: usize) -> Option<(Str<'a>, Entry<'a>)> {
         self.entries.shift_remove_index(index)
     }
 
     /// Keys and entries in insertion order.
-    pub fn iter(&self) -> indexmap::map::Iter<'_, String, Entry> {
+    pub fn iter(&self) -> Iter<'_, 'a> {
         self.entries.iter()
     }
 
     /// Keys and entries in insertion order, entries mutable.
-    pub fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, String, Entry> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, 'a> {
         self.entries.iter_mut()
     }
 
-    pub fn keys(&self) -> indexmap::map::Keys<'_, String, Entry> {
-        self.entries.keys()
+    pub fn keys(&self) -> Keys<'_, 'a> {
+        Keys(self.entries.iter())
     }
 
     /// Entries in insertion order.
-    pub fn entries(&self) -> indexmap::map::Values<'_, String, Entry> {
-        self.entries.values()
+    pub fn entries(&self) -> Entries<'_, 'a> {
+        Entries(self.entries.iter())
+    }
+
+    /// A copy of the object that borrows nothing ([`Value::owned_copy`]).
+    pub(crate) fn owned_copy(&self) -> Object<'static> {
+        let mut entries = Map::with_capacity(self.entries.len());
+        for (key, entry) in self.entries.iter() {
+            let slots = entry
+                .slots
+                .iter()
+                .map(|slot| slot.with_value(slot.value.owned_copy()));
+            entries.push_unique(key.clone().into_owned(), Entry::from_slots(slots));
+        }
+        Object { entries }
+    }
+
+    /// The object with every key and string it borrows copied ([`Value::into_owned`]).
+    pub fn into_owned(self) -> Object<'static> {
+        match Value::Object(self).into_owned() {
+            Value::Object(object) => object,
+            _ => unreachable!("an object stays an object"),
+        }
     }
 
     /// Inserts `value` under `key`, resolving an existing key by `strategy` and `priority`,
     /// and applying `flags`. Behaviour is specified in `docs/spec/08-duplicates.md`; see
-    /// [`UclObject::insert_slot_with_strategy`].
+    /// [`Object::insert_slot_with_strategy`].
     pub fn insert_with_strategy(
         &mut self,
-        key: impl Into<String>,
-        value: UclValue,
+        key: impl Into<Str<'a>>,
+        value: Value<'a>,
         priority: u8,
         strategy: DuplicateStrategy,
         flags: ParserFlags,
@@ -1026,7 +1445,7 @@ impl UclObject {
         self.insert_slot_with_strategy(key, Slot::new(value, priority), strategy, flags)
     }
 
-    /// [`UclObject::insert_with_strategy`] for a prepared slot.
+    /// [`Object::insert_with_strategy`] for a prepared slot.
     ///
     /// Under [`ParserFlags::KEY_LOWERCASE`] the key is lowercased first, ASCII letters only
     /// (spec §8.6, §12.1). A new key is added at the end. A key already present keeps its
@@ -1044,8 +1463,8 @@ impl UclObject {
     /// entries before it have already been merged.
     pub fn insert_slot_with_strategy(
         &mut self,
-        key: impl Into<String>,
-        slot: Slot,
+        key: impl Into<Str<'a>>,
+        slot: Slot<'a>,
         strategy: DuplicateStrategy,
         flags: ParserFlags,
     ) -> Result<(), DuplicateKeyError> {
@@ -1053,33 +1472,34 @@ impl UclObject {
             .map(|_| ())
     }
 
-    /// [`UclObject::insert_slot_with_strategy`], reporting where the value went.
+    /// [`Object::insert_slot_with_strategy`], reporting where the value went.
     ///
     /// The key the value is stored under is `key`, lowercased under
     /// [`ParserFlags::KEY_LOWERCASE`].
     pub fn insert_slot_placed(
         &mut self,
-        key: impl Into<String>,
-        slot: Slot,
+        key: impl Into<Str<'a>>,
+        slot: Slot<'a>,
         strategy: DuplicateStrategy,
         flags: ParserFlags,
     ) -> Result<Placement, DuplicateKeyError> {
         let mut key = key.into();
-        if flags.contains(ParserFlags::KEY_LOWERCASE) {
-            key.make_ascii_lowercase();
+        if flags.contains(ParserFlags::KEY_LOWERCASE) && key.bytes().any(|b| b.is_ascii_uppercase())
+        {
+            key = Str::from(key.to_ascii_lowercase());
         }
-        let index = self.entries.get_index_of(&key);
+        let index = self.entries.get_index_of(key.as_str());
         self.insert_slot_at(index, key, slot, strategy, flags)
     }
 
-    /// [`UclObject::insert_slot_placed`] for a key that is already lowercased where
+    /// [`Object::insert_slot_placed`] for a key that is already lowercased where
     /// `KEY_LOWERCASE` asks for it, and whose position `index` the caller has looked up (`None`
     /// for a new key), so that the key is hashed once. A new key is stored as `key`.
     pub(crate) fn insert_slot_at(
         &mut self,
         index: Option<usize>,
-        key: impl AsRef<str> + Into<String>,
-        slot: Slot,
+        key: impl AsRef<str> + Into<Str<'a>>,
+        slot: Slot<'a>,
         strategy: DuplicateStrategy,
         flags: ParserFlags,
     ) -> Result<Placement, DuplicateKeyError> {
@@ -1106,38 +1526,38 @@ impl UclObject {
     }
 }
 
-impl std::ops::Index<&str> for UclObject {
-    type Output = UclValue;
+impl<'a> std::ops::Index<&str> for Object<'a> {
+    type Output = Value<'a>;
 
     /// The first value of `key`. Panics if the key is absent.
-    fn index(&self, key: &str) -> &UclValue {
+    fn index(&self, key: &str) -> &Value<'a> {
         self.get(key)
             .unwrap_or_else(|| panic!("key '{key}' not found in UCL object"))
     }
 }
 
-impl IntoIterator for UclObject {
-    type Item = (String, Entry);
-    type IntoIter = indexmap::map::IntoIter<String, Entry>;
+impl<'a> IntoIterator for Object<'a> {
+    type Item = (Str<'a>, Entry<'a>);
+    type IntoIter = IntoIter<'a>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.entries.into_iter()
+    fn into_iter(mut self) -> Self::IntoIter {
+        std::mem::take(&mut self.entries).into_iter()
     }
 }
 
-impl<'a> IntoIterator for &'a UclObject {
-    type Item = (&'a String, &'a Entry);
-    type IntoIter = indexmap::map::Iter<'a, String, Entry>;
+impl<'v, 'a> IntoIterator for &'v Object<'a> {
+    type Item = (&'v Str<'a>, &'v Entry<'a>);
+    type IntoIter = Iter<'v, 'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.entries.iter()
     }
 }
 
-impl<K: Into<String>> FromIterator<(K, UclValue)> for UclObject {
-    /// Collects pairs with [`UclObject::append`]: a repeated key becomes an implicit array.
-    fn from_iter<I: IntoIterator<Item = (K, UclValue)>>(iter: I) -> Self {
-        let mut object = UclObject::new();
+impl<'a, K: Into<Str<'a>>> FromIterator<(K, Value<'a>)> for Object<'a> {
+    /// Collects pairs with [`Object::append`]: a repeated key becomes an implicit array.
+    fn from_iter<I: IntoIterator<Item = (K, Value<'a>)>>(iter: I) -> Self {
+        let mut object = Object::new();
         for (k, v) in iter {
             object.append(k, v);
         }
@@ -1145,8 +1565,8 @@ impl<K: Into<String>> FromIterator<(K, UclValue)> for UclObject {
     }
 }
 
-impl<K: Into<String>> Extend<(K, UclValue)> for UclObject {
-    fn extend<I: IntoIterator<Item = (K, UclValue)>>(&mut self, iter: I) {
+impl<'a, K: Into<Str<'a>>> Extend<(K, Value<'a>)> for Object<'a> {
+    fn extend<I: IntoIterator<Item = (K, Value<'a>)>>(&mut self, iter: I) {
         for (k, v) in iter {
             self.append(k, v);
         }
@@ -1170,16 +1590,19 @@ mod tests {
         let mut inner = UclObject::new();
         inner.insert_entry("z", Entry::from_slot(Slot::inherited(int(1), 3)));
         inner.append("y", UclValue::Time(1.5));
-        inner.append("y", UclValue::Array(vec![int(2), UclValue::Null]));
+        inner.append("y", UclValue::Array(vec![int(2), UclValue::Null].into()));
         let mut obj = UclObject::new();
         obj.insert("b", UclValue::Object(inner));
         obj.insert_entry(
             "a",
-            Entry::from_slot(Slot::collection(UclValue::Array(vec![
-                UclValue::String("s".into()),
-                UclValue::Array(vec![]),
-                UclValue::Object(UclObject::new()),
-            ]))),
+            Entry::from_slot(Slot::collection(UclValue::Array(
+                vec![
+                    UclValue::String("s".into()),
+                    UclValue::Array(vec![].into()),
+                    UclValue::Object(UclObject::new()),
+                ]
+                .into(),
+            ))),
         );
         obj.append("a", UclValue::Float(-0.0));
         let value = UclValue::Object(obj);
@@ -1206,7 +1629,7 @@ mod tests {
                 let mut value = int(1);
                 for depth in 0..20_000 {
                     value = if depth % 2 == 0 {
-                        UclValue::Array(vec![value])
+                        UclValue::Array(vec![value].into())
                     } else {
                         UclValue::Object([("k", value)].into_iter().collect())
                     };
@@ -1225,7 +1648,7 @@ mod tests {
 
     #[test]
     fn equality_is_that_of_the_derived_comparisons() {
-        let obj = |entries: Vec<(&str, Vec<Slot>)>| {
+        let obj = |entries: Vec<(&str, Vec<Slot<'static>>)>| {
             let mut o = UclObject::new();
             for (key, slots) in entries {
                 let mut slots = slots.into_iter();
@@ -1276,11 +1699,11 @@ mod tests {
         // A NaN equals nothing, itself included.
         assert!(UclValue::Float(f64::NAN) != UclValue::Float(f64::NAN));
         assert!(
-            UclValue::Array(vec![UclValue::Float(f64::NAN)])
-                != UclValue::Array(vec![UclValue::Float(f64::NAN)])
+            UclValue::Array(vec![UclValue::Float(f64::NAN)].into())
+                != UclValue::Array(vec![UclValue::Float(f64::NAN)].into())
         );
         // Arrays by length and element.
-        let arr = |items: Vec<UclValue>| UclValue::Array(items);
+        let arr = |items: Vec<UclValue>| UclValue::Array(items.into());
         assert!(arr(vec![int(1), arr(vec![])]) == arr(vec![int(1), arr(vec![])]));
         assert!(arr(vec![int(1)]) != arr(vec![int(1), int(1)]));
         assert!(arr(vec![arr(vec![int(1)])]) != arr(vec![arr(vec![int(2)])]));
@@ -1317,14 +1740,14 @@ mod tests {
         insert(
             &mut obj,
             "k",
-            UclValue::Array(vec![int(1), int(2)]),
+            UclValue::Array(vec![int(1), int(2)].into()),
             0,
             DuplicateStrategy::Append,
         );
         insert(&mut obj, "k", int(3), 0, DuplicateStrategy::Append);
         assert_eq!(
             values(&obj, "k"),
-            vec![UclValue::Array(vec![int(1), int(2)]), int(3)]
+            vec![UclValue::Array(vec![int(1), int(2)].into()), int(3)]
         );
     }
 
@@ -1346,7 +1769,7 @@ mod tests {
             obj.insert(*key, int(i as i64));
         }
         for (i, key) in keys.iter().enumerate() {
-            let copy = Str::from(*key);
+            let copy = KeyCopy::from(*key);
             // At its position, at another key's, and past the end.
             for index in [i, (i + 1) % keys.len(), keys.len()] {
                 let entry = obj.entry_at_mut(index, &copy);
@@ -1358,7 +1781,7 @@ mod tests {
             }
         }
         for absent in ["b", "é", "a key longer than twenty-two bytes!"] {
-            let copy = Str::from(absent);
+            let copy = KeyCopy::from(absent);
             for index in 0..=keys.len() {
                 assert!(
                     obj.entry_at_mut(index, &copy).is_none(),
@@ -1366,7 +1789,11 @@ mod tests {
                 );
             }
         }
-        assert!(UclObject::new().entry_at_mut(0, &Str::from("a")).is_none());
+        assert!(
+            UclObject::new()
+                .entry_at_mut(0, &KeyCopy::from("a"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1458,18 +1885,21 @@ mod tests {
         insert(
             &mut obj,
             "arr",
-            UclValue::Array(vec![int(1)]),
+            UclValue::Array(vec![int(1)].into()),
             0,
             DuplicateStrategy::Merge,
         );
         insert(
             &mut obj,
             "arr",
-            UclValue::Array(vec![int(2)]),
+            UclValue::Array(vec![int(2)].into()),
             0,
             DuplicateStrategy::Merge,
         );
-        assert_eq!(obj.get("arr"), Some(&UclValue::Array(vec![int(1), int(2)])));
+        assert_eq!(
+            obj.get("arr"),
+            Some(&UclValue::Array(vec![int(1), int(2)].into()))
+        );
     }
 
     #[test]
@@ -1482,19 +1912,19 @@ mod tests {
         }
         assert_eq!(
             values(&obj, "k"),
-            vec![UclValue::Array(vec![int(1), int(2), int(3)])]
+            vec![UclValue::Array(vec![int(1), int(2), int(3)].into())]
         );
 
         // A user-written array is not the collection array: it becomes its first element.
         let mut obj = UclObject::new();
-        let written = UclValue::Array(vec![int(1), int(2)]);
+        let written = UclValue::Array(vec![int(1), int(2)].into());
         obj.insert_with_strategy("k", written.clone(), 0, DuplicateStrategy::Append, flags)
             .unwrap();
         obj.insert_with_strategy("k", int(3), 0, DuplicateStrategy::Append, flags)
             .unwrap();
         assert_eq!(
             values(&obj, "k"),
-            vec![UclValue::Array(vec![written, int(3)])]
+            vec![UclValue::Array(vec![written, int(3)].into())]
         );
     }
 
@@ -1526,7 +1956,7 @@ mod tests {
             .collect()
     }
 
-    fn insert_slot(obj: &mut UclObject, key: &str, slot: Slot, s: DuplicateStrategy) {
+    fn insert_slot(obj: &mut UclObject, key: &str, slot: Slot<'static>, s: DuplicateStrategy) {
         obj.insert_slot_with_strategy(key, slot, s, ParserFlags::DEFAULT)
             .unwrap();
     }
@@ -1580,7 +2010,7 @@ mod tests {
         insert(
             &mut obj,
             "b",
-            UclValue::Array(vec![int(1)]),
+            UclValue::Array(vec![int(1)].into()),
             1,
             DuplicateStrategy::Merge,
         );
@@ -1591,7 +2021,7 @@ mod tests {
 
     #[test]
     fn test_merge_container_type_mismatch_is_an_error() {
-        let arr = UclValue::Array(vec![int(1)]);
+        let arr = UclValue::Array(vec![int(1)].into());
         let obj_value = object(&[("x", int(1))]);
         for (first, second) in [(arr.clone(), obj_value.clone()), (obj_value, arr)] {
             let mut obj = UclObject::new();
@@ -1616,20 +2046,20 @@ mod tests {
         insert(
             &mut obj,
             "a",
-            UclValue::Array(vec![int(1)]),
+            UclValue::Array(vec![int(1)].into()),
             3,
             DuplicateStrategy::Merge,
         );
         insert(
             &mut obj,
             "a",
-            UclValue::Array(vec![int(2)]),
+            UclValue::Array(vec![int(2)].into()),
             1,
             DuplicateStrategy::Merge,
         );
         assert_eq!(
             values(&obj, "a"),
-            vec![UclValue::Array(vec![int(1), int(2)])]
+            vec![UclValue::Array(vec![int(1), int(2)].into())]
         );
         assert_eq!(priorities(&obj, "a"), vec![3]);
     }
@@ -1779,7 +2209,7 @@ mod tests {
         }
         assert_eq!(
             values(&obj, "a"),
-            vec![UclValue::Array(vec![int(2), int(4)])]
+            vec![UclValue::Array(vec![int(2), int(4)].into())]
         );
         assert_eq!(priorities(&obj, "a"), vec![0]);
         obj.insert_with_strategy("a", int(5), 3, DuplicateStrategy::Append, flags)
@@ -1807,12 +2237,12 @@ mod tests {
         let flags = ParserFlags::NO_IMPLICIT_ARRAYS;
         let merge = DuplicateStrategy::Merge;
         let mut obj = UclObject::new();
-        for v in [int(1), int(2), UclValue::Array(vec![int(3)])] {
+        for v in [int(1), int(2), UclValue::Array(vec![int(3)].into())] {
             obj.insert_with_strategy("b", v, 0, merge, flags).unwrap();
         }
         assert_eq!(
             values(&obj, "b"),
-            vec![UclValue::Array(vec![int(1), int(2), int(3)])]
+            vec![UclValue::Array(vec![int(1), int(2), int(3)].into())]
         );
         obj.insert_with_strategy("b", int(5), 0, merge, flags)
             .unwrap();
@@ -1842,7 +2272,10 @@ mod tests {
         let mut entry = Entry::new(int(1));
         assert_eq!(entry.clone().into_value(), int(1));
         entry.push(int(2));
-        assert_eq!(entry.into_value(), UclValue::Array(vec![int(1), int(2)]));
+        assert_eq!(
+            entry.into_value(),
+            UclValue::Array(vec![int(1), int(2)].into())
+        );
     }
 
     #[test]

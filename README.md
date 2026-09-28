@@ -201,12 +201,43 @@ How values map onto serde (the `de` module documentation has the full table):
 - `null` into an `Option` is `None`. Enums are externally tagged: a string names a unit variant,
   and an object with one key a data variant.
 - Keys can be read into integer, `bool`, `char` and float map keys.
-- Values are owned: a borrowed `&str` field fails. Use `String` or `Cow<str>`.
+- Targets that borrow take keys and strings from the text without a copy: `&str` fields,
+  `Cow<str>` fields with `#[serde(borrow)]`, and `&str` map keys. That works for the text entry
+  points that borrow their input (`from_str`, `from_slice`, `UclDeserializer`), for every key and
+  string that appears in the text as it is. One that does not (an escaped or expanded string, a
+  key that `KEY_LOWERCASE` changes, a string from an included file) is owned in a `Cow`, and
+  fails for a `&str`.
+
+```rust
+use serde::Deserialize;
+use std::borrow::Cow;
+
+#[derive(Deserialize)]
+struct Server<'a> {
+    name: &'a str,
+    #[serde(borrow)]
+    motd: Cow<'a, str>,
+    #[serde(borrow)]
+    note: Cow<'a, str>,
+}
+
+fn main() -> Result<(), serde_ucl::UclError> {
+    let text = String::from("name = web\nmotd = \"hello\"\nnote = \"tab\\there\"\n");
+    let server: Server = serde_ucl::from_str(&text)?;
+    assert_eq!(server.name, "web");
+    // Borrowed from `text`, as written.
+    assert!(matches!(server.motd, Cow::Borrowed("hello")));
+    // The escape makes a new string.
+    assert!(matches!(server.note, Cow::Owned(ref s) if s == "tab\there"));
+    Ok(())
+}
+```
 
 ## The value tree
 
-`UclValue` is libucl's object model: `Object(UclObject)`, `Array(Vec<UclValue>)`,
-`Integer(i64)`, `Float(f64)`, `Time(f64)` (seconds), `String`, `Boolean` and `Null`. A
+`UclValue` is libucl's object model: `Object(UclObject)`, `Array(UclArray)`, `Integer(i64)`,
+`Float(f64)`, `Time(f64)` (seconds), `String(Str)`, `Boolean` and `Null`. `UclArray` derefs to a
+vector of values, and `Str`, a string that the value owns, to `str`. A
 `UclObject` keeps its keys in order. Each key holds an `Entry` of one or more values, and each
 value is a `Slot` with its priority and whether `.inherit` copied it. Indexing an object, or
 `get`, gives the first value of a key, and `get_all` gives every value. `from_str::<UclValue>`
@@ -231,8 +262,10 @@ fn main() -> Result<(), serde_ucl::UclError> {
 ```
 
 `UclObject` also offers insertion and removal, iteration, and `insert_with_strategy`, which
-applies libucl's duplicate rules. Cloning and serde conversion take the same stack at any depth
-of nesting.
+applies libucl's duplicate rules. Cloning, comparing, dropping and serde conversion take the same
+stack at any depth of nesting. `UclValue` is `Value<'static>`: a `Value<'a>` may borrow its keys
+and strings from text that lives for `'a`, which the serde entry points use internally, and
+`Value::into_owned` turns it into a `UclValue`.
 
 ## Writing
 
@@ -861,52 +894,57 @@ The [examples](examples/) are programs that check their results with assertions
 
 Three [criterion](https://docs.rs/criterion) benchmarks cover parsing, the emitters and serde
 ([benches/README.md](benches/README.md)). Run them with `cargo bench`; criterion's options go
-after `--`, as in `cargo bench -- --noplot`. One run of 0.3.0 on an Apple M4 Max with rustc
-1.98.1, median times:
+after `--`, as in `cargo bench -- --noplot`. One run of this version on an Apple M4 Max with
+rustc 1.98.1, median times:
 
 | Group | Document | Time | Throughput |
 | --- | --- | --- | --- |
-| `parse/config/1000` | configuration, 510 KB | 5.49 ms | 88.7 MiB/s |
-| `parse/json/1000` | JSON, 1000 records | 3.13 ms | 44.2 MiB/s |
-| `parse/nested/1000` | objects nested 1000 deep | 308 µs | 27.5 MiB/s |
-| `emit/config-1000/config` | the configuration, config format | 1.25 ms | 371 MiB/s of output |
-| `serde/deserialize-1000/from_str` | the configuration into a struct | 6.09 ms | 80.0 MiB/s |
-| `serde/deserialize-1000/from_value` | the parsed tree into a struct | 775 µs | 628 MiB/s |
-| `serde/deserialize-error-1000/from_str` | as above, failing on the last value | 15.0 ms | 32.5 MiB/s |
-| `serde/serialize-1000/to_string` | the struct in the config format | 2.59 ms | 182 MiB/s of output |
+| `parse/config/1000` | configuration, 510 KB | 2.39 ms | 204 MiB/s |
+| `parse/json/1000` | JSON, 1000 records | 1.45 ms | 95.1 MiB/s |
+| `parse/nested/1000` | objects nested 1000 deep | 183 µs | 46.5 MiB/s |
+| `emit/config-1000/config` | the configuration, config format | 1.16 ms | 403 MiB/s of output |
+| `serde/deserialize-1000/from_str` | the configuration into a struct | 2.33 ms | 209 MiB/s |
+| `serde/deserialize-1000/from_str-borrowed` | the same into a struct that borrows its strings | 2.07 ms | 236 MiB/s |
+| `serde/deserialize-1000/from_value` | the parsed tree into a struct | 571 µs | 853 MiB/s |
+| `serde/deserialize-error-1000/from_str` | as above, failing on the last value | 6.52 ms | 74.7 MiB/s |
+| `serde/serialize-1000/to_string` | the struct in the config format | 1.99 ms | 239 MiB/s of output |
 
 ### Against libucl and serde_json
 
 The benchmarks' documents (`benches/common/mod.rs`, the three entries also as JSON) parsed by
-serde_ucl 0.4.0, by libucl at the reference commit (CMake Release build, `-O3`) and by serde_json
-1.0.151, on an Apple M4 Max with rustc 1.98.1 and the release settings of `Cargo.toml` (fat LTO,
-one codegen unit). Each time is the median of three rounds, each the median of 31 samples of at
-least 5 ms of repetitions, and includes freeing the result.
+this version of serde_ucl, by libucl at the reference commit (CMake Release build, `-O3`) and by
+serde_json 1.0.151, on an Apple M4 Max with rustc 1.98.1 and the release settings of
+`Cargo.toml` (fat LTO, one codegen unit). The programs ran in turns for three rounds. Each time
+is the median of the rounds, each round the median of 31 samples of at least 5 ms of
+repetitions, and includes freeing the result.
 
 Parsing into each library's value tree (`parse::parse`; libucl's `ucl_parser_add_chunk` and
 `ucl_parser_get_object`; `serde_json::Value`):
 
 | Document | serde_ucl | libucl | serde_json |
 | --- | ---: | ---: | ---: |
-| JSON, 10,000 records (1.4 MiB) | 18.3 ms | 25.1 ms | 9.9 ms |
-| JSON, 1,000 records (142 KiB) | 1.76 ms | 2.36 ms | 0.93 ms |
-| configuration, 1,000 services (499 KiB) | 2.62 ms | 3.35 ms | – |
-| three entries, UCL | 0.73 µs | 9.1 µs | – |
-| three entries, JSON | 0.77 µs | 8.9 µs | 0.21 µs |
+| JSON, 10,000 records (1.4 MiB) | 15.1 ms | 26.4 ms | 10.7 ms |
+| JSON, 1,000 records (142 KiB) | 1.46 ms | 2.52 ms | 0.98 ms |
+| configuration, 1,000 services (499 KiB) | 2.40 ms | 3.57 ms | – |
+| three entries, UCL | 0.55 µs | 8.9 µs | – |
+| three entries, JSON | 0.56 µs | 8.8 µs | 0.22 µs |
 
-Deserializing into a struct with owned fields (`from_str`):
+Deserializing into a struct (`from_str`) whose strings are owned (`String`) or borrowed from the
+input (`&str`):
 
-| Document | serde_ucl | serde_json |
-| --- | ---: | ---: |
-| JSON, 10,000 records | 19.6 ms | 4.7 ms |
-| JSON, 1,000 records | 1.86 ms | 0.47 ms |
-| three entries, JSON | 0.81 µs | 0.08 µs |
+| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |
+| --- | ---: | ---: | ---: | ---: |
+| JSON, 10,000 records | 14.5 ms | 13.6 ms | 4.94 ms | 4.18 ms |
+| JSON, 1,000 records | 1.36 ms | 1.30 ms | 0.48 ms | 0.41 ms |
+| three entries, JSON | 0.55 µs | 0.54 µs | 0.08 µs | 0.08 µs |
 
-serde_ucl parses 1.3 to 1.4 times as fast as libucl on the larger documents, and 12 times as fast
+serde_ucl parses 1.5 to 1.7 times as fast as libucl on the larger documents, and 16 times as fast
 on the small ones, where creating a libucl parser takes most of the time. serde_json builds its
-value 1.9 times as fast on the larger documents and 3.7 times on the small one, and fills a struct
-4 to 10 times as fast: it deserializes straight from the text, while serde_ucl first builds the
-whole UCL value, which repeated keys, priorities and `.inherit` need.
+value 1.4 to 1.5 times as fast on the larger documents and 2.5 times on the small one, and fills
+a struct 3 to 7 times as fast: it deserializes straight from the text, while serde_ucl first
+builds the whole UCL value, which repeated keys, priorities and `.inherit` need. Borrowing saves
+serde_ucl 4% to 6% on the larger documents, whose strings are short, and serde_json 14% to 15%;
+building the value takes most of serde_ucl's time either way.
 
 ## Repository layout
 

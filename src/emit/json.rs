@@ -6,7 +6,7 @@
 
 use super::text;
 use super::{Mode, Writer};
-use crate::value::{Entry, UclArray, UclObject, UclValue};
+use crate::value::{Array, Entry, Object, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Style {
@@ -16,16 +16,16 @@ pub(super) enum Style {
 }
 
 impl Writer<'_> {
-    pub(super) fn json_root(&mut self, value: &UclValue, style: Style) {
+    pub(super) fn json_root(&mut self, value: &Value<'_>, style: Style) {
         match value {
-            UclValue::Object(object) if style == Style::Yaml => self.yaml_root(object),
+            Value::Object(object) if style == Style::Yaml => self.yaml_root(object),
             _ => self.json_value(value, 0, style),
         }
     }
 
     /// The root object of YAML: its entries without braces, one per line (§10.6). A multi-value
     /// entry that is not the first is preceded by `,⏎` instead of `⏎` (§10.7, *Quirk*).
-    fn yaml_root(&mut self, object: &UclObject) {
+    fn yaml_root(&mut self, object: &Object<'_>) {
         if self.mode == Mode::RoundTrip {
             let mut first = true;
             for (position, (key, entry)) in object.iter().enumerate() {
@@ -61,15 +61,15 @@ impl Writer<'_> {
     }
 
     /// A value whose line is indented `depth` levels.
-    fn json_value(&mut self, value: &UclValue, depth: usize, style: Style) {
+    fn json_value(&mut self, value: &Value<'_>, depth: usize, style: Style) {
         match value {
-            UclValue::Object(object) => self.json_object(object, depth, style),
-            UclValue::Array(items) => self.json_array(items, depth, style),
+            Value::Object(object) => self.json_object(object, depth, style),
+            Value::Array(items) => self.json_array(items, depth, style),
             scalar => self.scalar(scalar),
         }
     }
 
-    fn json_object(&mut self, object: &UclObject, depth: usize, style: Style) {
+    fn json_object(&mut self, object: &Object<'_>, depth: usize, style: Style) {
         if object.is_empty() {
             self.out.push_str("{}");
             return;
@@ -100,7 +100,7 @@ impl Writer<'_> {
         self.out.push('}');
     }
 
-    fn json_array(&mut self, items: &UclArray, depth: usize, style: Style) {
+    fn json_array(&mut self, items: &Array<'_>, depth: usize, style: Style) {
         if items.is_empty() {
             self.out.push_str("[]");
             return;
@@ -127,7 +127,7 @@ impl Writer<'_> {
     fn member(
         &mut self,
         (position, key): (usize, &str),
-        entry: &Entry,
+        entry: &Entry<'_>,
         depth: usize,
         style: Style,
     ) {
@@ -157,8 +157,8 @@ impl Writer<'_> {
         self.leave();
         let normal = kept_layout
             || match first {
-                UclValue::String(s) => !s.is_empty(),
-                UclValue::Object(o) => !o.is_empty(),
+                Value::String(s) => !s.is_empty(),
+                Value::Object(o) => !o.is_empty(),
                 _ => false,
             };
         self.out.push('[');
@@ -188,7 +188,7 @@ impl Writer<'_> {
         &mut self,
         (position, key): (usize, &str),
         index: usize,
-        value: &UclValue,
+        value: &Value<'_>,
         depth: usize,
         style: Style,
     ) {

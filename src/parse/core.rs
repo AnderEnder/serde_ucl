@@ -1,4 +1,4 @@
-//! Document structure: entries, keys, named sections and containers (spec §1–§4, §8, §11).
+//! Document<'t> structure: entries, keys, named sections and containers (spec §1–§4, §8, §11).
 //!
 //! The parser keeps an explicit stack of the containers that are open, so nesting depth never
 //! grows the call stack. An object or array is inserted into its parent (by the duplicate rules of
@@ -26,8 +26,8 @@ use super::{Comment, Error, ErrorKind, MAX_NESTING, PathSegment, Uncertain};
 use crate::emit::key_needs_quoting;
 use crate::error::Position;
 use crate::value::{
-    DuplicateKeyError, DuplicateStrategy, Entry, ParserFlags, Placement, Slot, Str, UclObject,
-    UclValue,
+    DuplicateKeyError, DuplicateStrategy, Entry, KeyCopy, Object, ParserFlags, Placement, Slot,
+    Str, UclValue, Value,
 };
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ pub(crate) struct Settings {
 
 /// What the next input starts with, from where the input before it ended (spec §13.1).
 #[derive(Debug)]
-pub(crate) enum Boundary {
+pub(crate) enum Boundary<'t> {
     /// No input has been read: the next one sets up the root (§1.1).
     Start,
     /// An entry may start.
@@ -56,7 +56,7 @@ pub(crate) enum Boundary {
     Separator,
     /// A key and its separator ended the input before a line break, so the value comes from a
     /// following line (§1.6), also in a later input (oracle runs, QUESTIONS.md #59).
-    Value(Box<PendingValue>),
+    Value(Box<PendingValue<'t>>),
     /// The root has closed: its brace, or an array root. Later inputs may hold only
     /// whitespace, `;`, `,` and comments (oracle runs, QUESTIONS.md #59).
     Closed,
@@ -67,21 +67,21 @@ pub(crate) enum Boundary {
 
 /// A key whose value comes from a following line, in a later input ([`Boundary::Value`]).
 #[derive(Debug)]
-pub(crate) struct PendingValue {
-    key: Key,
+pub(crate) struct PendingValue<'t> {
+    key: Key<'t>,
     /// The settings of the input the key is in: the value is inserted with them (oracle runs).
     settings: Settings,
 }
 
 /// The state of a parse from one input to the next (spec §13.1): the tree, the open containers,
 /// the saved comments and the output facts.
-pub(crate) struct Document {
-    root: UclValue,
-    frames: Vec<Frame>,
+pub(crate) struct Document<'t> {
+    root: Value<'t>,
+    frames: Vec<Frame<'t>>,
     notes: Option<Notes>,
     facts: Option<OutputFacts>,
     uppercase_keys: bool,
-    boundary: Boundary,
+    boundary: Boundary<'t>,
     /// How many macro argument documents this document is inside (§9.2): 0 for the parse of
     /// the parser's inputs.
     depth: usize,
@@ -91,20 +91,20 @@ pub(crate) struct Document {
 }
 
 /// A finished parse ([`Document::finish`]).
-pub(crate) struct Finished {
-    pub(crate) root: UclValue,
+pub(crate) struct Finished<'t> {
+    pub(crate) root: Value<'t>,
     /// The saved comments and the values they are attached to, when comments are saved.
     pub(crate) comments: Option<(Vec<Comment>, CommentGroups)>,
     pub(crate) facts: Option<OutputFacts>,
 }
 
-impl Document {
+impl<'t> Document<'t> {
     /// A parse with no input read yet. With `save_comments`, comments are saved (§12.5); with
     /// `facts`, output facts are recorded there (§10.1), which may be set to record locations
     /// ([`OutputFacts::locating`]).
     pub(crate) fn new(save_comments: bool, facts: Option<OutputFacts>, depth: usize) -> Self {
         Self {
-            root: UclValue::Object(UclObject::new()),
+            root: Value::Object(Object::new()),
             frames: Vec::new(),
             notes: save_comments.then(Notes::new),
             facts,
@@ -129,6 +129,33 @@ impl Document {
         expander: &mut Expander<'_>,
         includes: &mut Includes<'_>,
     ) -> Result<(), Error> {
+        self.read_unit(src, None, settings, expander, includes)
+    }
+
+    /// [`Document::read`], for text that the keys and strings of the tree may borrow, where
+    /// they appear in it as they are: without an escape, a variable reference replaced, or a
+    /// change of case (spec §12.1).
+    pub(crate) fn read_borrowed(
+        &mut self,
+        src: &'t [u8],
+        settings: Settings,
+        expander: &mut Expander<'_>,
+        includes: &mut Includes<'_>,
+    ) -> Result<(), Error> {
+        let borrow = std::str::from_utf8(src).ok();
+        self.read_unit(src, borrow, settings, expander, includes)
+    }
+
+    /// [`Document::read`], with `borrow`, `src` as text, when the tree may borrow from it.
+    fn read_unit(
+        &mut self,
+        src: &[u8],
+        borrow: Option<&'t str>,
+        settings: Settings,
+        expander: &mut Expander<'_>,
+        includes: &mut Includes<'_>,
+    ) -> Result<(), Error> {
+        debug_assert!(borrow.is_none_or(|text| text.as_bytes() == src));
         if src.is_empty() && !matches!(self.boundary, Boundary::Start) {
             return Ok(());
         }
@@ -141,6 +168,7 @@ impl Document {
         let mut core = Core {
             src,
             utf8: std::str::from_utf8(src).ok(),
+            borrow,
             pos: 0,
             settings,
             expander,
@@ -148,7 +176,7 @@ impl Document {
             notes: self.notes.take(),
             facts: self.facts.take(),
             uppercase_keys: self.uppercase_keys,
-            root: std::mem::replace(&mut self.root, UclValue::Null),
+            root: std::mem::replace(&mut self.root, Value::Null),
             frames: std::mem::take(&mut self.frames),
             depth: self.depth,
             root_priority: self.root_priority,
@@ -187,9 +215,9 @@ impl Document {
 
     /// A copy of the root as parsed so far, with the containers that are still open and what
     /// they hold: the partial result of a silent stop in one of several inputs.
-    pub(crate) fn snapshot(&self) -> UclValue {
+    pub(crate) fn snapshot(&self) -> Value<'t> {
         let mut root = self.root.clone();
-        let mut containers: Vec<Option<UclValue>> = self
+        let mut containers: Vec<Option<Value<'t>>> = self
             .frames
             .iter()
             .map(|frame| match &frame.home {
@@ -226,16 +254,16 @@ impl Document {
     /// line gets `null` (§1.6), then every container closes. Pending comments attach as at the
     /// end of input (§12.5). An error there, such as a repeated key under the `error` strategy,
     /// is returned with the saved comments.
-    pub(crate) fn finish(mut self) -> Result<Finished, Box<(Error, Vec<Comment>)>> {
+    pub(crate) fn finish(mut self) -> Result<Finished<'t>, Box<(Error, Vec<Comment>)>> {
         if let Boundary::Value(pending) = std::mem::replace(&mut self.boundary, Boundary::Entry) {
-            let mut expander = Expander::new(Vec::new(), None, false);
+            let mut expander = Expander::new(super::vars::Variables::new(), None, false);
             let loader = super::MemoryLoader::new();
             let budget = super::include::Budget::new(None);
-            let mut includes =
-                Includes::new(&loader, std::path::PathBuf::new(), None, &budget, None);
+            let mut includes = Includes::new(&loader, Path::new("").into(), None, &budget, None);
             let mut core = Core {
                 src: b"",
                 utf8: Some(""),
+                borrow: None,
                 pos: 0,
                 settings: pending.settings,
                 expander: &mut expander,
@@ -243,7 +271,7 @@ impl Document {
                 notes: self.notes.take(),
                 facts: self.facts.take(),
                 uppercase_keys: self.uppercase_keys,
-                root: std::mem::replace(&mut self.root, UclValue::Null),
+                root: std::mem::replace(&mut self.root, Value::Null),
                 frames: std::mem::take(&mut self.frames),
                 depth: self.depth,
                 root_priority: self.root_priority,
@@ -376,14 +404,18 @@ impl Close {
 #[derive(Debug)]
 enum Step {
     /// Value `slot` of the entry at position `entry`, whose key is `key`, a copy of the entry's
-    /// ([`Str`]). The entry is found by its key; its position is for the output facts, which
+    /// ([`KeyCopy`]). The entry is found by its key; its position is for the output facts, which
     /// are kept by position (clean-room work item C13).
-    Entry { entry: usize, key: Str, slot: usize },
+    Entry {
+        entry: usize,
+        key: KeyCopy,
+        slot: usize,
+    },
     /// Element `index` of the explicit array that is the first value of the entry at position
     /// `entry`, whose key is `key`: a repeat collected under `NO_IMPLICIT_ARRAYS` (§8.5).
     Collected {
         entry: usize,
-        key: Str,
+        key: KeyCopy,
         index: usize,
     },
     /// Element `index` of an array.
@@ -412,7 +444,7 @@ impl Step {
         }
     }
 
-    fn try_enter<'v>(&self, value: &'v mut UclValue) -> Option<&'v mut UclValue> {
+    fn try_enter<'v, 't>(&self, value: &'v mut Value<'t>) -> Option<&'v mut Value<'t>> {
         match self {
             Step::Entry { entry, key, slot } => value
                 .as_object_mut()
@@ -422,7 +454,7 @@ impl Step {
                 .as_object_mut()
                 .and_then(|o| o.entry_at_mut(*entry, key))
                 .and_then(|e| e.value_at_mut(0))
-                .and_then(UclValue::as_array_mut)
+                .and_then(Value::as_array_mut)
                 .and_then(|a| a.get_mut(*index)),
             Step::Element(index) => value.as_array_mut().and_then(|a| a.get_mut(*index)),
             Step::Path(steps) => steps
@@ -431,14 +463,14 @@ impl Step {
         }
     }
 
-    fn enter<'v>(&self, value: &'v mut UclValue) -> &'v mut UclValue {
+    fn enter<'v, 't>(&self, value: &'v mut Value<'t>) -> &'v mut Value<'t> {
         self.try_enter(value)
             .expect("an open container stays where it was inserted")
     }
 
     /// The steps of `path`, a value path inside `value`, in turn; `None` when `value` has no
     /// value there.
-    fn resolve(value: &UclValue, path: &[PathSegment]) -> Option<Step> {
+    fn resolve(value: &Value<'_>, path: &[PathSegment]) -> Option<Step> {
         let mut steps = Vec::with_capacity(path.len());
         let mut value = value;
         for segment in path {
@@ -450,7 +482,7 @@ impl Step {
                     value = found.slots().get(*index)?.value();
                     steps.push(Step::Entry {
                         entry,
-                        key: Str::from(name),
+                        key: KeyCopy::from(name),
                         slot: *index,
                     });
                 }
@@ -483,7 +515,7 @@ impl Step {
 }
 
 /// The value at `path` inside `value`.
-pub(super) fn get<'v>(value: &'v UclValue, path: &[PathSegment]) -> Option<&'v UclValue> {
+pub(super) fn get<'v, 't>(value: &'v Value<'t>, path: &[PathSegment]) -> Option<&'v Value<'t>> {
     path.iter().try_fold(value, |value, segment| match segment {
         PathSegment::Key { key, index } => value
             .as_object()?
@@ -553,21 +585,21 @@ fn only_comments(src: &[u8], from: usize) -> bool {
 
 /// Where a frame's container lives.
 #[derive(Debug)]
-enum Home {
+enum Home<'t> {
     /// It is the root value, [`Core::root`].
     Root,
     /// It belongs at the step inside the container of the frame below, where an empty container
     /// of its kind keeps its place while the frame holds it. It goes back there when it closes.
-    Attached(Step, UclValue),
+    Attached(Step, Value<'t>),
     /// It is parsed and then discarded, because a value with a higher priority exists (§8.3).
-    Detached(UclValue),
+    Detached(Value<'t>),
 }
 
 #[derive(Debug)]
-struct Frame {
+struct Frame<'t> {
     kind: Kind,
     close: Close,
-    home: Home,
+    home: Home<'t>,
     /// No element or entry has been read into the container yet.
     fresh: bool,
     /// The container's path from the root, set when first needed ([`Core::frame_path`]); `None`
@@ -607,8 +639,8 @@ struct Before {
 
 /// A key and where it starts.
 #[derive(Debug)]
-struct Key {
-    name: String,
+struct Key<'t> {
+    name: Str<'t>,
     at: usize,
     /// The key was written in double quotes and contains a backslash escape or a byte that makes
     /// the output formats quote it (spec §10.1, fact 3).
@@ -657,7 +689,11 @@ struct PlacedFacts {
 /// The name of `key`: its own, or for a key that [`Core::insert`] moved into the object of the
 /// top frame, that entry's ([`Key::stored`]). Takes the fields it reads, so that the caller may
 /// borrow others mutably meanwhile.
-fn stored_key_name<'a>(frames: &'a [Frame], root: &'a UclValue, key: &'a Key) -> &'a str {
+fn stored_key_name<'a, 't>(
+    frames: &'a [Frame<'t>],
+    root: &'a Value<'t>,
+    key: &'a Key<'t>,
+) -> &'a str {
     let Some(index) = key.stored else {
         return &key.name;
     };
@@ -705,14 +741,14 @@ const KEYWORD_LEN: RangeInclusive<usize> = 2..=5;
 fn keyword(raw: &[u8]) -> Option<UclValue> {
     let is = |word: &str| raw.eq_ignore_ascii_case(word.as_bytes());
     if is("true") || is("yes") || is("on") {
-        Some(UclValue::Boolean(true))
+        Some(Value::Boolean(true))
     } else if is("false") || is("no") || is("off") {
-        Some(UclValue::Boolean(false))
+        Some(Value::Boolean(false))
     } else {
         match raw {
-            b"null" => Some(UclValue::Null),
-            b"nan" => Some(UclValue::Float(f64::NAN)),
-            b"inf" => Some(UclValue::Float(f64::INFINITY)),
+            b"null" => Some(Value::Null),
+            b"nan" => Some(Value::Float(f64::NAN)),
+            b"inf" => Some(Value::Float(f64::INFINITY)),
             _ => None,
         }
     }
@@ -720,12 +756,16 @@ fn keyword(raw: &[u8]) -> Option<UclValue> {
 
 /// The parser state of one input unit. Macros are read and run in `super::macros`, and the
 /// include macros and `.load` in `super::include`.
-pub(super) struct Core<'s, 'e, 'v, 'l> {
+pub(super) struct Core<'s, 't, 'e, 'v, 'l> {
     pub(super) src: &'s [u8],
     /// `src` as text when all of it is valid UTF-8, checked once: keys and strings taken from
     /// it as written need no check of their own ([`Core::slice_string`]; clean-room work item
     /// C11).
     utf8: Option<&'s str>,
+    /// `src` as text that the keys and strings of the tree may borrow ([`Core::tree_str`]): set
+    /// only for the caller's own text in a parse that borrows from it (the serde entry points,
+    /// clean-room work item C13), never for an included file or text parsed in place.
+    borrow: Option<&'t str>,
     pub(super) pos: usize,
     /// The settings of the input unit; `.priority` changes its priority (§9.5).
     pub(super) settings: Settings,
@@ -738,11 +778,11 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     pub(super) facts: Option<OutputFacts>,
     /// A key with an uppercase ASCII letter has been read under `KEY_LOWERCASE` (§12.1).
     pub(super) uppercase_keys: bool,
-    pub(super) root: UclValue,
-    frames: Vec<Frame>,
+    pub(super) root: Value<'t>,
+    frames: Vec<Frame<'t>>,
     /// How many macro argument documents this document is inside (§9.2): 0 for the main one.
     pub(super) depth: usize,
-    /// The root's priority, that of the first input ([`Document`]); a context macro's handler
+    /// The root's priority, that of the first input ([`Document<'t>`]); a context macro's handler
     /// receives it with the root (§13.2).
     pub(super) root_priority: u8,
     /// This input unit's identity, which the frames it opens record.
@@ -771,12 +811,12 @@ pub(super) struct Core<'s, 'e, 'v, 'l> {
     /// `,`, `;`, `{` or `[` is at the second (the input's length if there is none).
     bracket_scan: (usize, usize),
     /// The input ended while a key waited for its value on a following line (§13.1).
-    pending: Option<PendingValue>,
+    pending: Option<PendingValue<'t>>,
     /// The input ended right after a value, or after section names, with no separator
     /// ([`Boundary::Separator`]).
     unseparated: bool,
     /// How this input ends when that does not follow from the state at its end.
-    ends: Option<Boundary>,
+    ends: Option<Boundary<'t>>,
     /// The sizes of the containers that closed last, for sizing new ones ([`Sizes`]).
     sizes: Sizes,
 }
@@ -830,7 +870,7 @@ pub(super) struct NestTarget {
     pub(super) priority: u8,
 }
 
-impl Core<'_, '_, '_, '_> {
+impl<'s, 't> Core<'s, 't, '_, '_, '_> {
     // ----- bytes ---------------------------------------------------------------------------
 
     pub(super) fn peek(&self) -> Option<u8> {
@@ -855,7 +895,7 @@ impl Core<'_, '_, '_, '_> {
     /// input, in that one.
     #[cold]
     #[inline(never)]
-    fn key_error(&self, key: &Key, kind: ErrorKind) -> Error {
+    fn key_error(&self, key: &Key<'t>, kind: ErrorKind) -> Error {
         match key.origin {
             Some(position) => Error::new(kind, position),
             None => self.error(kind, key.at),
@@ -872,6 +912,24 @@ impl Core<'_, '_, '_, '_> {
 
     /// `src[from..to]` as a string, for a token that starts at `at`: [`Core::text`] of those
     /// bytes, without checking them again when the whole input unit is valid UTF-8.
+    /// `src[from..to]` as a string of the tree, for a token that starts at `at`: borrowed where
+    /// the tree may borrow this unit's text ([`Core::borrow`]), a copy otherwise.
+    fn tree_str(&self, from: usize, to: usize, at: usize) -> Result<Str<'t>, Error> {
+        if let Some(text) = self.borrow.and_then(|text| text.get(from..to)) {
+            return Ok(Str::borrowed(text));
+        }
+        self.slice_string(from, to, at).map(Str::from)
+    }
+
+    /// `src[from..to]`, a string in which variables are expanded (§7), as a string of the tree:
+    /// as [`Core::tree_str`] when no reference is replaced, a copy of the expansion otherwise.
+    fn expanded_str(&mut self, from: usize, to: usize, at: usize) -> Result<Str<'t>, Error> {
+        match self.expander.expand_bytes(&self.src[from..to]) {
+            Some(bytes) => self.text(bytes, at).map(Str::from),
+            None => self.tree_str(from, to, at),
+        }
+    }
+
     fn slice_string(&self, from: usize, to: usize, at: usize) -> Result<String, Error> {
         match self.utf8.and_then(|text| text.get(from..to)) {
             Some(text) => Ok(text.to_owned()),
@@ -1011,12 +1069,12 @@ impl Core<'_, '_, '_, '_> {
 
     // ----- containers ----------------------------------------------------------------------
 
-    fn top(&self) -> &Frame {
+    fn top(&self) -> &Frame<'t> {
         self.frames.last().expect("a container is open")
     }
 
     /// The container of the top frame.
-    pub(super) fn current(&mut self) -> &mut UclValue {
+    pub(super) fn current(&mut self) -> &mut Value<'t> {
         match &mut self.frames.last_mut().expect("a container is open").home {
             Home::Root => &mut self.root,
             Home::Attached(_, value) | Home::Detached(value) => value,
@@ -1024,7 +1082,7 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// The container of frame `index`.
-    fn container(&self, index: usize) -> &UclValue {
+    fn container(&self, index: usize) -> &Value<'t> {
         match &self.frames[index].home {
             Home::Root => &self.root,
             Home::Attached(_, value) | Home::Detached(value) => value,
@@ -1037,7 +1095,7 @@ impl Core<'_, '_, '_, '_> {
     /// (§13.2), up to [`MAX_NESTING`], as deep as containers can be open (§11.2).
     pub(super) fn check_nesting(
         &self,
-        value: &UclValue,
+        value: &Value<'t>,
         limit: usize,
         at: usize,
     ) -> Result<(), Error> {
@@ -1053,7 +1111,7 @@ impl Core<'_, '_, '_, '_> {
         &mut self,
         kind: Kind,
         close: Close,
-        home: Home,
+        home: Home<'t>,
         path: Option<PathRef>,
         at: usize,
     ) -> Result<(), Error> {
@@ -1091,7 +1149,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// Takes the container at `step` inside the current container out of the tree for a new
     /// frame, leaving an empty container of its kind in its place.
-    fn take_out(&mut self, step: Step, kind: Kind) -> Home {
+    fn take_out(&mut self, step: Step, kind: Kind) -> Home<'t> {
         let value = std::mem::replace(step.enter(self.current()), Self::empty(kind));
         Home::Attached(step, value)
     }
@@ -1103,8 +1161,8 @@ impl Core<'_, '_, '_, '_> {
         let len = match &frame.home {
             Home::Root => 0,
             Home::Attached(_, value) | Home::Detached(value) => match value {
-                UclValue::Object(object) => object.len(),
-                UclValue::Array(items) => items.len(),
+                Value::Object(object) => object.len(),
+                Value::Array(items) => items.len(),
                 _ => 0,
             },
         };
@@ -1112,8 +1170,8 @@ impl Core<'_, '_, '_, '_> {
         if let Home::Attached(step, value) = frame.home {
             let place = step.enter(self.current());
             debug_assert!(
-                matches!(place, UclValue::Object(o) if o.is_empty())
-                    || matches!(place, UclValue::Array(a) if a.is_empty()),
+                matches!(place, Value::Object(o) if o.is_empty())
+                    || matches!(place, Value::Array(a) if a.is_empty()),
                 "only the top frame's container changes"
             );
             *place = value;
@@ -1171,7 +1229,7 @@ impl Core<'_, '_, '_, '_> {
     /// The value at `path` from the root as parsed so far. An open container is found in its
     /// frame, not at the empty container that keeps its place; containers open inside it are
     /// still empty in what is returned (see [`Core::filled_copy`]).
-    pub(super) fn value_at(&self, path: &[PathSegment]) -> Option<&UclValue> {
+    pub(super) fn value_at(&self, path: &[PathSegment]) -> Option<&Value<'t>> {
         if self.frames.is_empty() {
             return get(&self.root, path);
         }
@@ -1181,7 +1239,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// A copy of the value at `path` from the root as parsed so far, with the containers that
     /// are open inside it, as they are now (§9.7, *Quirk*).
-    pub(super) fn filled_copy(&self, path: &[PathSegment]) -> Option<UclValue> {
+    pub(super) fn filled_copy(&self, path: &[PathSegment]) -> Option<Value<'t>> {
         if self.frames.is_empty() {
             return get(&self.root, path).cloned();
         }
@@ -1228,20 +1286,20 @@ impl Core<'_, '_, '_, '_> {
         Some(copy)
     }
 
-    fn empty(kind: Kind) -> UclValue {
+    fn empty(kind: Kind) -> Value<'t> {
         match kind {
-            Kind::Object => UclValue::Object(UclObject::new()),
-            Kind::Array => UclValue::Array(Vec::new()),
+            Kind::Object => Value::Object(Object::new()),
+            Kind::Array => Value::Array(Vec::new().into()),
         }
     }
 
     /// An empty container of `kind` for a frame that is about to be pushed, with room for as
     /// many entries or elements as the one that closed last at its depth ([`Sizes`]).
-    fn sized(&self, kind: Kind) -> UclValue {
+    fn sized(&self, kind: Kind) -> Value<'t> {
         let capacity = self.sizes.hint(kind, self.frames.len());
         match kind {
-            Kind::Object => UclValue::Object(UclObject::with_capacity(capacity)),
-            Kind::Array => UclValue::Array(Vec::with_capacity(capacity)),
+            Kind::Object => Value::Object(Object::with_capacity(capacity)),
+            Kind::Array => Value::Array(Vec::with_capacity(capacity).into()),
         }
     }
 
@@ -1339,12 +1397,12 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// The name of `key`, which [`Core::insert`] may have moved into the current object.
-    fn key_name<'k>(&'k self, key: &'k Key) -> &'k str {
+    fn key_name<'k>(&'k self, key: &'k Key<'t>) -> &'k str {
         stored_key_name(&self.frames, &self.root, key)
     }
 
     /// [`Core::placed_path`] for `key`, just inserted.
-    fn placed_key_path(&self, key: &Key, placement: Placement) -> Option<PathRef> {
+    fn placed_key_path(&self, key: &Key<'t>, placement: Placement) -> Option<PathRef> {
         if !self.wants_paths() {
             return None;
         }
@@ -1402,8 +1460,8 @@ impl Core<'_, '_, '_, '_> {
     /// for this value; and, when locations are recorded, `at`, where the value was written.
     fn insert(
         &mut self,
-        key: &mut Key,
-        value: UclValue,
+        key: &mut Key<'t>,
+        value: Value<'t>,
         origin: Origin,
         at: usize,
     ) -> Result<Placement, Error> {
@@ -1422,10 +1480,10 @@ impl Core<'_, '_, '_, '_> {
             .as_object_mut()
             .expect("entries are parsed inside objects");
         // The key is hashed once, and its entry, if any, found by position from then on.
-        let hash = object.key_hash(&key.name);
-        let index = object.index_of_hashed(hash, &key.name);
+        let probe = object.probe(&key.name);
+        let index = probe.index;
         let entry = index.map(|index| object.get_index(index).expect("just found").1);
-        let is_container = |v: &UclValue| v.is_object() || v.is_array();
+        let is_container = |v: &Value<'t>| v.is_object() || v.is_array();
         // Under `merge`, a scalar that follows a container takes its place in the entry (§8.4,
         // *Quirk*); the oracle keeps the container's comments on it, as for one value.
         let existed = entry.is_some();
@@ -1436,15 +1494,15 @@ impl Core<'_, '_, '_, '_> {
         // non-empty container keeps the normal layout of a multi-value entry; the keywords `nan`
         // and `inf` follow their own kind, as strings and `null` do (spec §10.7, *Quirk*).
         let counts_as_container = match value {
-            UclValue::Integer(_) | UclValue::Time(_) | UclValue::Boolean(_) => true,
-            UclValue::Float(_) => !origin.keyword,
+            Value::Integer(_) | Value::Time(_) | Value::Boolean(_) => true,
+            Value::Float(_) => !origin.keyword,
             _ => false,
         };
         let normal_layout = in_place
             && counts_as_container
             && entry.is_some_and(|e| match e.first() {
-                UclValue::Object(o) => !o.is_empty(),
-                UclValue::Array(a) => !a.is_empty(),
+                Value::Object(o) => !o.is_empty(),
+                Value::Array(a) => !a.is_empty(),
                 _ => false,
             });
         let was_collected = entry.is_some_and(|e| e.slots()[0].is_collected());
@@ -1460,7 +1518,7 @@ impl Core<'_, '_, '_, '_> {
             None => {
                 key.stored = Some(object.len());
                 let name = std::mem::take(&mut key.name);
-                object.push_hashed(hash, name, Entry::from_slot(slot));
+                object.push_probed(probe, name, Entry::from_slot(slot));
                 Ok(Placement::Slot(0))
             }
             Some(_) => object.insert_slot_at(index, key.name.as_str(), slot, strategy, flags),
@@ -1510,7 +1568,7 @@ impl Core<'_, '_, '_, '_> {
     /// locations are recorded, the value's is `at`, and its key's where `key` starts.
     fn record_facts(
         &mut self,
-        key: &Key,
+        key: &Key<'t>,
         written: Option<&str>,
         placement: Placement,
         placed: PlacedFacts,
@@ -1582,7 +1640,7 @@ impl Core<'_, '_, '_, '_> {
         }
         let pos = Pos::Entry {
             entry,
-            key: Str::from(key),
+            key: KeyCopy::from(key),
             slot: 0,
         };
         let Some(node) = self.facts_node_below(&[pos]) else {
@@ -1635,7 +1693,7 @@ impl Core<'_, '_, '_, '_> {
     /// enough.
     ///
     /// Returns the spelling of `key` as written when it was changed.
-    fn match_key_case(&mut self, key: &mut Key) -> Option<String> {
+    fn match_key_case(&mut self, key: &mut Key<'t>) -> Option<Str<'t>> {
         if !self.settings.flags.contains(ParserFlags::KEY_LOWERCASE) {
             return None;
         }
@@ -1702,7 +1760,7 @@ impl Core<'_, '_, '_, '_> {
     /// written: its bracket, or the name of a section (§3.4).
     fn open_in_object(
         &mut self,
-        mut key: Key,
+        mut key: Key<'t>,
         kind: Kind,
         close: Close,
         at: usize,
@@ -1714,8 +1772,8 @@ impl Core<'_, '_, '_, '_> {
         let placement = self.insert(&mut key, container, Origin::default(), at)?;
         let path = self.placed_key_path(&key, placement);
         let name = match key.stored {
-            Some(_) => Str::from(self.key_name(&key)),
-            None => Str::from(std::mem::take(&mut key.name)),
+            Some(_) => KeyCopy::from(self.key_name(&key)),
+            None => KeyCopy::from(&key.name),
         };
         let entry = key.entry;
         let home = match placement {
@@ -1766,7 +1824,7 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// Appends `value` to the current array and returns its index.
-    fn push_element(&mut self, value: UclValue) -> usize {
+    fn push_element(&mut self, value: Value<'t>) -> usize {
         let array = self
             .current()
             .as_array_mut()
@@ -1851,7 +1909,7 @@ impl Core<'_, '_, '_, '_> {
     // ----- document (§1) -------------------------------------------------------------------
 
     /// Reads this input, which goes on where the input before it ended (spec §13.1).
-    fn read_input(&mut self, boundary: Boundary) -> Result<(), Error> {
+    fn read_input(&mut self, boundary: Boundary<'t>) -> Result<(), Error> {
         match boundary {
             Boundary::Start if self.src.is_empty() => {
                 // §13.1, *Quirk*: a zero-byte first input gives an empty object root that later
@@ -1887,7 +1945,7 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// How this input ended, for the next one.
-    fn boundary_at_end(&mut self) -> Boundary {
+    fn boundary_at_end(&mut self) -> Boundary<'t> {
         if let Some(ends) = self.ends.take() {
             return ends;
         }
@@ -1974,7 +2032,7 @@ impl Core<'_, '_, '_, '_> {
     /// The value of a key that ended the input before, on a following line of this one (§1.6;
     /// oracle runs, QUESTIONS.md #59). It is inserted with the settings of the key's input; what
     /// an object or array value holds gets this input's.
-    fn resume_value(&mut self, pending: PendingValue) -> Result<(), Error> {
+    fn resume_value(&mut self, pending: PendingValue<'t>) -> Result<(), Error> {
         // An input that is a single `#` is an error there (oracle runs).
         self.check_hash_at_end(true)?;
         self.leading_comments()?;
@@ -2044,6 +2102,7 @@ impl Core<'_, '_, '_, '_> {
         let mut inner = Core {
             src: input,
             utf8: std::str::from_utf8(input).ok(),
+            borrow: None,
             pos: 0,
             settings,
             expander: &mut *self.expander,
@@ -2051,7 +2110,7 @@ impl Core<'_, '_, '_, '_> {
             notes: self.notes.take(),
             facts: self.facts.take(),
             uppercase_keys: self.uppercase_keys,
-            root: std::mem::replace(&mut self.root, UclValue::Null),
+            root: std::mem::replace(&mut self.root, Value::Null),
             frames: std::mem::take(&mut self.frames),
             depth: self.depth,
             root_priority: self.root_priority,
@@ -2247,7 +2306,7 @@ impl Core<'_, '_, '_, '_> {
             .current()
             .as_object_mut()
             .expect("macros are read inside objects");
-        let empty_object = || UclValue::Object(UclObject::new());
+        let empty_object = || Value::Object(Object::new());
         // Where the array frame (if any) and the object frame go.
         // The number of values of an entry whose first value moves into a new array.
         let mut moved_from = None;
@@ -2255,33 +2314,35 @@ impl Core<'_, '_, '_, '_> {
         let (key, element) = match found {
             None => {
                 let (value, element) = if target.array {
-                    (UclValue::Array(vec![empty_object()]), Some(0))
+                    (Value::Array(vec![empty_object()].into()), Some(0))
                 } else {
                     (empty_object(), None)
                 };
+                let key = Str::from(target.key.as_str());
                 object.insert_entry(
-                    target.key.clone(),
+                    key.clone(),
                     Entry::from_slot(Slot::new(value, target.priority)),
                 );
-                (target.key.clone(), element)
+                (key, element)
             }
             Some(index) => {
                 let (name, entry) = object.get_index_mut(index).expect("the key was just found");
                 let name = name.clone();
                 let len = entry.len();
                 let element = match (entry.first_mut(), target.array) {
-                    (UclValue::Object(_), false) => None,
+                    (Value::Object(_), false) => None,
                     (_, false) => {
-                        return Err(self.error(ErrorKind::IncludeTargetNotObject { key: name }, at));
+                        let key = name.to_string();
+                        return Err(self.error(ErrorKind::IncludeTargetNotObject { key }, at));
                     }
-                    (UclValue::Array(items), true) => {
+                    (Value::Array(items), true) => {
                         items.push(empty_object());
                         Some(items.len() - 1)
                     }
                     (first, true) => {
                         moved_from = Some(len);
-                        let first = std::mem::replace(first, UclValue::Null);
-                        let array = UclValue::Array(vec![first, empty_object()]);
+                        let first = std::mem::replace(first, Value::Null);
+                        let array = Value::Array(vec![first, empty_object()].into());
                         *entry = Entry::from_slot(Slot::collection(array));
                         Some(1)
                     }
@@ -2304,7 +2365,7 @@ impl Core<'_, '_, '_, '_> {
         }
         let entry_pos = Pos::Entry {
             entry,
-            key: Str::from(&key),
+            key: KeyCopy::from(&key),
             slot: 0,
         };
         if (found.is_none() || moved_from.is_some())
@@ -2340,7 +2401,7 @@ impl Core<'_, '_, '_, '_> {
         let entry_path = self.placed_path(&key, Placement::Slot(0));
         let entry_step = Step::Entry {
             entry,
-            key: Str::from(key),
+            key: KeyCopy::from(&key),
             slot: 0,
         };
         let path = match element {
@@ -2676,7 +2737,7 @@ impl Core<'_, '_, '_, '_> {
 
     // ----- keys and sections (§3) ----------------------------------------------------------
 
-    fn read_key(&mut self) -> Result<Key, Error> {
+    fn read_key(&mut self) -> Result<Key<'t>, Error> {
         let at = self.pos;
         let lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
         // Whether a quoted key without escapes needs quoting, as its reading saw.
@@ -2734,13 +2795,19 @@ impl Core<'_, '_, '_, '_> {
                 });
             }
         }
-        let mut name = match bytes {
-            Some(bytes) => self.text(bytes, at)?,
-            None => self.slice_string(from, to, at)?,
+        let name = match bytes {
+            Some(bytes) => Str::from(self.text(bytes, at)?),
+            // A key with an uppercase letter to lowercase does not appear as it is.
+            None if lowercase
+                && !quoted
+                && self.src[from..to].iter().any(u8::is_ascii_uppercase) =>
+            {
+                let mut name = self.slice_string(from, to, at)?;
+                name.make_ascii_lowercase();
+                Str::from(name)
+            }
+            None => self.tree_str(from, to, at)?,
         };
-        if lowercase && !quoted {
-            name.make_ascii_lowercase();
-        }
         // Fact 3 of spec §10.1. The bytes of a bare key are none of those that need quoting. A
         // quoted key without escapes is its bytes as written, lowercasing aside, which changes
         // no byte that needs quoting.
@@ -2769,7 +2836,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// Everything after a key: an optional separator, then the value, or section names (§1.2,
     /// §3.4).
-    fn after_key(&mut self, key: Key) -> Result<(), Error> {
+    fn after_key(&mut self, key: Key<'t>) -> Result<(), Error> {
         self.skip_inline()?;
         if matches!(self.peek(), Some(b'=' | b':')) {
             self.pos += 1;
@@ -2788,14 +2855,14 @@ impl Core<'_, '_, '_, '_> {
 
     /// A key followed by section names: each name gets a nested object, and the last one holds
     /// the object or array that follows (§3.4).
-    fn section_path(&mut self, first: Key) -> Result<(), Error> {
+    fn section_path(&mut self, first: Key<'t>) -> Result<(), Error> {
         self.names(first, false, false)
     }
 
     /// The first key read in a name run (§9.1, *Quirk*). It counts as a word that follows a
     /// name: with a `=` or `:` after it, it is a name too and the names go on; without, it is
     /// tested as any key is.
-    fn key_after_name_run(&mut self, word: Key) -> Result<(), Error> {
+    fn key_after_name_run(&mut self, word: Key<'t>) -> Result<(), Error> {
         self.skip_inline()?;
         if !matches!(self.peek(), Some(b'=' | b':')) {
             return self.after_key(word);
@@ -2850,7 +2917,7 @@ impl Core<'_, '_, '_, '_> {
     /// `after_break`: a line break followed that separator.
     fn names(
         &mut self,
-        first: Key,
+        first: Key<'t>,
         mut after_separator: bool,
         mut after_break: bool,
     ) -> Result<(), Error> {
@@ -2935,7 +3002,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// The value of an entry, at the position after the key, the separator if any, and the
     /// spaces and comments on that line.
-    fn entry_value(&mut self, key: Key) -> Result<(), Error> {
+    fn entry_value(&mut self, key: Key<'t>) -> Result<(), Error> {
         match self.peek() {
             None => Err(self.error(ErrorKind::MissingValue, self.pos)),
             Some(b'\n' | b'\r' | 0x0B | 0x0C) => self.next_line_value(key),
@@ -2950,7 +3017,7 @@ impl Core<'_, '_, '_, '_> {
     /// At the end of an input given to the parser, the value may still come from a later input
     /// (oracle runs, QUESTIONS.md #59): the key waits for it, and [`Document::finish`] gives it
     /// `null` if none does.
-    fn next_line_value(&mut self, mut key: Key) -> Result<(), Error> {
+    fn next_line_value(&mut self, mut key: Key<'t>) -> Result<(), Error> {
         if let Some(notes) = &mut self.notes {
             // The group's comments attach after the value is created (§12.5, QUESTIONS.md #17).
             notes.hold();
@@ -2973,7 +3040,7 @@ impl Core<'_, '_, '_, '_> {
     }
 
     /// `null` for `key`, whose value on a following line did not come before the end of input.
-    fn null_value(&mut self, mut key: Key) -> Result<(), Error> {
+    fn null_value(&mut self, mut key: Key<'t>) -> Result<(), Error> {
         if let Some(existing) = self.null_merges_into(&key) {
             // Under `merge`, the `null` that ends the input goes into an object or array that
             // is the entry's first value, adding nothing, instead of taking its place as a
@@ -2983,7 +3050,7 @@ impl Core<'_, '_, '_, '_> {
             return Ok(());
         }
         let at = key.at;
-        let placement = self.insert(&mut key, UclValue::Null, Origin::default(), at)?;
+        let placement = self.insert(&mut key, Value::Null, Origin::default(), at)?;
         let path = self.placed_key_path(&key, placement);
         self.created(path);
         Ok(())
@@ -2991,7 +3058,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// Under `merge`, the spelling of the entry `key` names when its first value is an object or
     /// an array (keys compared as [`Core::insert`] does).
-    fn null_merges_into(&mut self, key: &Key) -> Option<String> {
+    fn null_merges_into(&mut self, key: &Key<'t>) -> Option<String> {
         if self.settings.strategy != DuplicateStrategy::Merge {
             return None;
         }
@@ -2999,10 +3066,10 @@ impl Core<'_, '_, '_, '_> {
             && (self.uppercase_keys || key.name.bytes().any(|b| b.is_ascii_uppercase()));
         let index = self.find_current_key(&key.name, ignore_case)?;
         let (name, entry) = self.current().as_object()?.get_index(index)?;
-        (entry.first().is_object() || entry.first().is_array()).then(|| name.clone())
+        (entry.first().is_object() || entry.first().is_array()).then(|| name.to_string())
     }
 
-    fn object_value(&mut self, mut key: Key) -> Result<(), Error> {
+    fn object_value(&mut self, mut key: Key<'t>) -> Result<(), Error> {
         match self.peek() {
             Some(b'{') => {
                 self.pos += 1;
@@ -3039,7 +3106,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// A value that is not a container. Returns it, whether it was quoted (a string in double or
     /// single quotes, or a heredoc), and where a string came from.
-    fn scalar(&mut self) -> Result<(UclValue, bool, Origin), Error> {
+    fn scalar(&mut self) -> Result<(Value<'t>, bool, Origin), Error> {
         let at = self.pos;
         match self.peek() {
             Some(b'"') => {
@@ -3047,39 +3114,43 @@ impl Core<'_, '_, '_, '_> {
                 let end = read.end;
                 self.pos = end;
                 // Only a `$` as written, or one an escape made, can start a reference.
-                let text = if read.dollar || read.escaped() {
-                    let bytes = read
-                        .bytes
-                        .unwrap_or_else(|| self.src[at + 1..end - 1].to_vec());
-                    let bytes = self.expander.expand(bytes);
-                    self.text(bytes, at)?
-                } else {
-                    self.slice_string(at + 1, end - 1, at)?
+                let text = match read.bytes {
+                    Some(bytes) => {
+                        let bytes = self.expander.expand(bytes);
+                        Str::from(self.text(bytes, at)?)
+                    }
+                    None if read.dollar => self.expanded_str(at + 1, end - 1, at)?,
+                    None => self.tree_str(at + 1, end - 1, at)?,
                 };
-                Ok((UclValue::String(text), true, Origin::default()))
+                Ok((Value::String(text), true, Origin::default()))
             }
             Some(b'\'') => {
-                let (bytes, end) = string::single_quoted(self.src, at)?;
+                let (bytes, end) = string::single_quoted_scan(self.src, at)?;
                 self.pos = end;
                 let origin = Origin {
                     single_quoted: true,
                     ..Origin::default()
                 };
-                Ok((UclValue::String(self.text(bytes, at)?), true, origin))
+                let text = match bytes {
+                    Some(bytes) => Str::from(self.text(bytes, at)?),
+                    None => self.tree_str(at + 1, end - 1, at)?,
+                };
+                Ok((Value::String(text), true, origin))
             }
             Some(b'<') if string::heredoc_opener(self.src, at).is_some() => {
                 let heredoc = string::heredoc(self.src, at)?;
                 self.pos = heredoc.end;
-                let bytes = if heredoc.expand {
-                    self.expander.expand(heredoc.content)
+                let (from, to) = (heredoc.content.start, heredoc.content.end);
+                let text = if heredoc.expand {
+                    self.expanded_str(from, to, at)?
                 } else {
-                    heredoc.content
+                    self.tree_str(from, to, at)?
                 };
                 let origin = Origin {
                     multiline: true,
                     ..Origin::default()
                 };
-                Ok((UclValue::String(self.text(bytes, at)?), true, origin))
+                Ok((Value::String(text), true, origin))
             }
             Some(b'<') if string::heredoc_opener_cut_by_end(self.src, at) => {
                 // `<<` and uppercase letters up to the end of the unit (§6.3, *Quirk*).
@@ -3098,7 +3169,7 @@ impl Core<'_, '_, '_, '_> {
 
     /// An unquoted value (§4): a number, a keyword or a string. Returns it, and whether it is a
     /// keyword (§4.5).
-    fn unquoted(&mut self) -> Result<(UclValue, bool), Error> {
+    fn unquoted(&mut self) -> Result<(Value<'t>, bool), Error> {
         let start = self.pos;
         if matches!(self.peek(), Some(b'0'..=b'9' | b'-')) {
             let no_time = self.settings.flags.contains(ParserFlags::NO_TIME);
@@ -3133,24 +3204,22 @@ impl Core<'_, '_, '_, '_> {
         }
         // Variables are expanded only if some `$` is not written as `\$` (§7.6, *Quirk*). Without
         // a backslash there is nothing to decode, and every `$` counts.
-        if !backslash && !dollar {
-            // The value as written.
-            return Ok((
-                UclValue::String(self.slice_string(start, trimmed, start)?),
-                false,
-            ));
+        if !backslash {
+            // The value as written, unless a variable reference is replaced.
+            let text = if dollar {
+                self.expanded_str(start, trimmed, start)?
+            } else {
+                self.tree_str(start, trimmed, start)?
+            };
+            return Ok((Value::String(text), false));
         }
-        let (bytes, expand) = if backslash {
-            string::decode_unquoted(raw)
-        } else {
-            (raw.to_vec(), dollar)
-        };
+        let (bytes, expand) = string::decode_unquoted(raw);
         let bytes = if expand {
             self.expander.expand(bytes)
         } else {
             bytes
         };
-        Ok((UclValue::String(self.text(bytes, start)?), false))
+        Ok((Value::String(Str::from(self.text(bytes, start)?)), false))
     }
 
     /// The end of the unquoted value starting at `start` (§4.1, §4.2): the first line break,

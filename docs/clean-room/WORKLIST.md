@@ -333,3 +333,21 @@ under these decisions:
    the standard library's.
 4. The report is `target/perf/C13-report.md`. It compares against the start of C13 and against
    0.3.0, and lists what was tried and reverted.
+5. Owner decision of 2026-09-28, on item 2 (zero-copy):
+   - Where a target asks for a `&str` (`deserialize_str`, and for keys also `deserialize_identifier`
+     and `deserialize_any`), visitors receive `visit_borrowed_str` for text that borrows from the
+     input.
+   - A hand-written visitor that implements only `visit_string` therefore no longer receives those
+     strings. This is accepted, as `serde_json` does the same, and it is listed under the breaking
+     changes in `CHANGELOG.md`.
+   - Otherwise, owned targets get the same values as before.
+6. Owner decision of 2026-09-28, on how the text entry points (`from_str`, `from_slice`,
+   `from_reader`, `from_file`, the `from_str_with_*` functions) choose between an owned and a
+   borrowed parse:
+   - They choose at the target's first request, as `UclDeserializer` does: an owned parse for a
+     target that takes the whole value, a borrowed one otherwise. The target's `Deserialize` is
+     not run on trial beforehand, so on input that parses and deserializes it runs once.
+   - A parse error reaches the caller as it does today, with its kind and position, whatever the
+     target does with the error it receives: a target that rewrites it, ignores it, or makes no
+     request at all still gets the parse error from the entry point.
+   - Values, errors, and the paths and positions of deserialization errors stay as they are.

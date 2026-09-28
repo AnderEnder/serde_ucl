@@ -77,7 +77,7 @@ pub use loader::{FileKind, Loader, MemoryLoader};
 pub use registered::{MacroCall, MacroError, MacroHandler};
 
 use crate::error::Position;
-use crate::value::{DuplicateStrategy, ParserFlags, UclValue};
+use crate::value::{DuplicateStrategy, ParserFlags, UclValue, Value};
 use indexmap::IndexMap;
 use std::cell::{Cell, OnceCell};
 use std::fmt;
@@ -604,11 +604,18 @@ impl Parser {
         self.loader.as_deref().unwrap_or(&*DEFAULT_LOADER)
     }
 
+    /// The current directory of the loader when it is the default one, which never changes, so
+    /// that it need not be asked for a copy ([`inputs::input_base`]).
+    fn loader_dir(&self) -> Option<&Path> {
+        self.loader.is_none().then(|| DEFAULT_LOADER.dir())
+    }
+
     /// The directory that relative paths in a document given as bytes, and a relative path given
     /// to [`Parser::parse_file`], resolve against: the base directory, or the loader's current
     /// directory.
     fn base(&self) -> PathBuf {
-        inputs::input_base(self.base_dir.as_deref(), self.loader(), None)
+        let (base_dir, loader_dir) = (self.base_dir.as_deref(), self.loader_dir());
+        inputs::input_base(base_dir, self.loader(), loader_dir, None).into_owned()
     }
 
     /// Starts a parse of several inputs into one result (spec §13.1): give it each input with
@@ -629,6 +636,17 @@ impl Parser {
     /// # Ok::<(), serde_ucl::parse::Error>(())
     /// ```
     pub fn inputs(&mut self) -> Inputs<'_> {
+        Inputs::new(self.parts())
+    }
+
+    /// A parse of inputs into a tree that may borrow from text that lives for `'t`, for the
+    /// serde entry points ([`Parser::parse_borrowed`]).
+    fn reader<'t>(&mut self) -> inputs::Reader<'_, 't> {
+        inputs::Reader::new(self.parts())
+    }
+
+    /// The parser's settings and state for a parse of inputs ([`Parser::inputs`]).
+    fn parts(&mut self) -> inputs::Parts<'_> {
         let Parser {
             flags,
             priority,
@@ -661,12 +679,13 @@ impl Parser {
                 answer
             }) as Box<vars::Handler<'_>>
         });
-        Inputs::new(inputs::Parts {
+        inputs::Parts {
             flags: *flags,
             priority: *priority,
             strategy: *strategy,
             variables,
             handler: recording,
+            loader_dir: loader.is_none().then(|| DEFAULT_LOADER.dir()),
             loader: loader.as_deref().unwrap_or(&*DEFAULT_LOADER),
             base_dir: base_dir.as_deref(),
             search_path: search_path.clone(),
@@ -679,7 +698,7 @@ impl Parser {
             facts,
             records_facts: *records_facts,
             budget,
-        })
+        }
     }
 
     /// The behaviour the spec leaves uncertain that the last parse reached and its result does
@@ -701,6 +720,46 @@ impl Parser {
     /// for the default loader. Registered variables of the same names override them.
     pub fn parse(&mut self, input: &[u8]) -> Result<UclValue, Error> {
         self.parse_one(Input::bytes(input))
+    }
+
+    /// Parses `input`, given as bytes, as [`Parser::parse`] does, into a tree whose keys and
+    /// strings borrow from `input` where they appear in it as they are: without an escape, a
+    /// variable reference replaced or a change of case, and not from an included file or text
+    /// parsed in place (clean-room work item C13). For the serde entry points, whose targets
+    /// can borrow them.
+    pub(crate) fn parse_borrowed<'a>(&mut self, input: &'a [u8]) -> Result<Value<'a>, Error> {
+        self.parse_one_borrowed(Input::bytes(input), input)
+    }
+
+    /// [`Parser::parse_read_file`] into a tree that borrows from `input`, as
+    /// [`Parser::parse_borrowed`] does.
+    #[cfg(feature = "fs")]
+    pub(crate) fn parse_read_file_borrowed<'a>(
+        &mut self,
+        canonical: PathBuf,
+        input: &'a [u8],
+    ) -> Result<Value<'a>, Error> {
+        self.parse_one_borrowed(Input::read_file(canonical, input), input)
+    }
+
+    /// [`Parser::parse_one`] of `input`, whose bytes are `bytes`, into a tree that borrows from
+    /// them.
+    fn parse_one_borrowed<'a>(
+        &mut self,
+        input: Input<'_>,
+        bytes: &'a [u8],
+    ) -> Result<Value<'a>, Error> {
+        let mut reader = self.reader();
+        let stopped = match reader.read(input, Some(bytes)) {
+            Ok(()) => None,
+            Err(e) if e.is_stopped() => Some(e),
+            Err(e) => return Err(e),
+        };
+        let value = reader.finish()?;
+        match stopped {
+            Some(stop) => Err(stop.with_partial(value.into_owned())),
+            None => Ok(value),
+        }
     }
 
     /// A parse of the single input `input`: a silent stop is an error that holds the result.
@@ -790,7 +849,14 @@ impl Parser {
     /// and `.inherit` copies them (§9.7). The loader is asked for the included files again. The
     /// variable handler is not called: its answers from the last parse are given again, in the
     /// same order. Saved comments and output facts of the last parse are kept.
-    pub(crate) fn parse_located(&mut self, source: &Source<'_>) -> Option<(UclValue, OutputFacts)> {
+    ///
+    /// With `borrow`, the result borrows from the input as [`Parser::parse_borrowed`] does, so
+    /// that a target that borrows fails as it failed on that parse.
+    pub(crate) fn parse_located<'a>(
+        &mut self,
+        source: &Source<'a>,
+        borrow: bool,
+    ) -> Option<(Value<'a>, OutputFacts)> {
         if self.macros.ran.get() {
             return None;
         }
@@ -799,9 +865,15 @@ impl Parser {
             #[cfg(feature = "fs")]
             Source::File { canonical, input } => (*input, Some(canonical.clone())),
         };
-        let base = inputs::input_base(self.base_dir.as_deref(), self.loader(), file.as_deref());
+        let base = inputs::input_base(
+            self.base_dir.as_deref(),
+            self.loader(),
+            self.loader_dir(),
+            file.as_deref(),
+        );
+        let curdir = inputs::base_text(&base);
         let variables =
-            inputs::first_variables(self.flags, &self.variables, file.as_deref(), &base);
+            inputs::first_variables(self.flags, &self.variables, file.as_deref(), curdir);
         let mut answers = self.handler_answers.iter();
         let replay = move |_: &str| answers.next().cloned().flatten();
         let mut expander = vars::Expander::new(
@@ -823,7 +895,13 @@ impl Parser {
         includes.files.push(file);
         includes.inherit_limit = self.inherit_depth_limit;
         let mut document = core::Document::new(false, Some(OutputFacts::locating()), 0);
-        match document.read(input, self.settings(), &mut expander, &mut includes) {
+        let settings = self.settings();
+        let read = if borrow {
+            document.read_borrowed(input, settings, &mut expander, &mut includes)
+        } else {
+            document.read(input, settings, &mut expander, &mut includes)
+        };
+        match read {
             Ok(()) => {}
             Err(e) if e.is_stopped() => {}
             Err(_) => return None,
@@ -1103,7 +1181,10 @@ mod tests {
             v.as_array().unwrap(),
             &vec![UclValue::String(" 1".into()), UclValue::Integer(2)]
         );
-        assert_eq!(parse(b"[ /* c */]").unwrap(), UclValue::Array(Vec::new()));
+        assert_eq!(
+            parse(b"[ /* c */]").unwrap(),
+            UclValue::Array(Vec::new().into())
+        );
         assert_eq!(kind(b"[ /* c */ ]"), ErrorKind::MissingValue);
     }
 
@@ -1131,7 +1212,7 @@ mod tests {
         ] {
             assert_eq!(
                 parse(input).unwrap(),
-                UclValue::Array(expected),
+                UclValue::Array(expected.into()),
                 "{}",
                 String::from_utf8_lossy(input)
             );

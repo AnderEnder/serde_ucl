@@ -2,6 +2,89 @@
 
 All notable changes to this crate are recorded here.
 
+## Unreleased
+
+### Serde targets that borrow
+
+`from_str`, `from_slice` and `UclDeserializer` now fill targets that borrow from the input
+without copying (clean-room work item C13): `&str` fields, `Cow<str>` fields with
+`#[serde(borrow)]`, and `&str` map keys take the keys and strings that appear in the text as
+they are. A key or string that does not (an escaped or expanded string, a key that
+`KEY_LOWERCASE` changes, a string from an included file or from text a registered macro parses
+in place) is owned in a `Cow`, and still fails for a `&str`, with its path and position. Before,
+every target that borrows failed. Owned targets get the same values as before. Which visitor
+method a borrowed string reaches changes, which breaks visitors that implement only
+`visit_string` (see *Breaking API changes*).
+
+`from_str`, `from_slice`, `from_reader`, `from_file` and the `from_str_with_*` functions now
+parse the document at the target's first request of the deserializer, as `UclDeserializer`
+does, and that request decides whether the value borrows: a `UclValue` or `UclObject` target
+gets a value that owns its strings, without a copy (clean-room work item C13, owner decision of
+2026-09-28). The target's `Deserialize` runs once on a document that parses and deserializes
+(twice, as before, when deserialization fails, to find the error's position). On a document
+that does not parse, it now runs too, and its first request fails with the parse error; the
+function returns that parse error, with its kind, position and file, whatever the target made of
+it.
+
+### Breaking API changes
+
+- Strings that borrow from the input reach visitors through `visit_borrowed_str` where a `&str`
+  is asked for (clean-room work item C13, owner decision of 2026-09-28): for a string value
+  through `deserialize_str`, and for a key through `deserialize_str`, `deserialize_identifier`
+  and `deserialize_any`. They reached them through `visit_string`. A hand-written visitor that
+  implements `visit_string` but not `visit_str` or `visit_borrowed_str` therefore no longer
+  receives these strings, and fails with an invalid-type error; implement `visit_str`, which
+  serde's default `visit_borrowed_str` calls, or ask with `deserialize_string`, which still
+  offers `visit_string`. `serde_json` behaves the same. This applies to `from_str`,
+  `from_slice`, `from_reader`, `from_file`, the `from_str_with_*` functions and
+  `UclDeserializer`. Strings that do not borrow (escaped, expanded, lowercased, from an included
+  file), a string value asked for with `deserialize_any`, and the strings of a parsed value
+  given to `from_value` are offered as before. serde's own types, derived types and
+  `serde_json::Value` are unaffected.
+
+- The value model can borrow (clean-room work item C13). `Value<'a>` is a value whose keys and
+  strings may borrow text that lives for `'a`; `UclValue` is now `Value<'static>`, and
+  `UclObject` and `UclArray` are `Object<'static>` and `Array<'static>`, so code that names the
+  owned types keeps compiling where it does not look inside strings and arrays. `Entry`, `Slot`
+  and `Values` have a lifetime parameter. The parser and every other function that gives a value
+  give an owned one; `Value::into_owned` turns a borrowed value into an owned one.
+  - Strings and keys are the new `value::Str<'a>`, borrowed or owned, which derefs to `str`,
+    compares and hashes as one, and converts from `&str`, `String` and `Cow<str>` and into
+    `String`. `UclValue::String` holds a `Str`: build one with `"text".into()` or
+    `Str::from(string)`, and read it through `as_str`, deref or `String::from`. `UclObject`'s
+    keys (`get_index`, `iter`, `keys`, `into_iter`, `remove_index`) are `Str`s, and its methods
+    that take a key take `impl Into<Str>`.
+  - `UclArray` is a struct around the vector of values, which it derefs to, instead of a
+    `Vec<UclValue>` alias: build one with `vec![...].into()` or `collect()`, and take the vector
+    with `into_vec`.
+  - Dropping a value no longer recurses, as cloning and comparing already did not: arrays and
+    objects drop what they hold through a heap stack. `Debug` output is as before.
+  - The emitters and `Serialize` take a `Value` of any lifetime.
+
+- An object of up to 16 keys keeps them in a vector, searched in order, instead of a hash index
+  (clean-room work item C13). `UclObject::iter`, `iter_mut`, `keys` and `entries`, and its
+  `IntoIterator` implementations, return the crate's `value::Iter`, `IterMut`, `Keys`, `Entries`
+  and `IntoIter` instead of `indexmap`'s iterators. They are opaque structs, double-ended,
+  exact-size and fused, and give the same items in the same order; `indexmap` no longer appears
+  in the crate's API.
+
+### Faster parsing and deserialization
+
+Parsing is 7% to 31% faster than in 0.4.0, deserialization 14% to 33%, and serializing the
+benchmarks' typed configuration 22% to 30% (clean-room work item C13). The gains come from three
+changes: objects of up to 16 keys keep their keys in a vector, a parse no longer copies its file
+variables and base directory, and the serde entry points borrow keys and strings from the input.
+On an Apple M4 Max, with the crate's benchmarks (0.3.0, 0.4.0 and this version measured in the
+same runs, so the 0.4.0 figures differ from those in its own entry):
+- `Parser::parse` of the 1000-service configuration takes 2.24 ms instead of 2.52 ms (5.04 ms in
+  0.3.0), and of the 1000-record JSON document 1.38 ms instead of 1.69 ms (2.84 ms).
+- `from_str` of the configuration into a typed struct takes 2.19 ms instead of 2.79 ms
+  (5.72 ms), and 1.98 ms into a struct that borrows its keys and strings.
+- A three-entry document parses in 0.49 µs instead of 0.72 µs, with 6 allocations instead of
+  13; `from_str` of it into a typed struct takes about 0.52 µs instead of 0.78 µs, with 3.
+
+Values, errors with their positions, and emitter output do not change.
+
 ## 0.4.0 - 2026-09-27
 
 Parsing is about twice as fast as in 0.3.0, and small documents much faster. Output facts

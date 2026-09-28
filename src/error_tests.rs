@@ -66,7 +66,7 @@ mod tests {
         for byte in [0x1Fu8, 0x7F] {
             let input = [&b"k = \"hello"[..], &[byte], b"world\""].concat();
             let expected = format!("hello{}world", byte as char);
-            assert_eq!(value_of_k(&input), UclValue::String(expected));
+            assert_eq!(value_of_k(&input), UclValue::String(expected.into()));
         }
     }
 
@@ -90,7 +90,7 @@ mod tests {
         let long = "1".repeat(2000);
         assert_eq!(
             value_of_k(format!("k = {long}").as_bytes()),
-            UclValue::String(long)
+            UclValue::String(long.into())
         );
     }
 

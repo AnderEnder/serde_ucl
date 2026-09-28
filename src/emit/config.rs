@@ -3,17 +3,17 @@
 use super::text;
 use super::{Mode, Writer};
 use crate::parse::CommentPlacement;
-use crate::value::{UclArray, UclObject, UclValue};
+use crate::value::{Array, Object, Value};
 
 impl Writer<'_> {
     /// The root: an object's entries without braces, or an array in brackets without a final line
     /// break (§10.5). Its comments go before and after the whole output (§10.10).
-    pub(super) fn config_root(&mut self, value: &UclValue) {
+    pub(super) fn config_root(&mut self, value: &Value<'_>) {
         self.comments_before(0);
         match value {
-            UclValue::Object(object) => self.config_entries(object, 0),
-            UclValue::Array(items) if items.is_empty() => self.out.push_str("[]"),
-            UclValue::Array(items) => {
+            Value::Object(object) => self.config_entries(object, 0),
+            Value::Array(items) if items.is_empty() => self.out.push_str("[]"),
+            Value::Array(items) => {
                 self.out.push_str("[\n");
                 self.config_elements(items, 1);
                 self.out.push(']');
@@ -24,7 +24,7 @@ impl Writer<'_> {
     }
 
     /// Every value of every entry of `object`, each with its own key (§10.1, §10.5).
-    fn config_entries(&mut self, object: &UclObject, depth: usize) {
+    fn config_entries(&mut self, object: &Object<'_>, depth: usize) {
         for (position, (key, entry)) in object.iter().enumerate() {
             for (index, value) in entry.values().enumerate() {
                 self.enter_entry(position, key, index);
@@ -35,20 +35,20 @@ impl Writer<'_> {
     }
 
     /// One entry line (and the lines of its container) at `depth`.
-    fn config_entry(&mut self, key: &str, value: &UclValue, depth: usize) {
+    fn config_entry(&mut self, key: &str, value: &Value<'_>, depth: usize) {
         self.indent(depth);
         self.comments_before(depth);
         self.write_key(key);
         match value {
-            UclValue::Object(object) if object.is_empty() => self.out.push_str(" {}\n"),
-            UclValue::Object(object) => {
+            Value::Object(object) if object.is_empty() => self.out.push_str(" {}\n"),
+            Value::Object(object) => {
                 self.out.push_str(" {\n");
                 self.config_entries(object, depth + 1);
                 self.indent(depth);
                 self.out.push_str("}\n");
             }
-            UclValue::Array(items) if items.is_empty() => self.out.push_str(" []\n"),
-            UclValue::Array(items) => {
+            Value::Array(items) if items.is_empty() => self.out.push_str(" []\n"),
+            Value::Array(items) => {
                 self.out.push_str(" [\n");
                 self.config_elements(items, depth + 1);
                 self.indent(depth);
@@ -64,21 +64,21 @@ impl Writer<'_> {
     }
 
     /// The elements of an array, at `depth`: scalars followed by `,`, containers without (§10.5).
-    fn config_elements(&mut self, items: &UclArray, depth: usize) {
+    fn config_elements(&mut self, items: &Array<'_>, depth: usize) {
         for (index, item) in items.iter().enumerate() {
             self.enter_index(index);
             self.indent(depth);
             self.comments_before(depth);
             match item {
-                UclValue::Object(object) if object.is_empty() => self.out.push_str("{}\n"),
-                UclValue::Object(object) => {
+                Value::Object(object) if object.is_empty() => self.out.push_str("{}\n"),
+                Value::Object(object) => {
                     self.out.push_str("{\n");
                     self.config_entries(object, depth + 1);
                     self.indent(depth);
                     self.out.push_str("}\n");
                 }
-                UclValue::Array(inner) if inner.is_empty() => self.out.push_str("[]\n"),
-                UclValue::Array(inner) => {
+                Value::Array(inner) if inner.is_empty() => self.out.push_str("[]\n"),
+                Value::Array(inner) => {
                     self.out.push_str("[\n");
                     self.config_elements(inner, depth + 1);
                     self.indent(depth);
@@ -95,13 +95,13 @@ impl Writer<'_> {
     }
 
     /// A scalar; strings in the heredoc, single-quoted or JSON form (§10.5).
-    fn config_scalar(&mut self, value: &UclValue) {
+    fn config_scalar(&mut self, value: &Value<'_>) {
         if self.mode == Mode::RoundTrip {
             self.exact_scalar(value, true);
             return;
         }
         match value {
-            UclValue::String(s) => {
+            Value::String(s) => {
                 let (single_quoted, multiline) = self
                     .facts()
                     .map_or((false, false), |f| (f.single_quoted, f.multiline));

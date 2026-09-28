@@ -301,10 +301,13 @@ mod implicit_array_tests {
         assert_eq!(entry.len(), 1);
         assert_eq!(
             entry.first(),
-            &UclValue::Array(vec![
-                UclValue::String("server1".into()),
-                UclValue::String("server2".into())
-            ])
+            &UclValue::Array(
+                vec![
+                    UclValue::String("server1".into()),
+                    UclValue::String("server2".into())
+                ]
+                .into()
+            )
         );
     }
 
