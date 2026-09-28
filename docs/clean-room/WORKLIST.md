@@ -392,14 +392,17 @@ serde_json reproducible.
 
 ## C15 — libucl-compatible C API (owner request of 2026-09-28; after C14, not started)
 
-A C API compatible with libucl's, so that C programs written for libucl can use the crate. The
-owner decides before it starts:
+A C API compatible with libucl's, so that C programs written for libucl can use the crate. Owner
+decisions of 2026-09-28:
 
-1. Scope: all of libucl's public API, or a part of it (parser, object access, emitters).
-2. Source compatibility (the same names and types, built against the crate's header) or binary
-   compatibility (a drop-in library, including the object layout that callers read directly).
-3. Packaging: a separate package in this repository, its library types, and how its header is
-   made.
+1. Scope: what the crate already implements. Parts of libucl's API for features the crate does
+   not have may be missing; the spec lists them as not provided.
+2. Complete API and ABI compatibility for that scope: the same names, signatures, types,
+   constants and object layout, including the fields that callers read directly, so that a C
+   program built against libucl's header links against the crate's library and runs unchanged,
+   as long as it uses only what is provided.
+3. Packaging is still open: a separate package in this repository, its library types, and how
+   its header is made.
 
 The spec team writes the C API's spec from libucl's public header and documentation: functions,
 types, constants, ownership and reference counting, error reporting. It also writes a test harness
