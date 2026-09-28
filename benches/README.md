@@ -6,9 +6,9 @@ generators are in `common/mod.rs` and `common/irregular.rs`.
 
 | Benchmark | Groups | Measures |
 | --- | --- | --- |
-| `parse_benchmarks` | `parse/config/{10,100,1000}`, `parse/small/{reused-parser,new-parser}`, `parse/config-100-flags/{save-comments,no-implicit-arrays,key-lowercase}`, `parse/json/{100,1000}`, `parse/nested/{10,500,1000}`, `parse/nested-mixed-1000/{default,save-comments}`, `parse/variables/1000`, `parse/irregular/{60k,600k}`, `parse/json-corpus/{twitter,citm_catalog,canada}`, `parse/corpus/<file>` | `parse::Parser::parse`, in input bytes per second |
+| `parse_benchmarks` | `parse/config/{10,100,1000}`, `parse/small/{reused-parser,new-parser}`, `parse/config-100-flags/{save-comments,no-implicit-arrays,key-lowercase}`, `parse/json/{100,1000}`, `parse/nested/{10,500,1000}`, `parse/nested-mixed-1000/{default,save-comments}`, `parse/variables/1000`, `parse/irregular/{60k,600k}`, `parse/json-corpus/{twitter,citm_catalog,canada}`, `parse/corpus/{rspamd-groups,rspamd-composites,rspamd-rbl_group}` | `parse::Parser::parse`, in input bytes per second |
 | `emit_benchmarks` | `emit/config-1000/{config,json,json-compact,yaml}`, `emit/nested-mixed-1000/{config,json,json-compact,yaml}` | `emit::Emitter::emit` of a parsed value, in output bytes per second |
-| `serde_benchmarks` | `serde/deserialize-1000/{from_str,from_str-borrowed,UclDeserializer,from_value}`, `serde/deserialize-small/{from_str,from_str-borrowed}`, `serde/deserialize-error-1000/{from_str,from_value}`, `serde/serialize-1000/{to_string,to_json_string,to_json_string_compact,to_yaml_string}`, `serde/to_value-1000`, `serde/nested-mixed-1000/{from_str,to_string,to_json_string_compact}`, `serde/irregular-{60k,600k}/{UclValue,IgnoredAny}`, `serde/json-corpus-{twitter,citm_catalog,canada}/{UclValue,IgnoredAny}`, `serde/corpus-<file>/{UclValue,IgnoredAny}` | deserializing into a typed struct (`-borrowed`: one that borrows its keys and strings from the input), or a `UclValue` for the nested document (input bytes per second), and serializing it (output bytes per second); `deserialize-error` deserializes a `config(1000)` whose last value does not fit, where `from_str` also finds the value's path and position by parsing and deserializing again. The documents without a typed struct go through `from_str` into a `UclValue`, which takes a parse that owns its strings, and into `IgnoredAny`, which takes one that borrows them |
+| `serde_benchmarks` | `serde/deserialize-1000/{from_str,from_str-borrowed,UclDeserializer,from_value}`, `serde/deserialize-small/{from_str,from_str-borrowed}`, `serde/deserialize-error-1000/{from_str,from_value}`, `serde/serialize-1000/{to_string,to_json_string,to_json_string_compact,to_yaml_string}`, `serde/to_value-1000`, `serde/nested-mixed-1000/{from_str,to_string,to_json_string_compact}`, `serde/irregular-{60k,600k}/{UclValue,IgnoredAny}`, `serde/json-corpus-{twitter,citm_catalog,canada}/{UclValue,IgnoredAny}`, `serde/corpus-{rspamd-groups,rspamd-composites,rspamd-rbl_group}/{UclValue,IgnoredAny}` | deserializing into a typed struct (`-borrowed`: one that borrows its keys and strings from the input), or a `UclValue` for the nested document (input bytes per second), and serializing it (output bytes per second); `deserialize-error` deserializes a `config(1000)` whose last value does not fit, where `from_str` also finds the value's path and position by parsing and deserializing again. The documents without a typed struct go through `from_str` (the corpus: `UclDeserializer`) into a `UclValue`, which takes a parse that owns its strings, and into `IgnoredAny`, which takes one that borrows them |
 
 The documents:
 
@@ -37,12 +37,18 @@ The documents:
   not committed, because their licences are unclear: `benches/fetch-documents.sh` fetches them
   from [serde-rs/json-benchmark](https://github.com/serde-rs/json-benchmark) at a pinned commit
   and checks their SHA-256 digests.
-- The configurations in `corpus/`, which the spec team copies there with their source and
-  licence; every file except hidden files, `*.md`, `*.txt` and licence files is a document.
-  `UCL_BENCH_CORPUS=DIR` uses another directory instead.
+- Three rspamd configurations from `corpus/` (source, commit and licence in
+  `corpus/README.md`), listed in `common/files.rs` (`CORPUS`): `rspamd-groups`, `groups.conf`
+  with the 14 files of `scores.d/` it includes (55 215 bytes read, the throughput counts them
+  all); `rspamd-composites`, `composites.conf` (9 155 bytes); and `rspamd-rbl_group`,
+  `scores.d/rbl_group.conf` (13 404 bytes). They are parsed as their check parses them: with
+  the filesystem loader, `corpus/rspamd/` as the base directory, the variable `ABI` =
+  `unknown`, and for `groups.conf` the variable `CONFDIR` = `.`. The `serde/corpus-*` groups
+  therefore go through `UclDeserializer::from_parser`, and make that parser in each iteration.
 
-The groups of documents read from files skip a document that is missing or does not parse, with
-a message, so the benchmarks build and run without the network.
+The groups of the JSON documents skip a document that is missing or does not parse, with a
+message, so the benchmarks build and run without the network. The corpus is committed and
+checked, so a corpus document that does not parse makes its benchmark fail.
 
 ## Checking the documents
 

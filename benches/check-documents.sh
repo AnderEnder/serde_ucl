@@ -2,8 +2,9 @@
 # Checks every benchmark document against libucl the way the differential fuzzer checks one
 # (`ucl-differential --check`, fuzz/README.md): libucl parses it, and the crate gives the same
 # result. The documents are the irregular configurations of benches/common/irregular.rs, the
-# JSON documents in target/bench-corpus/ (benches/fetch-documents.sh), and the configurations in
-# benches/corpus/, or in the directory UCL_BENCH_CORPUS names.
+# JSON documents in target/bench-corpus/ (benches/fetch-documents.sh), and the rspamd
+# configurations of benches/corpus/ that the benchmarks use, with the settings they use
+# (benches/common/files.rs, CORPUS).
 #
 #   benches/check-documents.sh [EXTRA_SEEDS]
 #
@@ -20,8 +21,6 @@ ORACLE=target/libucl-oracle/ucl-dump
 OUT=target/bench-documents
 FUZZER=target/fuzz/release/ucl-differential
 EXTRA_SEEDS=${1:-0}
-# The corpus directory, as in the benchmarks.
-CORPUS=${UCL_BENCH_CORPUS:-benches/corpus}
 
 if [ ! -x "$ORACLE" ]; then
 	echo "error: $ORACLE is missing; scripts/regen-golden.sh builds it" >&2
@@ -37,17 +36,26 @@ UCL_BENCH_DOCUMENTS_OUT="$PWD/$OUT/generated" UCL_BENCH_EXTRA_SEEDS="$EXTRA_SEED
 checked=0
 failed=0
 
-# check FILE DIR: runs FILE through both, with DIR as the working directory.
+# check FILE DIR [FLAG...]: runs FILE through both, with DIR as the working directory and the
+# fuzzer's flags FLAG (such as var:NAME=VALUE).
 check() {
-	report="$OUT/checks/$(basename "$1").txt"
-	"$FUZZER" --check "$1" --dir "$2" --oracle "$ORACLE" --out "$OUT/fuzz" >"$report" 2>&1 || true
+	file=$1
+	dir=$2
+	shift 2
+	report="$OUT/checks/$(basename "$file").txt"
+	for flag in "$@"; do
+		set -- "$@" --flag "$flag"
+		shift
+	done
+	"$FUZZER" --check "$file" --dir "$dir" "$@" --oracle "$ORACLE" --out "$OUT/fuzz" \
+		>"$report" 2>&1 || true
 	verdict=$(tail -n 1 "$report" | cut -c 1-200)
 	oracle=$(head -n 1 "$report" | cut -c 1-13)
 	checked=$((checked + 1))
 	if [ "$verdict" = agree ] && [ "$oracle" != "oracle: error" ]; then
-		echo "agree: $1"
+		echo "agree: $file"
 	else
-		echo "FAILED: $1: $oracle ... $verdict (see $report)"
+		echo "FAILED: $file: $oracle ... $verdict (see $report)"
 		failed=$((failed + 1))
 	fi
 }
@@ -65,15 +73,11 @@ else
 	echo "no JSON documents in target/bench-corpus/; benches/fetch-documents.sh fetches them"
 fi
 
-# The corpus, without the metadata files that benches/common/files.rs leaves out.
-for file in "$CORPUS"/*; do
-	[ -f "$file" ] || continue
-	name=$(basename "$file")
-	case $(printf '%s' "$name" | tr '[:lower:]' '[:upper:]') in
-	.* | *.MD | *.TXT | LICENSE* | LICENCE* | NOTICE* | COPYING*) continue ;;
-	esac
-	check "$file" "$CORPUS"
-done
+# The corpus documents of benches/common/files.rs (CORPUS), with its directories and variables
+# (benches/corpus/README.md).
+check benches/corpus/rspamd/groups.conf benches/corpus/rspamd var:CONFDIR=.
+check benches/corpus/rspamd/composites.conf benches/corpus/rspamd
+check benches/corpus/rspamd/scores.d/rbl_group.conf benches/corpus/rspamd
 
 echo "$checked documents checked, $failed failed"
 [ "$failed" -eq 0 ]

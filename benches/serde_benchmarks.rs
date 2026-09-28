@@ -14,7 +14,7 @@ use criterion::{
 };
 use serde::Deserialize;
 use serde::de::IgnoredAny;
-use serde_ucl::UclValue;
+use serde_ucl::{UclDeserializer, UclValue};
 use std::hint::black_box;
 use std::time::Duration;
 
@@ -151,8 +151,8 @@ fn bench_irregular(c: &mut Criterion) {
     }
 }
 
-/// A group per document, named `<prefix>-<document>`. A document that does not deserialize is
-/// skipped with a message.
+/// A group per JSON document, named `<prefix>-<document>`. A document that does not
+/// deserialize is skipped with a message.
 fn bench_documents(c: &mut Criterion, prefix: &str, documents: Vec<common::Document>) {
     for document in documents {
         if let Err(e) = serde_ucl::from_str::<UclValue>(&document.text) {
@@ -172,10 +172,41 @@ fn bench_json_corpus(c: &mut Criterion) {
     bench_documents(c, prefix, common::json_documents(prefix));
 }
 
-/// The configurations in `benches/corpus/`.
+/// The rspamd configurations in `benches/corpus/`, through `UclDeserializer` with a parser set
+/// up as their check sets one up (`common::Corpus::parser`); making that parser is part of each
+/// iteration. The throughput counts the included files too. One that does not deserialize is a
+/// failure, not a skip.
 fn bench_corpus(c: &mut Criterion) {
     let prefix = "serde/corpus";
-    bench_documents(c, prefix, common::corpus_documents(prefix));
+    for document in common::corpus_documents(prefix) {
+        let input = document.text.as_bytes();
+        if let Err(e) =
+            UclValue::deserialize(UclDeserializer::from_parser(document.parser(), input))
+        {
+            panic!("{prefix}: {}: {e}", document.path.display());
+        }
+        let mut group = c.benchmark_group(format!("{prefix}-{}", document.document.name));
+        group.throughput(Throughput::Bytes(document.bytes_read));
+        group.bench_function("UclValue", |b| {
+            b.iter(|| {
+                UclValue::deserialize(UclDeserializer::from_parser(
+                    document.parser(),
+                    black_box(input),
+                ))
+                .unwrap()
+            })
+        });
+        group.bench_function("IgnoredAny", |b| {
+            b.iter(|| {
+                IgnoredAny::deserialize(UclDeserializer::from_parser(
+                    document.parser(),
+                    black_box(input),
+                ))
+                .unwrap()
+            })
+        });
+        group.finish();
+    }
 }
 
 criterion_group! {
