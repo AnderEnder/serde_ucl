@@ -894,19 +894,20 @@ The [examples](examples/) are programs that check their results with assertions
 
 Three [criterion](https://docs.rs/criterion) benchmarks cover parsing, the emitters and serde
 ([benches/README.md](benches/README.md)). Run them with `cargo bench`; criterion's options go
-after `--`, as in `cargo bench -- --noplot`. One run of 0.3.0 on an Apple M4 Max with rustc
-1.98.1, median times:
+after `--`, as in `cargo bench -- --noplot`. One run of this version on an Apple M4 Max with
+rustc 1.98.1, median times:
 
 | Group | Document | Time | Throughput |
 | --- | --- | --- | --- |
-| `parse/config/1000` | configuration, 510 KB | 5.49 ms | 88.7 MiB/s |
-| `parse/json/1000` | JSON, 1000 records | 3.13 ms | 44.2 MiB/s |
-| `parse/nested/1000` | objects nested 1000 deep | 308 µs | 27.5 MiB/s |
-| `emit/config-1000/config` | the configuration, config format | 1.25 ms | 371 MiB/s of output |
-| `serde/deserialize-1000/from_str` | the configuration into a struct | 6.09 ms | 80.0 MiB/s |
-| `serde/deserialize-1000/from_value` | the parsed tree into a struct | 775 µs | 628 MiB/s |
-| `serde/deserialize-error-1000/from_str` | as above, failing on the last value | 15.0 ms | 32.5 MiB/s |
-| `serde/serialize-1000/to_string` | the struct in the config format | 2.59 ms | 182 MiB/s of output |
+| `parse/config/1000` | configuration, 510 KB | 2.39 ms | 204 MiB/s |
+| `parse/json/1000` | JSON, 1000 records | 1.45 ms | 95.1 MiB/s |
+| `parse/nested/1000` | objects nested 1000 deep | 183 µs | 46.5 MiB/s |
+| `emit/config-1000/config` | the configuration, config format | 1.16 ms | 403 MiB/s of output |
+| `serde/deserialize-1000/from_str` | the configuration into a struct | 2.33 ms | 209 MiB/s |
+| `serde/deserialize-1000/from_str-borrowed` | the same into a struct that borrows its strings | 2.07 ms | 236 MiB/s |
+| `serde/deserialize-1000/from_value` | the parsed tree into a struct | 571 µs | 853 MiB/s |
+| `serde/deserialize-error-1000/from_str` | as above, failing on the last value | 6.52 ms | 74.7 MiB/s |
+| `serde/serialize-1000/to_string` | the struct in the config format | 1.99 ms | 239 MiB/s of output |
 
 ### Against libucl and serde_json
 
