@@ -29,7 +29,8 @@ conformance suite in `tests/conformance/`, whose golden files come from libucl.
   `tests/common/oracle.rs`: running a case as the oracle does, shared with the fuzzer.
 - `fuzz/`: the differential fuzzer `ucl-differential`, a separate package (`fuzz/README.md`).
 - `scripts/ci.sh`: everything CI runs. `scripts/regen-golden.sh`, `scripts/create-cases.sh` and
-  `tools/ucl-dump/`: oracle tooling (spec team).
+  `tools/ucl-dump/`: oracle tooling (spec team). `scripts/bench-compare.sh` and
+  `tools/bench-compare/`: the comparison with libucl and serde_json (spec team).
 - `.github/workflows/`: `ci.yml` (`scripts/ci.sh`, Linux and macOS, stable), `coverage.yml`,
   `release.yml` (see *Release*), `golden.yml` (nightly drift check, Linux and macOS),
   `pin-move.yml` and `fuzz.yml` (manual).
@@ -44,7 +45,7 @@ never read libucl source.
 | Area | Owner |
 | --- | --- |
 | `src/`, `tests/*.rs`, `tests/common/`, `tests/features/`, `fuzz/`, `examples/`, `benches/` except `benches/corpus/`, `xfail-*.txt` entries for the crate's behaviour | implementation team |
-| `docs/spec/`, `docs/COMPATIBILITY.md`, conformance cases and golden files, `tests/conformance/README.md`, `scripts/regen-golden.sh`, `scripts/create-cases.sh`, `tools/`, `benches/corpus/` (third-party documents), `golden.yml`, `pin-move.yml` | spec team |
+| `docs/spec/`, `docs/COMPATIBILITY.md`, conformance cases and golden files, `tests/conformance/README.md`, `scripts/regen-golden.sh`, `scripts/create-cases.sh`, `scripts/bench-compare.sh`, `tools/`, `benches/corpus/` (third-party documents), `golden.yml`, `pin-move.yml` | spec team |
 | `docs/clean-room/WORKLIST.md` (goals and decisions), `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `Cargo.toml`, `scripts/ci.sh`, other workflows | either team, within its work item |
 
 Rules for the implementation team:
