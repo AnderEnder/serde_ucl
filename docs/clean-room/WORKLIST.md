@@ -351,3 +351,57 @@ under these decisions:
      target does with the error it receives: a target that rewrites it, ignores it, or makes no
      request at all still gets the parse error from the entry point.
    - Values, errors, and the paths and positions of deserialization errors stay as they are.
+
+## C14 — Benchmark documents (owner request of 2026-09-28)
+
+The benchmarks' documents are uniform: every service of `config(n)` has the same keys and sizes,
+strings are short and ASCII, and there is one JSON shape. Some gains of C11 to C13 may depend on
+that. C14 widens the documents, measures again, and makes the comparison with libucl and
+serde_json reproducible.
+
+1. Implementation team, `benches/`:
+   - A seeded generator of irregular configurations. Keys, section sizes, order and depth vary;
+     strings are long as well as short, with escapes and non-ASCII text; the value forms of
+     `config(n)` appear too. The same seed gives the same document.
+   - The documents that serde_json and simd-json publish figures for (`twitter.json`,
+     `citm_catalog.json`, `canada.json`), fetched by a script from pinned URLs into
+     `target/bench-corpus/`, with SHA-256 checks. They are not committed, because their licences
+     are unclear.
+   - Benchmark groups over these documents and over the corpus of item 2, in
+     `parse_benchmarks` and `serde_benchmarks`. `UclValue` and `IgnoredAny` targets are enough
+     for documents without a typed struct. Groups whose documents are missing are skipped with
+     a message, so the benches build and run without the network.
+   - Every document is checked the way the fuzzer checks one (`ucl-differential --check`): libucl
+     parses it, and the crate gives the same result. A difference goes to `QUESTIONS.md`.
+2. Spec team:
+   - `benches/corpus/`: a few real UCL configurations, for example from rspamd (Apache-2.0),
+     with their source, commit and licence, copied as single files at a pinned commit. Each one
+     passes the check of item 1.
+   - `tools/bench-compare/` and a script: the comparison in the README's *Against libucl and
+     serde_json*, so that its figures can be reproduced. libucl is built as a Release build; the
+     programs run in turns over rounds; each figure includes freeing the result; struct targets
+     are owned and borrowed.
+3. Implementation team, after items 1 and 2: measure the gains of C11 to C13 again on the new
+   documents, with C11's rules for measuring. The report is `target/perf/C14-report.md`.
+   - Above all: container pre-sizing from the last sibling (C11) and the 16-key threshold of small
+     objects (C13), each against its absence or other thresholds.
+   - The estimates of C11 item 8 (memchr, SIMD) where they depended on short strings.
+   - Where the new documents show a loss, it is corrected in a `perf` commit, with behaviour
+     unchanged. Dependencies and `unsafe` stay proposals (C11 item 8).
+4. The README's figures are refreshed from the new documents where they add information.
+
+## C15 — libucl-compatible C API (owner request of 2026-09-28; after C14, not started)
+
+A C API compatible with libucl's, so that C programs written for libucl can use the crate. The
+owner decides before it starts:
+
+1. Scope: all of libucl's public API, or a part of it (parser, object access, emitters).
+2. Source compatibility (the same names and types, built against the crate's header) or binary
+   compatibility (a drop-in library, including the object layout that callers read directly).
+3. Packaging: a separate package in this repository, its library types, and how its header is
+   made.
+
+The spec team writes the C API's spec from libucl's public header and documentation: functions,
+types, constants, ownership and reference counting, error reporting. It also writes a test harness
+that runs the same C programs against libucl and the crate. The implementation team works from
+the released spec, as for the format.
