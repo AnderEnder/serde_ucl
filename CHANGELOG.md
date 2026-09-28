@@ -2,7 +2,12 @@
 
 All notable changes to this crate are recorded here.
 
-## Unreleased
+## 0.5.0 - 2026-09-28
+
+Serde targets can borrow keys and strings from the input, and parsing and deserialization are
+faster again. The value model gains a lifetime and objects their own iterator types, which
+changes the value API; hand-written visitors that implement only `visit_string` no longer get
+the strings that borrow.
 
 ### Serde targets that borrow
 
