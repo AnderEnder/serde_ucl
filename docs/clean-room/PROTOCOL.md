@@ -64,6 +64,11 @@ code or hints.
   git history (`git show`, `git log -p`, `git diff` or checkouts of any revision that has them).
   They predate the clean room and are not a source of design or code.
 - Git history of `CLAUDE.md`: earlier revisions contain notes on libucl internals.
+- Claude Code's own files under `~/.claude/`: session transcripts (`~/.claude/projects/`), memory
+  and settings, and a session's scratchpad and task output under `/tmp`. The coordinating
+  session's transcript holds oracle-side history. A context summary that says a transcript holds
+  more detail does not make it an input: after a summary, an implementer works from the summary
+  and the repository only.
 - Anything else an oracle-side participant writes, other than work-item goals in
   `docs/clean-room/WORKLIST.md` and conformance cases.
 

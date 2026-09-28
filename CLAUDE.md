@@ -52,8 +52,9 @@ Rules for the implementation team:
 - Forbidden inputs: libucl source (`*.c`, `*.h`, build files) anywhere, including
   `target/libucl-oracle/` and online; `tools/` (oracle tooling); `REVIEW.md`, `PLAN.md`,
   `PROGRESS.md`; branches `quarantine/*` and `backup/*`; the history of `CLAUDE.md` and of any
-  revision containing `src/lexer.rs` or `src/parser.rs`; anything else the spec team writes
-  except work-item goals and conformance cases.
+  revision containing `src/lexer.rs` or `src/parser.rs`; Claude Code's files under `~/.claude/`
+  (session transcripts, memory), even when a context summary points at a transcript; anything
+  else the spec team writes except work-item goals and conformance cases.
 - Allowed inputs: the released spec, `docs/clean-room/`, libucl's public format documentation,
   the conformance cases and golden files, and the oracle run as a black box
   (`scripts/regen-golden.sh`, `target/libucl-oracle/ucl-dump`).
