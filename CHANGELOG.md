@@ -19,11 +19,12 @@ method a borrowed string reaches changes, which breaks visitors that implement o
 `from_str`, `from_slice`, `from_reader`, `from_file` and the `from_str_with_*` functions now
 parse the document at the target's first request of the deserializer, as `UclDeserializer`
 does, and that request decides whether the value borrows: a `UclValue` or `UclObject` target
-gets a value that owns its strings, without a copy (owner decision 6 of C13). The target's
-`Deserialize` runs once on a document that parses and deserializes (twice, as before, when
-deserialization fails, to find the error's position). On a document that does not parse, it now
-runs too, and its first request fails with the parse error; the function returns that parse
-error, with its kind, position and file, whatever the target made of it.
+gets a value that owns its strings, without a copy (clean-room work item C13, owner decision of
+2026-09-28). The target's `Deserialize` runs once on a document that parses and deserializes
+(twice, as before, when deserialization fails, to find the error's position). On a document
+that does not parse, it now runs too, and its first request fails with the parse error; the
+function returns that parse error, with its kind, position and file, whatever the target made of
+it.
 
 ### Breaking API changes
 
