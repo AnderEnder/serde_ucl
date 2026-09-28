@@ -29,8 +29,9 @@ The documents:
   from one byte to 16 KB, in several alphabets, with and without escapes. It uses every value
   form of `config(n)` as well, and JSON-style objects. The same seed and size give the same
   document; the module documentation lists the distributions. The benchmarks use seed 1 at
-  60 000 bytes (78 466 bytes) and seed 2 at 600 000 bytes (639 049 bytes), about the sizes of
-  `config(100)` and `config(1000)`; `tests/bench_documents.rs` pins them by digest.
+  60 000 bytes (78 466 bytes) and seed 2 at 600 000 bytes (639 049 bytes), somewhat more than
+  `config(100)` (50 571 bytes) and `config(1000)` (510 495 bytes); `tests/bench_documents.rs`
+  pins them by digest.
 - The JSON documents that serde_json and simd-json publish figures for, `twitter.json` (632 KB),
   `citm_catalog.json` (1.7 MB) and `canada.json` (2.3 MB), in `target/bench-corpus/`. They are
   not committed, because their licences are unclear: `benches/fetch-documents.sh` fetches them
