@@ -16,6 +16,15 @@ every target that borrows failed. Owned targets get the same values as before. W
 method a borrowed string reaches changes, which breaks visitors that implement only
 `visit_string` (see *Breaking API changes*).
 
+`from_str`, `from_slice`, `from_reader`, `from_file` and the `from_str_with_*` functions now
+parse the document at the target's first request of the deserializer, as `UclDeserializer`
+does, and that request decides whether the value borrows: a `UclValue` or `UclObject` target
+gets a value that owns its strings, without a copy (owner decision 6 of C13). The target's
+`Deserialize` runs once on a document that parses and deserializes (twice, as before, when
+deserialization fails, to find the error's position). On a document that does not parse, it now
+runs too, and its first request fails with the parse error; the function returns that parse
+error, with its kind, position and file, whatever the target made of it.
+
 ### Breaking API changes
 
 - Strings that borrow from the input reach visitors through `visit_borrowed_str` where a `&str`
@@ -71,7 +80,7 @@ same runs, so the 0.4.0 figures differ from those in its own entry):
 - `from_str` of the configuration into a typed struct takes 2.19 ms instead of 2.79 ms
   (5.72 ms), and 1.98 ms into a struct that borrows its keys and strings.
 - A three-entry document parses in 0.49 µs instead of 0.72 µs, with 6 allocations instead of
-  13; `from_str` of it into a typed struct takes 0.51 µs instead of 0.78 µs, with 3.
+  13; `from_str` of it into a typed struct takes about 0.52 µs instead of 0.78 µs, with 3.
 
 Values, errors with their positions, and emitter output do not change.
 
