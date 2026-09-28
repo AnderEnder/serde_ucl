@@ -25,8 +25,8 @@ include = [
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-# 2.2.2: the raw entry API (`RawEntryApiV1`, `index_from_hash`), with which the parser hashes a
-# key once (src/value.rs, `UclObject::key_hash`).
+# 2.2.2: the raw entry API (`RawEntryApiV1`, `index_from_hash`), with which a large object hashes
+# a key once for its lookup and its insertion (src/value/map.rs, `Map::probe`).
 indexmap = { version = "2.2.2", features = ["serde"] }
 smallvec = { version = "1", features = ["serde"] }
 
