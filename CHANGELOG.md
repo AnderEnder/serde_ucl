@@ -12,16 +12,25 @@ without copying (clean-room work item C13): `&str` fields, `Cow<str>` fields wit
 they are. A key or string that does not (an escaped or expanded string, a key that
 `KEY_LOWERCASE` changes, a string from an included file or from text a registered macro parses
 in place) is owned in a `Cow`, and still fails for a `&str`, with its path and position. Before,
-every target that borrows failed. Owned targets get the same values as before.
-
-What the deserializer offers visitors changes for borrowed text only: a borrowed string is
-offered with `visit_borrowed_str` where a `&str` is asked for (`deserialize_str`, and for keys
-also `deserialize_identifier` and `deserialize_any`), where it was `visit_string`. A hand-written
-visitor that implements `visit_string` but not `visit_str` no longer sees such strings; serde's
-own types, derived types and serde_json's `Value` are unaffected. `deserialize_string` still
-offers `visit_string`.
+every target that borrows failed. Owned targets get the same values as before. Which visitor
+method a borrowed string reaches changes, which breaks visitors that implement only
+`visit_string` (see *Breaking API changes*).
 
 ### Breaking API changes
+
+- Strings that borrow from the input reach visitors through `visit_borrowed_str` where a `&str`
+  is asked for (clean-room work item C13, owner decision of 2026-09-28): for a string value
+  through `deserialize_str`, and for a key through `deserialize_str`, `deserialize_identifier`
+  and `deserialize_any`. They reached them through `visit_string`. A hand-written visitor that
+  implements `visit_string` but not `visit_str` or `visit_borrowed_str` therefore no longer
+  receives these strings, and fails with an invalid-type error; implement `visit_str`, which
+  serde's default `visit_borrowed_str` calls, or ask with `deserialize_string`, which still
+  offers `visit_string`. `serde_json` behaves the same. This applies to `from_str`,
+  `from_slice`, `from_reader`, `from_file`, the `from_str_with_*` functions and
+  `UclDeserializer`. Strings that do not borrow (escaped, expanded, lowercased, from an included
+  file), a string value asked for with `deserialize_any`, and the strings of a parsed value
+  given to `from_value` are offered as before. serde's own types, derived types and
+  `serde_json::Value` are unaffected.
 
 - The value model can borrow (clean-room work item C13). `Value<'a>` is a value whose keys and
   strings may borrow text that lives for `'a`; `UclValue` is now `Value<'static>`, and
