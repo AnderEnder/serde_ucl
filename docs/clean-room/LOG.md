@@ -2801,3 +2801,58 @@
     - Allocation counts come from a counting allocator.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-28 — Role: implementation team (clean-implementer). Item: C13 decision 6, the parse
+  at the target's first request (the same session as the entry above, second part). Report:
+  `target/perf/C13-report.md` §2.5 (untracked).
+  - Branch: the coordinator rebased `libucl-compat` onto `d1b3c5e` (README pull requests #12
+    and #13) and added `0055a21` (changelog rewrap) and `39d18b8` (decision 6). The patches of
+    the entry above are unchanged (`git range-diff`) under new names: `a8af71a` → `c4f72f8`,
+    `c177c24` → `4c8d329`, `6c53961` → `243bee6`, `aaa0360` → `cae1d16`, `03653ed` →
+    `0fd3f7c`, `0211665` → `ec80390`, `57dbf47` → `ec023bd`, `5b3abb3` → `6fdb69f`, `b85d2c0` →
+    `5946870`, `74e42a4` → `b1a3b70`, `7e1bcf5` → `2f901ba`, `0f95f7b` → `7a98a53`. The code of
+    `b1a3b70` equals that of `74e42a4` (the rebase changed only `README.md`).
+  - Inputs consulted: `docs/clean-room/WORKLIST.md` (C13 decision 6); the crate's `src/de.rs`,
+    `src/error.rs` (`UclError`, `From<parse::Error>`), `src/parse/error.rs` (the fields and
+    derives of `Error`), `src/parse/mod.rs` (the parse entry points), `src/value.rs`
+    (`Entry::into_value`, `Drop for Object`); `tests/api_tests.rs`,
+    `tests/error_positions.rs` and `tests/inputs_and_macros.rs` (how they make scratch files
+    and a silent stop); `CHANGELOG.md`; my report and scratch under `target/perf/c13-wrap/`. No
+    spec section was needed (behaviour follows the decision; latest tag `spec-v13`).
+  - Searches: `grep` over `src/`, `tests/`, `benches/`, `CHANGELOG.md`, `README.md`,
+    `docs/clean-room/LOG.md` and `target/perf/`. Nothing under `~/.claude/` or `/private/tmp/`
+    was opened.
+  - Guard refusals: one, for a command that edited my report and then grepped it for the
+    oracle-tooling directory's name, to check that the report does not contain it ("Clean-room
+    guard: Bash refused, it touches [the oracle-tooling directory] (oracle tooling). [...]").
+    Nothing ran and nothing was read; the edit was run alone, without the check.
+  - Work:
+    - `292d8a4`: the text entry points give the target a deserializer that parses at its first
+      request (owned for the `marker::VALUE` request, borrowed otherwise). It keeps a parse
+      error and gives the target a copy, and parses after the target returns if it made no
+      request. `tests/first_request.rs` covers goals 1 and 2; the probe's unit tests now check
+      the chosen parse; the `de` module docs are updated.
+    - `37c941f`: `#[inline(always)]` on the request's borrowed parse. `292d8a4` alone made the
+      three-entry `from_str` 3% to 4% slower because the parser's entry stopped being inlined
+      (profiled with `/usr/bin/sample`). Two other variants gave nothing and were not kept.
+    - `1241e80`: the changelog describes the first-request parse, and the speed figure moves
+      from 0.51 to about 0.52 µs.
+  - Commits: `292d8a4`, `37c941f`, `1241e80`, and this entry. Not pushed; `main` untouched.
+  - Checks on `37c941f`, the final code commit (later commits change only `CHANGELOG.md` and
+    this log):
+    - `scripts/ci.sh`: 26 steps, exit 0; `cargo test` 434 passed, and the stack-depth and unit
+      tests unoptimised 221.
+    - `scripts/ci.sh fuzz 300`: seed 1790606557755031000, 1,111,249 inputs, 1,109,428 agree,
+      0 differences, 0 findings, exit 0.
+    - The same two on `292d8a4`: exit 0; 844,766 inputs, 0 differences.
+    - Mutations of the kept-error and no-request paths each failed two of the new tests.
+  - Measurements: serde benchmarks against `39d18b8`, in turns, 8 rounds, release settings, on
+    an exact build of `37c941f`; each run waited for a 1-minute load below 4.
+    - The typed three-entry `from_str` is +0.9% (−0.2 .. +2.6%); the other benchmarks are
+      within noise, with every range including zero.
+    - `error-1000/from_str` is +2.1%, as is `error-1000/from_value` (+2.4%), whose code is
+      unchanged.
+    - A first run was disturbed by outside load (up to 29.8) and is not used.
+    - `__text`: 2,057,484 bytes against 2,059,756 before.
+    - The report §2.5 has the table.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
