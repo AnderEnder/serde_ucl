@@ -48,6 +48,12 @@ if [ "$actual" != "$LIBUCL_COMMIT" ]; then
 	exit 1
 fi
 
+# A build configured from another checkout cannot be reused: CMake refuses a second source.
+cache="$WORK/libucl-build/CMakeCache.txt"
+if [ -f "$cache" ] &&
+	[ "$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache")" != "$(cd "$LIBUCL_DIR" && pwd -P)" ]; then
+	rm -rf "$WORK/libucl-build"
+fi
 echo "building libucl (Release) in $WORK/libucl-build" >&2
 if ! {
 	cmake -S "$LIBUCL_DIR" -B "$WORK/libucl-build" -DCMAKE_BUILD_TYPE=Release \
