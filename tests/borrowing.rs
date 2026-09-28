@@ -269,3 +269,77 @@ fn owned_targets_are_unchanged() {
         serde_ucl::parse::parse(b"a = 'x'\nb = [1, \"y\"]").unwrap()
     );
 }
+
+/// Decision 5: where a `&str` is asked for, a string that borrows from the input reaches
+/// `visit_borrowed_str`, so a visitor that implements only `visit_string` no longer receives it.
+/// `deserialize_string`, a string that does not borrow, and `from_value` of a parsed value offer
+/// `visit_string` as before.
+#[test]
+fn visitors_with_only_visit_string_miss_borrowed_strings() {
+    use serde::de::{self, Deserializer, Visitor};
+
+    /// Implements `visit_string` only: what clippy's `serde_api_misuse` warns of, and the case
+    /// decision 5 accepts breaking.
+    struct OnlyString;
+    #[allow(clippy::serde_api_misuse)]
+    impl<'de> Visitor<'de> for OnlyString {
+        type Value = String;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a string")
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> {
+            Ok(v)
+        }
+    }
+
+    /// Asks with `deserialize_str`, or with `deserialize_string` when `STRING`.
+    #[derive(Debug)]
+    struct Text<const STRING: bool>(String);
+    impl<'de, const STRING: bool> Deserialize<'de> for Text<STRING> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            if STRING {
+                deserializer.deserialize_string(OnlyString).map(Text)
+            } else {
+                deserializer.deserialize_str(OnlyString).map(Text)
+            }
+        }
+    }
+
+    /// A map key that asks with `deserialize_identifier`.
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct Key(String);
+    impl<'de> Deserialize<'de> for Key {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            deserializer.deserialize_identifier(OnlyString).map(Key)
+        }
+    }
+
+    type Values<const STRING: bool> = BTreeMap<String, Text<STRING>>;
+    let plain = "v = plain";
+    let err = from_str::<Values<false>>(plain).unwrap_err().to_string();
+    assert!(err.contains("invalid type: string \"plain\""), "{err}");
+    let err = Values::<false>::deserialize(UclDeserializer::new(plain)).unwrap_err();
+    assert!(err.to_string().contains("invalid type: string"), "{err}");
+    assert_eq!(from_str::<Values<true>>(plain).unwrap()["v"].0, "plain");
+    assert_eq!(
+        from_str::<Values<false>>("v = \"pl\\u0061in\"").unwrap()["v"].0,
+        "plain"
+    );
+    let parsed = serde_ucl::parse::parse(plain.as_bytes()).unwrap();
+    assert_eq!(
+        serde_ucl::from_value::<Values<false>>(parsed).unwrap()["v"].0,
+        "plain"
+    );
+
+    assert!(from_str::<BTreeMap<Key, i64>>("k = 1").is_err());
+    assert!(BTreeMap::<Key, i64>::deserialize(UclDeserializer::new("k = 1")).is_err());
+    let escaped = from_str::<BTreeMap<Key, i64>>("\"k\\u0031\" = 1").unwrap();
+    assert_eq!(escaped.keys().next().map(|k| k.0.as_str()), Some("k1"));
+    let parsed = serde_ucl::parse::parse(b"k = 1").unwrap();
+    assert_eq!(
+        serde_ucl::from_value::<BTreeMap<Key, i64>>(parsed)
+            .unwrap()
+            .len(),
+        1
+    );
+}
