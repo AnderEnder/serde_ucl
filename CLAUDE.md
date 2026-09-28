@@ -29,7 +29,8 @@ conformance suite in `tests/conformance/`, whose golden files come from libucl.
   `tests/common/oracle.rs`: running a case as the oracle does, shared with the fuzzer.
 - `fuzz/`: the differential fuzzer `ucl-differential`, a separate package (`fuzz/README.md`).
 - `scripts/ci.sh`: everything CI runs. `scripts/regen-golden.sh`, `scripts/create-cases.sh` and
-  `tools/ucl-dump/`: oracle tooling (spec team).
+  `tools/ucl-dump/`: oracle tooling (spec team). `scripts/bench-compare.sh` and
+  `tools/bench-compare/`: the comparison with libucl and serde_json (spec team).
 - `.github/workflows/`: `ci.yml` (`scripts/ci.sh`, Linux and macOS, stable), `coverage.yml`,
   `release.yml` (see *Release*), `golden.yml` (nightly drift check, Linux and macOS),
   `pin-move.yml` and `fuzz.yml` (manual).
@@ -43,21 +44,23 @@ never read libucl source.
 
 | Area | Owner |
 | --- | --- |
-| `src/`, `tests/*.rs`, `tests/common/`, `tests/features/`, `fuzz/`, `examples/`, `benches/`, `xfail-*.txt` entries for the crate's behaviour | implementation team |
-| `docs/spec/`, `docs/COMPATIBILITY.md`, conformance cases and golden files, `tests/conformance/README.md`, `scripts/regen-golden.sh`, `scripts/create-cases.sh`, `tools/`, `golden.yml`, `pin-move.yml` | spec team |
+| `src/`, `tests/*.rs`, `tests/common/`, `tests/features/`, `fuzz/`, `examples/`, `benches/` except `benches/corpus/`, `xfail-*.txt` entries for the crate's behaviour | implementation team |
+| `docs/spec/`, `docs/COMPATIBILITY.md`, conformance cases and golden files, `tests/conformance/README.md`, `scripts/regen-golden.sh`, `scripts/create-cases.sh`, `scripts/bench-compare.sh`, `tools/`, `benches/corpus/` (third-party documents), `golden.yml`, `pin-move.yml` | spec team |
 | `docs/clean-room/WORKLIST.md` (goals and decisions), `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `Cargo.toml`, `scripts/ci.sh`, other workflows | either team, within its work item |
 
 Rules for the implementation team:
 
 - Forbidden inputs: libucl source (`*.c`, `*.h`, build files) anywhere, including
-  `target/libucl-oracle/` and online; `tools/` (oracle tooling); `REVIEW.md`, `PLAN.md`,
-  `PROGRESS.md`; branches `quarantine/*` and `backup/*`; the history of `CLAUDE.md` and of any
-  revision containing `src/lexer.rs` or `src/parser.rs`; Claude Code's files under `~/.claude/`
-  (session transcripts, memory), even when a context summary points at a transcript; anything
-  else the spec team writes except work-item goals and conformance cases.
+  `target/libucl-oracle/`, online, and in projects that bundle it, such as rspamd; `tools/`
+  (oracle tooling); `REVIEW.md`, `PLAN.md`, `PROGRESS.md`; branches `quarantine/*` and
+  `backup/*`; the history of `CLAUDE.md` and of any revision containing `src/lexer.rs` or
+  `src/parser.rs`; Claude Code's files under `~/.claude/` (session transcripts, memory), even
+  when a context summary points at a transcript; anything else the spec team writes except
+  work-item goals and conformance cases.
 - Allowed inputs: the released spec, `docs/clean-room/`, libucl's public format documentation,
-  the conformance cases and golden files, and the oracle run as a black box
-  (`scripts/regen-golden.sh`, `target/libucl-oracle/ucl-dump`).
+  the conformance cases and golden files, the documents in `benches/corpus/` (not the
+  repositories they come from), and the oracle run as a black box (`scripts/regen-golden.sh`,
+  `target/libucl-oracle/ucl-dump`).
 - The released spec is the latest tag: `git tag --sort=-v:refname -l 'spec-v*' | head -1`.
   `git diff <tag> -- docs/spec` shows edits made after it, which are not released.
 - Search named directories only, never the repository root or `/tmp`.

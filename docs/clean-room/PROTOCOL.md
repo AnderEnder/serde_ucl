@@ -45,11 +45,16 @@ code or hints.
   the built `target/libucl-oracle/ucl-dump`. Running them is allowed; opening the libucl files the
   script checks out is not.
 - The crate's own code, except the files listed below, and general Rust, serde and crate documentation.
+- The third-party benchmark documents in `benches/corpus/`, which the spec team copies there for a
+  work item with their source and licence. Only the documents: the repositories they come from
+  are not inputs.
 
 ## Forbidden inputs
 
 - libucl source files (`*.c`, `*.h`, build files) anywhere: `target/libucl-oracle/libucl/`, any
   other clone, GitHub source views, and copies in search results or mirrors.
+- The repositories of projects that bundle a copy of libucl, such as rspamd, beyond the documents
+  copied into `benches/corpus/`.
 - `REVIEW.md`, `PLAN.md` and `PROGRESS.md`. They were written by the oracle side and contain
   references to libucl internals. Since C5 they are kept only on branch `quarantine/oracle-notes`,
   not in the working tree.

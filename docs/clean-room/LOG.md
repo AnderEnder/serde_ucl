@@ -2856,3 +2856,36 @@
     - The report §2.5 has the table.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-28 — Role: spec team (oracle side). Item: C14 item 2 (benchmark corpus, reproducible
+  comparison with libucl and serde_json).
+  - Inputs:
+    - rspamd at commit `5fc47041c8315eb2d6f20bc36e7d006448c47695`, the head of its `master` on
+      2026-09-28, read through GitHub's API and raw file URLs, with no clone. Listings of `conf/`,
+      `conf/modules.d/`, `conf/scores.d/` and the repository root; `LICENSE.md`; a check that no
+      `NOTICE`, `NOTICE.md` or `NOTICE.txt` exists; and, as single raw files
+      (`https://raw.githubusercontent.com/rspamd/rspamd/5fc47041c8315eb2d6f20bc36e7d006448c47695/<path>`),
+      every `.conf` and `.inc` file of those three directories, to choose from. Requests sent
+      the User-Agent `bench-corpus-fetch` and no personal data.
+    - libucl at the pinned commit: `include/ucl.h`, for the declarations of
+      `ucl_parser_register_variable` and the file functions. Black-box runs of the oracle
+      through `ucl-differential --check`.
+    - `scripts/regen-golden.sh` (the pin, the CMake options), the crate's `Parser` API
+      (`register_variable`, `set_loader`, `parse`, `FsLoader`), `benches/common/mod.rs`, and the
+      coordinator's comparison harness in its scratchpad (`cmp3/`).
+  - Corpus (`benches/corpus/`): `rspamd/groups.conf` with the 14 files of `rspamd/scores.d/` it
+    includes (55,215 bytes; needs `CONFDIR` and a file loader), `rspamd/composites.conf`, and
+    rspamd's `LICENSE.md` (Apache-2.0), 64,370 bytes of documents, unchanged, with a README of
+    sources, needs and SHA-256s.
+    - Every document agrees between libucl and the crate with `ucl-differential --check`:
+      `groups.conf` with `var:CONFDIR=.` (and with an absolute `CONFDIR`), where libucl and the
+      crate both give 21 groups with 253 symbols; `composites.conf` and each score file on their
+      own.
+    - Not taken: `conf/modules.d/rbl.conf` and `multimap.conf` use rspamd's Jinja templating
+      (`{= ... =}`), and both libucl and the crate reject them (same verdict); `antivirus.conf`
+      is almost only comments. No difference was found, so QUESTIONS.md is unchanged.
+  - Comparison: `tools/bench-compare/` (Rust, the generated documents included from
+    `benches/common/mod.rs`), `tools/bench-compare/lucl.c`, `scripts/bench-compare.sh`, and one
+    sentence in the README's section. A smoke run of one round printed the tables; the figures
+    in the README are unchanged.
+  - Commits: `0ec83a3` (corpus), `fd3ba43` (comparison), and this entry, on branch `c14-spec` from
+    `29f606f`. Not pushed.
