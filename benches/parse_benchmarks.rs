@@ -118,8 +118,8 @@ fn bench_irregular(c: &mut Criterion) {
     group.finish();
 }
 
-/// A group of one benchmark per document. A document that does not parse is skipped with a
-/// message, and so is the group if no document is left.
+/// A group of one benchmark per JSON document. A document that does not parse is skipped with
+/// a message, and so is the group if no document is left.
 fn bench_documents(c: &mut Criterion, name: &str, documents: Vec<common::Document>) {
     let documents: Vec<common::Document> = documents
         .into_iter()
@@ -157,10 +157,31 @@ fn bench_json_corpus(c: &mut Criterion) {
     bench_documents(c, name, common::json_documents(name));
 }
 
-/// The configurations in `benches/corpus/`.
+/// The rspamd configurations in `benches/corpus/`, parsed with the settings of their check
+/// (`common::Corpus::parser`). The throughput counts the included files too. These documents
+/// are committed and checked, so one that does not parse is a failure, not a skip.
 fn bench_corpus(c: &mut Criterion) {
     let name = "parse/corpus";
-    bench_documents(c, name, common::corpus_documents(name));
+    let documents = common::corpus_documents(name);
+    if documents.is_empty() {
+        return;
+    }
+    let mut group = c.benchmark_group(name);
+    for document in &documents {
+        if let Err(e) = document.parser().parse(document.text.as_bytes()) {
+            panic!("{name}: {}: {e}", document.path.display());
+        }
+        group.throughput(Throughput::Bytes(document.bytes_read));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(document.document.name),
+            document,
+            |b, document| {
+                let mut parser = document.parser();
+                b.iter(|| parser.parse(black_box(document.text.as_bytes())).unwrap());
+            },
+        );
+    }
+    group.finish();
 }
 
 criterion_group! {

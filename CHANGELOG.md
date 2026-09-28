@@ -10,8 +10,8 @@ All notable changes to this crate are recorded here.
   strings vary, and the JSON documents `twitter.json`, `citm_catalog.json` and `canada.json`,
   which `benches/fetch-documents.sh` fetches at a pinned commit with SHA-256 checks. New groups
   `parse/irregular`, `parse/json-corpus`, `parse/corpus`, `serde/irregular-*`,
-  `serde/json-corpus-*` and `serde/corpus-*`; the corpus groups read the configurations in
-  `benches/corpus/`. `benches/check-documents.sh` checks every document against libucl
+  `serde/json-corpus-*` and `serde/corpus-*`; the corpus groups parse three rspamd
+  configurations of `benches/corpus/`, one with the 14 files it includes. `benches/check-documents.sh` checks every document against libucl
   (clean-room work item C14).
 
 ## 0.5.0 - 2026-09-28

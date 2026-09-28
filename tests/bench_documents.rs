@@ -149,6 +149,36 @@ fn each_document_parses_and_varies() {
     }
 }
 
+/// The corpus documents parse with the settings of the benchmarks, which are those of their
+/// check, and `groups.conf` finds its 14 includes: 21 groups with 253 symbols, as
+/// `benches/corpus/README.md` says, from 55 215 bytes.
+#[test]
+fn the_corpus_documents_parse_as_checked() {
+    let documents = common::corpus_documents("test");
+    assert_eq!(documents.len(), common::CORPUS.len());
+    for document in &documents {
+        let value = document
+            .parser()
+            .parse(document.text.as_bytes())
+            .unwrap_or_else(|e| panic!("{}: {e}", document.path.display()));
+        if document.document.name != "rspamd-groups" {
+            continue;
+        }
+        assert_eq!(document.bytes_read, 55_215);
+        let groups = value.as_object().unwrap().entry("group").unwrap();
+        let mut symbols = 0;
+        for group in groups.values() {
+            for (_, entry) in group.as_object().unwrap() {
+                let group = entry.first().as_object().unwrap();
+                symbols += group
+                    .get("symbols")
+                    .map_or(0, |s| s.as_object().unwrap().len());
+            }
+        }
+        assert_eq!((groups.len(), symbols), (21, 253));
+    }
+}
+
 /// Writes the documents to the directory in `UCL_BENCH_DOCUMENTS_OUT`, for
 /// `benches/check-documents.sh`; does nothing without it. With `UCL_BENCH_EXTRA_SEEDS=N`, it
 /// also writes documents of 60 000 bytes for the seeds 1000 to 1000 + N - 1, which test the

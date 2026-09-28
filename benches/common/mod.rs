@@ -11,7 +11,7 @@
 mod files;
 mod irregular;
 
-pub use files::{Document, JSON_DOCUMENTS, corpus_documents, json_documents};
+pub use files::{CORPUS, Corpus, Document, JSON_DOCUMENTS, corpus_documents, json_documents};
 pub use irregular::{IRREGULAR, irregular};
 
 use serde::{Deserialize, Serialize};
