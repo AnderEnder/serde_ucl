@@ -2717,3 +2717,87 @@
     excerpts described under Exposure (of `PLAN.md`, of `CLAUDE.md` history, and of
     pre-clean-room code work), at about 19:58 CEST, after the last code commit (`e0fa899`); no
     code was written after it.
+- 2026-09-28 — Role: implementation team (clean-implementer). Item: C13 wrap-up (rebase onto
+  0.4.0, two fixes, decision 5 in the changelog, checks, measurements, report). Report:
+  `target/perf/C13-report.md` (untracked); scratch in `target/perf/c13-wrap/`.
+  - Inputs consulted:
+    - `docs/clean-room/PROTOCOL.md`, `docs/clean-room/WORKLIST.md` (C11, C12, C13 with
+      decision 5), this log (the entries of C12 and C13, for their content and format).
+      CLAUDE.md as embedded in the session prompt, not its history.
+    - The crate: `src/value/map.rs`, parts of `src/value.rs`, `src/value/string.rs`, `src/de.rs`,
+      `src/de/value.rs`, `src/parse/mod.rs`, `src/ser/mod.rs` and `src/ser/serializer.rs`;
+      `tests/borrowing.rs`; `benches/`; `scripts/ci.sh`; `Cargo.toml`, `Cargo.lock`,
+      `CHANGELOG.md`, and the README's diff against `main`.
+    - Git: messages, stats and diffs of this branch's commits and of `b8f389e` (0.4.0);
+      `Cargo.toml` of `v0.3.0` (`git show`) and the file names of its `src/`
+      (`git ls-tree --name-only`); `git archive` of `v0.3.0`, `ac64b1b`, `b8f389e`, `0211665` and
+      `74e42a4` with the pathspecs `src benches Cargo.toml Cargo.lock README.md` only, into
+      `target/perf/c13-wrap/trees/`.
+    - `target/perf/C12-report.md` (sections 1 to 5), `target/perf/conformance-c15.counts`, and a
+      listing of `target/perf/` (file names only). The first session's `target/perf/c13/` was not
+      opened.
+    - criterion 0.8.2's `src/lib.rs` in its registry directory (output directory and
+      command-line options).
+    - The oracle as a black box, through `scripts/ci.sh fuzz 300` only.
+    - No spec section was needed: behaviour does not change (latest tag `spec-v13`).
+  - Searches: `grep` over named files and directories only: `src/` and files in it, `tests/*.rs`,
+    `benches/`, `examples/`, `README.md`, `CHANGELOG.md`, `Cargo.toml`, `target/perf/c13-wrap/`,
+    and criterion's registry directory.
+    - Incident, no content: one early `grep -rn 'indexmap'` over a list of files included
+      `docs/COMPATIBILITY.md`, a spec-team file that is not on the allowed list. It printed no
+      line of that file (no match), so nothing of it was read. It was left out of every later
+      command.
+    - Nothing under `~/.claude/` or `/private/tmp/` was opened. The harness wrote the output of
+      background commands there; every such command logged to `target/perf/c13-wrap/logs/`
+      instead, and those logs were read.
+  - Guard refusals, three; nothing was read through any of them. Their text is quoted in the
+    session's final message; here the name of the oracle-tooling directory is left out.
+    1. "Clean-room guard: grep refused, it names no existing path, so it would search the
+       current directory. [...]": a `grep -ril` of a scratch directory that the same command's
+       `cargo doc` was about to create. It was rerun as a separate command with an absolute path.
+    2. "Clean-room guard: Bash refused, it touches [the oracle-tooling directory] (oracle
+       tooling). [...]": the command writing two scratch scripts, whose comment named that
+       directory as one the export leaves out. The comment was rewritten so that it no longer
+       names the directory, and the scripts were written then.
+    3. The same refusal for a command filling in the report, whose text quoted refusal 2 in
+       full. The text was rewritten so that it no longer names the directory, and the report
+       was filled in then.
+  - Rebase:
+    - `git rebase origin/main` reported no conflict, but it put the C13 changelog entries under
+      a second `## 0.4.0` heading and dropped `## Unreleased`.
+    - The five commits were rebuilt by cherry-pick on `b8f389e`, with the heading fixed in the
+      first. The tree then differed from the pre-rebase `d0052d3` only by 0.4.0's version bump.
+    - `cargo test` of that tree: 426 passed.
+  - Work:
+    - The object iterators became opaque structs (`0211665`).
+    - Whole-value targets are found by a probe of their first request rather than by
+      `std::any::type_name` (`57dbf47`); the reasoning is in the report, §2.2.
+    - A test of decision 5 (`5b3abb3`) and its changelog entry under the breaking changes
+      (`b85d2c0`).
+    - `Cargo.toml`'s note on indexmap corrected (`74e42a4`).
+    - The overall-gain changelog entry (`7e1bcf5`).
+    - Nothing was reverted.
+  - Commits (on `b8f389e`): the first session's five rebased as `a8af71a`, `c177c24`, `6c53961`,
+    `aaa0360` and `03653ed`; this session's `0211665`, `57dbf47`, `5b3abb3`, `b85d2c0`,
+    `74e42a4`, `7e1bcf5`, and this entry. Not pushed; `main` untouched.
+  - Checks, on `74e42a4`, the last commit that changes code (later commits change only
+    `CHANGELOG.md` and this log):
+    - `cargo fmt --check` and clippy with `-D warnings` over every feature set of
+      `scripts/ci.sh`: clean.
+    - `cargo test`: 429 passed.
+    - Conformance unchanged: new core 1653/1649/4, emitters 1220/1216, readback as in C12.
+    - `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`: clean.
+    - `scripts/ci.sh`: 26 steps, exit 0.
+    - `scripts/ci.sh fuzz 300`: seed 1790595825541337000, 932,312 inputs, 930,743 agree, 1,569
+      skipped for allowed reasons, 0 differences, 0 findings, exit 0.
+    - After the login expired, the coordinator asked for `scripts/ci.sh` and the fuzz run to be
+      run, believing the fuzz run had not finished. Their logs showed both had finished on
+      `74e42a4` (13:43 and 13:48, exit 0), and nothing changed after them, so they were not
+      repeated.
+  - Measurements: bench binaries of `v0.3.0`, `ac64b1b` (the C13 start), `b8f389e` and `74e42a4`,
+    all with HEAD's `benches/` and criterion 0.8.2, run in turns for four rounds.
+    - The first pass overlapped other CPU-heavy tasks on the machine (the owner's note), so it
+      was stopped and repeated; its results are kept and not used.
+    - Allocation counts come from a counting allocator.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
