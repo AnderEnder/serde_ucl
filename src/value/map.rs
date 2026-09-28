@@ -222,22 +222,22 @@ impl<'a> Map<'a> {
 
     pub(crate) fn iter(&self) -> Iter<'_, 'a> {
         match self {
-            Map::Small(items) => Iter::Small(items.iter()),
-            Map::Large(map) => Iter::Large(map.iter()),
+            Map::Small(items) => Iter(IterForm::Small(items.iter())),
+            Map::Large(map) => Iter(IterForm::Large(map.iter())),
         }
     }
 
     pub(crate) fn iter_mut(&mut self) -> IterMut<'_, 'a> {
         match self {
-            Map::Small(items) => IterMut::Small(items.iter_mut()),
-            Map::Large(map) => IterMut::Large(map.iter_mut()),
+            Map::Small(items) => IterMut(IterMutForm::Small(items.iter_mut())),
+            Map::Large(map) => IterMut(IterMutForm::Large(map.iter_mut())),
         }
     }
 
     pub(crate) fn into_iter(self) -> IntoIter<'a> {
         match self {
-            Map::Small(items) => IntoIter::Small(items.into_iter()),
-            Map::Large(map) => IntoIter::Large(map.into_iter()),
+            Map::Small(items) => IntoIter(IntoIterForm::Small(items.into_iter())),
+            Map::Large(map) => IntoIter(IntoIterForm::Large(map.into_iter())),
         }
     }
 }
@@ -253,10 +253,12 @@ impl<'a> IntoIterator for Map<'a> {
 
 /// The keys and entries of an object, in insertion order.
 #[derive(Debug, Clone)]
-pub enum Iter<'v, 'a> {
-    #[doc(hidden)]
+pub struct Iter<'v, 'a>(IterForm<'v, 'a>);
+
+/// [`Iter`] over each form of [`Map`]; private, so that neither form is part of the API.
+#[derive(Debug, Clone)]
+enum IterForm<'v, 'a> {
     Small(std::slice::Iter<'v, (Str<'a>, Entry<'a>)>),
-    #[doc(hidden)]
     Large(indexmap::map::Iter<'v, Str<'a>, Entry<'a>>),
 }
 
@@ -264,25 +266,25 @@ impl<'v, 'a> Iterator for Iter<'v, 'a> {
     type Item = (&'v Str<'a>, &'v Entry<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Iter::Small(items) => items.next().map(|(k, e)| (k, e)),
-            Iter::Large(items) => items.next(),
+        match &mut self.0 {
+            IterForm::Small(items) => items.next().map(|(k, e)| (k, e)),
+            IterForm::Large(items) => items.next(),
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Iter::Small(items) => items.size_hint(),
-            Iter::Large(items) => items.size_hint(),
+        match &self.0 {
+            IterForm::Small(items) => items.size_hint(),
+            IterForm::Large(items) => items.size_hint(),
         }
     }
 }
 
 impl DoubleEndedIterator for Iter<'_, '_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self {
-            Iter::Small(items) => items.next_back().map(|(k, e)| (k, e)),
-            Iter::Large(items) => items.next_back(),
+        match &mut self.0 {
+            IterForm::Small(items) => items.next_back().map(|(k, e)| (k, e)),
+            IterForm::Large(items) => items.next_back(),
         }
     }
 }
@@ -293,10 +295,12 @@ impl FusedIterator for Iter<'_, '_> {}
 
 /// The keys and entries of an object, in insertion order, the entries mutable.
 #[derive(Debug)]
-pub enum IterMut<'v, 'a> {
-    #[doc(hidden)]
+pub struct IterMut<'v, 'a>(IterMutForm<'v, 'a>);
+
+/// [`IterMut`] over each form of [`Map`]; private, as [`IterForm`].
+#[derive(Debug)]
+enum IterMutForm<'v, 'a> {
     Small(std::slice::IterMut<'v, (Str<'a>, Entry<'a>)>),
-    #[doc(hidden)]
     Large(indexmap::map::IterMut<'v, Str<'a>, Entry<'a>>),
 }
 
@@ -304,25 +308,25 @@ impl<'v, 'a> Iterator for IterMut<'v, 'a> {
     type Item = (&'v Str<'a>, &'v mut Entry<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            IterMut::Small(items) => items.next().map(|(k, e)| (&*k, e)),
-            IterMut::Large(items) => items.next(),
+        match &mut self.0 {
+            IterMutForm::Small(items) => items.next().map(|(k, e)| (&*k, e)),
+            IterMutForm::Large(items) => items.next(),
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            IterMut::Small(items) => items.size_hint(),
-            IterMut::Large(items) => items.size_hint(),
+        match &self.0 {
+            IterMutForm::Small(items) => items.size_hint(),
+            IterMutForm::Large(items) => items.size_hint(),
         }
     }
 }
 
 impl DoubleEndedIterator for IterMut<'_, '_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self {
-            IterMut::Small(items) => items.next_back().map(|(k, e)| (&*k, e)),
-            IterMut::Large(items) => items.next_back(),
+        match &mut self.0 {
+            IterMutForm::Small(items) => items.next_back().map(|(k, e)| (&*k, e)),
+            IterMutForm::Large(items) => items.next_back(),
         }
     }
 }
@@ -333,10 +337,12 @@ impl FusedIterator for IterMut<'_, '_> {}
 
 /// The keys and entries of an object, by value, in insertion order.
 #[derive(Debug)]
-pub enum IntoIter<'a> {
-    #[doc(hidden)]
+pub struct IntoIter<'a>(IntoIterForm<'a>);
+
+/// [`IntoIter`] over each form of [`Map`]; private, as [`IterForm`].
+#[derive(Debug)]
+enum IntoIterForm<'a> {
     Small(std::vec::IntoIter<(Str<'a>, Entry<'a>)>),
-    #[doc(hidden)]
     Large(indexmap::map::IntoIter<Str<'a>, Entry<'a>>),
 }
 
@@ -344,25 +350,25 @@ impl<'a> Iterator for IntoIter<'a> {
     type Item = (Str<'a>, Entry<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            IntoIter::Small(items) => items.next(),
-            IntoIter::Large(items) => items.next(),
+        match &mut self.0 {
+            IntoIterForm::Small(items) => items.next(),
+            IntoIterForm::Large(items) => items.next(),
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            IntoIter::Small(items) => items.size_hint(),
-            IntoIter::Large(items) => items.size_hint(),
+        match &self.0 {
+            IntoIterForm::Small(items) => items.size_hint(),
+            IntoIterForm::Large(items) => items.size_hint(),
         }
     }
 }
 
 impl DoubleEndedIterator for IntoIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self {
-            IntoIter::Small(items) => items.next_back(),
-            IntoIter::Large(items) => items.next_back(),
+        match &mut self.0 {
+            IntoIterForm::Small(items) => items.next_back(),
+            IntoIterForm::Large(items) => items.next_back(),
         }
     }
 }

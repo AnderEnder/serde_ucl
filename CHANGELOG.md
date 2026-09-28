@@ -45,8 +45,9 @@ offers `visit_string`.
 - An object of up to 16 keys keeps them in a vector, searched in order, instead of a hash index
   (clean-room work item C13). `UclObject::iter`, `iter_mut`, `keys` and `entries`, and its
   `IntoIterator` implementations, return the crate's `value::Iter`, `IterMut`, `Keys`, `Entries`
-  and `IntoIter` instead of `indexmap`'s iterators. They give the same items in the same order,
-  and `indexmap` no longer appears in the crate's API.
+  and `IntoIter` instead of `indexmap`'s iterators. They are opaque structs, double-ended,
+  exact-size and fused, and give the same items in the same order; `indexmap` no longer appears
+  in the crate's API.
 
 ## 0.4.0 - 2026-09-27
 
