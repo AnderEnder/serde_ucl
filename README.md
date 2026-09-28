@@ -916,7 +916,8 @@ this version of serde_ucl, by libucl at the reference commit (CMake Release buil
 serde_json 1.0.151, on an Apple M4 Max with rustc 1.98.1 and the release settings of
 `Cargo.toml` (fat LTO, one codegen unit). The programs ran in turns for three rounds. Each time
 is the median of the rounds, each round the median of 31 samples of at least 5 ms of
-repetitions, and includes freeing the result.
+repetitions, and includes freeing the result. `scripts/bench-compare.sh` reproduces these tables
+(`tools/bench-compare/README.md`).
 
 Parsing into each library's value tree (`parse::parse`; libucl's `ucl_parser_add_chunk` and
 `ucl_parser_get_object`; `serde_json::Value`):
