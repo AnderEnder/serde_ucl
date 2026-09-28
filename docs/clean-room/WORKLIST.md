@@ -333,3 +333,11 @@ under these decisions:
    the standard library's.
 4. The report is `target/perf/C13-report.md`. It compares against the start of C13 and against
    0.3.0, and lists what was tried and reverted.
+5. Owner decision of 2026-09-28, on item 2 (zero-copy):
+   - Where a target asks for a `&str` (`deserialize_str`, and for keys also `deserialize_identifier`
+     and `deserialize_any`), visitors receive `visit_borrowed_str` for text that borrows from the
+     input.
+   - A hand-written visitor that implements only `visit_string` therefore no longer receives those
+     strings. This is accepted, as `serde_json` does the same, and it is listed under the breaking
+     changes in `CHANGELOG.md`.
+   - Otherwise, owned targets get the same values as before.
