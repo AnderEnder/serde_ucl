@@ -2889,3 +2889,54 @@
     in the README are unchanged.
   - Commits: `0ec83a3` (corpus), `fd3ba43` (comparison), and this entry, on branch `c14-spec` from
     `29f606f`. Not pushed.
+- 2026-09-28 — Role: implementation team (clean-implementer). Item: C14 item 1, the benchmark
+  documents (generator, fetch script, groups, check). Items 2 and 3 not started: item 2 is the
+  spec team's corpus, and the item 3 measurements wait for a quiet machine (coordinator's
+  instruction).
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `docs/clean-room/WORKLIST.md` (C11 to C15),
+    the end of this log; the released spec `spec-v13` through `git show` (§1, §2.1–§2.3, §3,
+    §4, §5.1–§5.8, §6), to write documents that are valid by construction; the crate's
+    `benches/`, `fuzz/README.md`, `fuzz/Cargo.toml`, `fuzz/src/main.rs` (`--check`),
+    `fuzz/src/generate.rs` (its `Rng`), `src/value.rs` and `src/value/string.rs` (the value
+    API), `src/lib.rs` (re-exports), `src/de.rs` (`from_str`), `tests/generated_documents.rs`,
+    `scripts/ci.sh`, `Cargo.toml`, `CHANGELOG.md`, `.gitignore`.
+  - Oracle: run as a black box only, through `ucl-differential --check`
+    (`target/libucl-oracle/ucl-dump`, already built).
+  - Network: `git ls-remote https://github.com/serde-rs/json-benchmark` (HEAD
+    `17b13dd2d7a5e5fdd5594e847077932f955b5e2b`) and the three files under `data/` at that
+    commit from raw.githubusercontent.com, with curl's default user agent (once a fixed string);
+    no personal data. Nothing from libucl's repository or a project that bundles it.
+  - Searches: `grep` over `benches/`, `tests/`, `src/` and `fuzz/src/`, and in the single files
+    `scripts/ci.sh`, `CHANGELOG.md` and `.gitignore`. Nothing under `~/.claude/` or
+    `/private/tmp/` was opened. Guard refusals: none.
+  - Work (`b483f3b`, `da4fefb`):
+    - `benches/common/irregular.rs`: seeded generator (SplitMix64, no new dependency). Section
+      sizes 0–3 (30 %), 4–15 (35 %), 16–40 (25 %), 41–120 (10 %); sections to depth 7 with
+      named sections, inline objects, JSON-style objects and nested arrays below; quoted strings
+      1 byte to 16 KB in seven alphabets, 40 % of double-quoted strings with escapes; keys in
+      twelve forms; every value form of `config(n)`. Benchmarked: seed 1 at 60 000 bytes
+      (78 466 bytes) and seed 2 at 600 000 bytes (639 049 bytes); `config(100)` has 50 571
+      bytes and `config(1000)` 510 495 (`da4fefb` corrects the docs, which said "about the
+      sizes").
+    - `benches/fetch-documents.sh`: pinned URLs, SHA-256 checks, download to `.part` then
+      rename, into `target/bench-corpus/`.
+    - `benches/common/files.rs`, the groups in `parse_benchmarks` and `serde_benchmarks`, and
+      `benches/check-documents.sh`; `tests/bench_documents.rs` (determinism, parse, variety,
+      digests); `benches/README.md`, `CHANGELOG.md`.
+  - Checks:
+    - `benches/check-documents.sh 20` and a separate run over 60 extra seeds: the two benchmark
+      documents, seeds 1000–1059 and the three JSON documents all `agree`, with libucl
+      accepting each one. No difference, so nothing for `QUESTIONS.md`. With a scratch corpus
+      holding a file that neither side accepts, the script reports it and exits 1.
+    - `benches/fetch-documents.sh`: a second run keeps the files; a copy with a wrong digest
+      removes the download and exits 1.
+    - `cargo fmt --check`, clippy `-D warnings`; `scripts/ci.sh`: 26 steps, exit 0.
+    - Short runs of the new groups, with `target/bench-corpus/` present and moved aside (the
+      groups skip with a message), and with a scratch corpus through `UCL_BENCH_CORPUS` (a
+      document that does not parse is skipped; metadata files are left out). `src/` is
+      unchanged, so no fuzz run was needed.
+  - Commits: `b483f3b`, `da4fefb` (comments only; the documents and digests are unchanged) and
+    this entry, on top of the coordinator's `f5a14a2` (WORKLIST C15 only), which landed during
+    the session. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
