@@ -87,11 +87,17 @@ run_libucl() {
 		"$CORPUS/composites.conf" "$CORPUS/scores.d/rbl_group.conf"
 }
 
+# The one-minute load average, printed with each run: other work on the machine makes rounds
+# disagree, so a high load means the results should be run again.
+load() {
+	if [ -r /proc/loadavg ]; then cut -d' ' -f1 /proc/loadavg; else sysctl -n vm.loadavg | awk '{print $2}'; fi
+}
+
 round=1
 while [ "$round" -le "$ROUNDS" ]; do
 	if [ $((round % 2)) -eq 1 ]; then order="rust libucl"; else order="libucl rust"; fi
 	for tool in $order; do
-		echo "round $round of $ROUNDS: $tool" >&2
+		echo "round $round of $ROUNDS: $tool (load $(load))" >&2
 		"run_$tool" | sed "s/^/$round|/" >>"$RESULTS"
 	done
 	round=$((round + 1))
