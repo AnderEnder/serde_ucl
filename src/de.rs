@@ -308,6 +308,11 @@ impl<'de> FirstRequest<'_, 'de> {
     }
 
     /// The document parsed into a value that borrows from the input.
+    ///
+    /// Inlined, with [`record`] and [`parse_borrowed`], into each request that parses, so that
+    /// the parser's entry is inlined there too: without it, `from_str` of a three-entry
+    /// document into a typed struct took 2% to 3% longer (C13 measurements).
+    #[inline(always)]
     fn borrowed(self) -> Result<ValueDeserializer<'de, false>, UclError> {
         let result = parse_borrowed(self.parser, self.source);
         record(self.parsed, result, true).map(ValueDeserializer::borrowed)
@@ -316,6 +321,7 @@ impl<'de> FirstRequest<'_, 'de> {
 
 /// Records the outcome of the parse of a [`FirstRequest`] in `parsed`. On failure the error is
 /// kept for the entry point, and the target gets a copy.
+#[inline(always)]
 fn record<V>(
     parsed: &mut Parsed,
     result: Result<V, crate::parse::Error>,
@@ -347,6 +353,7 @@ fn parse_owned(
 }
 
 /// `source` parsed into a value that borrows from its input.
+#[inline(always)]
 fn parse_borrowed<'de>(
     parser: &mut Parser,
     source: &Source<'de>,
