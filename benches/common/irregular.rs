@@ -38,8 +38,9 @@
 
 use std::fmt::Write;
 
-/// The irregular documents of the benchmarks: their name, seed and least size in bytes. The
-/// sizes are about those of `config(100)` and `config(1000)`.
+/// The irregular documents of the benchmarks: their name, seed and least size in bytes. They
+/// have 78 466 and 639 049 bytes, somewhat more than `config(100)` (50 571) and `config(1000)`
+/// (510 495).
 pub const IRREGULAR: [(&str, u64, usize); 2] = [("60k", 1, 60_000), ("600k", 2, 600_000)];
 
 /// An irregular configuration of at least `size` bytes, the same for the same `seed` and
