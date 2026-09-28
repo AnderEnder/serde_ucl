@@ -61,11 +61,11 @@ method a borrowed string reaches changes, which breaks visitors that implement o
 ### Faster parsing and deserialization
 
 Parsing is 7% to 31% faster than in 0.4.0, deserialization 14% to 33%, and serializing the
-benchmarks' typed configuration 22% to 30% (clean-room work item C13). The gains come from three changes: objects of up to 16 keys keep
-their keys in a vector, a parse no longer copies its file variables and base directory, and
-the serde entry points borrow keys and strings from the input. On an Apple M4 Max, with the
-crate's benchmarks (0.3.0, 0.4.0 and this version measured in the same runs, so the 0.4.0
-figures differ from those in its own entry):
+benchmarks' typed configuration 22% to 30% (clean-room work item C13). The gains come from three
+changes: objects of up to 16 keys keep their keys in a vector, a parse no longer copies its file
+variables and base directory, and the serde entry points borrow keys and strings from the input.
+On an Apple M4 Max, with the crate's benchmarks (0.3.0, 0.4.0 and this version measured in the
+same runs, so the 0.4.0 figures differ from those in its own entry):
 - `Parser::parse` of the 1000-service configuration takes 2.24 ms instead of 2.52 ms (5.04 ms in
   0.3.0), and of the 1000-record JSON document 1.38 ms instead of 1.69 ms (2.84 ms).
 - `from_str` of the configuration into a typed struct takes 2.19 ms instead of 2.79 ms
