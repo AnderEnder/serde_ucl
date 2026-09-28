@@ -13,11 +13,17 @@ The script:
    `target/libucl-oracle/libucl` or cloning it (`LIBUCL_DIR`, `LIBUCL_COMMIT` override);
 2. builds `lucl.c` against it (`-O3`), and this package with the crate's release settings (fat
    LTO, one codegen unit);
-3. writes the benchmarks' generated documents (`benches/common/mod.rs`, which this package
+3. builds a second copy of this package against the previous release, the latest `v*` tag
+   reachable from HEAD (`BASELINE` overrides it; `BASELINE=none` leaves it out), taken from git
+   with `git archive`; the copy uses this tree's documents module, so both time the same
+   documents, and runs as `serde_ucl@VERSION`, without serde_json;
+4. writes the benchmarks' generated documents (`benches/common/mod.rs`, which this package
    includes as a module) to `target/bench-compare/documents/`;
-4. runs `bench-compare run` and `lucl` in turns for ROUNDS rounds, the order swapped each round,
-   and appends their lines to `target/bench-compare/results.txt`;
-5. prints the medians over the rounds as the README's tables (`bench-compare summarize`).
+5. runs this package, the copy and `lucl` in turns for ROUNDS rounds, the order rotated by one
+   each round, and appends their lines to `target/bench-compare/results.txt`, printing the load
+   with each run;
+6. prints the medians over the rounds as tables (`bench-compare summarize`): this version, the
+   previous release with the change against it, libucl and serde_json.
 
 What is timed, each the median of 31 samples of at least 5 ms of repetitions:
 
