@@ -3746,3 +3746,25 @@
   - Verdict: no Critical or Important defect found. The four-line source recognizer proves that the dropped comment precedes the distinct later value; it requires exact flags and one dropped comment. It changes only that later value's duplicate comment list, then requires whole-dump equality. The earlier-value negative and changed-comment, changed-value and extra-entry controls remain differences. Other corpus documents lack this exact flagged source shape and their tests pass.
   - Commits: this log entry only, on `c14-comments-v16`. Not merged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` VALUE before an ignored macro name.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §§7.1, 9.2, 12.2 and 13.2, own `fuzz/src/`, the saved
+    finding `values-differ-721c495bc7cf91fb`, and black-box oracle runs.
+  - Work: on isolated branch `c14-emit-eof` from `436db65`, classified only
+    `.emit r $ABI` followed by terminal `.s`, optionally after one simple
+    literal entry. The source and exact flags prove that the variable expands
+    in VALUE and that `.s` adds no entry. The crate result must retain `r` and
+    `unknown`; only same-length oracle key and string bytes may differ, and
+    the complete normalized dump must then agree. Changed crate values or
+    keys, a changed prefix, extra entries, ARGUMENTS or comment variables,
+    and content after `.s` remain reportable.
+  - Checks: the focused saved-shape test failed before the classifier change
+    and passed after; all 23 fuzz unit tests and `scripts/ci.sh` passed;
+    release-build replay of the saved finding exited 0 as `skipped: uncertain:
+    expanded .emit text under zerocopy (§12.2)`; `git diff --check` passed.
+    No full fuzz run was requested or performed for this isolated follow-up.
+  - Commits: the following `fix(fuzz): classify expanded emit before ignored macro name`
+    commit on `c14-emit-eof`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
