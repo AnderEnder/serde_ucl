@@ -3680,3 +3680,9 @@
     commit on `c14-comments-v16`. Not merged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 isolated spec-v16 §12.5 fuzzer review (`7a90c8f..7c09e52`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §12.5, the implementation-owned `fuzz/src/` diff and C14 LOG entry, and the preserved reduced §12.5 finding under `target/perf/c14/findings/`. The oracle was used only as a black box through its built executable; no forbidden input was read.
+  - Checks: all 22 fuzzer unit tests, three conformance tests, five benchmark-document/corpus tests and scoped `git diff --check` passed. A release fuzzer replay of the exact saved input and flags returned `skipped: uncertain: comments of a replaced value (§12.5)`. The implementer LOG records a passing `scripts/ci.sh` run; no full fuzz run was made in this review.
+  - Verdict: no Critical or Important defect found. The four-line source recognizer proves that the dropped comment precedes the distinct later value; it requires exact flags and one dropped comment. It changes only that later value's duplicate comment list, then requires whole-dump equality. The earlier-value negative and changed-comment, changed-value and extra-entry controls remain differences. Other corpus documents lack this exact flagged source shape and their tests pass.
+  - Commits: this log entry only, on `c14-comments-v16`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
