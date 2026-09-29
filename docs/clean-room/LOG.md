@@ -3637,3 +3637,24 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (draft). Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §§9.4 and 9.5, the saved C14 input and report, existing
+    glob and parameter-prefix conformance cases, the pinned oracle and its
+    source, and black-box controls. No Claude Code sessions or memory were read.
+  - Work: reproduced `.include(g=true,t=true) "/.*"` as an oracle error on a
+    host where the pattern matches unreadable regular `/.file`. Full parameter
+    names and direct inclusion of that file gave the same error. Controlled
+    unreadable hidden and ordinary regular files also errored for direct and
+    glob optional includes and `.try_include`; missing files and directories
+    were skipped. Drafted the missing §9.4 read-denial row and answered #82.
+    The exact root pattern depends on host files and permissions, so no
+    portable golden case was added. No implementation or fuzz file was edited.
+  - Checks: pinned-oracle controls above, `cargo test --test conformance`
+    passed all three tests, and `git diff --check` passed.
+  - Commits: the following `docs(spec): draft C14 unreadable include rule`
+    commit on `c14/spec80`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names
+    or source structure.
