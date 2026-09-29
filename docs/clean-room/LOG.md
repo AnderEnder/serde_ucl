@@ -3375,3 +3375,28 @@
   - Attestation: the draft spec, question answer, cases and this log contain
     observable behavior only, with no libucl code, pseudo-code, internal names
     or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v14 §9.4, the `a76fbe1..897fb6e` draft diff, question #80,
+    the six new conformance inputs, flags and goldens, their included fixture,
+    `tests/conformance/README.md`, and black-box runs of the pinned oracle. No
+    libucl source, implementation or fuzzer source, or Claude sessions or
+    memory were read.
+  - Review: changes requested for corpus documentation only. The earlier
+    protocol finding is addressed by a draft §9.4 answer awaiting independent
+    review and release; the earlier case finding is addressed by three pending
+    oracle-acceptance cases with goldens and three active rejection controls.
+    The exception describes observable behavior, cites each case, and leaves
+    untested combinations open. The case counts are correct: 1,657 active and
+    three pending. All six typed goldens matched fresh pinned-oracle runs; a
+    three-directory probe also found the first matching later file as described.
+    But `tests/conformance/README.md` still says `pending/` has no cases and
+    requires a pending README that is absent; its layout description must be
+    brought up to date. Also the coverage table in `docs/spec/README.md` claims
+    to map every case, yet omits the six new case IDs; add their §9 mappings.
+  - Checks: six typed-golden comparisons with the pinned oracle and scoped
+    `git diff --check`; no implementation tests were run in this re-review.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
