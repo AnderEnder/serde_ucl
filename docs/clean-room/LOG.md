@@ -4077,3 +4077,46 @@
     of that tool (load 3.74 to 4.44).
   - Commits: `522a8e2`, `9c8a486`, `2757ae7`, and the following commit with question #83, two
     rows of `docs/COMPATIBILITY.md` and this entry.
+
+- 2026-09-30 — Role: spec team (classification). Item: C14 priority on expanded `.emit` under released spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v17 §§8.3, 8.7, 9.2, 12.2 and 13.2, the saved finding's input,
+    flags and typed report, priority and registered-macro conformance cases,
+    pinned libucl source, and pinned-oracle black-box controls. No Claude Code
+    sessions or memory were read.
+  - Work: classified `n I⏎.emit l=$ABI⏎.s` at `priority:3` with
+    `zerocopy`, `registered-macros` and `string-input`. The emitted key and
+    string differ within the existing §12.2 uncertainty. The terminal `.s`
+    adds nothing: omitting it gave the same typed values in the oracle. The
+    oracle root had priority 3, while the crate's root dump omitted it; that
+    omission also occurred for plain `n I`, a terminal `.s` alone, a literal
+    `.emit` VALUE, and expanded `.emit` without `zerocopy`. In all four stable
+    controls, both sides had priority 3 on the child values and the differential
+    comparison reported agreement. A `.ctx` copy of a root created at priority
+    3 carried priority 3 in both parsers, with and without `zerocopy`. §8.7
+    states that the outer root priority has no effect on the result except
+    through such a copy, so this finding needs no parser change or new spec
+    answer. No normative spec, conformance, or fuzzer file changed.
+  - Checks: saved finding and narrow controls with the pinned oracle and
+    differential checker; scoped `git diff --check`.
+  - Commit: the following classification commit on
+    `c14/spec-priority-finding`; not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: coordinator (oracle side). Item: C14 leftovers after release 0.6.0.
+  - Inputs consulted: the local worktrees and clones left by C14, their branches, their
+    uncommitted changes and file times, and the saved fuzzer findings.
+  - The clone `c14-spec-priority`, cloned from the implementer clone `c14-emit-vt`, holds the
+    spec-team classification above (`a96000f`, 2026-09-30 00:17:54 +0200), whose session
+    consulted pinned libucl source. `c14-emit-vt` held an uncommitted edit of
+    `fuzz/src/uncertain.rs`, last modified at 00:19:16 +0200, with no log entry. It is committed
+    unreviewed to the local branch `quarantine/c14-emit-priority` (`be61c09`), which is not
+    pushed and not an input for implementation. The classification is carried over here.
+  - The finding of that clone, `values-differ-0bdbfbd65e9562d3` (`priority:3`), and the three
+    that the coordinator entry on PR #20 names are kept under `target/fuzz-differential/findings/`
+    of the main checkout. The classifier work for the three `.emit` findings goes to a fresh
+    implementer, and question #83 to the spec team.
+  - Removed: the C14 worktrees and clones whose work is on `main`; a duplicate of the
+    vertical-tab classification entry, which `main` has, was discarded.
+  - Commit: the following commit with this entry and the classification above.
