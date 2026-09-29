@@ -151,17 +151,34 @@ fn bench_irregular(c: &mut Criterion) {
     }
 }
 
-/// A group per JSON document, named `<prefix>-<document>`. A document that does not
-/// deserialize is skipped with a message.
+/// One serde_ucl and one serde_json group per JSON document. A document that does not
+/// deserialize with either crate is skipped with a message.
 fn bench_documents(c: &mut Criterion, prefix: &str, documents: Vec<common::Document>) {
     for document in documents {
         if let Err(e) = serde_ucl::from_str::<UclValue>(&document.text) {
             eprintln!("{prefix}: skipping {}: {e}", document.path.display());
             continue;
         }
+        if let Err(e) = serde_json::from_str::<serde_json::Value>(&document.text) {
+            eprintln!(
+                "{prefix}: skipping {}: serde_json: {e}",
+                document.path.display()
+            );
+            continue;
+        }
         let mut group = c.benchmark_group(format!("{prefix}-{}", document.name));
         group.throughput(Throughput::Bytes(document.text.len() as u64));
         untyped(&mut group, &document.text);
+        group.finish();
+
+        let mut group = c.benchmark_group(format!("serde_json/json-corpus-{}", document.name));
+        group.throughput(Throughput::Bytes(document.text.len() as u64));
+        group.bench_function("Value", |b| {
+            b.iter(|| serde_json::from_str::<serde_json::Value>(black_box(&document.text)).unwrap())
+        });
+        group.bench_function("IgnoredAny", |b| {
+            b.iter(|| serde_json::from_str::<IgnoredAny>(black_box(&document.text)).unwrap())
+        });
         group.finish();
     }
 }
