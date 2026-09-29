@@ -3480,3 +3480,32 @@
     commit on `c14/spec80`. No tag or push.
   - Attestation: the question answer and this log contain observable behavior
     only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #81.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `ff1af40^..ff1af40` question and log diff, released spec-v15 §12.5,
+    the named comment conformance input, flags and golden, and pinned-oracle
+    black-box runs of the exact question input and seven controls. The saved
+    C14 finding under `target/perf/c14/` was not present in this worktree.
+    No libucl source, implementation or fuzzer source, or Claude sessions or
+    memory were read.
+  - Review: changes requested on protocol grounds. The oracle returned the
+    exact `rewrite`, `dump-comments`, `string-input`, `no-filevars` result
+    recorded in #81: `k` had two before-comments, while `a` had no saved
+    comment. `append`, `merge`, removing the first comment, removing the
+    replacement, distinct earlier comment text, removing the final comment,
+    and an unrelated earlier value with the same comment text gave the stated
+    controls. Released §12.5 already classifies a replaced value's comment
+    reappearing on a later value as uncertain; the proposed difference boundary
+    does not broaden that rule, and an oracle golden for this undefined outcome
+    is not needed. However, `docs/clean-room/PROTOCOL.md` requires answers to
+    implementer questions to land in a new reviewed and tagged spec version,
+    never as code or hints. #81's resolved answer and fuzzer allowance appear
+    only in `QUESTIONS.md` after spec-v15, with no new release proposed. A pure
+    duplicate classification could cite spec-v15 without adding normative or
+    implementation guidance; otherwise the answer needs the normal release.
+  - Checks: exact and seven control black-box oracle outputs; scoped
+    `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
