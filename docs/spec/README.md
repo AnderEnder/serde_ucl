@@ -206,10 +206,11 @@ answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58
 §13 for several inputs and registered macros, `spec-v11` answers #59 (the rules where inputs
 join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, and `spec-v13`
 answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79, found during
-C14's differential fuzzing (§12.2 and §13.2).
+C14's differential fuzzing (§12.2 and §13.2). A draft for #80 adds a §9.4 exception; it is
+pending independent review and has not been released.
 
-The cases of `spec-v13` are all in `cases/spec/`; `tests/conformance/pending/` was removed when the
-crate followed them (C10a).
+The cases of `spec-v13` are all in `cases/spec/`. The C14 draft for question #80 has three cases
+under `tests/conformance/pending/09-macros/` until the crate follows its §9.4 rule.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
 check (`tests/conformance/README.md`, *Golden files per platform*). The files next to each case
@@ -238,8 +239,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1654 cases in `cases/` and
-`libucl/`.
+Every case in `tests/conformance/` and the section(s) that explain it: 1657 cases in `cases/` and
+`libucl/`, plus three pending C14 cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the

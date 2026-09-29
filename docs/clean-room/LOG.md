@@ -3355,3 +3355,27 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #80.
+  - Inputs consulted: the independent review at `a76fbe1`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, C14 in `WORKLIST.md`, question #80, released
+    spec-v14 §9.4, the named include-path and URL conformance cases, the pinned
+    oracle and its source, and `scripts/regen-golden.sh` for the golden procedure.
+    No Claude Code sessions or memory were read.
+  - Work: superseded the first ruling after the review and coordinator's decision
+    to match the stable oracle result. Drafted a narrow §9.4 exception for a
+    first-directory miss, a matching later directory, and a subsequent skipped
+    URL include. Added three pending acceptance cases for file and string input,
+    both skippable URL macro forms, and an intervening entry; added three active
+    rejection controls. Generated every new golden from the pinned oracle, updated
+    #80, and corrected the spec index and case counts. Other combinations remain
+    unspecified pending evidence. No implementation-owned file was edited.
+  - Checks: fresh pinned-oracle runs matched all six new typed goldens and all
+    output goldens for the three accepted cases; active case count 1,657 and
+    pending case count 3; `cargo test --test conformance` passed all three tests;
+    `git diff --check` passed.
+  - Commits: the following `docs(spec): draft C14 include-path exception` commit
+    on `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names
+    or source structure.

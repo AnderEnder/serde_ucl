@@ -849,13 +849,28 @@ project*. libucl behaves as follows:
   - The list stays in effect for every later include of the whole parse, with or without `path`
     (`include_path_persists`).
   - While a list is in effect, each path is tried as `DIR/PATH`, absolute paths included, for
-    the directories in order. For `.include`, the first directory decides: if the file is missing
-    there, that is an error at once (`include_path_first_dir`,
+    the directories in order. For `.include`, the first directory normally decides: if the file
+    is missing there, the document is an error (`include_path_first_dir`,
     `include_path_missing_in_first_dir_error`), and with `try=true` it is skipped without looking
     further (`include_path_try_first_dir_only`). `.try_include` does search: the first directory
     that has the file is used (`try_include_path_searches_all_dirs`), and a file found in none of
     them is an error, not a silent stop (`try_include_path_missing_error`). An empty list makes
     every include an error (`include_path_empty_array_error`).
+  - **Quirk: a later skipped URL include.** If the first directory of a `.include` without
+    `try=true` or `glob=true` lacks the file but a later directory has it, and a subsequent
+    `.include(try=true, url=true)` or `.try_include(url=true)` has `://` in its path and is
+    skipped, the document is accepted with the later directory's file included. Entries between
+    the two macros and after the URL macro are read too
+    (`include_path_first_miss_then_url_try_accepts_later`,
+    `include_path_first_miss_then_try_include_url_accepts_later`). This holds whether the
+    document is given as a file or as text
+    (`include_path_first_miss_then_url_try_accepts_later_file_input`). Without a matching later
+    directory, or when the later URL include is not skippable, the document is an error
+    (`include_path_first_miss_then_url_try_no_later_file`,
+    `include_path_first_miss_then_url_error`). A later optional ordinary file include does not
+    change the first-directory error (`include_path_first_miss_then_optional_file_error`). The
+    ordinary first-directory rule above applies otherwise. These cases do not establish an
+    exception for other later macros or other kinds of file failure.
   - With `glob=true`, the pattern is expanded in every directory, and all matches are included
     (`include_path_glob_all_dirs`). Without `try=true`, `.include` then fails when the **last**
     directory has no match, whatever the others had (`include_path_glob_last_dir_must_match_error`).
