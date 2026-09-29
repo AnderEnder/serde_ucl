@@ -3109,3 +3109,95 @@
   - Commits: this log entry only, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, `QUESTIONS.md`
+    #79 and C14 `WORKLIST.md`; released `spec-v13` §§12.2 and 13.2; the oracle's public
+    options and test-macro setup in `tools/ucl-dump/`; pinned libucl source at
+    `24c8b399062ae4691168c243e3b7345ef7f31956` (spec team only). I did not read
+    Claude Code sessions or memory, or implementation source.
+  - Reproduction: built the pinned oracle in this worktree's ignored `target/`, wrote
+    temporary inputs under `target/libucl-oracle/probes/`, and ran each against
+    `ucl-dump -R -S`, with and without `-z`, from that directory. For `.emit $CURDIR 2`,
+    20/20 runs without `-z` gave the same expanded path key and `int 2`; 20/20 with `-z`
+    gave distinct non-UTF-8 keys of the path's byte length and `int 2`. For
+    `.emit k = $ABI`, `-z` changed both the literal key and string value. Controls
+    `k = $ABI`, `.seen $ABI`, and `.emit k = stable` under `-z` retained the expected
+    bytes in 12/12 runs each. A registered `$MYVAR=abc` expansion in `.emit $MYVAR 2`
+    also changed the key; `.emit k = $NUM` with `$NUM=2` changed the literal key.
+  - Finding: the oracle's bytes for keys and strings from variable-expanded `.emit`
+    text under `zerocopy` are undefined. The project may retain the expanded bytes.
+    No golden case was added because the oracle result is not stable. A fuzzer skip
+    is justified only when `zerocopy` is set, a registered `.emit` VALUE actually
+    expands a variable, and its parsed text supplies a key or string value to the
+    result. This is a draft answer pending independent spec review and release.
+  - Work: drafted behavior-only amendments to §§12.2 and 13.2 and an answer to #79.
+    I inadvertently sent the coordinator a source-derived mechanism in an interim
+    message; I immediately flagged the clean-room exposure and instructed any
+    implementation-role recipient to follow the protocol. No such detail appears
+    in the spec or question answer.
+  - Commits: the following spec-team draft commit on `c14/spec79`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: spec team (same participant). Item: C14 question #79, independent
+  review follow-up.
+  - Inputs consulted: the independent review request; current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, §§12.2 and 13.2, the conformance corpus layout and
+    `scripts/regen-golden.sh`; the pinned oracle built in this spec-team worktree.
+  - Work: added `zerocopy_registered_macros_stable` with `zerocopy`,
+    `registered-macros` and `string-input`. Its input combines direct `$ABI` expansion,
+    `.seen $ABI`, and `.emit` of literal text. The case establishes the stable boundary
+    of the undefined result in §12.2; its five golden files came solely from the pinned
+    `ucl-dump` oracle. No golden file was made for expanded `.emit` text under `zerocopy`.
+  - Checks: 20 oracle runs were byte-identical for each of the typed, config, JSON,
+    compact JSON and YAML outputs; `cargo test --test conformance` passed all three
+    conformance tests. `git diff --check` passed.
+  - Commits: `57fb924` (initial spec draft) and the following stable-control commit on
+    `c14/spec79`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md` and
+    `QUESTIONS.md` #79; released `spec-v13` §§7, 12.2 and 13.2; diff
+    `da65b1a..57fb924` limited to `docs/spec/12-flags.md`,
+    `docs/spec/13-inputs-and-macros.md`, `docs/clean-room/QUESTIONS.md` and this log;
+    named conformance case inputs and flags for `zerocopy_no_effect` and
+    `macro_registered_value_variables`; the pinned `ucl-dump` binary as a black box.
+  - Verdict: changes requested before release. The draft states observable behavior,
+    contains no libucl internal names, source structure, pseudo-code or mechanism, and
+    does not conflict with the released variable or registered-macro rules. The
+    unstable output needs no golden case. However, the stable controls and the limit
+    of the uncertainty have no conformance case combining `zerocopy` with
+    `registered-macros`. Add a reproducible control case and cite it in §12.2 before
+    release, as `PROTOCOL.md` requires case evidence for spec rules. The existing
+    `zerocopy_no_effect` and `macro_registered_value_variables` cases exercise the
+    two features separately. A black-box check of `.emit k = $NUM` with `-R -S -z`
+    and `-v NUM=2` independently returned a NUL key, consistent with the draft's
+    example of possible affected bytes.
+  - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
+  - Attestation: I did not read libucl source code, implementation `src/`, Claude
+    Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79,
+  scoped re-review of `f5232b2..07f117d`.
+  - Inputs consulted: the scoped diff in §12.2, `QUESTIONS.md`, this log and the new
+    `zerocopy_registered_macros_stable` case; the pinned `ucl-dump` binary as a black box.
+  - Verdict: approved. The case combines `zerocopy`, `registered-macros` and
+    `string-input`, pins the three stable controls, and is cited in §12.2. Its typed
+    golden matched an independent oracle run; `git diff --check` passed. The prior
+    finding is resolved, and the diff adds no prohibited content or spec conflict.
+  - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
+  - Attestation: I did not read libucl source code, implementation `src/`, Claude
+    Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
+- 2026-09-29 — Role: spec team (release). Item: C14 question #79, spec-v14.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    `QUESTIONS.md` #79, the approved v14 draft in `docs/spec/`, the stable control case
+    and oracle goldens, and the independent reviewer entries in this log.
+  - Work: after independent approval, updated the spec index for #79 and the new
+    case count, then committed and locally tagged the reviewed behavior as `spec-v14`.
+    The undefined oracle result has no golden file.
+  - Checks: latest previous spec tag was `spec-v13`; `cargo test --test conformance`
+    passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v14` commit on `c14/spec79`,
+    tagged locally as `spec-v14`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
