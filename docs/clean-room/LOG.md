@@ -3695,3 +3695,26 @@
     commit on `c14/activate-spec15`. Not pushed; independent review pending.
   - Attestation: this case move and documentation contain observable behavior
     only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 spec-v15 case activation.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `e22cadd..61ecc520` activation diff, the three moved case inputs,
+    flags and goldens, the active include fixture, both corpus and spec index
+    READMEs, and the pinned oracle only as a black box. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. Git records all 20 case, flag and golden files as
+    byte-identical renames from `pending/09-macros/` into `cases/spec/09-macros/`.
+    The removed pending `pa.inc` fixture has the same blob ID as the active
+    fixture. All three new active IDs occur once in the §9 coverage table;
+    its count of 1,660 active cases is correct, and the pending directory is
+    absent. The corpus README now describes that state. The move changes no
+    spec rule, implementation file or fuzzer file, and follows the pending
+    case move procedure. No new finding.
+  - Checks: fresh pinned-oracle output matched all three typed goldens and
+    all 12 emitter goldens byte for byte; `cargo test --test conformance`
+    passed all three tests; scoped `git diff --check`, case counts, blob IDs
+    and index occurrence counts passed.
+  - Commits: this reviewer log entry only on `c14/activate-spec15`. Not tagged
+    or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
