@@ -3092,3 +3092,20 @@
   - Commits: the following C14 fuzzer/documentation commit, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 fuzz-gate
+  follow-up (`da65b1a..a761284`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, the review diff, released `spec-v13` §7.7 and annotated
+    `spec-v14` §§12.2 and 13.2, `fuzz/src/run.rs` and `fuzz/src/uncertain.rs`, focused
+    tests, the C14 report, saved reduced findings, and implementation-side fuzz logs.
+    The oracle was used only as a black box.
+  - Checks: all 12 fuzzer unit tests passed. Replaying the two exact prior findings with the
+    current release fuzzer classified them as the specific §7.7 and §12.2 uncertainties.
+    The recorded final `scripts/ci.sh` completed 26 steps, and `fuzz 300` exited 0 after
+    1,101,512 inputs with zero findings. `git diff --check` passed.
+  - Verdict: the prior Important five-minute fuzz-gate finding is addressed. Both skips are
+    bounded by their released uncertainty rules; the tests leave unrelated flags, values,
+    lengths and extra entries visible. No new Critical or Important finding.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
