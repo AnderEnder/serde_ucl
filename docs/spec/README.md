@@ -205,7 +205,8 @@ specifies the config output with saved comments. `spec-v7` answers #50–#54, `s
 answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58 and adds
 §13 for several inputs and registered macros, `spec-v11` answers #59 (the rules where inputs
 join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, and `spec-v13`
-answers #70–#78, found by the fuzzer after `spec-v12`.
+answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79, found during
+C14's differential fuzzing (§12.2 and §13.2).
 
 The cases of `spec-v13` are all in `cases/spec/`; `tests/conformance/pending/` was removed when the
 crate followed them (C10a).
@@ -225,6 +226,8 @@ the project*.
 
 Two §13 rules have no case: a `{` after a zero-byte first input crashes libucl, and the file
 variables that an input given as a file sets would put the checkout path into the golden file.
+The undefined result for variable-expanded `.emit` text under `zerocopy` (§12.2) has no golden;
+`zerocopy_registered_macros_stable` covers its stable boundary.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
@@ -235,7 +238,7 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1653 cases in `cases/` and
+Every case in `tests/conformance/` and the section(s) that explain it: 1654 cases in `cases/` and
 `libucl/`.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.

@@ -58,7 +58,18 @@ key, so they form multi-value entries (`key_lowercase_merges_case`, §8.6).
 
 ## 12.2 `zerocopy`
 
-No observable effect on the value tree (`zerocopy_no_effect`).
+Ordinary input has no observable change to the value tree (`zerocopy_no_effect`).
+
+**Uncertain (undefined in libucl):** with `zerocopy`, when a registered `.emit` macro's VALUE
+contains a variable that expands and the resulting text is parsed in place (§13.2), keys and
+string values made from that text need not retain their input bytes. The affected bytes may be
+NUL, non-UTF-8 or different between runs. This includes literal text around the variable:
+`.emit $CURDIR 2` gives the expanded `CURDIR` as the key of `int 2` without `zerocopy`, but
+under `zerocopy` repeated oracle runs gave different non-UTF-8 keys of the same length;
+`.emit k = $ABI` gave a changed `k` and a changed string value. With `zerocopy`, direct
+`direct = $ABI`, `.seen $ABI`, and `.emit literal = stable` kept their expected bytes in the
+oracle (`zerocopy_registered_macros_stable`).
+The project keeps the expanded text's bytes. There is no golden case for the undefined result.
 
 ## 12.3 `no-time`
 
