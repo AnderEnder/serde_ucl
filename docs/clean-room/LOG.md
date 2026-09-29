@@ -3454,3 +3454,25 @@
     tagged locally as `spec-v15`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code,
     pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: spec team (fresh question). Item: C14 question #81.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v15 §12.5, the existing comment conformance cases, the saved
+    C14 finding's input, flags and typed dumps under `target/perf/c14/`, the
+    pinned oracle and its source, and black-box control runs. No Claude Code
+    sessions or memory were read.
+  - Work: reproduced the exact `rewrite`, `dump-comments`, `string-input`,
+    `no-filevars` finding. The oracle gives the later `k` two before-comments;
+    without the replaced value's comment or without the replacement, it gives
+    one after-comment. Distinct comment texts show the earlier comment before
+    `k`'s own, and an unrelated earlier value with the same text keeps its own
+    comment without changing `k`. Answered #81 as already covered by the
+    released §12.5 uncertainty: the crate may retain only `k`'s own comment.
+    No spec amendment or golden case is needed; a fuzzer allowance must be
+    confined to comments of a replaced value on a later value.
+  - Checks: repeated the exact pinned-oracle result and asserted seven black-box
+    control outputs; `git diff --check` passed.
+  - Commits: the following `docs(clean-room): resolve C14 duplicate-comment question`
+    commit on `c14/spec80`. No tag or push.
+  - Attestation: the question answer and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
