@@ -3275,3 +3275,20 @@
   - Commits: the following C14 review-fix commit on `libucl-compat`. Not pushed.
   - Attestation: this spec-side tooling and documentation contain observable benchmark
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent spec-side reviewer. Item: C14 comparison re-review.
+  - Inputs consulted: the `fc955c5` review, `review-fc955c5..2e90d6b.diff`, current
+    comparison tooling and README, the benchmark corpus settings, and the saved corrected
+    three-round run under `target/bench-compare/`. No Claude Code sessions or memory read.
+  - Checks: `sh -n scripts/bench-compare.sh`; re-summarized `results.txt` and matched every
+    README table row; verified the saved truncated round is rejected; inspected the injected
+    failure log; `UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture`
+    passed 3 tests and confirmed 1654/1650 parse and 1221/1217 output counts;
+    `git diff --check fc955c5..2e90d6b` passed.
+  - Verdict: all three findings addressed. Rust and libucl corpus settings now align with
+    the benchmark setup; tool failures stop the script without replacing complete results,
+    and incomplete rounds are rejected; README conformance counts are current. No new
+    breakage found in the scoped fix diff. No implementation files changed in this review.
+  - Commits: this log-only re-review commit. Not pushed.
+  - Attestation: this review and log contain observable benchmark behavior only, with no
+    libucl code, pseudo-code, internal names or source structure.
