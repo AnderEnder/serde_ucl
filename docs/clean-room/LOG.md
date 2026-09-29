@@ -3237,3 +3237,20 @@
     `libucl-compat`. Not pushed.
   - Attestation: this spec-side tooling and documentation contain observable benchmark
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent spec-side reviewer. Item: C14 benchmark comparison.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, `tools/bench-compare/README.md`, the README comparison, the
+    `review-bb8328b..269ac64.diff` package, spec-team comparison tooling, the saved
+    `target/bench-compare/` run, and the benchmark document and parser settings.
+  - Checks: `sh -n scripts/bench-compare.sh`; regenerated the three-round summary from
+    `results.txt`; compared its tables with README; checked pinned JSON SHA-256 digests;
+    ran `UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture` (3 pass).
+  - Verdict: Important: rspamd corpus parser settings differ across the Rust, libucl and
+    Criterion runs, masking the optional-include gain on `composites.conf`; a failed tool
+    in the shell pipeline can leave a successful partial summary. Minor: README
+    conformance counts are stale after spec-v14 (1654/1650 parse, 1221/1217 emit).
+    The README benchmark numbers match the saved summary. No implementation files changed.
+  - Commits: this log-only review commit. Not pushed.
+  - Attestation: this review and log contain observable benchmark behavior only, with no
+    libucl code, pseudo-code, internal names or source structure.
