@@ -3416,3 +3416,24 @@
     `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
   - Attestation: these documents contain observable behavior only, with no libucl code,
     pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (final re-review). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `94b9e53..966ce48` documentation diff, §9.4's six named cases,
+    `docs/spec/README.md`, `tests/conformance/README.md`, and the new
+    `tests/conformance/pending/README.md`. No libucl source, implementation or
+    fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. The pending layout now permits draft cases, states that
+    three C14 cases are pending, and links to a pending README that lists each
+    once with its expected role and move procedure. The coverage table maps
+    each of the three active rejection controls and three pending acceptance
+    cases to §9 exactly once. Counts remain 1,657 active and three pending;
+    the pending `pa.inc` fixture is byte-identical to the active fixture.
+    The revised §9.4 answer and its cases remain ready for spec release under
+    the clean-room protocol. No new finding in this documentation-only diff.
+  - Checks: scoped `git diff --check`, exact-ID occurrence counts in both
+    READMEs, fixture `cmp`, and case-file counts. The prior re-review checked
+    all six typed goldens against the pinned oracle.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
