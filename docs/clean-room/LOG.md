@@ -3818,3 +3818,94 @@
   - Verdict: no Critical or Important defect found. The skip is confined to the expanded VALUE before a terminal ignored macro name under the specified flags; the optional literal prefix must agree unchanged.
   - Commits: this reviewer LOG entry only on `c14-emit-eof`. Not merged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (draft). Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §§9.4 and 9.5, the saved C14 input and report, existing
+    glob and parameter-prefix conformance cases, the pinned oracle and its
+    source, and black-box controls. No Claude Code sessions or memory were read.
+  - Work: reproduced `.include(g=true,t=true) "/.*"` as an oracle error on a
+    host where the pattern matches unreadable regular `/.file`. Full parameter
+    names and direct inclusion of that file gave the same error. Controlled
+    unreadable hidden and ordinary regular files also errored for direct and
+    glob optional includes and `.try_include`; missing files and directories
+    were skipped. Drafted the missing §9.4 read-denial row and answered #82.
+    The exact root pattern depends on host files and permissions, so no
+    portable golden case was added. No implementation or fuzz file was edited.
+  - Checks: pinned-oracle controls above, `cargo test --test conformance`
+    passed all three tests, and `git diff --check` passed.
+  - Commits: the following `docs(spec): draft C14 unreadable include rule`
+    commit on `c14/spec80`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names
+    or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `f98a9b1^..f98a9b1` draft diff, released spec-v16 §9.4, the named
+    dot-glob and parameter-prefix conformance cases, and pinned-oracle
+    black-box runs with host `/.file` and controlled unreadable regular files
+    under ignored `target/`. No libucl source, implementation or fuzzer source,
+    or Claude sessions or memory were read.
+  - Review: changes requested for one Q82 question phrase only. On this host,
+    `/.file` is an unreadable regular file and both abbreviated and full-name
+    optional dot-glob includes, and direct optional inclusion, were errors.
+    Controlled hidden and ordinary unreadable files also errored for plain
+    and optional `.include`, optional glob inclusion, `.try_include`, and
+    `.try_include(try=false)`. The draft §9.4 row states these observable
+    outcomes without prohibited content; the host-dependent absolute glob
+    and permission-dependent case justify the absence of a portable golden.
+    The draft is unreleased and follows the question-and-review protocol.
+    However, Q82 says missing files and directories were "skipped" after
+    describing `.try_include` controls. With entries after the macro, the
+    oracle showed `.include(try=true)` skipped them, while `.try_include`
+    stopped silently and `.try_include(try=false)` of a directory errored,
+    exactly as the released §9.4 table says. State those outcomes precisely.
+  - Checks: pinned-oracle direct and glob controls; scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team. Item: C14 question #82, spec-v17 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released §9.4, Q82 and the independent Q82 review entry.
+  - Change: clarified Q82's missing-file and directory controls by naming the
+    observable outcomes for `.include(try=true)`, `.try_include`, and
+    `.try_include(try=false)` with a later entry. No normative rule changed.
+  - Checks: scoped diff and `git diff --check`.
+  - Commit: pending this entry's commit. Not tagged or pushed.
+  - Attestation: the question and specification contain behavior only.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `0431255..f978214` question-and-log diff, unchanged draft §9.4,
+    and the prior pinned-oracle marker controls. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. Q82 now says that `.include(try=true)` skips missing
+    files and directories and reads a later entry; `.try_include` stops before
+    that entry for both; `.try_include(try=false)` stops for a missing file but
+    errors for a directory. These are the outcomes of the prior controlled
+    oracle probes and match released §9.4. The answer remains observable and
+    contains no implementation hint. Draft §9.4 and its host-dependent
+    no-portable-golden rationale are unchanged. No new finding.
+  - Checks: scoped `git diff --check` and changed-file list; prior review's
+    pinned-oracle controls cover the corrected text.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #82, spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    reviewed #82 draft §9.4 and question answer, the independent reviewer
+    entries through `39a234a`, the spec index, and conformance case lists.
+    No Claude Code sessions or memory were read.
+  - Work: after independent approval, changed the #82 answer and spec index
+    from draft wording to `spec-v17`. The §9.4 behavior rule is unchanged;
+    host-dependent read access has no portable golden.
+  - Checks: latest previous spec tag was `spec-v16`; worktree was clean before
+    release edits; 1,657 active and three pending cases; all three tests in
+    `cargo test --test conformance` passed; scoped `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v17` commit on
+    `c14/spec80`, tagged locally as `spec-v17`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
