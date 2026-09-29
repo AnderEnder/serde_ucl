@@ -4049,3 +4049,10 @@
     commit on isolated `c14-emit-vt`; not merged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: independent clean-room implementation reviewer. Item: C14 §12.2 expanded `.emit` after one stable scalar prefix; implementation commit `a28f12a` on `c14-emit-vt`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v17:docs/spec/12-flags.md` §12.2 through `git show`, scoped implementation and implementer LOG diff, own `fuzz/src/uncertain.rs`, the saved black-box finding `values-differ-3e5f081c503a0f82` (input, flags, directory and report), and the oracle executable as a black box. No current or post-release `docs/spec/` content was opened.
+  - Verdict: no Critical or Important defect found in this C14 scope. The source parser accepts one alphanumeric scalar prefix with whitespace or the ordinary placements of `=`, followed by exactly `.emit KEY $ABI`, with an alphanumeric KEY. The exact three flags gate the classifier. It requires the crate's source-expected emitted key and `unknown` string, checks equal byte lengths for the oracle's emitted key and string, normalizes only those two fields, then requires whole-dump equality. A recognized shape that fails validation returns without reaching the broader classifier, keeping same-length crate errors and changed stable entries reportable. Focused negatives cover the stable prefix, extra entries, wrong types or lengths, crate key or value, flags, arguments, and trailing source text.
+  - Verification: all 27 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check a28f12a^ a28f12a` passed. The release fuzzer replay of the saved reduced finding exited 0 with `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. No sustained fuzz campaign was run for this review.
+  - Commit: this LOG-only review commit on `c14-emit-vt`; no implementation edits or push.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
