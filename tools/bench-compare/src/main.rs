@@ -3,7 +3,8 @@
 //!
 //! ```text
 //! bench-compare write DIR                  write the generated documents into DIR
-//! bench-compare run DIR [CORPUS]           time serde_ucl and serde_json on them, and on CORPUS
+//! bench-compare run DIR [CORPUS] [JSON_CORPUS]
+//!                                         time the generated, rspamd and available JSON documents
 //! bench-compare summarize RESULTS...       median tables from the lines of the runs
 //! ```
 //!
@@ -82,7 +83,7 @@ struct SmallBorrowed<'a> {
 
 /// The generated documents: file name, contents. JSON documents have a typed target.
 fn documents() -> Vec<(&'static str, String)> {
-    vec![
+    let mut docs = vec![
         ("json-10000.json", common::json(10000)),
         ("json-1000.json", common::json(1000)),
         ("config-1000.ucl", common::config(1000)),
@@ -91,7 +92,18 @@ fn documents() -> Vec<(&'static str, String)> {
             "small.json",
             r#"{"name": "svc", "port": 8080, "debug": true}"#.to_string(),
         ),
-    ]
+    ];
+    for (name, seed, size) in common::IRREGULAR {
+        docs.push((
+            match name {
+                "60k" => "irregular-60k.ucl",
+                "600k" => "irregular-600k.ucl",
+                _ => unreachable!("benchmark irregular document"),
+            },
+            common::irregular(seed, size),
+        ));
+    }
+    docs
 }
 
 /// The corpus documents, relative to the corpus directory (`benches/corpus/rspamd`), and
@@ -156,20 +168,24 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn run(dir: &Path, corpus: Option<&Path>) {
+fn run_value(ucl: &str, json: bool, name: &str, doc: &str) {
+    let t = time(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).is_ok());
+    println!("{ucl}|parse|{name}|{t:.9}");
+    let t = time_keep(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).unwrap());
+    println!("{ucl}|parse-nofree|{name}|{t:.9}");
+    if json && name.ends_with(".json") {
+        let t = time(|| serde_json::from_str::<serde_json::Value>(black_box(doc)).is_ok());
+        println!("serde_json|parse|{name}|{t:.9}");
+    }
+}
+
+fn run(dir: &Path, corpus: Option<&Path>, json_corpus: Option<&Path>) {
     let ucl = std::env::var("BENCH_COMPARE_LABEL").unwrap_or_else(|_| "serde_ucl".into());
     // A copy built against an earlier serde_ucl times only that serde_ucl.
     let json = !ucl.contains('@');
     for (name, _) in documents() {
         let doc = read(&dir.join(name));
-        let t = time(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).is_ok());
-        println!("{ucl}|parse|{name}|{t:.9}");
-        let t = time_keep(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).unwrap());
-        println!("{ucl}|parse-nofree|{name}|{t:.9}");
-        if json && name.ends_with(".json") {
-            let t = time(|| serde_json::from_str::<serde_json::Value>(black_box(&doc)).is_ok());
-            println!("serde_json|parse|{name}|{t:.9}");
-        }
+        run_value(&ucl, json, name, &doc);
         if name.starts_with("json") {
             let t = time(|| serde_ucl::from_str::<Items>(black_box(&doc)).is_ok());
             println!("{ucl}|typed|{name}|{t:.9}");
@@ -192,6 +208,19 @@ fn run(dir: &Path, corpus: Option<&Path>) {
                 println!("serde_json|typed|{name}|{t:.9}");
                 let t = time(|| serde_json::from_str::<SmallBorrowed>(black_box(&doc)).is_ok());
                 println!("serde_json|typed-borrowed|{name}|{t:.9}");
+            }
+        }
+    }
+    if let Some(json_corpus) = json_corpus {
+        for name in common::JSON_DOCUMENTS {
+            let filename = format!("{name}.json");
+            let path = json_corpus.join(&filename);
+            match std::fs::read_to_string(&path) {
+                Ok(doc) => run_value(&ucl, json, &filename, &doc),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("bench-compare: skipping missing {}", path.display());
+                }
+                Err(e) => panic!("{}: {e}", path.display()),
             }
         }
     }
@@ -228,6 +257,11 @@ fn label(name: &str) -> String {
         "config-1000.ucl" => "configuration, 1,000 services".into(),
         "small.ucl" => "three entries, UCL".into(),
         "small.json" => "three entries, JSON".into(),
+        "irregular-60k.ucl" => "irregular configuration, 78,466 bytes".into(),
+        "irregular-600k.ucl" => "irregular configuration, 639,049 bytes".into(),
+        "twitter.json" => "twitter.json".into(),
+        "citm_catalog.json" => "citm_catalog.json".into(),
+        "canada.json" => "canada.json".into(),
         "groups.conf" => "rspamd `groups.conf`, with its includes".into(),
         other => format!("rspamd `{other}`"),
     }
@@ -421,14 +455,18 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("write") if args.len() == 2 => write(Path::new(&args[1])),
-        Some("run") if (2..=3).contains(&args.len()) => {
-            run(Path::new(&args[1]), args.get(2).map(Path::new))
-        }
+        Some("run") if (2..=4).contains(&args.len()) => run(
+            Path::new(&args[1]),
+            args.get(2).map(Path::new),
+            args.get(3).map(Path::new),
+        ),
         Some("summarize") if args.len() >= 2 => {
             summarize(&args[1..].iter().map(PathBuf::from).collect::<Vec<_>>())
         }
         _ => {
-            eprintln!("usage: bench-compare write DIR | run DIR [CORPUS] | summarize RESULTS...");
+            eprintln!(
+                "usage: bench-compare write DIR | run DIR [CORPUS] [JSON_CORPUS] | summarize RESULTS..."
+            );
             std::process::exit(2);
         }
     }

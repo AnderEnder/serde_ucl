@@ -1,11 +1,11 @@
 #!/bin/sh
-# Compares serde_ucl with its previous release, libucl and serde_json on the benchmarks' documents
-# and the rspamd corpus, for the README's section *Against libucl and serde_json* and for the
-# measurements of performance work (tools/bench-compare/README.md).
+# Compares serde_ucl with its previous release, libucl and serde_json on the generated benchmark
+# documents, the pinned JSON documents when present, and the rspamd corpus, for the README's
+# *Against libucl and serde_json* section and performance work (tools/bench-compare/README.md).
 #
 # Builds libucl at the oracle's pinned commit as a CMake Release build (-O3), tools/bench-compare/
 # with the crate's release settings, and the C program tools/bench-compare/lucl.c; writes the
-# generated documents; runs the three programs in turns for ROUNDS rounds, rotating their order
+# generated documents; runs the programs in turns for ROUNDS rounds, rotating their order
 # each round; prints the medians over the rounds as tables. Every time includes freeing the result,
 # except in the table that says it does not. Run it on a quiet machine.
 #
@@ -30,6 +30,7 @@ CC=${CC:-cc}
 WORK="$ROOT/target/bench-compare"
 DOCS="$WORK/documents"
 CORPUS="$ROOT/benches/corpus/rspamd"
+JSON_CORPUS="$ROOT/target/bench-corpus"
 
 case "$ROUNDS" in
 '' | *[!0-9]* | 0) echo "usage: scripts/bench-compare.sh [ROUNDS]" >&2; exit 2 ;;
@@ -107,14 +108,23 @@ RESULTS="$WORK/results.txt"
 : >"$RESULTS"
 
 run_rust() {
-	"$TOOL" run "$DOCS" "$CORPUS"
+	"$TOOL" run "$DOCS" "$CORPUS" "$JSON_CORPUS"
 }
 run_baseline() {
-	BENCH_COMPARE_LABEL="serde_ucl@${BASELINE#v}" "$BASE_TOOL" run "$DOCS" "$CORPUS"
+	BENCH_COMPARE_LABEL="serde_ucl@${BASELINE#v}" "$BASE_TOOL" run "$DOCS" "$CORPUS" "$JSON_CORPUS"
 }
 run_libucl() {
-	"$WORK/lucl" "$DOCS/json-10000.json" "$DOCS/json-1000.json" "$DOCS/config-1000.ucl" \
-		"$DOCS/small.ucl" "$DOCS/small.json"
+	set -- "$DOCS/json-10000.json" "$DOCS/json-1000.json" "$DOCS/config-1000.ucl" \
+		"$DOCS/small.ucl" "$DOCS/small.json" "$DOCS/irregular-60k.ucl" \
+		"$DOCS/irregular-600k.ucl"
+	for name in twitter citm_catalog canada; do
+		if [ -f "$JSON_CORPUS/$name.json" ]; then
+			set -- "$@" "$JSON_CORPUS/$name.json"
+		else
+			echo "bench-compare: skipping missing $JSON_CORPUS/$name.json" >&2
+		fi
+	done
+	"$WORK/lucl" "$@"
 	"$WORK/lucl" -v "CONFDIR=$(cd "$CORPUS" && pwd)" "$CORPUS/groups.conf" \
 		"$CORPUS/composites.conf" "$CORPUS/scores.d/rbl_group.conf"
 }

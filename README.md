@@ -911,41 +911,69 @@ rustc 1.98.1, median times:
 
 ### Against libucl and serde_json
 
-The benchmarks' documents (`benches/common/mod.rs`, the three entries also as JSON) parsed by
-this version of serde_ucl, by libucl at the reference commit (CMake Release build, `-O3`) and by
-serde_json 1.0.151, on an Apple M4 Max with rustc 1.98.1 and the release settings of
-`Cargo.toml` (fat LTO, one codegen unit). The programs ran in turns for three rounds. Each time
-is the median of the rounds, each round the median of 31 samples of at least 5 ms of
-repetitions, and includes freeing the result. `scripts/bench-compare.sh` reproduces these tables
-(`tools/bench-compare/README.md`).
+This version of serde_ucl, the previous release (`v0.5.0`), and libucl at the reference commit
+(CMake Release build, `-O3`) parsed the same documents. serde_json 1.0.151 parsed the JSON
+documents. The run used an Apple M4 Max with rustc 1.98.1. The crate and comparison tool used
+the release settings in `Cargo.toml` (fat LTO, one codegen unit). The programs ran in turns over
+three rotated rounds;
+the measured one-minute load ranged from 4.21 to 4.57. Each result is the median of the rounds,
+each round the median of 31 samples of at least 5 ms of repetitions.
+`scripts/bench-compare.sh` reproduces the tables (`tools/bench-compare/README.md`). The three
+pinned JSON documents were present and passed their SHA-256 checks.
 
-Parsing into each library's value tree (`parse::parse`; libucl's `ucl_parser_add_chunk` and
-`ucl_parser_get_object`; `serde_json::Value`):
+The first table parses into each library's value tree (`parse::parse`, libucl's
+`ucl_parser_add_chunk` and `ucl_parser_get_object`, or `serde_json::Value`). The `change` column
+is this version's time relative to 0.5.0; a negative value is faster.
 
-| Document | serde_ucl | libucl | serde_json |
-| --- | ---: | ---: | ---: |
-| JSON, 10,000 records (1.4 MiB) | 15.1 ms | 26.4 ms | 10.7 ms |
-| JSON, 1,000 records (142 KiB) | 1.46 ms | 2.52 ms | 0.98 ms |
-| configuration, 1,000 services (499 KiB) | 2.40 ms | 3.57 ms | – |
-| three entries, UCL | 0.55 µs | 8.9 µs | – |
-| three entries, JSON | 0.56 µs | 8.8 µs | 0.22 µs |
+Medians over 3 rounds; each time includes freeing the result.
 
-Deserializing into a struct (`from_str`) whose strings are owned (`String`) or borrowed from the
-input (`&str`):
+| Document | serde_ucl | 0.5.0 | change | libucl | serde_json |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| JSON, 10,000 records | 14.2 ms | 14.4 ms | −1% | 24.9 ms | 9.98 ms |
+| JSON, 1,000 records | 1.38 ms | 1.39 ms | −1% | 2.36 ms | 0.91 ms |
+| configuration, 1,000 services | 2.28 ms | 2.25 ms | +1% | 3.26 ms | – |
+| three entries, UCL | 0.53 µs | 0.53 µs | +0% | 8.56 µs | – |
+| three entries, JSON | 0.55 µs | 0.56 µs | −2% | 8.47 µs | 0.21 µs |
+| irregular configuration, 78,466 bytes | 0.19 ms | 0.19 ms | −1% | 0.30 ms | – |
+| irregular configuration, 639,049 bytes | 2.10 ms | 2.09 ms | +0% | 2.95 ms | – |
+| twitter.json | 2.57 ms | 2.55 ms | +1% | 3.42 ms | 1.54 ms |
+| citm_catalog.json | 4.84 ms | 4.86 ms | −0% | 7.75 ms | 3.98 ms |
+| canada.json | 11.4 ms | 13.0 ms | −12% | 18.4 ms | 6.75 ms |
+| rspamd `groups.conf`, with its includes | 0.65 ms | 0.98 ms | −33% | 1.52 ms | – |
+| rspamd `composites.conf` | 31.1 µs | 31.3 µs | −1% | 89.2 µs | – |
+| rspamd `rbl_group.conf` | 54.4 µs | 54.9 µs | −1% | 87.4 µs | – |
 
-| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |
+The same without freeing the value in the timing (freed after each sample):
+
+| Document | serde_ucl | 0.5.0 | change | libucl |
 | --- | ---: | ---: | ---: | ---: |
-| JSON, 10,000 records | 14.5 ms | 13.6 ms | 4.94 ms | 4.18 ms |
-| JSON, 1,000 records | 1.36 ms | 1.30 ms | 0.48 ms | 0.41 ms |
-| three entries, JSON | 0.55 µs | 0.54 µs | 0.08 µs | 0.08 µs |
+| JSON, 10,000 records | 11.4 ms | 11.7 ms | −3% | 17.6 ms |
+| JSON, 1,000 records | 1.13 ms | 1.13 ms | −1% | 1.67 ms |
+| configuration, 1,000 services | 1.90 ms | 1.91 ms | −0% | 2.39 ms |
+| three entries, UCL | 0.50 µs | 0.50 µs | −1% | 8.34 µs |
+| three entries, JSON | 0.52 µs | 0.52 µs | +0% | 8.27 µs |
+| irregular configuration, 78,466 bytes | 0.17 ms | 0.17 ms | −1% | 0.24 ms |
+| irregular configuration, 639,049 bytes | 1.83 ms | 1.87 ms | −2% | 2.48 ms |
+| twitter.json | 2.19 ms | 2.19 ms | +0% | 2.61 ms |
+| citm_catalog.json | 4.01 ms | 4.06 ms | −1% | 5.62 ms |
+| canada.json | 9.78 ms | 11.4 ms | −14% | 13.9 ms |
+| rspamd `groups.conf`, with its includes | 0.62 ms | 0.95 ms | −35% | 1.43 ms |
+| rspamd `composites.conf` | 27.1 µs | 27.4 µs | −1% | 82.1 µs |
+| rspamd `rbl_group.conf` | 46.6 µs | 47.2 µs | −1% | 67.5 µs |
 
-serde_ucl parses 1.5 to 1.7 times as fast as libucl on the larger documents, and 16 times as fast
-on the small ones, where creating a libucl parser takes most of the time. serde_json builds its
-value 1.4 to 1.5 times as fast on the larger documents and 2.5 times on the small one, and fills
-a struct 3 to 7 times as fast: it deserializes straight from the text, while serde_ucl first
-builds the whole UCL value, which repeated keys, priorities and `.inherit` need. Borrowing saves
-serde_ucl 4% to 6% on the larger documents, whose strings are short, and serde_json 14% to 15%;
-building the value takes most of serde_ucl's time either way.
+Deserializing the generated JSON documents into structs with owned (`String`) or borrowed
+(`&str`) strings:
+
+| Document | serde_ucl, owned | 0.5.0, owned | change | serde_ucl, borrowed | 0.5.0, borrowed | change | serde_json, owned | serde_json, borrowed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JSON, 10,000 records | 13.4 ms | 13.7 ms | −3% | 12.6 ms | 12.8 ms | −1% | 4.56 ms | 3.95 ms |
+| JSON, 1,000 records | 1.30 ms | 1.31 ms | −1% | 1.20 ms | 1.23 ms | −2% | 0.45 ms | 0.39 ms |
+| three entries, JSON | 0.54 µs | 0.54 µs | −1% | 0.52 µs | 0.52 µs | −0% | 0.08 µs | 0.08 µs |
+
+On the new inputs, serde_ucl parses faster than libucl. Against 0.5.0, its parse time on the
+irregular configurations and pinned JSON documents ranges from 12% faster to 1% slower in this
+run. serde_json parses its JSON value tree faster; its typed deserializer does not build that
+value tree first. These times describe this machine and run, rather than a fixed speed ratio.
 
 ## Repository layout
 
