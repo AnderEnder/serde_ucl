@@ -3967,3 +3967,28 @@
   - Red/green and checks: the pre-fix `Err(_) => unusable(...)` branch would skip the denied regular file for `.include(try=true)`, causing the new regression's `unwrap_err()` to fail; the implementer logged this red run. I independently ran the new focused test green, both `first_search_miss` tests, all three conformance tests, and `scripts/ci.sh`; all passed. `git diff --check 6af6133^ 6af6133` passed. I did not mutate implementation code or independently rerun the pre-fix test.
   - Commits: this LOG-only review commit; no implementation edits or push.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` VALUE after VT.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v17` §§7.1, 9.2, 12.2 and 13.2 through `git show` only,
+    own `fuzz/src/uncertain.rs`, the saved black-box finding
+    `values-differ-9fa8bfc0f8579219`, and black-box oracle runs. Current
+    `docs/spec/` and unreleased spec changes were not read.
+  - Work: in isolated local checkout `c14-emit-vt` from `521786a`, added only
+    the exact source `t I\n.emit\x0b$ABI e` under the exact three flags to the
+    §12.2 classifier. Released §9.2 makes VT a separator before the macro
+    VALUE, and §12.2 leaves bytes from that expanded VALUE uncertain. The
+    classifier requires the crate's `unknown: "e"`, equal byte lengths for
+    the oracle's second key and string, and complete dump equality after
+    normalizing only those two fields. Changes to the stable `t: "I"` prefix,
+    extra entries, types, byte lengths, or crate values remain reportable;
+    variables only in ARGUMENTS or comments do not qualify.
+  - Checks: the focused test failed before the change and passed after; all
+    26 fuzz unit tests and `scripts/ci.sh` passed; release fuzzer replay of
+    the saved finding exited 0 as `skipped: uncertain: expanded .emit text
+    under zerocopy (§12.2)`; `git diff --check` passed. No full fuzz run was
+    requested or performed.
+  - Commits: the following `fix(fuzz): classify expanded emit after vertical tab`
+    commit on `c14-emit-vt`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.

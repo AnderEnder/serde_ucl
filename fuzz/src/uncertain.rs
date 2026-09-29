@@ -348,26 +348,30 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
 }
 
 /// These source forms prove exactly which entry came from an expanded `.emit`
-/// VALUE (§12.2). The other entries are stable and must match as whole trees.
+/// VALUE (§12.2). VT after NAME is skipped before VALUE (§9.2). The other
+/// entries are stable and must match as whole trees.
 /// The terminal `.s` form adds no entry because its NAME reaches EOF (§9.2).
 /// Forms outside this small set stay reportable.
-fn simple_abi_emit_shape(input: &[u8]) -> Option<(usize, usize, &'static str)> {
+fn simple_abi_emit_shape(input: &[u8]) -> Option<(usize, usize, &'static str, &'static str)> {
+    if input == b"t I\n.emit\x0b$ABI e" {
+        return Some((1, 2, "unknown", "e"));
+    }
     if input == b".seen I\n.emit l $ABI" {
-        return Some((1, 2, "l"));
+        return Some((1, 2, "l", "unknown"));
     }
     if input == b"\n.emit l $ABI\nr= s" {
-        return Some((0, 2, "l"));
+        return Some((0, 2, "l", "unknown"));
     }
     if input == b"direct = $A{a=1}een $ABI\n.emit liteen $ABI\n.emit literal = ral = stable\n" {
-        return Some((1, 3, "liteen"));
+        return Some((1, 3, "liteen", "unknown"));
     }
     const EMIT: &[u8] = b".emit r $ABI\n.s";
     if input == EMIT {
-        return Some((0, 1, "r"));
+        return Some((0, 1, "r", "unknown"));
     }
     let prefix = input.strip_suffix(EMIT)?.strip_suffix(b"\n")?;
     let prefix = std::str::from_utf8(prefix).ok()?;
-    simple_literal_entry(prefix).then_some((1, 2, "r"))
+    simple_literal_entry(prefix).then_some((1, 2, "r", "unknown"))
 }
 
 fn excuse_abi_emit_with_stable_neighbors(golden: &mut J, actual: &J, ctx: &Context<'_>) -> bool {
@@ -375,7 +379,7 @@ fn excuse_abi_emit_with_stable_neighbors(golden: &mut J, actual: &J, ctx: &Conte
     if ctx.flags.len() != FLAGS.len() || !FLAGS.iter().all(|flag| ctx.has_flag(flag)) {
         return false;
     }
-    let Some((index, entry_count, key)) = simple_abi_emit_shape(ctx.input) else {
+    let Some((index, entry_count, key, value)) = simple_abi_emit_shape(ctx.input) else {
         return false;
     };
     let (Some(g_entries), Some(a_entries)) = (
@@ -409,8 +413,8 @@ fn excuse_abi_emit_with_stable_neighbors(golden: &mut J, actual: &J, ctx: &Conte
     };
     if g_value.get("t").and_then(J::as_str) != Some("string")
         || a_value.get("t").and_then(J::as_str) != Some("string")
-        || g_value.get("v").and_then(J::as_str).map(str::len) != Some(7)
-        || a_value.get("v").and_then(J::as_str) != Some("unknown")
+        || g_value.get("v").and_then(J::as_str).map(str::len) != Some(value.len())
+        || a_value.get("v").and_then(J::as_str) != Some(value)
     {
         return false;
     }
@@ -420,7 +424,7 @@ fn excuse_abi_emit_with_stable_neighbors(golden: &mut J, actual: &J, ctx: &Conte
     };
     entry.remove("khex");
     entry.insert("k".to_owned(), J::from(key));
-    normalized["entries"][index]["v"][0]["v"] = J::from("unknown");
+    normalized["entries"][index]["v"][0]["v"] = J::from(value);
     if &normalized != actual || &normalized == golden {
         return false;
     }
@@ -1183,6 +1187,65 @@ mod tests {
         let mut changed_reduced_suffix = reduced_oracle;
         changed_reduced_suffix["entries"][1]["v"][0]["v"] = json!("t");
         assert!(!excused(changed_reduced_suffix, &reduced_actual, &reduced).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_after_vertical_tab_only_excuses_emitted_bytes() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let input = "t I\n.emit\x0b$ABI e";
+        let ctx = context(input, &flags, &[]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"t","v":[{"t":"string","v":"I"}]},
+            {"k":"unknown","v":[{"t":"string","v":"e"}]}
+        ]});
+        let oracle = json!({"t":"object","entries":[
+            {"k":"t","v":[{"t":"string","v":"I"}]},
+            {"k":"\0\0\0\0\0\0\0","v":[{"t":"string","v":"\0"}]}
+        ]});
+        let (same, reasons) = excused(oracle.clone(), &actual, &ctx);
+        assert!(same);
+        assert_eq!(reasons, BTreeSet::from([ZEROCOPY_EMIT]));
+
+        let mut changed_prefix = oracle.clone();
+        changed_prefix["entries"][0]["v"][0]["v"] = json!("J");
+        assert!(!excused(changed_prefix, &actual, &ctx).0);
+        let mut changed_prefix_key = oracle.clone();
+        changed_prefix_key["entries"][0]["k"] = json!("u");
+        assert!(!excused(changed_prefix_key, &actual, &ctx).0);
+        let mut extra_entry = oracle.clone();
+        extra_entry["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"k":"x","v":[{"t":"int","v":"1"}]}));
+        assert!(!excused(extra_entry, &actual, &ctx).0);
+        let mut wrong_key_length = oracle.clone();
+        wrong_key_length["entries"][1]["k"] = json!("\0\0\0\0\0\0");
+        assert!(!excused(wrong_key_length, &actual, &ctx).0);
+        let mut wrong_value_length = oracle.clone();
+        wrong_value_length["entries"][1]["v"][0]["v"] = json!("\0\0");
+        assert!(!excused(wrong_value_length, &actual, &ctx).0);
+        let mut wrong_value_type = oracle.clone();
+        wrong_value_type["entries"][1]["v"][0]["t"] = json!("int");
+        assert!(!excused(wrong_value_type, &actual, &ctx).0);
+        let mut changed_actual_key = actual.clone();
+        changed_actual_key["entries"][1]["k"] = json!("unknowx");
+        assert!(!excused(oracle.clone(), &changed_actual_key, &ctx).0);
+        let mut changed_actual_value = actual.clone();
+        changed_actual_value["entries"][1]["v"][0]["v"] = json!("f");
+        assert!(!excused(oracle.clone(), &changed_actual_value, &ctx).0);
+
+        let no_zerocopy = strings(&["registered-macros", "string-input"]);
+        assert!(!excused(oracle.clone(), &actual, &context(input, &no_zerocopy, &[])).0);
+        for other in [
+            "t I\n.emit\x0b(a=$ABI) stable e",
+            "t I\n.emit\x0b/* $ABI */stable e",
+            "t I\n.emit\x0b$ABI e\nx 1",
+        ] {
+            assert!(
+                !excused(oracle.clone(), &actual, &context(other, &flags, &[])).0,
+                "{other:?}"
+            );
+        }
     }
 
     #[test]
