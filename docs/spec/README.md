@@ -208,8 +208,7 @@ join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, a
 answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79, found during
 C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §9.4 exception.
 `spec-v16` answers #81 by narrowing the existing §12.5 uncertainty.
-A draft for #82 clarifies the §9.4 outcome for a file that cannot be opened for reading; it awaits
-independent review for `spec-v17`.
+`spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
 
 The cases of `spec-v13` are all in `cases/spec/`. `spec-v15` has three cases
 under `tests/conformance/pending/09-macros/` until the crate follows its §9.4 rule.
@@ -233,7 +232,7 @@ The undefined result for variable-expanded `.emit` text under `zerocopy` (§12.2
 `zerocopy_registered_macros_stable` covers its stable boundary.
 The §12.5 clarification for #81 has no golden because the replaced comment's later
 appearance is uncertain in libucl.
-The draft §9.4 access-failure rule for #82 has no portable golden because read access depends on
+The §9.4 access-failure rule for #82 has no portable golden because read access depends on
 the checkout's permissions and the identity running the test.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:

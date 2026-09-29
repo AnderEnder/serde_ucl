@@ -3716,3 +3716,19 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #82, spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    reviewed #82 draft §9.4 and question answer, the independent reviewer
+    entries through `39a234a`, the spec index, and conformance case lists.
+    No Claude Code sessions or memory were read.
+  - Work: after independent approval, changed the #82 answer and spec index
+    from draft wording to `spec-v17`. The §9.4 behavior rule is unchanged;
+    host-dependent read access has no portable golden.
+  - Checks: latest previous spec tag was `spec-v16`; worktree was clean before
+    release edits; 1,657 active and three pending cases; all three tests in
+    `cargo test --test conformance` passed; scoped `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v17` commit on
+    `c14/spec80`, tagged locally as `spec-v17`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
