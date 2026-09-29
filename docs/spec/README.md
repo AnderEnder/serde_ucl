@@ -206,10 +206,9 @@ answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58
 §13 for several inputs and registered macros, `spec-v11` answers #59 (the rules where inputs
 join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, and `spec-v13`
 answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79, found during
-C14's differential fuzzing (§12.2 and §13.2). A draft for #80 adds a §9.4 exception; it is
-pending independent review and has not been released.
+C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §9.4 exception.
 
-The cases of `spec-v13` are all in `cases/spec/`. The C14 draft for question #80 has three cases
+The cases of `spec-v13` are all in `cases/spec/`. `spec-v15` has three cases
 under `tests/conformance/pending/09-macros/` until the crate follows its §9.4 rule.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
