@@ -3106,3 +3106,14 @@
   - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
   - Attestation: I did not read libucl source code, implementation `src/`, Claude
     Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79,
+  scoped re-review of `f5232b2..07f117d`.
+  - Inputs consulted: the scoped diff in §12.2, `QUESTIONS.md`, this log and the new
+    `zerocopy_registered_macros_stable` case; the pinned `ucl-dump` binary as a black box.
+  - Verdict: approved. The case combines `zerocopy`, `registered-macros` and
+    `string-input`, pins the three stable controls, and is cited in §12.2. Its typed
+    golden matched an independent oracle run; `git diff --check` passed. The prior
+    finding is resolved, and the diff adds no prohibited content or spec conflict.
+  - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
+  - Attestation: I did not read libucl source code, implementation `src/`, Claude
+    Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
