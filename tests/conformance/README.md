@@ -22,11 +22,11 @@ None of them is written by hand.
   include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
   `../09-macros/files/`. `cases/spec/13-inputs/files/` holds the further inputs of the §13 cases
   (`<case>.<n>.inc`, `n01.inc`…`n16.inc`) and the files they include.
-- `pending/`, when present, holds cases that a released spec version added but the crate does not
-  pass yet, with their golden files and a README; the runners do not read it, but
+- `pending/`, when present, holds cases from a spec draft or released version that the crate does
+  not pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
-  `cases/spec/` when the crate passes it. At present there is none: the spec-v13 cases moved to
-  `cases/spec/` in C10a.
+  `cases/spec/` when the crate passes it. Three C14 question #80 cases are pending under
+  `pending/09-macros/` (see `pending/README.md`).
 - `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
   platform's C library; see *Golden files per platform* below.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results

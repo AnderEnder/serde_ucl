@@ -1202,6 +1202,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1657 case
 | `cases/spec/09-macros/include_param_prefix_names` | §9 |
 | `cases/spec/09-macros/include_path_empty_array_error` | §9 |
 | `cases/spec/09-macros/include_path_first_dir` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_optional_file_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_url_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_url_try_no_later_file` | §9 |
 | `cases/spec/09-macros/include_path_glob_all_dirs` | §9 |
 | `cases/spec/09-macros/include_path_glob_last_dir_must_match_error` | §9 |
 | `cases/spec/09-macros/include_path_later_list_replaces` | §9 |
@@ -1558,6 +1561,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1657 case
 | `cases/spec/09-macros/try_include_url_try_false_error` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
 | `cases/spec/09-macros/zero_byte_file_moves_filevars` | §9, §7 |
+| `pending/09-macros/include_path_first_miss_then_try_include_url_accepts_later` | §9 |
+| `pending/09-macros/include_path_first_miss_then_url_try_accepts_later` | §9 |
+| `pending/09-macros/include_path_first_miss_then_url_try_accepts_later_file_input` | §9 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
 | `cases/spec/10-output/comments_output_before_and_after` | §10, §12 |
