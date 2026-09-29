@@ -3909,3 +3909,10 @@
     `c14/spec80`, tagged locally as `spec-v17`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl
     code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: clean-room implementer. Item: released spec-v17 §9.4 read-denied regular includes.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, `spec-v17:docs/spec/09-macros.md` via the released tag only, implementation-owned `src/parse/include.rs` and `src/parse/loader.rs`, and the active conformance suite. No post-release spec edits or forbidden input were read.
+  - Work: a regular file that the loader cannot read now errors for `.include`, `.include(try=true)`, `.try_include`, and glob matches. A custom loader returns `PermissionDenied` deterministically; the regression also checks missing and nonregular files retain their optional behavior.
+  - Checks: the focused test failed first because `.include(try=true)` returned a value after skipping the denied file; it passed after the fix. `cargo test --test conformance` passed all three tests, `scripts/ci.sh` passed, and `git diff --check` passed.
+  - Commits: `6af6133` (`fix(parse): reject unreadable regular includes with try`); this LOG entry is in a separate follow-up commit. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
