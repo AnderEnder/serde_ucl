@@ -272,6 +272,15 @@ fn compare_results(oracle: &OracleResult, krate: &CrateResult, ctx: &Context<'_>
                 }
             }
         }
+        (
+            OracleResult::Dump(golden),
+            CrateResult::Rejected {
+                kind: ErrorKind::MissingValue,
+                ..
+            },
+        ) if uncertain::handler_in_single_emit_value(ctx, golden) => {
+            Verdict::Skipped(uncertain::HANDLER)
+        }
         (OracleResult::Dump(_), CrateResult::Rejected { kind, message }) => match kind {
             // Project divergences (spec README, *Divergences decided by the project*).
             ErrorKind::InvalidUtf8 => Verdict::Skipped("divergence: non-UTF-8"),
@@ -472,6 +481,76 @@ mod tests {
             make_verdict(b".include(g=true,y=e)\"${H_}.*\"\nx=1", &handler),
             Verdict::Differs {
                 kind: Kind::CrateAccepts,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn mixed_handler_emit_text_rejection_skips_only_its_undefined_value() {
+        let input = b".emit \"x=${H_}c\"";
+        let flags = flags(&[
+            "registered-macros",
+            "dump-comments",
+            "string-input",
+            "variable-handler",
+        ]);
+        let setup = Setup::from_flags(&flags).unwrap();
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/13-inputs");
+        let (krate, notes) = run_crate(&setup, &dir, input);
+        assert!(matches!(
+            &krate,
+            CrateResult::Rejected {
+                kind: ErrorKind::MissingValue,
+                ..
+            }
+        ));
+        let ctx = Context {
+            input,
+            flags: &flags,
+            dropped_comments: &notes.dropped_comments,
+            uncertain: &notes.uncertain,
+        };
+        let oracle = |key: &str| {
+            OracleResult::Dump(serde_json::json!({
+                "t":"object","entries":[{"k":key,"v":[{"t":"string","v":"[handled]\0"}]}]
+            }))
+        };
+        assert!(matches!(
+            compare(&oracle("x"), &krate, &ctx),
+            Verdict::Skipped(uncertain::HANDLER)
+        ));
+        assert!(matches!(
+            compare(&oracle("y"), &krate, &ctx),
+            Verdict::Differs {
+                kind: Kind::CrateRejects,
+                ..
+            }
+        ));
+
+        let extra = b".emit \"x=${H_}c\"\nother=1";
+        let extra_ctx = Context {
+            input: extra,
+            flags: ctx.flags,
+            dropped_comments: ctx.dropped_comments,
+            uncertain: ctx.uncertain,
+        };
+        assert!(matches!(
+            compare(&oracle("x"), &krate, &extra_ctx),
+            Verdict::Differs {
+                kind: Kind::CrateRejects,
+                ..
+            }
+        ));
+        let wrong_error = CrateResult::Rejected {
+            kind: ErrorKind::UnexpectedTerminator,
+            message: "other error".into(),
+        };
+        assert!(matches!(
+            compare(&oracle("x"), &wrong_error, &ctx),
+            Verdict::Differs {
+                kind: Kind::CrateRejects,
                 ..
             }
         ));
