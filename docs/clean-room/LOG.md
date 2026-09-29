@@ -3505,3 +3505,22 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: independent review at `8326eab`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, released spec-v15 §12.5, the #81 black-box
+    controls and the spec index. No Claude Code sessions or memory were read.
+  - Work: moved #81's narrow observable classification into §12.5 for review as
+    spec-v16, updated the question answer and index to mark the draft, and stated
+    why the uncertain result has no golden. A replaced comment may appear on a
+    later value before that value's own trailing comment; comments on earlier
+    unrelated values and value differences remain outside this allowance. The
+    three pending spec-v15 include cases remain intact. No implementation file
+    was edited.
+  - Checks: `git diff --check`; `cargo test --test conformance` passed all three
+    tests; latest released tag remained `spec-v15`.
+  - Commits: the following `docs(spec): draft C14 comment uncertainty` commit
+    on `c14/spec80`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source
+    structure.
