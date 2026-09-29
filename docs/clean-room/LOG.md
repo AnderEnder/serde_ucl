@@ -3039,3 +3039,27 @@
   - Commits: this log entry only, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: implementation team (same clean-room implementer). Item: C14 item 3,
+  differential fuzz gate follow-up.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, this log and question #79; released `spec-v13`
+    README *Divergences decided by the project* and *Uncertain behaviour*, §§7.7 and 12.2;
+    `fuzz/src/`, `tests/common/oracle.rs`, and the two saved black-box findings and fuzz logs
+    under `target/`. No spec-team branch or draft spec was read.
+  - Work: the §7.7 handler result combined with other text was already an allowed project
+    divergence. Added a narrow fuzzer skip for oracle rejection of a single `.include` whose
+    simple quoted path has an unshadowed handler-resolved reference plus other text and whose
+    crate result is empty. Its regression test also checks that no handler, variable shadowing,
+    and an adjacent extra entry remain differences. The `zerocopy` finding remains unsuppressed:
+    released §12.2 says the flag has no observable value-tree effect, so question #79 requires a
+    spec ruling before a skip can be justified.
+  - Checks: the new test failed before the change and passed afterward; all 11 fuzzer unit
+    tests passed. `scripts/ci.sh` passed all 26 steps. Replaying the saved findings with the
+    updated release fuzzer skipped only the §7.7 case and still reported #79 as `values-differ`.
+    `scripts/ci.sh fuzz 300` then exited 0 on seed 1790704509759185000: 934,779 inputs,
+    933,133 agreements and zero findings saved. The full log is preserved at
+    `target/perf/c14/logs/fuzz-after-handler-skip.log`. The prior failing run and both saved
+    findings remain preserved and documented in `target/perf/C14-report.md`.
+  - Commits: the following C14 fuzzer/documentation commit, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

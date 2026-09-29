@@ -43,6 +43,70 @@ pub const ENDED_UNIT: &str = "uncertain: a container of an ended unit at a file'
 pub const CLOSED_ARRAY_ELEMENT: &str = "uncertain: a file's '}' closes an array element (§9.4)";
 pub const TRAILING_SLASH: &str = "uncertain: a '/' after a file or a link to one (§9.4)";
 
+/// §7.7 also affects the filename made from a macro value. The oracle can reject an include
+/// whose quoted path contains a handler result and other text, while the crate's substitution
+/// makes a glob with no matches. Limit this to a single include with an empty result: neither
+/// another entry nor another macro can then be hidden by the skip.
+pub fn handler_in_single_include_path(ctx: &Context<'_>, actual: &J) -> bool {
+    if !ctx.has_flag("variable-handler") || ctx.has_flag("disable-macro") {
+        return false;
+    }
+    let Some(map) = actual.as_object() else {
+        return false;
+    };
+    if map.len() != 2
+        || map.get("t").and_then(J::as_str) != Some("object")
+        || !map
+            .get("entries")
+            .and_then(J::as_array)
+            .is_some_and(Vec::is_empty)
+    {
+        return false;
+    }
+    let Some(mut rest) = ctx.input.trim_ascii().strip_prefix(b".include") else {
+        return false;
+    };
+    if let Some(after_open) = rest.strip_prefix(b"(") {
+        let Some(end) = after_open.iter().position(|&b| b == b')') else {
+            return false;
+        };
+        // This recogniser deliberately leaves quoted or nested argument documents alone.
+        if after_open[..end].iter().any(|&b| b == b'"' || b == b'(') {
+            return false;
+        }
+        rest = &after_open[end + 1..];
+    }
+    rest = rest.trim_ascii_start();
+    let Some(path) = rest.strip_prefix(b"\"").and_then(|s| s.strip_suffix(b"\"")) else {
+        return false;
+    };
+    if path.contains(&b'"') || path.contains(&b'\\') {
+        return false;
+    }
+    for (at, pair) in path.windows(2).enumerate() {
+        if pair != b"${" {
+            continue;
+        }
+        let Some(end) = path[at + 2..].iter().position(|&b| b == b'}') else {
+            continue;
+        };
+        let name = &path[at + 2..at + 2 + end];
+        if !name.starts_with(b"H_") || (at == 0 && at + 3 + end == path.len()) {
+            continue;
+        }
+        let shadowed = ctx
+            .flags
+            .iter()
+            .filter_map(|flag| flag.strip_prefix("var:"))
+            .filter_map(|var| var.split_once('=').map(|(name, _)| name.as_bytes()))
+            .any(|registered| registered == name);
+        if !shadowed {
+            return true;
+        }
+    }
+    false
+}
+
 /// The reason for a difference in a parse that reached `rule`.
 pub fn reached(rule: Uncertain) -> &'static str {
     match rule {
