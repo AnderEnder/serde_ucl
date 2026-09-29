@@ -3789,3 +3789,32 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` VALUE before an ignored macro name.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §§7.1, 9.2, 12.2 and 13.2, own `fuzz/src/`, the saved
+    finding `values-differ-721c495bc7cf91fb`, and black-box oracle runs.
+  - Work: on isolated branch `c14-emit-eof` from `436db65`, classified only
+    `.emit r $ABI` followed by terminal `.s`, optionally after one simple
+    literal entry. The source and exact flags prove that the variable expands
+    in VALUE and that `.s` adds no entry. The crate result must retain `r` and
+    `unknown`; only same-length oracle key and string bytes may differ, and
+    the complete normalized dump must then agree. Changed crate values or
+    keys, a changed prefix, extra entries, ARGUMENTS or comment variables,
+    and content after `.s` remain reportable.
+  - Checks: the focused saved-shape test failed before the classifier change
+    and passed after; all 23 fuzz unit tests and `scripts/ci.sh` passed;
+    release-build replay of the saved finding exited 0 as `skipped: uncertain:
+    expanded .emit text under zerocopy (§12.2)`; `git diff --check` passed.
+    No full fuzz run was requested or performed for this isolated follow-up.
+  - Commits: the following `fix(fuzz): classify expanded emit before ignored macro name`
+    commit on `c14-emit-eof`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 §12.2/§9.2 isolated `.emit` EOF fuzzer review (`436db65..1914c38`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §§9.2 and 12.2, the scoped implementation diff, implementation-side C14 LOG entry, saved replay input, and recorded CI log. The oracle executable was used only as a black box.
+  - Checks: 23 fuzzer unit tests and scoped `git diff --check` passed. Release fuzzer replay of `.emit r $ABI\n.s` and its one-entry prefix returned the intended §12.2 skip; ARGUMENTS and comment-variable controls agreed with the oracle. The exact source recognizer, exact flags, emitted-entry shape, and whole-dump equality keep changed key/value/prefix/entries and trailing-content differences reportable. The implementer CI log records a successful run; no full fuzz run was performed in this review.
+  - Verdict: no Critical or Important defect found. The skip is confined to the expanded VALUE before a terminal ignored macro name under the specified flags; the optional literal prefix must agree unchanged.
+  - Commits: this reviewer LOG entry only on `c14-emit-eof`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
