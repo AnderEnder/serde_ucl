@@ -3658,3 +3658,25 @@
     `c14/spec80`, tagged locally as `spec-v16`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl
     code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.5 duplicate-comment uncertainty.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §12.5, own `fuzz/src/uncertain.rs` and `fuzz/src/run.rs`,
+    and the saved black-box finding under `target/perf/c14/findings/`.
+  - Work: on isolated branch `c14-comments-v16` from `7a90c8f`, restricted the
+    uncertainty skip to an unambiguous four-line rewrite input that proves the
+    replaced comment precedes the distinct later value. The complete dump must
+    agree after normalizing only that later value's duplicate comment list.
+    Earlier unrelated values with the same comment text, changed values,
+    unrelated comments and extra entries remain reportable. More complex
+    input forms remain reportable when source order cannot be proved.
+  - Checks: a focused test failed before the classifier change, then passed;
+    `cargo test --manifest-path fuzz/Cargo.toml` passed 22 tests;
+    `scripts/ci.sh` passed; release-build replay of the preserved §12.5
+    finding exited 0 as `skipped: uncertain: comments of a replaced value
+    (§12.5)`; `git diff --check` passed. No full fuzz run was requested or
+    performed for this isolated follow-up.
+  - Commits: the following `fix(fuzz): scope replaced-comment skip to later simple value`
+    commit on `c14-comments-v16`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
