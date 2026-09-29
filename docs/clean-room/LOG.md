@@ -3309,3 +3309,22 @@
   - Checks: 19/19 fuzzer unit tests passed; `scripts/ci.sh` passed all 26 steps (`target/perf/c14/logs/ci-v14-suffix.log`). The latest completed `scripts/ci.sh fuzz 300` **exited 1**, seed `1790709424304949000`, 944,790 inputs and three saved findings (`target/perf/c14/logs/fuzz-v14-dollar.log`); it ran before the final compact-prefix and suffix edits. With final code, replay of the six preserved findings from the last two fuzz samples classifies four released §12.2 cases and still reports #80 plus a pre-existing §12.5 duplicate-comment difference. The latter and #80 reproduce with v0.5.0. No further full fuzz run was made pending #80's spec ruling; the zero-difference gate is open. Findings and full logs are preserved under `target/perf/c14/`.
   - Commits: the following C14 fuzzer review-fix commit on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, question #80, released spec-v14 §9.4, the existing include-path and URL
+    conformance inputs and goldens, `tools/ucl-dump/`, the pinned libucl source, and
+    black-box runs of the pinned oracle. No Claude Code sessions or memory were read.
+  - Work: checked the reduced two-include input against controls that vary the search
+    directories, URL option and `try` option. The oracle rejects the first-directory miss
+    alone and accepts the compound input only when a later directory supplies the file and
+    the later URL include is skippable. Answered #80 from the released first-directory
+    rule: the crate's error is required, with no spec amendment or implementation change.
+    Existing conformance cases cover the separate rules; the conflicting compound result
+    was not added as a golden case. Recommended narrowly recognizing that compound oracle
+    discrepancy in differential fuzzing.
+  - Checks: repeated the reduced oracle run and its rejection controls; `git diff --check`.
+  - Commits: the following `docs(clean-room): resolve C14 include-path question` commit on
+    `c14/spec80`. Not released, tagged or pushed; independent review pending.
+  - Attestation: the question answer and this log contain observable behavior only, with
+    no libucl code, pseudo-code, internal names or source structure.
