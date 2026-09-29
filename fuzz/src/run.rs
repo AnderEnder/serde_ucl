@@ -557,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_reappearing_rewrite_comment_skips_only_that_comment() {
+    fn duplicate_reappearing_rewrite_comment_stays_reportable_without_positions() {
         let input = b"# c\na d\na 2\nk d# c";
         let run_flags = flags(&[
             "dump-comments",
@@ -581,36 +581,43 @@ mod tests {
             {"k":"a","v":[{"t":"int","v":"2"}]},
             {"k":"k","v":[{"t":"string","v":"d","c":["# c","# c"]}]}
         ]});
-        let verdict = |dump| compare(&OracleResult::Dump(dump), &krate, &ctx);
         assert!(matches!(
-            verdict(golden.clone()),
-            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+            compare(&OracleResult::Dump(golden), &krate, &ctx),
+            Verdict::Differs {
+                kind: Kind::ValuesDiffer,
+                ..
+            }
         ));
+    }
 
-        let mut changed_value = golden.clone();
-        changed_value["entries"][1]["v"][0]["v"] = serde_json::json!("q");
-        assert!(matches!(verdict(changed_value), Verdict::Differs { .. }));
-        let mut unrelated_comment = golden.clone();
-        unrelated_comment["entries"][1]["v"][0]["c"][0] = serde_json::json!("# x");
-        assert!(matches!(
-            verdict(unrelated_comment),
-            Verdict::Differs { .. }
-        ));
-        let mut extra_entry = golden.clone();
-        extra_entry["entries"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::json!({"k":"z","v":[{"t":"int","v":"1"}]}));
-        assert!(matches!(verdict(extra_entry), Verdict::Differs { .. }));
-
-        let no_rewrite = flags(&["dump-comments", "string-input", "no-filevars"]);
-        let no_rewrite_ctx = Context {
-            flags: &no_rewrite,
-            ..ctx
+    #[test]
+    fn dropped_comment_cannot_reappear_on_an_earlier_value() {
+        let input = b"p { v 1 # c\n}\n# c\na 1\na 2\n";
+        let run_flags = flags(&["dump-comments", "strategy:rewrite", "string-input"]);
+        let setup = Setup::from_flags(&run_flags).unwrap();
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
+        let (krate, notes) = run_crate(&setup, &dir, input);
+        assert!(matches!(&krate, CrateResult::Dump(_)));
+        assert_eq!(notes.dropped_comments, ["# c"]);
+        let ctx = Context {
+            input,
+            flags: &run_flags,
+            dropped_comments: &notes.dropped_comments,
+            uncertain: &notes.uncertain,
         };
+        let wrong_earlier_comment = serde_json::json!({"t":"object","entries":[
+            {"k":"p","v":[{"t":"object","entries":[
+                {"k":"v","v":[{"t":"int","v":"1","c":["# c","# c"]}]}
+            ]}]},
+            {"k":"a","v":[{"t":"int","v":"2"}]}
+        ]});
         assert!(matches!(
-            compare(&OracleResult::Dump(golden), &krate, &no_rewrite_ctx),
-            Verdict::Differs { .. }
+            compare(&OracleResult::Dump(wrong_earlier_comment), &krate, &ctx),
+            Verdict::Differs {
+                kind: Kind::ValuesDiffer,
+                ..
+            }
         ));
     }
 }

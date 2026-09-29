@@ -583,6 +583,8 @@ fn comments(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSe
         }
     }
     if g_texts != a_texts {
+        // A matching text on the actual value cannot be identified as a dropped
+        // comment: these notes have no source positions or value creation order.
         let dropped =
             |text: &String| ctx.dropped_comments.contains(text) && !a_texts.contains(text);
         let kept: Vec<String> = g_texts.iter().filter(|t| !dropped(t)).cloned().collect();
@@ -596,24 +598,6 @@ fn comments(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSe
             reasons.insert(REPLACED_COMMENTS);
             changed = true;
         }
-    }
-    // A replaced value's comment can reappear before a later value that already has an
-    // identical after-comment (§12.5). The existing subset rule cannot distinguish the two
-    // copies by text, so cover only this two-to-one `c`/`ca` shape under rewrite.
-    if !changed
-        && ctx.has_flag("strategy:rewrite")
-        && g_key == "c"
-        && a_key == "ca"
-        && g_texts.len() == 2
-        && a_texts.len() == 1
-        && g_texts[0] == a_texts[0]
-        && g_texts[1] == a_texts[0]
-        && ctx.dropped_comments.contains(&g_texts[0])
-    {
-        g_texts = a_texts;
-        g_key = a_key;
-        reasons.insert(REPLACED_COMMENTS);
-        changed = true;
     }
     if changed && let Some(node) = golden.as_object_mut() {
         node.remove("c");
