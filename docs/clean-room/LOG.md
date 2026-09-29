@@ -3039,3 +3039,32 @@
   - Commits: this log entry only, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, `QUESTIONS.md`
+    #79 and C14 `WORKLIST.md`; released `spec-v13` §§12.2 and 13.2; the oracle's public
+    options and test-macro setup in `tools/ucl-dump/`; pinned libucl source at
+    `24c8b399062ae4691168c243e3b7345ef7f31956` (spec team only). I did not read
+    Claude Code sessions or memory, or implementation source.
+  - Reproduction: built the pinned oracle in this worktree's ignored `target/`, wrote
+    temporary inputs under `target/libucl-oracle/probes/`, and ran each against
+    `ucl-dump -R -S`, with and without `-z`, from that directory. For `.emit $CURDIR 2`,
+    20/20 runs without `-z` gave the same expanded path key and `int 2`; 20/20 with `-z`
+    gave distinct non-UTF-8 keys of the path's byte length and `int 2`. For
+    `.emit k = $ABI`, `-z` changed both the literal key and string value. Controls
+    `k = $ABI`, `.seen $ABI`, and `.emit k = stable` under `-z` retained the expected
+    bytes in 12/12 runs each. A registered `$MYVAR=abc` expansion in `.emit $MYVAR 2`
+    also changed the key; `.emit k = $NUM` with `$NUM=2` changed the literal key.
+  - Finding: the oracle's bytes for keys and strings from variable-expanded `.emit`
+    text under `zerocopy` are undefined. The project may retain the expanded bytes.
+    No golden case was added because the oracle result is not stable. A fuzzer skip
+    is justified only when `zerocopy` is set, a registered `.emit` VALUE actually
+    expands a variable, and its parsed text supplies a key or string value to the
+    result. This is a draft answer pending independent spec review and release.
+  - Work: drafted behavior-only amendments to §§12.2 and 13.2 and an answer to #79.
+    I inadvertently sent the coordinator a source-derived mechanism in an interim
+    message; I immediately flagged the clean-room exposure and instructed any
+    implementation-role recipient to follow the protocol. No such detail appears
+    in the spec or question answer.
+  - Commits: the following spec-team draft commit on `c14/spec79`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
