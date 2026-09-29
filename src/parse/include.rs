@@ -546,7 +546,10 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
                 let path = Some(shown.to_owned());
                 return Err(self.error(ErrorKind::InputTooLarge { limit, path }, request.at));
             }
-            Err(_) => return unusable(self, not_a_file()),
+            // A regular file that cannot be read is an error even for optional includes
+            // (spec §9.4, *Missing and unusable files*). `try` only skips missing files and
+            // non-regular paths.
+            Err(_) => return Err(self.error(not_a_file(), request.at)),
         };
         let key = key.or_else(|| request.prefix.then(|| prefix_key(&canonical)));
         self.include_unit(&bytes, &canonical, request, key)?;
@@ -1784,6 +1787,92 @@ mod tests {
         );
         assert!(run(&files, ".include(path=[], try=true) \"g/a.inc\"").is_err());
         assert_eq!(ok(".include(path=\"p1\") \"g/a.inc\""), ["ga"]);
+    }
+
+    #[test]
+    fn unreadable_regular_file_is_an_error_even_for_optional_includes() {
+        use crate::parse::{FileKind, Loader};
+        use std::io;
+        use std::path::PathBuf;
+
+        struct DenyRead(MemoryLoader);
+        impl Loader for DenyRead {
+            fn current_dir(&self) -> io::Result<PathBuf> {
+                self.0.current_dir()
+            }
+            fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+                self.0.canonicalize(path)
+            }
+            fn kind(&self, path: &Path) -> Option<FileKind> {
+                self.0.kind(path)
+            }
+            fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+                if path.file_name().is_some_and(|name| name == "denied.inc") {
+                    return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+                }
+                self.0.read(path)
+            }
+            fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
+                self.0.read_dir(path)
+            }
+        }
+
+        let mut files = MemoryLoader::new();
+        files
+            .add_file("/c/denied.inc", "hidden = 1\n")
+            .add_file("/c/g/denied.inc", "hidden = 1\n")
+            .add_file("/c/g/good.inc", "good = 1\n")
+            .add_file("/c/other/good.inc", "good = 1\n")
+            .add_dir("/c/nonregular")
+            .add_dir("/c/other/subdir");
+        let run = |input: &str| {
+            let mut parser = Parser::new();
+            parser
+                .set_loader(DenyRead(files.clone()))
+                .set_base_dir("/c");
+            parser.parse(input.as_bytes())
+        };
+
+        for input in [
+            ".include \"denied.inc\"",
+            ".include(try=true) \"denied.inc\"\nafter = 1",
+            ".try_include \"denied.inc\"\nafter = 1",
+            ".try_include(try=false) \"denied.inc\"\nafter = 1",
+            ".include(glob=true, try=true) \"g/*.inc\"\nafter = 1",
+            ".try_include(glob=true) \"g/*.inc\"\nafter = 1",
+            ".try_include(glob=true, try=false) \"g/*.inc\"\nafter = 1",
+        ] {
+            let error = run(input).unwrap_err();
+            assert!(
+                matches!(error.kind(), ErrorKind::NotAFile { .. }),
+                "{input}: {error}"
+            );
+        }
+
+        assert_eq!(
+            keys(&run(".include(try=true) \"missing.inc\"\nafter = 1").unwrap()),
+            ["after"]
+        );
+        assert_eq!(
+            keys(&run(".include(try=true) \"nonregular\"\nafter = 1").unwrap()),
+            ["after"]
+        );
+        assert!(
+            run(".try_include \"missing.inc\"\nafter = 1")
+                .unwrap_err()
+                .is_stopped()
+        );
+        assert!(
+            run(".try_include \"nonregular\"\nafter = 1")
+                .unwrap_err()
+                .is_stopped()
+        );
+        for input in [
+            ".include(glob=true, try=true) \"other/*\"\nafter = 1",
+            ".try_include(glob=true) \"other/*\"\nafter = 1",
+        ] {
+            assert_eq!(keys(&run(input).unwrap()), ["good", "after"], "{input}");
+        }
     }
 
     #[test]
