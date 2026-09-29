@@ -3292,3 +3292,9 @@
   - Commits: this log-only re-review commit. Not pushed.
   - Attestation: this review and log contain observable benchmark behavior only, with no
     libucl code, pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 final branch review (`65ed378...7556c1a`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §§9.2, 12.2 and 13.2, implementation-owned branch diff under `src/parse/`, `fuzz/`, `benches/` (excluding corpus), `tests/*.rs`, and implementation-side log entries; `target/perf/C14-report.md`. Oracle used only as a black box.
+  - Checks: `cargo test`, fuzzer unit tests (12/12), benchmark-document tests (5/5), `benches/check-documents.sh` (8 agreements), pinned JSON hash check, serde benchmark listing, and scoped `git diff --check` passed. `.emit (a=$ABI) k=stable` with `registered-macros`, `zerocopy`, `string-input` agreed with the oracle.
+  - Verdict: one Important finding in `fuzz/src/uncertain.rs`: `single_expanded_emit` scans ARGUMENTS for `$ABI`, although §9.2 does not expand application variables there and §12.2 requires expansion in VALUE. It can excuse same-length key/string differences for the agreeing control. Add a negative test for variable text in ARGUMENTS and restrict recognition to VALUE. No Critical finding or parser/benchmark defect found. Performance figures were assessed from the report, not rerun.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
