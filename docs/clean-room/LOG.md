@@ -3063,3 +3063,32 @@
   - Commits: the following C14 fuzzer/documentation commit, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: implementation team (same clean-room implementer). Item: C14 item 3,
+  released spec-v14 answer to question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, and this log; only the released `spec-v14` §12.2 and §13.2
+    (`git show spec-v14:docs/spec/12-flags.md` and
+    `git show spec-v14:docs/spec/13-inputs-and-macros.md`), plus the released
+    `zerocopy_registered_macros_stable` conformance case; `fuzz/src/`, the exact reduced
+    inputs and prior black-box logs under `target/perf/c14/`. No spec-team branch or draft spec
+    was read; the oracle was used only as a black box.
+  - Work: spec-v14 now marks expanded registered `.emit` text under `zerocopy` uncertain in
+    libucl; the project keeps the expanded bytes. Added a fuzzer-only recognizer for a single
+    registered `.emit` with a known expanding variable, excusing same-length key and string
+    value bytes while leaving other differences visible. The focused test failed before the
+    change and passed after it; it also checks changed numeric values, wrong-length keys,
+    direct values, `.seen`, literal `.emit`, no file variables and extra entries. No parser
+    behavior changed. Corrected the C14 report: a prior clean fuzz run removed the default
+    finding directory, so the two exact reduced inputs, flags and directories were restored
+    under `target/perf/c14/reduced-findings/` from recorded checks; full original fuzz logs
+    remain preserved.
+  - Checks: all 12 fuzzer unit tests passed. Replaying both restored reduced inputs with the
+    updated release fuzzer skipped #79 under §12.2 and the handler-path case under §7.7;
+    `target/perf/c14/logs/replay-v14.log` records both reasons. The released stable conformance
+    input compared as `agree` using the oracle as a black box. `scripts/ci.sh` passed all 26
+    steps. `scripts/ci.sh fuzz 300` exited 0 on seed 1790705519133757000: 1,101,512 inputs,
+    1,099,766 agreements and zero saved findings. Its full log is
+    `target/perf/c14/logs/fuzz-v14-skip.log`.
+  - Commits: the following C14 fuzzer/documentation commit, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

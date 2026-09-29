@@ -12,6 +12,7 @@
 //! | [`REPLACED_COMMENTS`] | §12.5 | comments of a value §8 replaced, which libucl can attach to a later value |
 //! | [`NUL_IN_COPY`] | §9.7, §13.2 | the bytes after the first NUL of a string that `.inherit`, `.seen` or `.ctx` copies |
 //! | [`SEEN_COLLECTED_KEY`] | §13.2 | the key of a `no-implicit-arrays` collection in `.seen`'s copy of ARGUMENTS |
+//! | [`ZEROCOPY_EMIT`] | §12.2 | keys and string values parsed from an expanded `.emit` VALUE under `zerocopy` |
 //! | [`ARRAY_TEXT`] | §9.4, §13.2 | an included file, or text parsed in place, that starts with `[` and holds more |
 //!
 //! Four more cannot be seen in the dumps or the input, so the crate reports when a parse reaches
@@ -37,6 +38,7 @@ pub const BLOCK_COMMENT_END: &str = "uncertain: the byte after a block comment a
 pub const REPLACED_COMMENTS: &str = "uncertain: comments of a replaced value (§12.5)";
 pub const NUL_IN_COPY: &str = "uncertain: bytes after a NUL in a copied string (§9.7)";
 pub const SEEN_COLLECTED_KEY: &str = "uncertain: the key of a collection in .seen's copy (§13.2)";
+pub const ZEROCOPY_EMIT: &str = "uncertain: expanded .emit text under zerocopy (§12.2)";
 pub const ARRAY_TEXT: &str = "uncertain: an included file or text in place that starts with '['";
 pub const REOPENED_NOT_OBJECT: &str = "uncertain: a reopened value that is not an object (§9.1)";
 pub const ENDED_UNIT: &str = "uncertain: a container of an ended unit at a file's end (§9.4)";
@@ -145,6 +147,57 @@ impl Context<'_> {
             || (self.has_flag("registered-macros")
                 && (self.input_has(b".seen") || self.input_has(b".ctx")))
     }
+
+    /// The one unit is a registered `.emit` with an expanded built-in variable in its VALUE.
+    /// Restricting this to one simple macro keeps entries outside its parsed text visible.
+    fn single_expanded_emit(&self) -> bool {
+        if !self.has_flag("registered-macros")
+            || !self.has_flag("zerocopy")
+            || self.has_flag("disable-macro")
+        {
+            return false;
+        }
+        let Some(rest) = self.input.trim_ascii().strip_prefix(b".emit") else {
+            return false;
+        };
+        if !rest.first().is_some_and(u8::is_ascii_whitespace) {
+            return false;
+        }
+        let value = rest.trim_ascii_start();
+        if value.is_empty()
+            || value
+                .iter()
+                .any(|b| matches!(b, b'\n' | b'\r' | b';' | b'\\' | b'#'))
+        {
+            return false;
+        }
+        for (at, &byte) in value.iter().enumerate() {
+            if byte != b'$' || (at > 0 && value[at - 1] == b'$') {
+                continue;
+            }
+            let rest = &value[at + 1..];
+            let name = if let Some(braced) = rest.strip_prefix(b"{") {
+                let Some(end) = braced.iter().position(|&b| b == b'}') else {
+                    continue;
+                };
+                &braced[..end]
+            } else if rest.starts_with(b"ABI") {
+                b"ABI".as_slice()
+            } else if rest.starts_with(b"CURDIR") {
+                b"CURDIR".as_slice()
+            } else if rest.starts_with(b"FILENAME") {
+                b"FILENAME".as_slice()
+            } else {
+                continue;
+            };
+            if name == b"ABI"
+                || (!self.has_flag("no-filevars") && (name == b"CURDIR" || name == b"FILENAME"))
+            {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// Where the oracle's dump `golden` differs from the crate's `actual` only in behaviour the spec
@@ -171,12 +224,20 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
                 if let (Some(g_key), Some(a_key)) =
                     (entry_key(g_entry), a_entry.get("k").and_then(J::as_str))
                     && g_key != a_key.as_bytes()
-                    && seen_collected_key(&g_key, a_key, a_entry, ctx)
                     && let Some(entry) = g_entry.as_object_mut()
                 {
-                    entry.remove("khex");
-                    entry.insert("k".to_owned(), J::from(a_key));
-                    reasons.insert(SEEN_COLLECTED_KEY);
+                    let reason = if seen_collected_key(&g_key, a_key, a_entry, ctx) {
+                        Some(SEEN_COLLECTED_KEY)
+                    } else if ctx.single_expanded_emit() && g_key.len() == a_key.len() {
+                        Some(ZEROCOPY_EMIT)
+                    } else {
+                        None
+                    };
+                    if let Some(reason) = reason {
+                        entry.remove("khex");
+                        entry.insert("k".to_owned(), J::from(a_key));
+                        reasons.insert(reason);
+                    }
                 }
                 if let (Some(g_values), Some(a_values)) = (
                     g_entry.get_mut("v").and_then(J::as_array_mut),
@@ -212,6 +273,8 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
                 Some(NUL_IN_COPY)
             } else if handler_with_other_text(g, a, ctx) {
                 Some(HANDLER)
+            } else if ctx.single_expanded_emit() && g.len() == a.len() {
+                Some(ZEROCOPY_EMIT)
             } else {
                 None
             };
@@ -435,6 +498,51 @@ mod tests {
         assert!(excused(string("[handled]\0\0"), &string("${H_unknown"), &ctx).0);
         assert!(!excused(string("y"), &string("[handled]"), &ctx).0);
         assert!(!excused(string("x"), &string("x[handled]"), &context("", &[], &[])).0);
+    }
+
+    #[test]
+    fn zerocopy_expanded_emit_excuses_bytes_but_not_nearby_differences() {
+        let flags = strings(&["registered-macros", "zerocopy", "string-input"]);
+        let emitted = context(".emit $CURDIR 2", &flags, &[]);
+        let actual = json!({"t":"object","entries":[{"k":"/tmp/x","v":[{"t":"int","v":"2"}]}]});
+        let corrupted =
+            json!({"t":"object","entries":[{"khex":"000000000000","v":[{"t":"int","v":"2"}]}]});
+        let (same, reasons) = excused(corrupted.clone(), &actual, &emitted);
+        assert!(same && reasons.iter().any(|reason| reason.contains("zerocopy")));
+
+        let wrong_number =
+            json!({"t":"object","entries":[{"khex":"000000000000","v":[{"t":"int","v":"3"}]}]});
+        assert!(!excused(wrong_number, &actual, &emitted).0);
+        let wrong_length =
+            json!({"t":"object","entries":[{"khex":"0000000000","v":[{"t":"int","v":"2"}]}]});
+        assert!(!excused(wrong_length, &actual, &emitted).0);
+        for (input, flags) in [
+            (
+                ".emit $CURDIR 2",
+                strings(&["registered-macros", "string-input"]),
+            ),
+            (".emit $CURDIR 2", strings(&["zerocopy", "string-input"])),
+            (
+                ".emit $CURDIR 2",
+                strings(&["registered-macros", "zerocopy", "no-filevars"]),
+            ),
+            (".seen $CURDIR", flags.clone()),
+            (".emit literal = stable", flags.clone()),
+            (".emit $$CURDIR 2", flags.clone()),
+            ("direct = $ABI", flags.clone()),
+            (".emit $CURDIR 2\nother = 1", flags.clone()),
+        ] {
+            assert!(
+                !excused(corrupted.clone(), &actual, &context(input, &flags, &[])).0,
+                "{input}"
+            );
+        }
+
+        let actual = json!({"t":"object","entries":[{"k":"k","v":[{"t":"string","v":"unknown"}]}]});
+        let corrupted =
+            json!({"t":"object","entries":[{"k":"x","v":[{"t":"string","v":"xxxxxxx"}]}]});
+        let (same, reasons) = excused(corrupted, &actual, &context(".emit k = $ABI", &flags, &[]));
+        assert!(same && reasons.iter().any(|reason| reason.contains("zerocopy")));
     }
 
     #[test]
