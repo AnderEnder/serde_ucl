@@ -3999,3 +3999,26 @@
   - Verification: all 26 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check d8e3e36^ d8e3e36` passed. The release fuzzer replay of the saved reduced finding, using its recorded flags and working directory and the oracle executable as a black box, exited 0 with `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. No sustained fuzz campaign was run for this review.
   - Commits: this LOG-only review commit on `c14-emit-vt`; no implementation edits or push.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (classification). Item: C14 vertical-tab `.emit` finding under released spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released
+    spec-v17 §§9.2, 12.2 and 13.2, the saved finding's input, flags and typed
+    report, `zerocopy_registered_macros_stable`, the pinned oracle as a black
+    box, and pinned libucl source. No Claude Code sessions or memory were read.
+  - Work: classified `t I⏎.emit␋$ABI e` with `zerocopy`, `registered-macros`
+    and `string-input` as the already undefined §12.2 byte result. §9.2 treats
+    VT as whitespace after the macro name, so the VALUE contains `$ABI` and
+    expands. The oracle kept `t: "I"` and gave a seven-NUL key and one-NUL
+    string for the emitted entry in three runs; the crate kept `t: "I"` and
+    the expanded key and string. Space and TAB separators gave the same oracle
+    result. Without `zerocopy`, the oracle gave `unknown: "e"`; with a literal
+    VALUE under `zerocopy`, it also gave `unknown: "e"`. A direct `k $ABI`
+    entry under `zerocopy` gave `k: "unknown"`; without registered macros,
+    `.emit` was an error. Released spec-v17 already covers the difference; no
+    new question, normative amendment, golden or tag is needed.
+  - Checks: repeated pinned-oracle runs and narrow controls; scoped
+    `git diff --check`.
+  - Commit: this classification log carried forward from `c14/spec-emit-vt`;
+    not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
