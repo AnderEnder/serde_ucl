@@ -3528,3 +3528,26 @@
   - Attestation: the draft spec, question answer and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source
     structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `8326eab..ede677a` draft diff, released spec-v15 §12.5, the Q81
+    black-box input and flags, and the pinned oracle. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: changes requested for the Q81 answer only. The draft §12.5 text
+    describes the observable `rewrite` result and the project's narrow choice
+    without code, pseudo-code, internal names or source structure. The example
+    reproduced both with its exact `string-input` and `no-filevars` flags and
+    without those flags; the earlier seven controls support its boundary. The
+    README and question mark spec-v16 as a draft, the latest released tag is
+    still spec-v15, and no pending conformance file changed. This prepares the
+    question to be answered through a reviewed spec release. However, the Q81
+    answer still says what differential fuzzing may recognize and require.
+    `QUESTIONS.md` and `PROTOCOL.md` prohibit implementation hints in answers;
+    remove that fuzzer-specific sentence. The observable boundary is already
+    stated in §12.5 and can remain in the answer as a spec summary.
+  - Checks: pinned-oracle replay under both flag sets; scoped
+    `git diff --check`; changed-file list and latest spec tag.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
