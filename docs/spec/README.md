@@ -207,6 +207,8 @@ answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58
 join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, and `spec-v13`
 answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79, found during
 C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §9.4 exception.
+A draft for #81 narrows the existing §12.5 uncertainty; it awaits independent review for
+`spec-v16`.
 
 The cases of `spec-v13` are all in `cases/spec/`. `spec-v15` has three cases
 under `tests/conformance/pending/09-macros/` until the crate follows its §9.4 rule.
@@ -228,6 +230,8 @@ Two §13 rules have no case: a `{` after a zero-byte first input crashes libucl,
 variables that an input given as a file sets would put the checkout path into the golden file.
 The undefined result for variable-expanded `.emit` text under `zerocopy` (§12.2) has no golden;
 `zerocopy_registered_macros_stable` covers its stable boundary.
+The draft §12.5 clarification for #81 has no golden because the replaced comment's later
+appearance is uncertain in libucl.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
