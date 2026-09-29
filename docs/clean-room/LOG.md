@@ -3658,3 +3658,29 @@
   - Attestation: the draft spec, question answer and this log contain
     observable behavior only, with no libucl code, pseudo-code, internal names
     or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `f98a9b1^..f98a9b1` draft diff, released spec-v16 §9.4, the named
+    dot-glob and parameter-prefix conformance cases, and pinned-oracle
+    black-box runs with host `/.file` and controlled unreadable regular files
+    under ignored `target/`. No libucl source, implementation or fuzzer source,
+    or Claude sessions or memory were read.
+  - Review: changes requested for one Q82 question phrase only. On this host,
+    `/.file` is an unreadable regular file and both abbreviated and full-name
+    optional dot-glob includes, and direct optional inclusion, were errors.
+    Controlled hidden and ordinary unreadable files also errored for plain
+    and optional `.include`, optional glob inclusion, `.try_include`, and
+    `.try_include(try=false)`. The draft §9.4 row states these observable
+    outcomes without prohibited content; the host-dependent absolute glob
+    and permission-dependent case justify the absence of a portable golden.
+    The draft is unreleased and follows the question-and-review protocol.
+    However, Q82 says missing files and directories were "skipped" after
+    describing `.try_include` controls. With entries after the macro, the
+    oracle showed `.include(try=true)` skipped them, while `.try_include`
+    stopped silently and `.try_include(try=false)` of a directory errored,
+    exactly as the released §9.4 table says. State those outcomes precisely.
+  - Checks: pinned-oracle direct and glob controls; scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
