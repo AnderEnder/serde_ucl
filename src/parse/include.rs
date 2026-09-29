@@ -86,6 +86,8 @@ pub(crate) struct Includes<'l> {
     /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
     /// ([`super::Parser::set_search_path`]).
     search: Option<Vec<String>>,
+    /// A first-directory miss that §9.4 allows a later skipped URL in this input to recover.
+    pub(crate) pending_search_miss: Option<(usize, Error)>,
     /// The parser's search path, which macro argument documents start with.
     default_search: Option<Vec<String>>,
     /// The file of each open input unit, the inputs first: an included file's canonical path;
@@ -124,6 +126,7 @@ impl<'l> Includes<'l> {
             loader,
             base,
             search: search.clone(),
+            pending_search_miss: None,
             default_search: search,
             files: SmallVec::new(),
             budget,
@@ -288,6 +291,14 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
             // (spec §9.4, *Signatures, URLs and search paths*). Its `path` list still takes
             // effect for later includes (oracle runs, QUESTIONS.md #37).
             return if try_ {
+                if self
+                    .includes
+                    .pending_search_miss
+                    .as_ref()
+                    .is_some_and(|(unit, _)| Some(unit) == self.includes.open_units.last())
+                {
+                    self.includes.pending_search_miss = None;
+                }
                 Ok(())
             } else {
                 Err(self.error(ErrorKind::UrlNotSupported { path }, call.value_at))
@@ -314,11 +325,52 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         };
         let outcome = match self.includes.search.clone() {
             None => self.include_path(&path, request.wildcard_after_nul, &request)?,
+            Some(dirs) if !soft && !try_ && !glob && self.includes.open_units.len() == 1 => {
+                self.include_searched_with_later_url(&dirs, &path, &request)?
+            }
             Some(dirs) => self.include_searched(&dirs, &path, &request)?,
         };
         match outcome {
             Outcome::Done => Ok(()),
             Outcome::Unusable(_) => Err(self.error(ErrorKind::Stopped { path }, call.at)),
+        }
+    }
+
+    /// §9.4: a later skipped URL can recover a plain include's missing first directory when
+    /// another directory has the file. Keep the first error until the input reaches that URL.
+    fn include_searched_with_later_url(
+        &mut self,
+        dirs: &[String],
+        path: &str,
+        request: &Request,
+    ) -> Result<Outcome, Error> {
+        let Some((first, rest)) = dirs.split_first() else {
+            return self.include_searched(dirs, path, request);
+        };
+        let first_path = format!("{first}/{path}");
+        match self.include_path(&first_path, false, request) {
+            Ok(outcome) => Ok(outcome),
+            Err(miss) if matches!(miss.kind(), ErrorKind::FileNotFound { .. }) => {
+                for dir in rest {
+                    let later_path = format!("{dir}/{path}");
+                    let candidate = self.includes.resolve(&later_path);
+                    if self.includes.loader.kind(&candidate) != Some(FileKind::File) {
+                        continue;
+                    }
+                    self.include_path(&later_path, false, request)?;
+                    let unit = *self
+                        .includes
+                        .open_units
+                        .last()
+                        .expect("an input unit is open");
+                    self.includes
+                        .pending_search_miss
+                        .get_or_insert((unit, miss));
+                    return Ok(Outcome::Done);
+                }
+                Err(miss)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -1827,6 +1879,60 @@ mod tests {
         )
         .unwrap();
         assert_eq!(obj(&v).entry("a").unwrap().slots()[0].priority(), 3);
+    }
+
+    #[test]
+    fn first_search_miss_is_recovered_only_by_later_skipped_url() {
+        let files = [
+            ("/c/p2/pa.inc", "pa = 1\n"),
+            (
+                "/c/document.ucl",
+                ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\n.include(try=true, url=true) ://\nafter = 2\n",
+            ),
+        ];
+        for url in [
+            ".include(try=true, url=true) ://",
+            ".try_include(url=true) ://",
+        ] {
+            let input = format!(
+                ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\nbetween = 1\n{url}\nafter = 2\n"
+            );
+            let value = run(&files, &input).unwrap();
+            assert_eq!(keys(&value), ["pa", "between", "after"]);
+            assert_eq!(
+                obj(&value).get("pa").and_then(UclValue::as_integer),
+                Some(1)
+            );
+            assert_eq!(
+                obj(&value).get("between").and_then(UclValue::as_integer),
+                Some(1)
+            );
+            assert_eq!(
+                obj(&value).get("after").and_then(UclValue::as_integer),
+                Some(2)
+            );
+        }
+        let value = parser(&files, ParserFlags::DEFAULT)
+            .parse_file("document.ucl")
+            .unwrap();
+        assert_eq!(keys(&value), ["pa", "after"]);
+        assert_eq!(
+            obj(&value).get("pa").and_then(UclValue::as_integer),
+            Some(1)
+        );
+        assert_eq!(
+            obj(&value).get("after").and_then(UclValue::as_integer),
+            Some(2)
+        );
+
+        for input in [
+            ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\nafter = 2",
+            ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\n.include(url=true) ://",
+            ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\n.include(try=true) \"missing.inc\"",
+            ".include(path=[\"p1\", \"p3\"]) \"pa.inc\"\n.include(try=true, url=true) ://",
+        ] {
+            assert!(run(&files, input).is_err(), "{input}");
+        }
     }
 
     /// `.load` does not use the parser's search path (spec §9.6).

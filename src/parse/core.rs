@@ -196,6 +196,19 @@ impl<'t> Document<'t> {
             sizes: Sizes::default(),
         };
         let result = core.read_input(boundary);
+        let result = match result {
+            Ok(()) => match core.includes.pending_search_miss.take() {
+                Some((pending_unit, error)) if pending_unit == unit => Err(error),
+                pending => {
+                    core.includes.pending_search_miss = pending;
+                    Ok(())
+                }
+            },
+            Err(error) => {
+                core.includes.pending_search_miss = None;
+                Err(error)
+            }
+        };
         self.boundary = match &result {
             Ok(()) => core.boundary_at_end(),
             Err(_) => Boundary::Entry,
