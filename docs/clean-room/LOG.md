@@ -3348,3 +3348,152 @@
   - Checks: the earlier-value negative test failed before removal and passed after. All 22 fuzzer unit tests and `scripts/ci.sh` passed (`target/perf/c14/logs/ci-v14-comment-order-rollback.log`). Final release replay still reports the duplicate-comment finding and #80 and retains the earlier §7.7/§12.2 classifications. No new `fuzz 300` run was started before the reviewed #80 spec/implementation decision; the latest completed 300-second run **exited 1**, and the zero-difference gate remains open.
   - Commits: the following C14 §12.5 skip rollback commit on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, question #80, released spec-v14 §9.4, the existing include-path and URL
+    conformance inputs and goldens, `tools/ucl-dump/`, the pinned libucl source, and
+    black-box runs of the pinned oracle. No Claude Code sessions or memory were read.
+  - Work: checked the reduced two-include input against controls that vary the search
+    directories, URL option and `try` option. The oracle rejects the first-directory miss
+    alone and accepts the compound input only when a later directory supplies the file and
+    the later URL include is skippable. Answered #80 from the released first-directory
+    rule: the crate's error is required, with no spec amendment or implementation change.
+    Existing conformance cases cover the separate rules; the conflicting compound result
+    was not added as a golden case. Recommended narrowly recognizing that compound oracle
+    discrepancy in differential fuzzing.
+  - Checks: repeated the reduced oracle run and its rejection controls; `git diff --check`.
+  - Commits: the following `docs(clean-room): resolve C14 include-path question` commit on
+    `c14/spec80`. Not released, tagged or pushed; independent review pending.
+  - Attestation: the question answer and this log contain observable behavior only, with
+    no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, question #80 and the `dab0150..b45466d` clean-room diff,
+    released spec-v14 §9.4 and its README, the named include-path and URL
+    conformance inputs and goldens, `files/v4/p1/pa.inc`, and black-box runs of
+    the pinned oracle from the case directory. No libucl source, implementation
+    source, fuzzer source, or Claude sessions or memory were read.
+  - Review: changes requested. The released first-directory rule requires the
+    crate's error for the reduced input, but five repeated oracle runs accepted
+    the compound input and returned `pa: int 1`. Controls rejected the first
+    include alone, a missing later directory, a non-skippable URL include, and
+    a later include without URL recognition. The stable compound result is a
+    concrete exception to the spec's description of libucl, not evidence of an
+    undefined result. The two existing cases pin separate rules but not their
+    combination. Resolving an implementer question only in `QUESTIONS.md`
+    conflicts with the protocol's requirement that answers land in a reviewed,
+    tagged spec version. A new compound oracle golden is reproducible; a crate
+    mismatch alone is not a reason to omit it. If the project keeps the error,
+    record that as a deliberate divergence and arrange conformance handling.
+    A fuzzer known-difference exception is defensible only for the demonstrated
+    compound shape and exact first-directory-error versus oracle-success
+    mismatch, with all other differences still compared.
+  - Checks: pinned oracle probes through `/dev/stdin`; scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #80.
+  - Inputs consulted: the independent review at `a76fbe1`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, C14 in `WORKLIST.md`, question #80, released
+    spec-v14 §9.4, the named include-path and URL conformance cases, the pinned
+    oracle and its source, and `scripts/regen-golden.sh` for the golden procedure.
+    No Claude Code sessions or memory were read.
+  - Work: superseded the first ruling after the review and coordinator's decision
+    to match the stable oracle result. Drafted a narrow §9.4 exception for a
+    first-directory miss, a matching later directory, and a subsequent skipped
+    URL include. Added three pending acceptance cases for file and string input,
+    both skippable URL macro forms, and an intervening entry; added three active
+    rejection controls. Generated every new golden from the pinned oracle, updated
+    #80, and corrected the spec index and case counts. Other combinations remain
+    unspecified pending evidence. No implementation-owned file was edited.
+  - Checks: fresh pinned-oracle runs matched all six new typed goldens and all
+    output goldens for the three accepted cases; active case count 1,657 and
+    pending case count 3; `cargo test --test conformance` passed all three tests;
+    `git diff --check` passed.
+  - Commits: the following `docs(spec): draft C14 include-path exception` commit
+    on `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names
+    or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v14 §9.4, the `a76fbe1..897fb6e` draft diff, question #80,
+    the six new conformance inputs, flags and goldens, their included fixture,
+    `tests/conformance/README.md`, and black-box runs of the pinned oracle. No
+    libucl source, implementation or fuzzer source, or Claude sessions or
+    memory were read.
+  - Review: changes requested for corpus documentation only. The earlier
+    protocol finding is addressed by a draft §9.4 answer awaiting independent
+    review and release; the earlier case finding is addressed by three pending
+    oracle-acceptance cases with goldens and three active rejection controls.
+    The exception describes observable behavior, cites each case, and leaves
+    untested combinations open. The case counts are correct: 1,657 active and
+    three pending. All six typed goldens matched fresh pinned-oracle runs; a
+    three-directory probe also found the first matching later file as described.
+    But `tests/conformance/README.md` still says `pending/` has no cases and
+    requires a pending README that is absent; its layout description must be
+    brought up to date. Also the coverage table in `docs/spec/README.md` claims
+    to map every case, yet omits the six new case IDs; add their §9 mappings.
+  - Checks: six typed-golden comparisons with the pinned oracle and scoped
+    `git diff --check`; no implementation tests were run in this re-review.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #80 corpus documentation.
+  - Inputs consulted: independent re-review at `94b9e53`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, the six C14 conformance cases, `tests/conformance/README.md`,
+    the prior pending README at `spec-v13`, and the coverage table in `docs/spec/README.md`.
+    No Claude Code sessions or memory were read.
+  - Work: corrected the conformance layout description for the three pending C14 cases,
+    added `pending/README.md` with the case list and move procedure, and mapped all six
+    new case IDs to §9 in the spec coverage table. The §9.4 rule and goldens are unchanged.
+  - Checks: `git diff --check`; verified each of the six IDs occurs once in the coverage
+    table, each pending ID occurs once in its README, and counts remain 1,657 active and
+    three pending cases.
+  - Commits: the following `docs(spec): document C14 pending cases` commit on
+    `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
+  - Attestation: these documents contain observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (final re-review). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `94b9e53..966ce48` documentation diff, §9.4's six named cases,
+    `docs/spec/README.md`, `tests/conformance/README.md`, and the new
+    `tests/conformance/pending/README.md`. No libucl source, implementation or
+    fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. The pending layout now permits draft cases, states that
+    three C14 cases are pending, and links to a pending README that lists each
+    once with its expected role and move procedure. The coverage table maps
+    each of the three active rejection controls and three pending acceptance
+    cases to §9 exactly once. Counts remain 1,657 active and three pending;
+    the pending `pa.inc` fixture is byte-identical to the active fixture.
+    The revised §9.4 answer and its cases remain ready for spec release under
+    the clean-room protocol. No new finding in this documentation-only diff.
+  - Checks: scoped `git diff --check`, exact-ID occurrence counts in both
+    READMEs, fixture `cmp`, and case-file counts. The prior re-review checked
+    all six typed goldens against the pinned oracle.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #80, spec-v15.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the
+    approved §9.4 draft and six C14 cases, question #80, the independent reviewer
+    entries through `f73b874`, and the pending-case documentation. No Claude Code
+    sessions or memory were read.
+  - Work: after independent approval, changed draft wording to `spec-v15` in the
+    spec index, question answer and pending README. Committed and locally tagged
+    the reviewed behavior as `spec-v15`; the three acceptance cases remain pending
+    until the crate follows the released rule.
+  - Checks: previous latest spec tag was `spec-v14`; the worktree was clean before
+    release edits; 1,657 active cases and three pending cases; `cargo test --test
+    conformance` passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v15` commit on `c14/spec80`,
+    tagged locally as `spec-v15`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
