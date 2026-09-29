@@ -3658,3 +3658,10 @@
     `c14/spec80`, tagged locally as `spec-v16`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl
     code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §9.4 first-directory error precedence follow-up.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §9.4 (the C14 rule released in `spec-v15`), the parent-provided independent-review finding, the six C14 conformance inputs and goldens, implementation-owned `src/parse/` and conformance test utilities. No unreleased draft or forbidden input was read.
+  - Work: record the first-directory `FileNotFound` before parsing a later matching file, and return it if that input ends or fails before a later skippable URL include clears it. Added controls for a malformed later file and bad trailing input.
+  - Checks: the new focused test failed first with `UnterminatedArray` instead of the first-directory `FileNotFound`; both focused tests passed after the fix. A temporary test harness checked all three pending acceptance cases against typed and four emitter goldens and all three active rejection controls against their error goldens; it passed and was removed. `scripts/ci.sh` and `git diff --check` passed.
+  - Commits: `50c9b88` (`fix(parse): preserve first search miss error precedence`); this LOG entry is in a separate follow-up commit. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
