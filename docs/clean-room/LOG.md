@@ -3324,3 +3324,30 @@
     `c14/spec80`. Not released, tagged or pushed; independent review pending.
   - Attestation: the question answer and this log contain observable behavior only, with
     no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, question #80 and the `dab0150..b45466d` clean-room diff,
+    released spec-v14 §9.4 and its README, the named include-path and URL
+    conformance inputs and goldens, `files/v4/p1/pa.inc`, and black-box runs of
+    the pinned oracle from the case directory. No libucl source, implementation
+    source, fuzzer source, or Claude sessions or memory were read.
+  - Review: changes requested. The released first-directory rule requires the
+    crate's error for the reduced input, but five repeated oracle runs accepted
+    the compound input and returned `pa: int 1`. Controls rejected the first
+    include alone, a missing later directory, a non-skippable URL include, and
+    a later include without URL recognition. The stable compound result is a
+    concrete exception to the spec's description of libucl, not evidence of an
+    undefined result. The two existing cases pin separate rules but not their
+    combination. Resolving an implementer question only in `QUESTIONS.md`
+    conflicts with the protocol's requirement that answers land in a reviewed,
+    tagged spec version. A new compound oracle golden is reproducible; a crate
+    mismatch alone is not a reason to omit it. If the project keeps the error,
+    record that as a deliberate divergence and arrange conformance handling.
+    A fuzzer known-difference exception is defensible only for the demonstrated
+    compound shape and exact first-directory-error versus oracle-success
+    mismatch, with all other differences still compared.
+  - Checks: pinned oracle probes through `/dev/stdin`; scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
