@@ -1,0 +1,3 @@
+direct = $ABI
+.seen $ABI
+.emit literal = stable

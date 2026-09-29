@@ -67,7 +67,8 @@ NUL, non-UTF-8 or different between runs. This includes literal text around the 
 `.emit $CURDIR 2` gives the expanded `CURDIR` as the key of `int 2` without `zerocopy`, but
 under `zerocopy` repeated oracle runs gave different non-UTF-8 keys of the same length;
 `.emit k = $ABI` gave a changed `k` and a changed string value. With `zerocopy`, direct
-`k = $ABI`, `.seen $ABI`, and `.emit k = stable` kept their expected bytes in the oracle.
+`direct = $ABI`, `.seen $ABI`, and `.emit literal = stable` kept their expected bytes in the
+oracle (`zerocopy_registered_macros_stable`).
 The project keeps the expanded text's bytes. There is no golden case for the undefined result.
 
 ## 12.3 `no-time`
