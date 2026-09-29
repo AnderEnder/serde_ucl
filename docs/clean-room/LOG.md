@@ -3068,3 +3068,24 @@
   - Commits: the following spec-team draft commit on `c14/spec79`; not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code,
     pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md` and
+    `QUESTIONS.md` #79; released `spec-v13` §§7, 12.2 and 13.2; diff
+    `da65b1a..57fb924` limited to `docs/spec/12-flags.md`,
+    `docs/spec/13-inputs-and-macros.md`, `docs/clean-room/QUESTIONS.md` and this log;
+    named conformance case inputs and flags for `zerocopy_no_effect` and
+    `macro_registered_value_variables`; the pinned `ucl-dump` binary as a black box.
+  - Verdict: changes requested before release. The draft states observable behavior,
+    contains no libucl internal names, source structure, pseudo-code or mechanism, and
+    does not conflict with the released variable or registered-macro rules. The
+    unstable output needs no golden case. However, the stable controls and the limit
+    of the uncertainty have no conformance case combining `zerocopy` with
+    `registered-macros`. Add a reproducible control case and cite it in §12.2 before
+    release, as `PROTOCOL.md` requires case evidence for spec rules. The existing
+    `zerocopy_no_effect` and `macro_registered_value_variables` cases exercise the
+    two features separately. A black-box check of `.emit k = $NUM` with `-R -S -z`
+    and `-v NUM=2` independently returned a NUL key, consistent with the draft's
+    example of possible affected bytes.
+  - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
+  - Attestation: I did not read libucl source code, implementation `src/`, Claude
+    Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
