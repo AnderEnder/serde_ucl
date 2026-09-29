@@ -443,7 +443,12 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         key: Option<String>,
     ) -> Result<Outcome, Error> {
         let loader = self.includes.loader;
-        let Ok(canonical) = loader.canonicalize(candidate) else {
+        let canonical = if request.try_ {
+            loader.canonicalize_optional(candidate)
+        } else {
+            loader.canonicalize(candidate)
+        };
+        let Ok(canonical) = canonical else {
             return self.unusable_missing(shown, request);
         };
         let not_a_file = || ErrorKind::NotAFile {
