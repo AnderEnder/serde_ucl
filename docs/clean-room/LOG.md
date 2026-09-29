@@ -3694,3 +3694,21 @@
   - Checks: scoped diff and `git diff --check`.
   - Commit: pending this entry's commit. Not tagged or pushed.
   - Attestation: the question and specification contain behavior only.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `0431255..f978214` question-and-log diff, unchanged draft §9.4,
+    and the prior pinned-oracle marker controls. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. Q82 now says that `.include(try=true)` skips missing
+    files and directories and reads a later entry; `.try_include` stops before
+    that entry for both; `.try_include(try=false)` stops for a missing file but
+    errors for a directory. These are the outcomes of the prior controlled
+    oracle probes and match released §9.4. The answer remains observable and
+    contains no implementation hint. Draft §9.4 and its host-dependent
+    no-portable-golden rationale are unchanged. No new finding.
+  - Checks: scoped `git diff --check` and changed-file list; prior review's
+    pinned-oracle controls cover the corrected text.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
