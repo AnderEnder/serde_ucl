@@ -3851,3 +3851,8 @@
     commit on `c14-emit-seen-prefix`. Not merged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 isolated §12.2 fuzzer review (`adce859..38eedab`), stopped on exposure.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the scoped `fuzz/src/uncertain.rs` and implementation LOG diff, and a search of current `docs/spec/` before restricting reads to the released tag.
+  - Exposure: the search output included lines from current `docs/spec/README.md`; `git diff --name-only spec-v16 -- docs/spec` confirms that file has post-release edits. This is unreleased spec-team material forbidden to implementers. I stopped review at that point and did not inspect the unreleased diff or make a verdict.
+  - Commits: this exposure LOG entry only on `c14-emit-seen-prefix`; no implementation edits or push. A fresh clean-room reviewer must complete the review.
