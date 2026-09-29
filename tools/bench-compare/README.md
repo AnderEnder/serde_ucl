@@ -30,7 +30,7 @@ What is timed, each the median of 31 samples of at least 5 ms of repetitions:
 
 | Kind | serde_ucl | libucl | serde_json |
 | --- | --- | --- | --- |
-| `parse` | `parse::parse`, or a `Parser` with a file loader and `CONFDIR` for the corpus document that includes files | `ucl_parser_new(0)`, `ucl_parser_add_chunk`, `ucl_parser_get_object`, `ucl_parser_free` | `from_str::<serde_json::Value>` |
+| `parse` | `parse::parse`, or a `Parser` with a file loader, corpus base directory, `ABI=unknown` and the document's variables for rspamd | `ucl_parser_new(0)`, `ucl_parser_add_chunk`, `ucl_parser_get_object`, `ucl_parser_free`; for rspamd, the process runs from the corpus directory with matching variables | `from_str::<serde_json::Value>` |
 | `parse-nofree` | the same, the values kept and freed after the sample's timing | the same | – |
 | `typed` | `from_str` into a struct with `String` fields | – | `from_str`, the same struct |
 | `typed-borrowed` | `from_str` into a struct with `&str` fields | – | `from_str`, the same struct |
@@ -44,6 +44,17 @@ are timed when present in `target/bench-corpus/`; each missing file is skipped w
 does not fetch them. The remaining inputs are three documents of the rspamd corpus
 (`benches/corpus/README.md`): `groups.conf` with the 14 files it includes, `composites.conf` and
 `scores.d/rbl_group.conf`. All applicable tools read the same document files in each round.
+The Rust corpus parser follows `benches/common/files.rs` for this version and `v0.5.0`,
+including optional include attempts in `composites.conf`. libucl's chunk API has no separate
+base-directory argument in this harness, so its corpus run changes the process working directory
+to the same directory. `CONFDIR=.` is registered only for `groups.conf`; `ABI=unknown` is
+registered for all three documents. This matches the files and variable values used by the
+benchmark and document check, while the languages' include implementations remain their own.
+
+Each tool's output is collected before it is added to a round. A failing tool stops the script
+without printing a summary or replacing the last complete `results.txt`; the incomplete run is
+left in `results.incomplete.txt`. The summarizer rejects malformed lines and rounds with
+different sets of measurements.
 
 Each line of a run is `tool|kind|document|seconds`, with the round number in front in
 `results.txt`. `bench-compare summarize FILE...` also reads the files of several runs.

@@ -3250,3 +3250,28 @@
   - Commits: this log-only review commit. Not pushed.
   - Attestation: this review and log contain observable benchmark behavior only, with no
     libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: spec team (same participant). Item: C14 benchmark comparison review fixes.
+  - Inputs consulted: the review at `fc955c5`, current `CLAUDE.md` and clean-room protocol,
+    C14 work item, the comparison tooling and saved results, `benches/common/files.rs`,
+    `benches/corpus/README.md`, corpus documents, the oracle check script, and the conformance
+    report. No Claude Code sessions or memory were read.
+  - Work: made the current and `v0.5.0` Rust comparison use the corpus parser's file loader,
+    base directory, `ABI=unknown`, and per-document variables for every rspamd input. The
+    libucl corpus run uses that directory as its process working directory and the same
+    variable values. Stopped the script on any tool failure, retained only complete results,
+    and made the summarizer reject malformed or incomplete rounds. Replaced the README tables
+    from the corrected run and updated the spec-v14 conformance counts.
+  - Checks: `benches/check-documents.sh 0` found 8 agreements and no failures;
+    `UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture` passed all 3 tests
+    and reported 1,654 cases/1,650 parse matches and 1,221 output cases/1,217 matches.
+    A one-round comparison passed. An injected libucl failure exited nonzero, printed no
+    summary and left the last complete results unchanged; a deliberately truncated two-round
+    result made the summarizer exit nonzero without a table. The corrected quiet run was
+    `BASELINE=v0.5.0 scripts/bench-compare.sh 3`, with one-minute load 3.44–4.03,
+    libucl `24c8b399062ae4691168c243e3b7345ef7f31956`, `v0.5.0` at
+    `3266195e83b2b52c4a24d1627ed083d2b11c4da1`, and the C14 crate source at
+    `bb8328b`. Its summary and per-round results are under `target/bench-compare/`.
+  - Commits: the following C14 review-fix commit on `libucl-compat`. Not pushed.
+  - Attestation: this spec-side tooling and documentation contain observable benchmark
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
