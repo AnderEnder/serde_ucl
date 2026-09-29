@@ -336,7 +336,114 @@ fn simple_literal_entry(line: &str) -> bool {
 /// Everything else is left for the comparison that follows. The dumps are walked in parallel,
 /// entries and elements by position.
 pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSet<&'static str>) {
+    if excuse_simple_later_rewrite_comment(golden, actual, ctx) {
+        reasons.insert(REPLACED_COMMENTS);
+        return;
+    }
     excuse_at(golden, actual, ctx, reasons, false, true);
+}
+
+/// §12.5 permits a replaced comment to reappear only on a value created later. This source
+/// form proves the order without guessing from equal comment text: one initial comment, two
+/// simple values of the same key under `rewrite`, then a distinct key and its own trailing
+/// comment. Every other source form remains reportable.
+fn simple_rewrite_pair(line: &str) -> Option<(&str, &str)> {
+    let (key, value) = line.split_once(' ')?;
+    (!key.is_empty()
+        && key.bytes().all(|b| b.is_ascii_lowercase())
+        && !value.is_empty()
+        && value.bytes().all(|b| b.is_ascii_alphanumeric()))
+    .then_some((key, value))
+}
+
+fn simple_later_rewrite_source(input: &[u8]) -> Option<(&str, &str, &str)> {
+    let input = std::str::from_utf8(input).ok()?;
+    let input = input.strip_suffix('\n').unwrap_or(input);
+    let lines: Vec<_> = input.split('\n').collect();
+    if lines.len() != 4 {
+        return None;
+    }
+    let comment = lines[0];
+    let comment_body = comment.strip_prefix("# ")?;
+    if comment_body.is_empty() || !comment_body.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let (replaced_key, _) = simple_rewrite_pair(lines[1])?;
+    let (repeat_key, _) = simple_rewrite_pair(lines[2])?;
+    let (last_value, last_comment) = lines[3].split_once('#')?;
+    let (later_key, _) = simple_rewrite_pair(last_value)?;
+    if replaced_key != repeat_key
+        || replaced_key == later_key
+        || last_comment != comment.strip_prefix('#')?
+    {
+        return None;
+    }
+    Some((replaced_key, later_key, comment))
+}
+
+/// For that proven source order, normalize the one comment difference only when the whole
+/// value tree otherwise agrees. This keeps changed values, other comments and entries visible.
+fn excuse_simple_later_rewrite_comment(golden: &mut J, actual: &J, ctx: &Context<'_>) -> bool {
+    const FLAGS: [&str; 4] = [
+        "dump-comments",
+        "strategy:rewrite",
+        "string-input",
+        "no-filevars",
+    ];
+    if ctx.flags.len() != FLAGS.len() || !FLAGS.iter().all(|flag| ctx.has_flag(flag)) {
+        return false;
+    }
+    let Some((replaced_key, later_key, comment)) = simple_later_rewrite_source(ctx.input) else {
+        return false;
+    };
+    if ctx.dropped_comments.len() != 1 || ctx.dropped_comments[0] != comment {
+        return false;
+    }
+    let (Some(g_entries), Some(a_entries)) = (
+        golden.get("entries").and_then(J::as_array),
+        actual.get("entries").and_then(J::as_array),
+    ) else {
+        return false;
+    };
+    if golden.get("t").and_then(J::as_str) != Some("object")
+        || actual.get("t").and_then(J::as_str) != Some("object")
+        || g_entries.len() != 2
+        || a_entries.len() != 2
+        || g_entries[0].get("k").and_then(J::as_str) != Some(replaced_key)
+        || a_entries[0].get("k").and_then(J::as_str) != Some(replaced_key)
+        || g_entries[1].get("k").and_then(J::as_str) != Some(later_key)
+        || a_entries[1].get("k").and_then(J::as_str) != Some(later_key)
+    {
+        return false;
+    }
+    let Some(g_target) = g_entries[1]
+        .get("v")
+        .and_then(J::as_array)
+        .filter(|values| values.len() == 1)
+        .and_then(|values| values[0].as_object())
+    else {
+        return false;
+    };
+    let Some(g_comments) = g_target.get("c").and_then(J::as_array) else {
+        return false;
+    };
+    if g_target.contains_key("ca")
+        || g_comments.len() != 2
+        || !g_comments.iter().all(|text| text.as_str() == Some(comment))
+    {
+        return false;
+    }
+    let mut normalized = golden.clone();
+    let Some(target) = normalized["entries"][1]["v"][0].as_object_mut() else {
+        return false;
+    };
+    target.remove("c");
+    target.insert("ca".to_owned(), J::from(vec![comment]));
+    if &normalized != actual {
+        return false;
+    }
+    *golden = normalized;
+    true
 }
 
 /// `emitted` is inherited only by descendants of an isolated expanded `.emit` entry.
