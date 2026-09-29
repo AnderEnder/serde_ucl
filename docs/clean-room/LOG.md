@@ -2950,3 +2950,26 @@
     requested handoff. I have not read libucl source or written implementation code.
     A fresh participant with no access to this session is required for implementation.
   - Commits: this log entry only.
+- 2026-09-29 — Role: implementation team (clean-implementer). Item: C14 benchmark setup
+  continuation (serde_json groups only; no measurements or `src/` changes).
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C14 in
+    `docs/clean-room/WORKLIST.md`, and this log; `benches/serde_benchmarks.rs`,
+    `benches/parse_benchmarks.rs`, `benches/common/files.rs`, `benches/common/mod.rs`,
+    `benches/README.md`, `benches/fetch-documents.sh`, `benches/check-documents.sh`;
+    `Cargo.toml`; the documents in `benches/corpus/` through the checker; the three JSON
+    documents in `target/bench-corpus/` through the benchmark and checker. The latest spec tag
+    is `spec-v13`; the `docs/spec/` diff against it is empty. No spec section was needed.
+  - Work: `bafb337` adds serde_json `Value` and `IgnoredAny` groups alongside the serde_ucl
+    groups for each JSON document, sharing its input and byte throughput, and documents them.
+    Both groups skip a document that fails either deserializer's preflight check.
+  - Checks: `cargo bench --bench serde_benchmarks -- --list` before the change had no
+    `serde_json/json-corpus-*` entries; afterward it listed six (two per document).
+    `cargo bench --bench serde_benchmarks -- serde_json/json-corpus --test` succeeded for all
+    six. `benches/fetch-documents.sh` verified all three cached files as present with their
+    pinned hashes. `benches/check-documents.sh` reported 8 agreements, 0 failures, including
+    all three JSON documents and the three committed corpus configurations. `scripts/ci.sh`
+    exited 0. `git diff --check` found no whitespace errors. No benchmark measurements were
+    taken.
+  - Commits: `bafb337` and this log entry, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
