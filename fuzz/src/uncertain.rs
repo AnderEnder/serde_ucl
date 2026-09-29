@@ -235,15 +235,16 @@ impl Context<'_> {
         // A lone `.` at the end is an ignored macro name (§9.2), after the
         // preceding line's VALUE has ended. It creates no other entry.
         let value = value.strip_suffix(b"\n.").unwrap_or(value);
-        // A parenthesized ARGUMENTS document precedes VALUE (§9.2). Keep the
-        // recognizer to calls without one, so every scanned variable is in VALUE.
-        if value.starts_with(b"(") {
+        // ARGUMENTS may follow a block comment before VALUE (§9.2), and a
+        // variable inside that comment or ARGUMENTS is not an expanded VALUE.
+        // Decline all such shapes, including literal parentheses in VALUE.
+        if value.windows(2).any(|pair| pair == b"/*") {
             return false;
         }
         if value.is_empty()
             || value
                 .iter()
-                .any(|b| matches!(b, b'\n' | b'\r' | b';' | b'\\' | b'#'))
+                .any(|b| matches!(b, b'\n' | b'\r' | b';' | b'\\' | b'#' | b'(' | b')'))
         {
             return false;
         }
@@ -721,6 +722,30 @@ mod tests {
         for name in ["ABI", "CURDIR", "FILENAME"] {
             let input = format!(".emit (a=${name}) k=stable");
             let ctx = context(&input, &flags, &[]);
+            assert!(!excused(wrong_key.clone(), &actual, &ctx).0, "key: {input}");
+            assert!(
+                !excused(wrong_value.clone(), &actual, &ctx).0,
+                "value: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn zerocopy_emit_comment_before_arguments_or_value_does_not_expand_comment_text() {
+        let flags = strings(&["registered-macros", "zerocopy", "string-input"]);
+        let actual = json!({"t":"object","entries":[{"k":"k","v":[{"t":"string","v":"stable"}]}]});
+        let wrong_key =
+            json!({"t":"object","entries":[{"k":"x","v":[{"t":"string","v":"stable"}]}]});
+        let wrong_value =
+            json!({"t":"object","entries":[{"k":"k","v":[{"t":"string","v":"xxxxxx"}]}]});
+        for input in [
+            ".emit /* c */(a=$ABI) k=stable",
+            ".emit /* c */ (a=$CURDIR) k=stable",
+            ".emit /* $ABI */k=stable",
+            ".emit /* $FILENAME */k=stable",
+            ".emit # $ABI\nk=stable",
+        ] {
+            let ctx = context(input, &flags, &[]);
             assert!(!excused(wrong_key.clone(), &actual, &ctx).0, "key: {input}");
             assert!(
                 !excused(wrong_value.clone(), &actual, &ctx).0,
