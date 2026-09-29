@@ -357,7 +357,6 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
                     if self.includes.loader.kind(&candidate) != Some(FileKind::File) {
                         continue;
                     }
-                    self.include_path(&later_path, false, request)?;
                     let unit = *self
                         .includes
                         .open_units
@@ -366,6 +365,7 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
                     self.includes
                         .pending_search_miss
                         .get_or_insert((unit, miss));
+                    self.include_path(&later_path, false, request)?;
                     return Ok(Outcome::Done);
                 }
                 Err(miss)
@@ -1933,6 +1933,26 @@ mod tests {
         ] {
             assert!(run(&files, input).is_err(), "{input}");
         }
+    }
+
+    #[test]
+    fn first_search_miss_precedes_errors_after_a_speculative_later_match() {
+        let first = ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"";
+        let malformed_file = run(&[("/c/p2/pa.inc", "pa = [")], first).unwrap_err();
+        assert_eq!(
+            malformed_file.kind(),
+            &ErrorKind::FileNotFound {
+                path: "p1/pa.inc".to_owned(),
+            }
+        );
+
+        let bad_trailing = run(
+            &[("/c/p2/pa.inc", "pa = 1\n")],
+            &format!("{first}\n.unknown 1"),
+        )
+        .unwrap_err();
+        assert_eq!(bad_trailing.kind(), malformed_file.kind());
+        assert_eq!(bad_trailing.position(), malformed_file.position());
     }
 
     /// `.load` does not use the parser's search path (spec §9.6).
