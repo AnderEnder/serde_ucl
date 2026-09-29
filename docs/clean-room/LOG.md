@@ -3547,3 +3547,15 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: independent review at `dbf5a26`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, and the draft #81 answer. No Claude Code
+    sessions or memory were read.
+  - Work: removed the fuzzer-specific sentence from #81. The draft §12.5
+    observable boundary, index and cases are unchanged.
+  - Checks: scoped `git diff --check`.
+  - Commits: the following `docs(clean-room): clarify C14 comment answer` commit
+    on `c14/spec80`. Not tagged or pushed; independent re-review pending.
+  - Attestation: the question answer and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
