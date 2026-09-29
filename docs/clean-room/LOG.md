@@ -3020,3 +3020,22 @@
     and the following documentation commit, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 performance
+  changes (`41d021b..0638cae`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, released `spec-v13` §§5 and 9, the C14 review diff,
+    `src/parse/` and focused tests, `target/perf/C14-report.md`, C14 guard and fuzz logs,
+    saved findings, and the fuzzer's documented replay command. The oracle was used only
+    as a black box.
+  - Checks: number tests 10/10 and include tests 29/29 passed; the optional-loader guard
+    matched its v0.5.0 control; both saved fuzz findings replayed against v0.5.0 and still
+    differed from the oracle. `git diff --check` passed.
+  - Verdict: no Critical or Important defect found in the two code changes. The new Loader
+    method has a backward-compatible default; ordinary filesystem, symlink and error paths
+    matched the control, with the report's permission and mount caveat. The float slice is
+    derived from the same input unit and uses the old validated fallback. Important process
+    finding: the C11/C14 five-minute zero-difference fuzz gate is not met (`fuzz 300` exited
+    1 with two findings), although both are proven pre-existing and the report says so.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
