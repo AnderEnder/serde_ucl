@@ -3497,3 +3497,18 @@
     tagged locally as `spec-v15`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code,
     pseudo-code, internal names or source structure.
+
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 §12.5 rollback re-review (`6273f6b..a27bb90`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §12.5, implementation-side C14 log entry and CI record, the implementation-owned `fuzz/src/` diff, and the exact saved duplicate-comment finding under `target/perf/c14/`. Oracle used only as a black box.
+  - Checks: all 22 fuzzer unit tests and scoped `git diff --check` passed. Rebuilt the release fuzzer and replayed the saved `values-differ-28d7b8d64fdadefa` input with its exact flags and directory: exit 1, `values-differ` at `$.entries[1].v[0]` (oracle `c:["# c","# c"]`, crate `ca:["# c"]`). The implementation-side log records a passing `scripts/ci.sh` run.
+  - Verdict: the previous Important skip-breadth finding is **addressed**. The two-to-one rewrite normalization is removed; the real-parse earlier-value negative test and saved finding both remain reportable. Other skip logic is unchanged in this diff and its focused tests pass. No new finding. The five-minute zero-difference fuzz gate remains open on #80; this review did not rerun it.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 question #80, released spec-v15 §9.4.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v15` §9.4, C14 work item and question #80, the three pending acceptance inputs and golden result, the active rejection-control case names, implementation-owned `src/parse/` and `tests/conformance.rs`, and the test-driven-development skill. No unreleased spec draft was used.
+  - Work: a plain `.include` whose first search directory lacks the file may tentatively include a file from a later directory; the original first-directory error remains pending until a later skippable URL include in the same input clears it. Added a regression test for both URL macro forms, file input, intervening and following entries, and rejection controls.
+  - Checks: the new test failed first with `FileNotFound { path: "p1/pa.inc" }`, then passed after implementation; `cargo test --test conformance` passed all three tests; `scripts/ci.sh` passed; the strengthened value assertions passed in a final focused test; `git diff --check` passed.
+  - Commits: `c6600e6` (`fix(parse): recover searched include after skipped URL`); this LOG entry is in a separate follow-up commit. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
