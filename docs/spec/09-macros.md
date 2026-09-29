@@ -647,6 +647,7 @@ files record that tree, and §11.1 counts it as a result, not an error.
 | --- | --- | --- | --- | --- |
 | does not exist, including the empty path | error (`include_missing_error`) | skipped (`include_try_missing`, `include_empty_path_try`, `libucl/basic/14`) | stops silently (`try_include_missing_stops_parsing`, `try_include_empty_path_stops_parsing`) | stops silently (`try_include_try_false_missing_stops`) |
 | is a directory or another non-regular file | error (`include_directory_error`) | skipped (`include_directory_try`) | stops silently (`try_include_directory_stops_parsing`) | error (`try_include_try_false_directory_error`) |
+| exists as a regular file but cannot be opened for reading | error | error | error | error |
 | is the file that holds the macro (resolved path, §9.3) | error (`include_self_error`, `include_main_document_itself_error`) | error (`include_self_with_try_error`) | stops silently (`try_include_self_stops_parsing`, `try_include_main_document_itself_stops`) | stops silently (`try_include_try_false_self_stops`) |
 | exists and is readable | included (`try_include_present`) | included | included | included |
 
@@ -655,6 +656,14 @@ behaves as `.try_include` (`try_include_try_true_directory_stops`). Only the fil
 macro counts as itself; a cycle through other files ends at the nesting limit (above), for
 `.try_include` too. `libucl/basic/9` ends with a `.try_include` of a missing file, so nothing is
 lost there.
+
+**Filesystem-dependent access failure.** A glob match that is a regular file but cannot be
+opened for reading is also an error, even with `try=true` or `.try_include`. On the oracle host,
+`/.file` is such a file and is among the matches of `"/.*"`, so
+`.include(g=true,t=true) "/.*"` is an error. The same pattern may have a different result on a
+host with different files or permissions. No portable golden case pins read denial: the case
+files cannot guarantee it across checkouts and test identities. The neighboring rules for `.*`
+and `t=true` are pinned by `include_glob_dot_star_try` and `include_param_prefix_names`.
 
 A silent stop inside an included file ends the parse in every open unit, also when the file was a
 match of a glob pattern of `.include`, with or without `try=true`
