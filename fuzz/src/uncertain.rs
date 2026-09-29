@@ -109,6 +109,74 @@ pub fn handler_in_single_include_path(ctx: &Context<'_>, actual: &J) -> bool {
     false
 }
 
+/// §7.7: a test handler result mixed with other text in one registered `.emit` VALUE can make
+/// libucl accept text that the crate's chosen substitution rejects. Keep this to one simple
+/// quoted VALUE and its one expected entry, so another parse failure stays visible.
+pub fn handler_in_single_emit_value(ctx: &Context<'_>, golden: &J) -> bool {
+    if !ctx.has_flag("variable-handler")
+        || !ctx.has_flag("registered-macros")
+        || ctx.has_flag("disable-macro")
+    {
+        return false;
+    }
+    let Some(rest) = ctx.input.trim_ascii().strip_prefix(b".emit") else {
+        return false;
+    };
+    if !rest.first().is_some_and(u8::is_ascii_whitespace) {
+        return false;
+    }
+    let value = rest.trim_ascii_start();
+    let Some(text) = value
+        .strip_prefix(b"\"")
+        .and_then(|v| v.strip_suffix(b"\""))
+    else {
+        return false;
+    };
+    if text.contains(&b'"') || text.contains(&b'\\') || text.contains(&b'\n') {
+        return false;
+    }
+    let Some(at) = text.windows(2).position(|pair| pair == b"${") else {
+        return false;
+    };
+    let Some(end) = text[at + 2..].iter().position(|&b| b == b'}') else {
+        return false;
+    };
+    let name = &text[at + 2..at + 2 + end];
+    let key = text[..at].strip_suffix(b"=");
+    if !name.starts_with(b"H_")
+        || key.is_none_or(|k| k.is_empty() || !k.iter().all(u8::is_ascii_alphanumeric))
+        || text[at + 3 + end..].is_empty()
+        || ctx
+            .flags
+            .iter()
+            .filter_map(|flag| flag.strip_prefix("var:"))
+            .filter_map(|var| var.split_once('=').map(|(name, _)| name.as_bytes()))
+            .any(|registered| registered == name)
+    {
+        return false;
+    }
+    let key = key.expect("checked above");
+    let Some(entries) = golden.get("entries").and_then(J::as_array) else {
+        return false;
+    };
+    if golden.get("t").and_then(J::as_str) != Some("object") || entries.len() != 1 {
+        return false;
+    }
+    let entry = &entries[0];
+    entry
+        .get("k")
+        .and_then(J::as_str)
+        .is_some_and(|k| k.as_bytes() == key)
+        && entry.get("v").and_then(J::as_array).is_some_and(|values| {
+            values.len() == 1
+                && values[0].get("t").and_then(J::as_str) == Some("string")
+                && values[0]
+                    .get("v")
+                    .and_then(J::as_str)
+                    .is_some_and(|v| v.contains("[handled]"))
+        })
+}
+
 /// The reason for a difference in a parse that reached `rule`.
 pub fn reached(rule: Uncertain) -> &'static str {
     match rule {
@@ -164,6 +232,14 @@ impl Context<'_> {
             return false;
         }
         let value = rest.trim_ascii_start();
+        // A lone `.` at the end is an ignored macro name (§9.2), after the
+        // preceding line's VALUE has ended. It creates no other entry.
+        let value = value.strip_suffix(b"\n.").unwrap_or(value);
+        // A parenthesized ARGUMENTS document precedes VALUE (§9.2). Keep the
+        // recognizer to calls without one, so every scanned variable is in VALUE.
+        if value.starts_with(b"(") {
+            return false;
+        }
         if value.is_empty()
             || value
                 .iter()
@@ -198,6 +274,60 @@ impl Context<'_> {
         }
         false
     }
+
+    /// The position and total count of entries when exactly one can depend on §12.2.
+    /// A simple literal entry may precede or follow it; its dump must match exactly.
+    /// Calls with ARGUMENTS remain outside this recognizer because VALUE starts later.
+    fn expanded_emit_position(&self) -> Option<(usize, usize)> {
+        if self.single_expanded_emit() {
+            return Some((0, 1));
+        }
+        let input = std::str::from_utf8(self.input.trim_ascii()).ok()?;
+        let (prefix, tail) = input.split_once('\n')?;
+        let tail_ctx = Context {
+            input: tail.as_bytes(),
+            flags: self.flags,
+            dropped_comments: self.dropped_comments,
+            uncertain: self.uncertain,
+        };
+        if simple_literal_entry(prefix) && tail_ctx.single_expanded_emit() {
+            return Some((1, 2));
+        }
+        let (head, suffix) = input.rsplit_once('\n')?;
+        let head_ctx = Context {
+            input: head.as_bytes(),
+            flags: self.flags,
+            dropped_comments: self.dropped_comments,
+            uncertain: self.uncertain,
+        };
+        (head_ctx.single_expanded_emit() && simple_literal_entry(suffix)).then_some((0, 2))
+    }
+}
+
+/// A one-line scalar entry whose boundary cannot consume text from a neighboring `.emit`.
+fn simple_literal_entry(line: &str) -> bool {
+    let (key, value) = {
+        let mut words = line.split_ascii_whitespace();
+        let Some(first) = words.next() else {
+            return false;
+        };
+        match (words.next(), words.next()) {
+            (Some(value), None) => (first, value),
+            (None, None) => {
+                let Some(parts) = first.split_once('=') else {
+                    return false;
+                };
+                parts
+            }
+            _ => return false,
+        }
+    };
+    !key.is_empty()
+        && !value.is_empty()
+        && key.bytes().all(|b| b.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'$')
 }
 
 /// Where the oracle's dump `golden` differs from the crate's `actual` only in behaviour the spec
@@ -205,6 +335,18 @@ impl Context<'_> {
 /// Everything else is left for the comparison that follows. The dumps are walked in parallel,
 /// entries and elements by position.
 pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSet<&'static str>) {
+    excuse_at(golden, actual, ctx, reasons, false, true);
+}
+
+/// `emitted` is inherited only by descendants of an isolated expanded `.emit` entry.
+fn excuse_at(
+    golden: &mut J,
+    actual: &J,
+    ctx: &Context<'_>,
+    reasons: &mut BTreeSet<&'static str>,
+    emitted: bool,
+    root: bool,
+) {
     comments(golden, actual, ctx, reasons);
     let Some(kind) = golden.get("t").and_then(J::as_str).map(str::to_owned) else {
         return;
@@ -220,7 +362,30 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
             ) else {
                 return;
             };
-            for (g_entry, a_entry) in g_entries.iter_mut().zip(a_entries) {
+            let emit_pos = if root {
+                match ctx.expanded_emit_position() {
+                    Some((0, 1)) if g_entries.len() == 1 && a_entries.len() == 1 => Some(0),
+                    Some((1, 2))
+                        if g_entries.len() == 2
+                            && a_entries.len() == 2
+                            && g_entries[0] == a_entries[0] =>
+                    {
+                        Some(1)
+                    }
+                    Some((0, 2))
+                        if g_entries.len() == 2
+                            && a_entries.len() == 2
+                            && g_entries[1] == a_entries[1] =>
+                    {
+                        Some(0)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            for (index, (g_entry, a_entry)) in g_entries.iter_mut().zip(a_entries).enumerate() {
+                let emitted_here = emitted || emit_pos == Some(index);
                 if let (Some(g_key), Some(a_key)) =
                     (entry_key(g_entry), a_entry.get("k").and_then(J::as_str))
                     && g_key != a_key.as_bytes()
@@ -228,7 +393,7 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
                 {
                     let reason = if seen_collected_key(&g_key, a_key, a_entry, ctx) {
                         Some(SEEN_COLLECTED_KEY)
-                    } else if ctx.single_expanded_emit() && g_key.len() == a_key.len() {
+                    } else if emitted_here && g_key.len() == a_key.len() {
                         Some(ZEROCOPY_EMIT)
                     } else {
                         None
@@ -244,7 +409,7 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
                     a_entry.get("v").and_then(J::as_array),
                 ) {
                     for (g, a) in g_values.iter_mut().zip(a_values) {
-                        excuse(g, a, ctx, reasons);
+                        excuse_at(g, a, ctx, reasons, emitted_here, false);
                     }
                 }
             }
@@ -255,7 +420,7 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
                 actual.get("v").and_then(J::as_array),
             ) {
                 for (g, a) in g_items.iter_mut().zip(a_items) {
-                    excuse(g, a, ctx, reasons);
+                    excuse_at(g, a, ctx, reasons, emitted, false);
                 }
             }
         }
@@ -273,7 +438,7 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
                 Some(NUL_IN_COPY)
             } else if handler_with_other_text(g, a, ctx) {
                 Some(HANDLER)
-            } else if ctx.single_expanded_emit() && g.len() == a.len() {
+            } else if emitted && g.len() == a.len() {
                 Some(ZEROCOPY_EMIT)
             } else {
                 None
@@ -543,6 +708,118 @@ mod tests {
             json!({"t":"object","entries":[{"k":"x","v":[{"t":"string","v":"xxxxxxx"}]}]});
         let (same, reasons) = excused(corrupted, &actual, &context(".emit k = $ABI", &flags, &[]));
         assert!(same && reasons.iter().any(|reason| reason.contains("zerocopy")));
+    }
+
+    #[test]
+    fn zerocopy_emit_arguments_do_not_make_literal_value_uncertain() {
+        let flags = strings(&["registered-macros", "zerocopy", "string-input"]);
+        let actual = json!({"t":"object","entries":[{"k":"k","v":[{"t":"string","v":"stable"}]}]});
+        let wrong_key =
+            json!({"t":"object","entries":[{"k":"x","v":[{"t":"string","v":"stable"}]}]});
+        let wrong_value =
+            json!({"t":"object","entries":[{"k":"k","v":[{"t":"string","v":"xxxxxx"}]}]});
+        for name in ["ABI", "CURDIR", "FILENAME"] {
+            let input = format!(".emit (a=${name}) k=stable");
+            let ctx = context(&input, &flags, &[]);
+            assert!(!excused(wrong_key.clone(), &actual, &ctx).0, "key: {input}");
+            assert!(
+                !excused(wrong_value.clone(), &actual, &ctx).0,
+                "value: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn zerocopy_expanded_emit_before_ignored_dot_is_still_uncertain() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let actual = json!({"t":"object","entries":[{"k":"n","v":[{"t":"string","v":"unknown"}]}]});
+        let corrupted = json!({"t":"object","entries":[{"k":"\u{0}","v":[{"t":"string","v":"\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}"}]}]});
+        let ctx = context(".emit n $ABI\n.", &flags, &[]);
+        let (same, reasons) = excused(corrupted.clone(), &actual, &ctx);
+        assert!(same && reasons.contains(ZEROCOPY_EMIT));
+
+        let ctx = context(".emit n $ABI\n.other = 1", &flags, &[]);
+        assert!(!excused(corrupted, &actual, &ctx).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_after_literal_entry_only_excuses_emitted_entry() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"n","v":[{"t":"string","v":"I"}]},
+            {"k":"t","v":[{"t":"string","v":"unknown"}]}
+        ]});
+        let mut corrupted = actual.clone();
+        corrupted["entries"][1] =
+            json!({"k":"\u{0}","v":[{"t":"string","v":"\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}"}]});
+        let ctx = context("n I\n.emit t $ABI", &flags, &[]);
+        let (same, reasons) = excused(corrupted.clone(), &actual, &ctx);
+        assert!(same && reasons.contains(ZEROCOPY_EMIT));
+
+        // A disagreement in the literal prefix remains a finding.
+        let mut wrong_prefix = corrupted.clone();
+        wrong_prefix["entries"][0]["v"][0]["v"] = json!("J");
+        assert!(!excused(wrong_prefix, &actual, &ctx).0);
+
+        // The recognizer does not cover further parsed text after .emit.
+        let mut with_suffix = actual.clone();
+        with_suffix["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"k":"z","v":[{"t":"int","v":"1"}]}));
+        let mut wrong_suffix = with_suffix.clone();
+        wrong_suffix["entries"][1] = corrupted["entries"][1].clone();
+        wrong_suffix["entries"][2]["v"][0]["v"] = json!("2");
+        let ctx = context("n I\n.emit t $ABI\nz 1", &flags, &[]);
+        assert!(!excused(wrong_suffix, &with_suffix, &ctx).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_after_literal_dollar_keeps_prefix_visible() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"n","v":[{"t":"string","v":"$"}]},
+            {"k":"i","v":[{"t":"string","v":"unknown"}]}
+        ]});
+        let mut corrupted = actual.clone();
+        corrupted["entries"][1] =
+            json!({"k":"\u{0}","v":[{"t":"string","v":"\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}"}]});
+        let ctx = context("n $\n.emit i $ABI", &flags, &[]);
+        assert!(excused(corrupted.clone(), &actual, &ctx).0);
+        corrupted["entries"][0]["v"][0]["v"] = json!("x");
+        assert!(!excused(corrupted, &actual, &ctx).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_after_compact_literal_keeps_prefix_visible() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"t","v":[{"t":"string","v":"I"}]},
+            {"k":"l","v":[{"t":"string","v":"undef"}]}
+        ]});
+        let mut corrupted = actual.clone();
+        corrupted["entries"][1] =
+            json!({"k":"\u{0}","v":[{"t":"string","v":"\u{0}\u{0}\u{0}\u{0}\u{0}"}]});
+        let ctx = context("t=I\n.emit l $FILENAME", &flags, &[]);
+        assert!(excused(corrupted.clone(), &actual, &ctx).0);
+        corrupted["entries"][0]["v"][0]["v"] = json!("J");
+        assert!(!excused(corrupted, &actual, &ctx).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_before_literal_entry_keeps_suffix_visible() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"i","v":[{"t":"string","v":"unknown"}]},
+            {"k":"e","v":[{"t":"string","v":"s"}]}
+        ]});
+        let mut corrupted = actual.clone();
+        corrupted["entries"][0] =
+            json!({"k":"\u{0}","v":[{"t":"string","v":"\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}"}]});
+        let ctx = context(".emit i=$ABI\ne s", &flags, &[]);
+        assert!(excused(corrupted.clone(), &actual, &ctx).0);
+        corrupted["entries"][1]["v"][0]["v"] = json!("t");
+        assert!(!excused(corrupted, &actual, &ctx).0);
     }
 
     #[test]
