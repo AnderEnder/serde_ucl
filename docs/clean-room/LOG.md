@@ -3746,3 +3746,46 @@
   - Verdict: no Critical or Important defect found. The four-line source recognizer proves that the dropped comment precedes the distinct later value; it requires exact flags and one dropped comment. It changes only that later value's duplicate comment list, then requires whole-dump equality. The earlier-value negative and changed-comment, changed-value and extra-entry controls remain differences. Other corpus documents lack this exact flagged source shape and their tests pass.
   - Commits: this log entry only, on `c14-comments-v16`. Not merged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (classification). Item: C14 expanded `.emit` under `zerocopy`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §§9.2, 12.2 and 13.2, the saved C14 finding's input and
+    typed report, `zerocopy_registered_macros_stable`, the pinned oracle and
+    its source, and black-box controls. No Claude Code sessions or memory
+    were read.
+  - Work: classified `.emit r $ABI` with or without the trailing `.s` as the
+    already uncertain §12.2 result. With `zerocopy`, the oracle gave a one-byte
+    NUL key and seven NUL value bytes in eight repeated runs; without it,
+    the key was `r` and the value `unknown`. The trailing `.s` changed neither
+    result. Under `zerocopy`, a literal `.emit`, a direct variable value,
+    `.seen` with a variable, and a variable only in `.emit` arguments kept
+    their expected bytes. The released rule already covers the changed key
+    and value. No new question, spec amendment or golden case was added.
+  - Checks: repeated black-box oracle runs for the finding and controls;
+    `git diff --check` passed.
+  - Commits: the following `docs(clean-room): classify C14 zerocopy finding`
+    commit on `c14/spec80`. Not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 final `zerocopy` finding classification.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `0842f018^..0842f018` LOG-only diff, released spec-v16 §§9.2, 12.2
+    and 13.2, the named stable `zerocopy` conformance case, and the pinned
+    oracle only as a black box. No libucl source, implementation or fuzzer
+    source, or Claude sessions or memory were read.
+  - Review: approved. Eight runs of `.emit r $ABI` followed by `.s`, with
+    `zerocopy`, `registered-macros` and `string-input`, returned the recorded
+    one-NUL-byte key and seven-NUL-byte string. Omitting `.s` gave the same
+    result; without `zerocopy`, both forms gave `r: "unknown"`. Under
+    `zerocopy`, literal `.emit`, direct `$ABI`, `.seen $ABI`, and a variable
+    only in `.emit` arguments retained their expected bytes. Released §12.2
+    already marks key and string bytes parsed from variable-expanded `.emit`
+    VALUE text as uncertain; §9.2 explains the ignored final `.s`. This
+    classification adds no rule, implementation hint or forbidden content,
+    so it needs no new question, spec release or golden.
+  - Checks: eight exact oracle repetitions, paired trailing-macro and
+    `zerocopy` controls, four stable controls, scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
