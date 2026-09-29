@@ -2988,3 +2988,35 @@
   - Commits: this log entry only, on `libucl-compat`.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: implementation team (fresh clean-room implementer). Item: C14 item 3,
+  performance measurements, low-risk fixes and fuzz follow-up.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, relevant entries of this log, `docs/clean-room/QUESTIONS.md`,
+    released `spec-v13` §§7.7 and 12.2; implementation source under `src/`, `fuzz/src/`,
+    benchmark source under `benches/`, benchmark documents under `benches/corpus/` and
+    `target/bench-corpus/`, previous C11/C13 performance reports, and implementation-side
+    scratch under `target/perf/c14/`. The oracle was used only as a black box. No spec edits
+    after `spec-v13` were used for implementation. I did not consult the previous Claude
+    session or memory.
+  - Work: measured every C11/C13 ablation against unmodified v0.5.0; retained the last-sibling
+    hint and 16-key small-object threshold; measured serde_json alongside serde_ucl where
+    supported. Tested broad and optional-only filesystem preflight on missing, found, mixed,
+    symlink and custom-loader cases; committed only the optional path. Reused a validated
+    UTF-8 slice for float parsing. Evaluated memchr and a safe word-scan proxy in scratch only.
+    Full measurements and limitations are in `target/perf/C14-report.md`. Filed
+    `docs/clean-room/QUESTIONS.md` #79 for unstable oracle keys under `zerocopy`.
+  - Checks: `benches/check-documents.sh 20` gave 28 agreements, 0 failures;
+    `scripts/ci.sh` passed all 26 steps. Conformance counts were unchanged: new core
+    1649/1653 passes with four established expected failures; emitters 1216/1220 matches
+    with four established expected failures; readback config [1201,12,3,0], JSON
+    [1213,0,3,0], YAML [1204,9,3,0]. `scripts/ci.sh fuzz 300` ran 300 seconds on seed
+    1790703414275939000, 1,080,551 inputs, and **exited 1 with two findings**. Both reduced
+    findings reproduce with v0.5.0, the first C14 commit alone, and final code, so they are
+    pre-existing, not a C14 regression. One is the `zerocopy` question #79; the other is a
+    handler result with trailing text in an include path, already undefined by released §7.7.
+    The five-minute zero-difference fuzz gate is unresolved. Full fuzz log and findings are
+    preserved in `target/perf/c14/` and `target/fuzz-differential/findings/`.
+  - Commits: `55289a5` (optional filesystem preflight), `e508a72` (float UTF-8 reuse),
+    and the following documentation commit, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
