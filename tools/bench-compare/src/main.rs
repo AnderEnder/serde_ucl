@@ -20,7 +20,7 @@
 mod common;
 
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -105,14 +105,6 @@ fn documents() -> Vec<(&'static str, String)> {
     }
     docs
 }
-
-/// The corpus documents, relative to the corpus directory (`benches/corpus/rspamd`), and
-/// whether they include files of it, through the variable `CONFDIR` (benches/corpus/README.md).
-const CORPUS: [(&str, bool); 3] = [
-    ("groups.conf", true),
-    ("composites.conf", false),
-    ("scores.d/rbl_group.conf", false),
-];
 
 /// Median time per call over 31 samples, each at least about 5 ms of repetitions.
 fn time<F: FnMut() -> bool>(mut f: F) -> f64 {
@@ -226,19 +218,21 @@ fn run(dir: &Path, corpus: Option<&Path>, json_corpus: Option<&Path>) {
     }
     let Some(corpus) = corpus else { return };
     let confdir = std::fs::canonicalize(corpus).expect("the corpus directory");
-    for (path, includes) in CORPUS {
+    for document in &common::CORPUS {
+        let path = Path::new(document.file)
+            .strip_prefix("rspamd")
+            .expect("rspamd corpus path");
         let doc = read(&confdir.join(path));
-        let name = Path::new(path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        // A parser as `parse::parse` makes one, with a file loader and `CONFDIR` for includes.
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        // Match Corpus::parser for the current crate and the previous release alike. Its
+        // CARGO_MANIFEST_DIR points at the baseline copy when built against that release.
         let parse = || {
             let mut parser = serde_ucl::parse::Parser::new();
-            if includes {
-                parser.set_loader(serde_ucl::parse::FsLoader::new());
-                parser.register_variable("CONFDIR", confdir.to_string_lossy().into_owned());
+            parser.set_loader(serde_ucl::parse::FsLoader::new());
+            parser.set_base_dir(&confdir);
+            parser.register_variable("ABI", "unknown");
+            for &(name, value) in document.variables {
+                parser.register_variable(name, value);
             }
             parser.parse(black_box(doc.as_bytes()))
         };
@@ -289,27 +283,63 @@ fn summarize(files: &[PathBuf]) {
     let mut values: BTreeMap<(String, String, String), Vec<f64>> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     for file in files {
+        let mut round_rows: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
+        let mut unnumbered = false;
         for line in read(file).lines() {
             let fields: Vec<&str> = line.split('|').collect();
-            // An optional round number first.
-            let fields = if fields.len() == 5 {
-                &fields[1..]
-            } else {
-                &fields[..]
+            let (round, fields) = match fields.len() {
+                5 => (Some(fields[0]), &fields[1..]),
+                4 => (None, &fields[..]),
+                _ => panic!("{}: malformed result line: {line}", file.display()),
             };
             let [tool, kind, doc, seconds] = fields else {
-                continue;
+                unreachable!()
             };
-            let Ok(seconds) = seconds.parse::<f64>() else {
-                continue;
-            };
+            let seconds = seconds
+                .parse::<f64>()
+                .unwrap_or_else(|_| panic!("{}: invalid time: {line}", file.display()));
+            assert!(
+                seconds.is_finite() && seconds > 0.0,
+                "{}: invalid time: {line}",
+                file.display()
+            );
+            let key = (tool.to_string(), kind.to_string(), doc.to_string());
+            if let Some(round) = round {
+                assert!(
+                    round_rows
+                        .entry(round.to_string())
+                        .or_default()
+                        .insert(key.clone()),
+                    "{}: duplicate result in round {round}: {line}",
+                    file.display()
+                );
+            } else {
+                unnumbered = true;
+            }
             if !order.iter().any(|d| d == doc) {
                 order.push(doc.to_string());
             }
-            values
-                .entry((tool.to_string(), kind.to_string(), doc.to_string()))
-                .or_default()
-                .push(seconds);
+            values.entry(key).or_default().push(seconds);
+        }
+        assert!(
+            !round_rows.is_empty() || unnumbered,
+            "{}: no results",
+            file.display()
+        );
+        assert!(
+            round_rows.is_empty() || !unnumbered,
+            "{}: mixed numbered and unnumbered results",
+            file.display()
+        );
+        if let Some((first_round, expected)) = round_rows.first_key_value() {
+            for (round, rows) in &round_rows {
+                assert_eq!(
+                    rows,
+                    expected,
+                    "{}: round {round} differs from round {first_round}",
+                    file.display()
+                );
+            }
         }
     }
     let median = |tool: &str, kind: &str, doc: &str| -> Option<f64> {

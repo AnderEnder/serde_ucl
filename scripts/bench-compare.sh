@@ -105,7 +105,10 @@ fi
 
 "$TOOL" write "$DOCS"
 RESULTS="$WORK/results.txt"
-: >"$RESULTS"
+RESULTS_TMP="$WORK/results.incomplete.txt"
+RUN_OUTPUT="$WORK/run-output.txt"
+SUMMARY_TMP="$WORK/summary.incomplete.txt"
+: >"$RESULTS_TMP"
 
 run_rust() {
 	"$TOOL" run "$DOCS" "$CORPUS" "$JSON_CORPUS"
@@ -124,9 +127,9 @@ run_libucl() {
 			echo "bench-compare: skipping missing $JSON_CORPUS/$name.json" >&2
 		fi
 	done
-	"$WORK/lucl" "$@"
-	"$WORK/lucl" -v "CONFDIR=$(cd "$CORPUS" && pwd)" "$CORPUS/groups.conf" \
-		"$CORPUS/composites.conf" "$CORPUS/scores.d/rbl_group.conf"
+	"$WORK/lucl" "$@" || return 1
+	(cd "$CORPUS" && "$WORK/lucl" -v ABI=unknown -v CONFDIR=. groups.conf) || return 1
+	(cd "$CORPUS" && "$WORK/lucl" -v ABI=unknown composites.conf scores.d/rbl_group.conf) || return 1
 }
 
 # The one-minute load average, printed with each run: other work on the machine makes rounds
@@ -150,10 +153,20 @@ while [ "$round" -le "$ROUNDS" ]; do
 	order="$*"
 	for tool in $order; do
 		echo "round $round of $ROUNDS: $tool (load $(load))" >&2
-		"run_$tool" | sed "s/^/$round|/" >>"$RESULTS"
+		if ! "run_$tool" >"$RUN_OUTPUT"; then
+			echo "error: $tool failed in round $round; no summary produced" >&2
+			exit 1
+		fi
+		if [ ! -s "$RUN_OUTPUT" ]; then
+			echo "error: $tool produced no results in round $round; no summary produced" >&2
+			exit 1
+		fi
+		sed "s/^/$round|/" "$RUN_OUTPUT" >>"$RESULTS_TMP"
 	done
 	round=$((round + 1))
 done
 
+"$TOOL" summarize "$RESULTS_TMP" >"$SUMMARY_TMP"
+mv "$RESULTS_TMP" "$RESULTS"
 echo "results: $RESULTS" >&2
-"$TOOL" summarize "$RESULTS"
+cat "$SUMMARY_TMP"
