@@ -3688,3 +3688,13 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team. Item: C14 question #82, spec-v17 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released §9.4, Q82 and the independent Q82 review entry.
+  - Change: clarified Q82's missing-file and directory controls by naming the
+    observable outcomes for `.include(try=true)`, `.try_include`, and
+    `.try_include(try=false)` with a later entry. No normative rule changed.
+  - Checks: scoped diff and `git diff --check`.
+  - Commit: pending this entry's commit. Not tagged or pushed.
+  - Attestation: the question and specification contain behavior only.
