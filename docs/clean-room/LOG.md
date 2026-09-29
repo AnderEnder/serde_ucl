@@ -3117,3 +3117,16 @@
   - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
   - Attestation: I did not read libucl source code, implementation `src/`, Claude
     Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
+- 2026-09-29 — Role: spec team (release). Item: C14 question #79, spec-v14.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    `QUESTIONS.md` #79, the approved v14 draft in `docs/spec/`, the stable control case
+    and oracle goldens, and the independent reviewer entries in this log.
+  - Work: after independent approval, updated the spec index for #79 and the new
+    case count, then committed and locally tagged the reviewed behavior as `spec-v14`.
+    The undefined oracle result has no golden file.
+  - Checks: latest previous spec tag was `spec-v13`; `cargo test --test conformance`
+    passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v14` commit on `c14/spec79`,
+    tagged locally as `spec-v14`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
