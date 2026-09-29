@@ -2973,3 +2973,18 @@
   - Commits: `bafb337` and this log entry, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent implementation-side reviewer. Item: C14 benchmark setup
+  review (`0a7c8eb..442d1a8`).
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C14 in
+    `docs/clean-room/WORKLIST.md`, and this log;
+    `.superpowers/sdd/WORKLIST/review-0a7c8eb..442d1a8.diff`;
+    `benches/serde_benchmarks.rs`,
+    `benches/common/files.rs`, `benches/README.md`, and `Cargo.toml`;
+    the code-review and using-superpowers skill instructions.
+  - Review: the serde_json `Value` and `IgnoredAny` groups meet the C14 benchmark setup
+    request. No Critical or Important spec, code-quality, or benchmark-correctness findings.
+  - Checks: `cargo bench --bench serde_benchmarks -- --list` listed all six new cases;
+    `cargo bench --bench serde_benchmarks -- serde_json/json-corpus --test` passed all six.
+  - Commits: this log entry only, on `libucl-compat`.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
