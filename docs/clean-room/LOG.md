@@ -3915,4 +3915,48 @@
   - Work: a regular file that the loader cannot read now errors for `.include`, `.include(try=true)`, `.try_include`, and glob matches. A custom loader returns `PermissionDenied` deterministically; the regression also checks missing and nonregular files retain their optional behavior.
   - Checks: the focused test failed first because `.include(try=true)` returned a value after skipping the denied file; it passed after the fix. `cargo test --test conformance` passed all three tests, `scripts/ci.sh` passed, and `git diff --check` passed.
   - Commits: `6af6133` (`fix(parse): reject unreadable regular includes with try`); this LOG entry is in a separate follow-up commit. Not pushed.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` after stable neighbors.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §§12.2 and 13.2, own `fuzz/src/`, the saved
+    `values-differ-b2f0d092b5866768` and `values-differ-8f6dc6b3a6b6eea2`
+    findings including the latter's original input, and black-box oracle runs.
+  - Work: on isolated branch `c14-emit-seen-prefix` from `adce859`, extended
+    the §12.2 classifier to three exact source shapes: `.seen I` before the
+    expanded `.emit`; the reduced finding with `r= s` after it; and the
+    second finding's original input with stable entries on both sides.
+    Only the identified emitted entry's key and string may normalize at equal
+    byte lengths. The crate key must match its source and its value must be
+    `unknown`; the complete dump, including nested `.seen` data and arguments
+    and any other entries, must then agree. Other source shapes stay reportable.
+  - Finding triage: before this change, the first reduced finding replayed
+    as `values-differ`. The second reduced finding replayed as a non-UTF-8
+    skip on one run, while its original input remained a live difference.
+    Subsequent reduced replays alternated between §12.2 and non-UTF-8 skips
+    as oracle bytes varied. The fuzzer checks a candidate while reducing and
+    rechecks it for the saved report; the saved `skipped` report reflects that
+    later run and does not prove the original ceased to differ. No counting
+    bug was established.
+  - Checks: both new focused tests failed before the classifier change and
+    passed after; all 25 fuzz unit tests and `scripts/ci.sh` passed. The
+    release fuzzer replay of both reduced findings and a check of the second
+    original input exited 0 as a §12.2 skip on the final run; five earlier
+    repeats of each also exited 0, with one non-UTF-8 skip on the second
+    reduced input. `git diff --check` passed. No full 300-second fuzz run was
+    requested or performed on this isolated branch.
+  - Commits: the following `fix(fuzz): preserve stable neighbors of expanded emit`
+    commit on `c14-emit-seen-prefix`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 isolated §12.2 fuzzer review (`adce859..38eedab`), stopped on exposure.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the scoped `fuzz/src/uncertain.rs` and implementation LOG diff, and a search of current `docs/spec/` before restricting reads to the released tag.
+  - Exposure: the search output included lines from current `docs/spec/README.md`; `git diff --name-only spec-v16 -- docs/spec` confirms that file has post-release edits. This is unreleased spec-team material forbidden to implementers. I stopped review at that point and did not inspect the unreleased diff or make a verdict.
+  - Commits: this exposure LOG entry only on `c14-emit-seen-prefix`; no implementation edits or push. A fresh clean-room reviewer must complete the review.
+
+- 2026-09-29 — Role: fresh clean-room implementation reviewer. Item: C14 §12.2 expanded `.emit` with stable neighbors; implementation commit `38eedab` (LOG exposure commit `0657b8d` excluded from technical verdict).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §§12.2 and 13.2 via `git show`, commit `38eedab`'s `fuzz/src/uncertain.rs` diff and its implementer LOG addition, relevant own fuzz and conformance-runner code, the saved black-box findings `values-differ-b2f0d092b5866768` and `values-differ-8f6dc6b3a6b6eea2` (including the latter's `original.ucl`), and the oracle executable as a black box. I did not use the previous reviewer's partial observations.
+  - Verdict: no Critical or Important defect found within this C14 scope. The three added exact source forms identify one expanded `.emit` entry under the exact three flags. The classifier checks root and entry shapes, source-expected crate key and `unknown` string, and oracle key and string byte lengths. It changes only that entry's key and string, then requires equality of the complete normalized dump; nested `.seen` data and arguments, both stable neighbors in the original input, entry count, and any extra fields remain visible. Existing and new negative controls reject changed stable entries, wrong entry count, missing `zerocopy`, unrelated source forms, wrong emitted type, and wrong byte lengths. Non-UTF-8 oracle strings remain a separate preexisting fuzzer skip before this classifier runs.
+  - Verification: all 25 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check 38eedab^ 38eedab` passed. One initial replay and three further replays of both saved reduced findings returned `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. One initial check and three further checks of `values-differ-8f6dc6b3a6b6eea2/original.ucl` returned the same skip with both stable entries equal; the oracle's six-byte emitted key varied between checks. No sustained fuzz campaign was run for this review.
+  - Commits: this LOG-only review commit on `c14-emit-seen-prefix`; no implementation edits or push.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

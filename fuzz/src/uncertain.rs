@@ -340,33 +340,42 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
         reasons.insert(REPLACED_COMMENTS);
         return;
     }
-    if excuse_abi_emit_before_ignored_name(golden, actual, ctx) {
+    if excuse_abi_emit_with_stable_neighbors(golden, actual, ctx) {
         reasons.insert(ZEROCOPY_EMIT);
         return;
     }
     excuse_at(golden, actual, ctx, reasons, false, true);
 }
 
-/// §9.2 ignores `.s` only when its NAME reaches the end of input. In this
-/// restricted §12.2 form, it adds no entry, so only the preceding expanded
-/// `.emit` key and string can have uncertain bytes. A single literal prefix
-/// is allowed only when its whole dump agrees unchanged.
-fn abi_emit_before_ignored_name_position(input: &[u8]) -> Option<usize> {
+/// These source forms prove exactly which entry came from an expanded `.emit`
+/// VALUE (§12.2). The other entries are stable and must match as whole trees.
+/// The terminal `.s` form adds no entry because its NAME reaches EOF (§9.2).
+/// Forms outside this small set stay reportable.
+fn simple_abi_emit_shape(input: &[u8]) -> Option<(usize, usize, &'static str)> {
+    if input == b".seen I\n.emit l $ABI" {
+        return Some((1, 2, "l"));
+    }
+    if input == b"\n.emit l $ABI\nr= s" {
+        return Some((0, 2, "l"));
+    }
+    if input == b"direct = $A{a=1}een $ABI\n.emit liteen $ABI\n.emit literal = ral = stable\n" {
+        return Some((1, 3, "liteen"));
+    }
     const EMIT: &[u8] = b".emit r $ABI\n.s";
     if input == EMIT {
-        return Some(0);
+        return Some((0, 1, "r"));
     }
     let prefix = input.strip_suffix(EMIT)?.strip_suffix(b"\n")?;
     let prefix = std::str::from_utf8(prefix).ok()?;
-    simple_literal_entry(prefix).then_some(1)
+    simple_literal_entry(prefix).then_some((1, 2, "r"))
 }
 
-fn excuse_abi_emit_before_ignored_name(golden: &mut J, actual: &J, ctx: &Context<'_>) -> bool {
+fn excuse_abi_emit_with_stable_neighbors(golden: &mut J, actual: &J, ctx: &Context<'_>) -> bool {
     const FLAGS: [&str; 3] = ["zerocopy", "registered-macros", "string-input"];
     if ctx.flags.len() != FLAGS.len() || !FLAGS.iter().all(|flag| ctx.has_flag(flag)) {
         return false;
     }
-    let Some(index) = abi_emit_before_ignored_name_position(ctx.input) else {
+    let Some((index, entry_count, key)) = simple_abi_emit_shape(ctx.input) else {
         return false;
     };
     let (Some(g_entries), Some(a_entries)) = (
@@ -377,10 +386,10 @@ fn excuse_abi_emit_before_ignored_name(golden: &mut J, actual: &J, ctx: &Context
     };
     if golden.get("t").and_then(J::as_str) != Some("object")
         || actual.get("t").and_then(J::as_str) != Some("object")
-        || g_entries.len() != index + 1
-        || a_entries.len() != index + 1
-        || a_entries[index].get("k").and_then(J::as_str) != Some("r")
-        || entry_key(&g_entries[index]).is_none_or(|key| key.len() != 1)
+        || g_entries.len() != entry_count
+        || a_entries.len() != entry_count
+        || a_entries[index].get("k").and_then(J::as_str) != Some(key)
+        || entry_key(&g_entries[index]).is_none_or(|bytes| bytes.len() != key.len())
     {
         return false;
     }
@@ -410,7 +419,7 @@ fn excuse_abi_emit_before_ignored_name(golden: &mut J, actual: &J, ctx: &Context
         return false;
     };
     entry.remove("khex");
-    entry.insert("k".to_owned(), J::from("r"));
+    entry.insert("k".to_owned(), J::from(key));
     normalized["entries"][index]["v"][0]["v"] = J::from("unknown");
     if &normalized != actual || &normalized == golden {
         return false;
@@ -1050,6 +1059,130 @@ mod tests {
             .unwrap()
             .push(json!({"k":"x","v":[{"t":"int","v":"3"}]}));
         assert!(!excused(extra_entry, &prefixed_actual, &prefix).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_after_seen_keeps_nested_prefix_visible() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let input = ".seen I\n.emit l $ABI";
+        let ctx = context(input, &flags, &[]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"seen","v":[{"t":"object","entries":[
+                {"k":"data","v":[{"t":"string","v":"I"}]},
+                {"k":"args","v":[{"t":"null"}]}
+            ]}]},
+            {"k":"l","v":[{"t":"string","v":"unknown"}]}
+        ]});
+        let oracle = json!({"t":"object","entries":[
+            {"k":"seen","v":[{"t":"object","entries":[
+                {"k":"data","v":[{"t":"string","v":"I"}]},
+                {"k":"args","v":[{"t":"null"}]}
+            ]}]},
+            {"k":"\0","v":[{"t":"string","v":"\0\0\0\0\0\0\0"}]}
+        ]});
+        let (same, reasons) = excused(oracle.clone(), &actual, &ctx);
+        assert!(same);
+        assert_eq!(reasons, BTreeSet::from([ZEROCOPY_EMIT]));
+
+        let mut changed_data = oracle.clone();
+        changed_data["entries"][0]["v"][0]["entries"][0]["v"][0]["v"] = json!("J");
+        assert!(!excused(changed_data, &actual, &ctx).0);
+        let mut changed_args = oracle.clone();
+        changed_args["entries"][0]["v"][0]["entries"][1]["v"][0] = json!({"t":"string","v":"x"});
+        assert!(!excused(changed_args, &actual, &ctx).0);
+        let mut changed_prefix_key = oracle.clone();
+        changed_prefix_key["entries"][0]["k"] = json!("other");
+        assert!(!excused(changed_prefix_key, &actual, &ctx).0);
+        let mut extra_entry = oracle.clone();
+        extra_entry["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"k":"x","v":[{"t":"int","v":"1"}]}));
+        assert!(!excused(extra_entry, &actual, &ctx).0);
+        let no_zerocopy = strings(&["registered-macros", "string-input"]);
+        assert!(!excused(oracle.clone(), &actual, &context(input, &no_zerocopy, &[])).0);
+
+        for (input, prefix) in [
+            (
+                ".seen I\n.emit l stable",
+                json!({"k":"seen","v":[{"t":"object","entries":[
+                    {"k":"data","v":[{"t":"string","v":"I"}]},
+                    {"k":"args","v":[{"t":"null"}]}
+                ]}]}),
+            ),
+            (
+                ".seen $ABI\n.emit l stable",
+                json!({"k":"seen","v":[{"t":"object","entries":[
+                    {"k":"data","v":[{"t":"string","v":"unknown"}]},
+                    {"k":"args","v":[{"t":"null"}]}
+                ]}]}),
+            ),
+            (
+                ".seen (a=$ABI) I\n.emit l stable",
+                json!({"k":"seen","v":[{"t":"object","entries":[
+                    {"k":"data","v":[{"t":"string","v":"I"}]},
+                    {"k":"args","v":[{"t":"object","entries":[
+                        {"k":"a","v":[{"t":"string","v":"$ABI"}]}
+                    ]}]}
+                ]}]}),
+            ),
+        ] {
+            let stable_actual = json!({"t":"object","entries":[
+                prefix,
+                {"k":"l","v":[{"t":"string","v":"stable"}]}
+            ]});
+            let mut wrong = stable_actual.clone();
+            wrong["entries"][1]["k"] = json!("\0");
+            wrong["entries"][1]["v"][0]["v"] = json!("xxxxxx");
+            assert!(
+                !excused(wrong, &stable_actual, &context(input, &flags, &[])).0,
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn zerocopy_emit_with_two_stable_neighbors_keeps_both_visible() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let source = "direct = $A{a=1}een $ABI\n.emit liteen $ABI\n.emit literal = ral = stable\n";
+        let ctx = context(source, &flags, &[]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"direct","v":[{"t":"string","v":"$A{a=1}een unknown"}]},
+            {"k":"liteen","v":[{"t":"string","v":"unknown"}]},
+            {"k":"literal","v":[{"t":"string","v":"ral = stable"}]}
+        ]});
+        let oracle = json!({"t":"object","entries":[
+            {"k":"direct","v":[{"t":"string","v":"$A{a=1}een unknown"}]},
+            {"khex":"000000000000","v":[{"t":"string","v":"\0\0\0\0\0\0\0"}]},
+            {"k":"literal","v":[{"t":"string","v":"ral = stable"}]}
+        ]});
+        let (same, reasons) = excused(oracle.clone(), &actual, &ctx);
+        assert!(same);
+        assert_eq!(reasons, BTreeSet::from([ZEROCOPY_EMIT]));
+
+        let mut changed_prefix = oracle.clone();
+        changed_prefix["entries"][0]["v"][0]["v"] = json!("different");
+        assert!(!excused(changed_prefix, &actual, &ctx).0);
+        let mut changed_suffix = oracle.clone();
+        changed_suffix["entries"][2]["v"][0]["v"] = json!("changed");
+        assert!(!excused(changed_suffix, &actual, &ctx).0);
+        let mut changed_suffix_key = oracle.clone();
+        changed_suffix_key["entries"][2]["k"] = json!("other");
+        assert!(!excused(changed_suffix_key, &actual, &ctx).0);
+
+        let reduced = context("\n.emit l $ABI\nr= s", &flags, &[]);
+        let reduced_actual = json!({"t":"object","entries":[
+            {"k":"l","v":[{"t":"string","v":"unknown"}]},
+            {"k":"r","v":[{"t":"string","v":"s"}]}
+        ]});
+        let reduced_oracle = json!({"t":"object","entries":[
+            {"k":"\0","v":[{"t":"string","v":"\0\0\0\0\0\0\0"}]},
+            {"k":"r","v":[{"t":"string","v":"s"}]}
+        ]});
+        assert!(excused(reduced_oracle.clone(), &reduced_actual, &reduced).0);
+        let mut changed_reduced_suffix = reduced_oracle;
+        changed_reduced_suffix["entries"][1]["v"][0]["v"] = json!("t");
+        assert!(!excused(changed_reduced_suffix, &reduced_actual, &reduced).0);
     }
 
     #[test]
