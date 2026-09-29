@@ -3594,3 +3594,24 @@
     `c14/spec80`, tagged locally as `spec-v16`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl
     code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: spec team (classification). Item: C14 expanded `.emit` under `zerocopy`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §§9.2, 12.2 and 13.2, the saved C14 finding's input and
+    typed report, `zerocopy_registered_macros_stable`, the pinned oracle and
+    its source, and black-box controls. No Claude Code sessions or memory
+    were read.
+  - Work: classified `.emit r $ABI` with or without the trailing `.s` as the
+    already uncertain §12.2 result. With `zerocopy`, the oracle gave a one-byte
+    NUL key and seven NUL value bytes in eight repeated runs; without it,
+    the key was `r` and the value `unknown`. The trailing `.s` changed neither
+    result. Under `zerocopy`, a literal `.emit`, a direct variable value,
+    `.seen` with a variable, and a variable only in `.emit` arguments kept
+    their expected bytes. The released rule already covers the changed key
+    and value. No new question, spec amendment or golden case was added.
+  - Checks: repeated black-box oracle runs for the finding and controls;
+    `git diff --check` passed.
+  - Commits: the following `docs(clean-room): classify C14 zerocopy finding`
+    commit on `c14/spec80`. Not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
