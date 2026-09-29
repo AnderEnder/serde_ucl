@@ -3201,3 +3201,39 @@
     tagged locally as `spec-v14`; not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code,
     pseudo-code, internal names or source structure.
+
+
+- 2026-09-29 — Role: coordinator (spec integration). Item: C14 question #79.
+  - Inputs consulted: the reviewed local `spec-v14` release and its spec-team/reviewer
+    log entries, the `libucl-compat` branch status, and conformance test results.
+  - Work: merged the reviewed spec release and stable oracle case into `libucl-compat`,
+    retaining both sides' log entries. A spec-team interim message disclosed a
+    source-derived mechanism to this coordinator only; it was not forwarded to any
+    clean-room implementer. This coordinator had already recorded a forbidden-input
+    exposure and wrote no implementation code.
+  - Checks: `git diff --check` and `cargo test --test conformance` (3/3) passed.
+  - Commits: the following merge commit. Not pushed.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 benchmark comparison.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, `benches/README.md`, `benches/common/` document definitions,
+    `benches/fetch-documents.sh`, `tools/bench-compare/`, `scripts/bench-compare.sh`,
+    the README comparison, and the pinned JSON files in `target/bench-corpus/`.
+    No Claude Code sessions or memory were read.
+  - Work: extended the comparison to both seeded irregular configurations and the three
+    pinned JSON files when present. The current crate, `v0.5.0` and libucl time the same
+    files; serde_json also times each JSON file. Missing pinned files skip with a message.
+    Refreshed the README tables directly from the script's final summary.
+  - Checks: `cargo fmt --manifest-path tools/bench-compare/Cargo.toml --check`,
+    `cargo check --quiet --manifest-path tools/bench-compare/Cargo.toml`,
+    `sh -n scripts/bench-compare.sh`, and `git diff --check`; a one-round smoke comparison;
+    a run with an absent JSON directory that skipped all three files; and
+    `BASELINE=v0.5.0 scripts/bench-compare.sh 3` on the final C14 crate at `bb8328b`.
+    The three-round run used libucl `24c8b399062ae4691168c243e3b7345ef7f31956`,
+    `v0.5.0` at `3266195e83b2b52c4a24d1627ed083d2b11c4da1`, serde_json 1.0.151,
+    and rustc 1.98.1 on an Apple M4 Max. Its one-minute load readings ranged from 4.21 to
+    4.57. The summary and per-round results are under `target/bench-compare/`.
+  - Commits: the following `docs(bench): compare C14 documents` commit on
+    `libucl-compat`. Not pushed.
+  - Attestation: this spec-side tooling and documentation contain observable benchmark
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
