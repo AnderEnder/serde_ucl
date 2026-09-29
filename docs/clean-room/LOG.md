@@ -3068,6 +3068,23 @@
   - Commits: the following spec-team draft commit on `c14/spec79`; not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code,
     pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: spec team (same participant). Item: C14 question #79, independent
+  review follow-up.
+  - Inputs consulted: the independent review request; current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, §§12.2 and 13.2, the conformance corpus layout and
+    `scripts/regen-golden.sh`; the pinned oracle built in this spec-team worktree.
+  - Work: added `zerocopy_registered_macros_stable` with `zerocopy`,
+    `registered-macros` and `string-input`. Its input combines direct `$ABI` expansion,
+    `.seen $ABI`, and `.emit` of literal text. The case establishes the stable boundary
+    of the undefined result in §12.2; its five golden files came solely from the pinned
+    `ucl-dump` oracle. No golden file was made for expanded `.emit` text under `zerocopy`.
+  - Checks: 20 oracle runs were byte-identical for each of the typed, config, JSON,
+    compact JSON and YAML outputs; `cargo test --test conformance` passed all three
+    conformance tests. `git diff --check` passed.
+  - Commits: `57fb924` (initial spec draft) and the following stable-control commit on
+    `c14/spec79`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
 - 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79.
   - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md` and
     `QUESTIONS.md` #79; released `spec-v13` §§7, 12.2 and 13.2; diff
