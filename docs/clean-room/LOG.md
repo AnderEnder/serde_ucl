@@ -3671,3 +3671,27 @@
   - Verdict: the prior Important error-precedence finding is **addressed**. Recording the pending miss before speculative parsing and returning it on input failure preserves the ordinary first-directory kind and position without losing the released later-URL acceptance. No new issue found in this scoped diff. A five-minute fuzz run was not repeated in this review.
   - Commits: this log entry only, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 spec-v15 case activation.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §9.4 and index, `tests/conformance/README.md`, the
+    `pending/README.md` move procedure and three case inputs, flags and
+    goldens, the existing active fixture, approved C14 integration commit
+    `e22cadd`, and the pinned oracle only as a black box. No Claude Code
+    sessions or memory were read.
+  - Work: from `e22cadd`, created the isolated `c14/activate-spec15` worktree.
+    Moved three spec-v15 include-acceptance cases and their goldens unchanged
+    into `cases/spec/09-macros/`. Removed the pending fixture after verifying
+    it is byte-identical to the active fixture, and removed the now-empty
+    pending README and directory. Updated both corpus and spec coverage
+    documentation to 1,660 active cases and no pending cases. No implementation
+    or fuzz file was edited.
+  - Checks: baseline and final `cargo test --test conformance` each passed all
+    three tests. Fresh pinned-oracle runs matched each moved typed golden and
+    four emitter goldens byte for byte. Verified all three case IDs occur once
+    in the spec index, 1,660 active cases, no pending directory, and staged
+    and unstaged `git diff --check` passed.
+  - Commits: the following `test(conformance): activate spec-v15 include cases`
+    commit on `c14/activate-spec15`. Not pushed; independent review pending.
+  - Attestation: this case move and documentation contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
