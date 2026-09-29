@@ -38,6 +38,12 @@ pub trait Loader {
     /// (spec §9.3). An error when nothing exists at `path`.
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
 
+    /// Canonicalize an optional include path. Loaders may reject a missing path early; the
+    /// default keeps the behavior of existing loader implementations.
+    fn canonicalize_optional(&self, path: &Path) -> io::Result<PathBuf> {
+        self.canonicalize(path)
+    }
+
     /// What `path` names, following symbolic links, or `None` if nothing exists there.
     fn kind(&self, path: &Path) -> Option<FileKind>;
 
@@ -84,6 +90,11 @@ impl Loader for FsLoader {
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        std::fs::canonicalize(path)
+    }
+
+    fn canonicalize_optional(&self, path: &Path) -> io::Result<PathBuf> {
+        std::fs::metadata(path)?;
         std::fs::canonicalize(path)
     }
 
