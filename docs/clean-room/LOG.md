@@ -3400,3 +3400,19 @@
   - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed
     in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #80 corpus documentation.
+  - Inputs consulted: independent re-review at `94b9e53`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, the six C14 conformance cases, `tests/conformance/README.md`,
+    the prior pending README at `spec-v13`, and the coverage table in `docs/spec/README.md`.
+    No Claude Code sessions or memory were read.
+  - Work: corrected the conformance layout description for the three pending C14 cases,
+    added `pending/README.md` with the case list and move procedure, and mapped all six
+    new case IDs to §9 in the spec coverage table. The §9.4 rule and goldens are unchanged.
+  - Checks: `git diff --check`; verified each of the six IDs occurs once in the coverage
+    table, each pending ID occurs once in its README, and counts remain 1,657 active and
+    three pending cases.
+  - Commits: the following `docs(spec): document C14 pending cases` commit on
+    `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
+  - Attestation: these documents contain observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
