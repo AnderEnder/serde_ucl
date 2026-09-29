@@ -3518,3 +3518,143 @@
   - Verdict: Important regression at `src/parse/include.rs` lines 353–360 and `src/parse/core.rs` lines 199–209. Before any skipped URL appears, the code parses a later-directory file and the remaining input, allowing their errors to replace the first-directory `FileNotFound`. With `p1` missing and valid `p2/pa.inc`, `.include(path=["p1","p2"]) "pa.inc"\nx = [` now reports `UnterminatedArray` at line 3; malformed `p2/pa.inc` likewise reports its error. Released §9.4 says the first directory normally decides and that rule applies without the later skipped URL. Preserve the first-miss kind and position outside the new recovery case. No clean-room provenance issue found.
   - Commits: this log entry only, on `libucl-compat`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh question). Item: C14 question #81.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v15 §12.5, the existing comment conformance cases, the saved
+    C14 finding's input, flags and typed dumps under `target/perf/c14/`, the
+    pinned oracle and its source, and black-box control runs. No Claude Code
+    sessions or memory were read.
+  - Work: reproduced the exact `rewrite`, `dump-comments`, `string-input`,
+    `no-filevars` finding. The oracle gives the later `k` two before-comments;
+    without the replaced value's comment or without the replacement, it gives
+    one after-comment. Distinct comment texts show the earlier comment before
+    `k`'s own, and an unrelated earlier value with the same text keeps its own
+    comment without changing `k`. Answered #81 as already covered by the
+    released §12.5 uncertainty: the crate may retain only `k`'s own comment.
+    No spec amendment or golden case is needed; a fuzzer allowance must be
+    confined to comments of a replaced value on a later value.
+  - Checks: repeated the exact pinned-oracle result and asserted seven black-box
+    control outputs; `git diff --check` passed.
+  - Commits: the following `docs(clean-room): resolve C14 duplicate-comment question`
+    commit on `c14/spec80`. No tag or push.
+  - Attestation: the question answer and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #81.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `ff1af40^..ff1af40` question and log diff, released spec-v15 §12.5,
+    the named comment conformance input, flags and golden, and pinned-oracle
+    black-box runs of the exact question input and seven controls. The saved
+    C14 finding under `target/perf/c14/` was not present in this worktree.
+    No libucl source, implementation or fuzzer source, or Claude sessions or
+    memory were read.
+  - Review: changes requested on protocol grounds. The oracle returned the
+    exact `rewrite`, `dump-comments`, `string-input`, `no-filevars` result
+    recorded in #81: `k` had two before-comments, while `a` had no saved
+    comment. `append`, `merge`, removing the first comment, removing the
+    replacement, distinct earlier comment text, removing the final comment,
+    and an unrelated earlier value with the same comment text gave the stated
+    controls. Released §12.5 already classifies a replaced value's comment
+    reappearing on a later value as uncertain; the proposed difference boundary
+    does not broaden that rule, and an oracle golden for this undefined outcome
+    is not needed. However, `docs/clean-room/PROTOCOL.md` requires answers to
+    implementer questions to land in a new reviewed and tagged spec version,
+    never as code or hints. #81's resolved answer and fuzzer allowance appear
+    only in `QUESTIONS.md` after spec-v15, with no new release proposed. A pure
+    duplicate classification could cite spec-v15 without adding normative or
+    implementation guidance; otherwise the answer needs the normal release.
+  - Checks: exact and seven control black-box oracle outputs; scoped
+    `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: independent review at `8326eab`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, released spec-v15 §12.5, the #81 black-box
+    controls and the spec index. No Claude Code sessions or memory were read.
+  - Work: moved #81's narrow observable classification into §12.5 for review as
+    spec-v16, updated the question answer and index to mark the draft, and stated
+    why the uncertain result has no golden. A replaced comment may appear on a
+    later value before that value's own trailing comment; comments on earlier
+    unrelated values and value differences remain outside this allowance. The
+    three pending spec-v15 include cases remain intact. No implementation file
+    was edited.
+  - Checks: `git diff --check`; `cargo test --test conformance` passed all three
+    tests; latest released tag remained `spec-v15`.
+  - Commits: the following `docs(spec): draft C14 comment uncertainty` commit
+    on `c14/spec80`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source
+    structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `8326eab..ede677a` draft diff, released spec-v15 §12.5, the Q81
+    black-box input and flags, and the pinned oracle. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: changes requested for the Q81 answer only. The draft §12.5 text
+    describes the observable `rewrite` result and the project's narrow choice
+    without code, pseudo-code, internal names or source structure. The example
+    reproduced both with its exact `string-input` and `no-filevars` flags and
+    without those flags; the earlier seven controls support its boundary. The
+    README and question mark spec-v16 as a draft, the latest released tag is
+    still spec-v15, and no pending conformance file changed. This prepares the
+    question to be answered through a reviewed spec release. However, the Q81
+    answer still says what differential fuzzing may recognize and require.
+    `QUESTIONS.md` and `PROTOCOL.md` prohibit implementation hints in answers;
+    remove that fuzzer-specific sentence. The observable boundary is already
+    stated in §12.5 and can remain in the answer as a spec summary.
+  - Checks: pinned-oracle replay under both flag sets; scoped
+    `git diff --check`; changed-file list and latest spec tag.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: independent review at `dbf5a26`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, and the draft #81 answer. No Claude Code
+    sessions or memory were read.
+  - Work: removed the fuzzer-specific sentence from #81. The draft §12.5
+    observable boundary, index and cases are unchanged.
+  - Checks: scoped `git diff --check`.
+  - Commits: the following `docs(clean-room): clarify C14 comment answer` commit
+    on `c14/spec80`. Not tagged or pushed; independent re-review pending.
+  - Attestation: the question answer and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `dbf5a26..75eac67` question-and-log diff, the unchanged draft §12.5
+    text, and the Q81 answer. No libucl source, implementation or fuzzer
+    source, or Claude sessions or memory were read.
+  - Review: approved. The answer no longer directs differential fuzzing; it
+    states only the observable boundary and the project's choice already in
+    draft §12.5. The draft spec remains unchanged from the prior review and
+    still contains no prohibited code or internal names. The latest released
+    tag remains spec-v15; a reviewed spec-v16 release will carry this answer
+    to implementers under the protocol. No new finding in this scoped diff.
+  - Checks: scoped `git diff --check` and changed-file list. The prior review
+    reproduced the oracle example with and without `string-input` and
+    `no-filevars`, and verified the seven controls.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #81, spec-v16.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    approved #81 draft §12.5 and question answer, the independent reviewer
+    entries through `1ae55ec`, and the spec index. No Claude Code sessions or
+    memory were read.
+  - Work: after independent approval, changed the #81 answer and spec index
+    from draft wording to `spec-v16`, then committed and locally tagged the
+    reviewed clarification. No golden was added for the uncertain result;
+    the three pending spec-v15 include cases remain intact.
+  - Checks: latest previous spec tag was `spec-v15`; worktree was clean before
+    release edits; 1,657 active and three pending cases; `cargo test --test
+    conformance` passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v16` commit on
+    `c14/spec80`, tagged locally as `spec-v16`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.

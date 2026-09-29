@@ -183,7 +183,13 @@ Comments and the rules of §8:
   (`comments_rewrite_drops_replaced_value_comments`). **Uncertain (undefined in libucl):** the
   comments of a value that was replaced, under `rewrite` or by a higher priority, can reappear on a
   value created later, depending on memory reuse (under `rewrite`, `# c⏎k = 2⏎k = 3⏎q = 4` gave
-  `q` the comment `# c`). No case pins this.
+  `q` the comment `# c`). With `dump-comments` and `rewrite`,
+  `# c⏎a d⏎a 2⏎k d# c` gave `a: int 2` without comments and `k: "d"` with
+  `"c": ["# c", "# c"]`: the earlier comment appears before `k`'s own trailing comment. The
+  project may instead give `k` only `"ca": ["# c"]`. This uncertainty covers a replaced value's
+  comment on a value created later. It does not cover a changed comment on an earlier unrelated
+  value, even when that comment has the same text, or any difference in the values. No case pins
+  the uncertain result.
 
 libucl's config output can include saved comments when the application passes them in; §10.10
 specifies that output. The other output formats of §10 never contain comments.
