@@ -262,10 +262,16 @@ fn compare_results(oracle: &OracleResult, krate: &CrateResult, ctx: &Context<'_>
         }
         (OracleResult::BadOutput(_), _) => Verdict::Skipped("oracle wrote no dump"),
         (OracleResult::Error, CrateResult::Rejected { .. }) => Verdict::Agree,
-        (OracleResult::Error, CrateResult::Dump(value)) => Verdict::Differs {
-            kind: Kind::CrateAccepts,
-            detail: format!("libucl rejects the input; crate accepted it as {value}"),
-        },
+        (OracleResult::Error, CrateResult::Dump(value)) => {
+            if uncertain::handler_in_single_include_path(ctx, value) {
+                Verdict::Skipped(uncertain::HANDLER)
+            } else {
+                Verdict::Differs {
+                    kind: Kind::CrateAccepts,
+                    detail: format!("libucl rejects the input; crate accepted it as {value}"),
+                }
+            }
+        }
         (OracleResult::Dump(_), CrateResult::Rejected { kind, message }) => match kind {
             // Project divergences (spec README, *Divergences decided by the project*).
             ErrorKind::InvalidUtf8 => Verdict::Skipped("divergence: non-UTF-8"),
@@ -421,6 +427,53 @@ mod tests {
         assert!(matches!(
             compare(&OracleResult::Crashed("signal 11".into()), &dump("a = 1")),
             Verdict::Skipped(_)
+        ));
+    }
+
+    #[test]
+    fn mixed_handler_include_path_skips_only_the_undefined_empty_result() {
+        let input = b".include(g=true,y=e)\"${H_}.*\"";
+        let make_verdict = |input: &[u8], flags: &[String]| {
+            let setup = Setup::from_flags(flags).unwrap();
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../tests/conformance/cases/spec/09-macros");
+            let (krate, notes) = run_crate(&setup, &dir, input);
+            let ctx = Context {
+                input,
+                flags,
+                dropped_comments: &notes.dropped_comments,
+                uncertain: &notes.uncertain,
+            };
+            compare(&OracleResult::Error, &krate, &ctx)
+        };
+        let handler = flags(&["string-input", "variable-handler"]);
+        assert!(matches!(
+            make_verdict(input, &handler),
+            Verdict::Skipped(uncertain::HANDLER)
+        ));
+        assert!(matches!(
+            make_verdict(input, &flags(&["string-input"])),
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        ));
+        assert!(matches!(
+            make_verdict(
+                input,
+                &flags(&["string-input", "variable-handler", "var:H_=x"])
+            ),
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        ));
+        assert!(matches!(
+            make_verdict(b".include(g=true,y=e)\"${H_}.*\"\nx=1", &handler),
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
         ));
     }
 }
