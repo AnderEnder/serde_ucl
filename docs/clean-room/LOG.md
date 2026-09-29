@@ -4022,3 +4022,30 @@
     not tagged or pushed.
   - Attestation: this log contains observable behavior only, with no libucl
     code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit`
+  VALUE after one stable scalar prefix.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v17:docs/spec/12-flags.md` via `git show`, own
+    `fuzz/src/uncertain.rs` and `fuzz/src/main.rs`, saved black-box finding
+    `values-differ-3e5f081c503a0f82`, and the oracle executable as a black
+    box. No current `docs/spec/` content or forbidden source was read.
+  - Work: recognized one simple, stable scalar prefix before `.emit r $ABI`
+    across whitespace and all ordinary placements of `=`. Under exactly
+    `zerocopy`, `registered-macros`, and `string-input`, the classifier requires
+    the crate's source-expected emitted key and string, equal byte lengths for
+    the oracle's emitted key and string, and whole-dump equality after changing
+    only those emitted fields. A recognized source shape whose values fail
+    those checks remains reportable instead of falling through to the broader
+    recognizer. No parser or spec files were changed.
+  - Checks: the focused test failed on `t= I` and then `t =I` before their
+    implementation changes, and passed after; all 27 fuzz unit tests and
+    `scripts/ci.sh` passed. Release fuzzer replay of the saved finding exited
+    0 as `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`.
+    Negative controls keep changes to the stable prefix, emitted crate key or
+    value, type, lengths, entries, flags, and trailing source text visible.
+    `git diff --check` passed. No full fuzz campaign was run.
+  - Commit: the following `fix(fuzz): classify expanded emit after simple equals prefix`
+    commit on isolated `c14-emit-vt`; not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.

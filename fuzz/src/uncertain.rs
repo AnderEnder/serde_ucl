@@ -340,8 +340,17 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
         reasons.insert(REPLACED_COMMENTS);
         return;
     }
-    if excuse_abi_emit_with_stable_neighbors(golden, actual, ctx) {
-        reasons.insert(ZEROCOPY_EMIT);
+    const ABI_FLAGS: [&str; 3] = ["zerocopy", "registered-macros", "string-input"];
+    if ctx.flags.len() == ABI_FLAGS.len()
+        && ABI_FLAGS.iter().all(|flag| ctx.has_flag(flag))
+        && let Some(shape) = simple_abi_emit_shape(ctx.input)
+    {
+        // This shape identifies the emitted entry and its expected crate value.
+        // If those checks fail, keep the difference visible: the general recognizer
+        // could otherwise excuse an incorrect same-length key or string there.
+        if excuse_abi_emit_with_stable_neighbors(golden, actual, shape) {
+            reasons.insert(ZEROCOPY_EMIT);
+        }
         return;
     }
     excuse_at(golden, actual, ctx, reasons, false, true);
@@ -352,7 +361,7 @@ pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTree
 /// entries are stable and must match as whole trees.
 /// The terminal `.s` form adds no entry because its NAME reaches EOF (§9.2).
 /// Forms outside this small set stay reportable.
-fn simple_abi_emit_shape(input: &[u8]) -> Option<(usize, usize, &'static str, &'static str)> {
+fn simple_abi_emit_shape(input: &[u8]) -> Option<(usize, usize, &str, &str)> {
     if input == b"t I\n.emit\x0b$ABI e" {
         return Some((1, 2, "unknown", "e"));
     }
@@ -369,19 +378,58 @@ fn simple_abi_emit_shape(input: &[u8]) -> Option<(usize, usize, &'static str, &'
     if input == EMIT {
         return Some((0, 1, "r", "unknown"));
     }
-    let prefix = input.strip_suffix(EMIT)?.strip_suffix(b"\n")?;
-    let prefix = std::str::from_utf8(prefix).ok()?;
-    simple_literal_entry(prefix).then_some((1, 2, "r", "unknown"))
+    if let Some(prefix) = input.strip_suffix(EMIT).and_then(|p| p.strip_suffix(b"\n")) {
+        let prefix = std::str::from_utf8(prefix).ok()?;
+        if simple_literal_entry(prefix) {
+            return Some((1, 2, "r", "unknown"));
+        }
+    }
+    // One stable scalar before an expanded VALUE. Parse all ordinary separator
+    // spellings here instead of guessing the prefix's dump from its source text.
+    // The whole prefix dump must still agree exactly in the comparison below.
+    let input = std::str::from_utf8(input).ok()?;
+    let (prefix, emit) = input.split_once('\n')?;
+    if !simple_scalar_prefix(prefix) {
+        return None;
+    }
+    let value = emit.strip_prefix(".emit ")?.strip_suffix(" $ABI")?;
+    (!value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric()))
+        .then_some((1, 2, value, "unknown"))
 }
 
-fn excuse_abi_emit_with_stable_neighbors(golden: &mut J, actual: &J, ctx: &Context<'_>) -> bool {
-    const FLAGS: [&str; 3] = ["zerocopy", "registered-macros", "string-input"];
-    if ctx.flags.len() != FLAGS.len() || !FLAGS.iter().all(|flag| ctx.has_flag(flag)) {
-        return false;
-    }
-    let Some((index, entry_count, key, value)) = simple_abi_emit_shape(ctx.input) else {
+fn simple_scalar_prefix(line: &str) -> bool {
+    let mut words = line.split_ascii_whitespace();
+    let Some(first) = words.next() else {
         return false;
     };
+    let (key, value) = match (words.next(), words.next(), words.next()) {
+        (None, None, None) => match first.split_once('=') {
+            Some(parts) => parts,
+            None => return false,
+        },
+        (Some(value), None, None) => {
+            if let Some(key) = first.strip_suffix('=') {
+                (key, value)
+            } else if let Some(value) = value.strip_prefix('=') {
+                (first, value)
+            } else {
+                (first, value)
+            }
+        }
+        (Some("="), Some(value), None) => (first, value),
+        _ => return false,
+    };
+    !key.is_empty()
+        && !value.is_empty()
+        && key.bytes().all(|b| b.is_ascii_alphanumeric())
+        && value.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+fn excuse_abi_emit_with_stable_neighbors(
+    golden: &mut J,
+    actual: &J,
+    (index, entry_count, key, value): (usize, usize, &str, &str),
+) -> bool {
     let (Some(g_entries), Some(a_entries)) = (
         golden.get("entries").and_then(J::as_array),
         actual.get("entries").and_then(J::as_array),
@@ -1278,6 +1326,79 @@ mod tests {
         wrong_suffix["entries"][2]["v"][0]["v"] = json!("2");
         let ctx = context("n I\n.emit t $ABI\nz 1", &flags, &[]);
         assert!(!excused(wrong_suffix, &with_suffix, &ctx).0);
+    }
+
+    #[test]
+    fn zerocopy_emit_after_simple_equals_prefix_keeps_stable_entry_visible() {
+        let flags = strings(&["zerocopy", "registered-macros", "string-input"]);
+        let actual = json!({"t":"object","entries":[
+            {"k":"t","v":[{"t":"string","v":"I"}]},
+            {"k":"r","v":[{"t":"string","v":"unknown"}]}
+        ]});
+        let oracle = json!({"t":"object","entries":[
+            {"k":"t","v":[{"t":"string","v":"I"}]},
+            {"k":"\0","v":[{"t":"string","v":"\0\0\0\0\0\0\0"}]}
+        ]});
+        for input in [
+            "t I\n.emit r $ABI",
+            "t=I\n.emit r $ABI",
+            "t= I\n.emit r $ABI",
+            "t =I\n.emit r $ABI",
+            "t = I\n.emit r $ABI",
+        ] {
+            let (same, reasons) = excused(oracle.clone(), &actual, &context(input, &flags, &[]));
+            assert!(same, "{input}");
+            assert_eq!(reasons, BTreeSet::from([ZEROCOPY_EMIT]));
+        }
+
+        let input = "t= I\n.emit r $ABI";
+        let ctx = context(input, &flags, &[]);
+        let mut changed_prefix_value = oracle.clone();
+        changed_prefix_value["entries"][0]["v"][0]["v"] = json!("J");
+        assert!(!excused(changed_prefix_value, &actual, &ctx).0);
+        let mut changed_prefix_key = oracle.clone();
+        changed_prefix_key["entries"][0]["k"] = json!("u");
+        assert!(!excused(changed_prefix_key, &actual, &ctx).0);
+        let mut extra_entry = oracle.clone();
+        extra_entry["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"k":"x","v":[{"t":"int","v":"1"}]}));
+        assert!(!excused(extra_entry, &actual, &ctx).0);
+        let mut wrong_key_length = oracle.clone();
+        wrong_key_length["entries"][1]["k"] = json!("\0\0");
+        assert!(!excused(wrong_key_length, &actual, &ctx).0);
+        let mut wrong_value_length = oracle.clone();
+        wrong_value_length["entries"][1]["v"][0]["v"] = json!("\0\0\0\0\0\0");
+        assert!(!excused(wrong_value_length, &actual, &ctx).0);
+        let mut wrong_value_type = oracle.clone();
+        wrong_value_type["entries"][1]["v"][0]["t"] = json!("int");
+        assert!(!excused(wrong_value_type, &actual, &ctx).0);
+        let mut changed_actual_key = actual.clone();
+        changed_actual_key["entries"][1]["k"] = json!("q");
+        assert!(!excused(oracle.clone(), &changed_actual_key, &ctx).0);
+        let mut changed_actual_value = actual.clone();
+        changed_actual_value["entries"][1]["v"][0]["v"] = json!("unknowx");
+        assert!(!excused(oracle.clone(), &changed_actual_value, &ctx).0);
+
+        for other_flags in [
+            strings(&["registered-macros", "string-input"]),
+            strings(&["zerocopy", "string-input"]),
+            strings(&[
+                "zerocopy",
+                "registered-macros",
+                "string-input",
+                "dump-comments",
+            ]),
+        ] {
+            assert!(!excused(oracle.clone(), &actual, &context(input, &other_flags, &[])).0);
+        }
+        for other in ["t= I\n.emit (a=$ABI) r unknown", "t= I\n.emit r $ABI\nx 1"] {
+            assert!(
+                !excused(oracle.clone(), &actual, &context(other, &flags, &[])).0,
+                "{other}"
+            );
+        }
     }
 
     #[test]
