@@ -3173,7 +3173,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         let start = self.pos;
         if matches!(self.peek(), Some(b'0'..=b'9' | b'-')) {
             let no_time = self.settings.flags.contains(ParserFlags::NO_TIME);
-            match number::scan(self.src, start, no_time) {
+            match number::scan(self.src, self.utf8, start, no_time) {
                 Number::Value(value, end) => {
                     self.pos = end;
                     return Ok((value, false));

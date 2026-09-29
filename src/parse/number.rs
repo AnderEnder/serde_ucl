@@ -81,7 +81,7 @@ enum Base {
 /// hex digit after it, or a `.` right after hex digits. Any other trailing text makes it a string
 /// only after the range check, so `99999999999999999999x` is a string while
 /// `99999999999999999999 x` and `1e400b` are errors.
-pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
+pub(crate) fn scan(src: &[u8], text: Option<&str>, start: usize, no_time: bool) -> Number {
     let at = |i: usize| src.get(i).copied();
 
     let mut i = start;
@@ -143,7 +143,10 @@ pub(crate) fn scan(src: &[u8], start: usize, no_time: bool) -> Number {
     if dot || exponent {
         let end = float_text_end(src, int_start);
         // The number's text is ASCII: sign, digits, `.`, exponent.
-        let text = std::str::from_utf8(&src[start..end]).expect("ASCII");
+        let text = match text.and_then(|text| text.get(start..end)) {
+            Some(text) => text,
+            None => std::str::from_utf8(&src[start..end]).expect("ASCII"),
+        };
         match float_value(text) {
             Some(v) => finish(src, end, Base::Float(v), false, no_time),
             None => Number::OutOfRange,
@@ -359,7 +362,7 @@ mod tests {
     use super::*;
 
     fn num(s: &str) -> Number {
-        scan(s.as_bytes(), 0, false)
+        scan(s.as_bytes(), Some(s), 0, false)
     }
 
     #[test]
@@ -554,10 +557,10 @@ mod tests {
             assert_eq!(value(s), UclValue::Integer(v), "{s}");
         }
         assert_eq!(num("1.5x10 ;"), Number::Value(UclValue::Integer(0), 6));
-        assert_eq!(scan(b"1.5x10s", 0, true), Number::Text);
-        assert_eq!(scan(b"1.5x1d", 0, true), Number::Text);
+        assert_eq!(scan(b"1.5x10s", None, 0, true), Number::Text);
+        assert_eq!(scan(b"1.5x1d", None, 0, true), Number::Text);
         assert_eq!(
-            scan(b"1.5x10ms", 0, true),
+            scan(b"1.5x10ms", None, 0, true),
             Number::Value(UclValue::Integer(0), 8)
         );
     }
@@ -600,9 +603,9 @@ mod tests {
         for s in ["1t", "1tb", "1b", "1mins", "1sec", "1k5", "1k ", "1s/"] {
             assert_eq!(num(s), Number::Text, "{s}");
         }
-        assert_eq!(scan(b"1s", 0, true), Number::Text);
+        assert_eq!(scan(b"1s", None, 0, true), Number::Text);
         assert_eq!(
-            scan(b"1ms", 0, true),
+            scan(b"1ms", None, 0, true),
             Number::Value(UclValue::Time(0.001), 3)
         );
     }
