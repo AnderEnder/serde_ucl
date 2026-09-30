@@ -1508,6 +1508,96 @@ mod tests {
     }
 
     #[test]
+    fn comments_after_the_first_name_brace() {
+        // spec §12.5 and §9.4 (QUESTIONS.md #83): the `}` that closes the first name's object is
+        // its own bracket, so the value created most recently stays what it was; a bracketed
+        // container that closes it, or a section object whose brace was taken over, makes the
+        // outermost object closed the most recent value.
+        let files = [
+            ("/c/twice.inc", "{ x \"y{\" z\n}\n}"),
+            ("/c/once.inc", "{ x \"y{\" z\n}"),
+            ("/c/between.inc", "{ x \"y{\" z\n} # c\n}"),
+            ("/c/entry.inc", "{ x \"y{\" z\nk = 2\n}\n}"),
+            ("/c/by_object.inc", "{ x \"y{\" z\na { b = 1 }\n}"),
+            ("/c/braced.inc", "{ a = 1 }"),
+            ("/c/close_brace.inc", "a = 1 }"),
+            // A file included in the name's object takes over its brace, or closes it (oracle
+            // runs).
+            ("/c/taken.inc", "{ x \"y{\" z\n.include \"braced.inc\"\n}"),
+            (
+                "/c/closed.inc",
+                "{ x \"y{\" z\n.include \"close_brace.inc\"\n}",
+            ),
+        ];
+        let after = |input: &str| -> Vec<String> {
+            let mut p = parser(&files, ParserFlags::SAVE_COMMENTS);
+            p.parse(input.as_bytes()).unwrap();
+            let groups = p.attached_comments();
+            assert_eq!(groups.len(), 1, "{input:?}");
+            assert_eq!(groups[0].placement, CommentPlacement::After, "{input:?}");
+            groups[0]
+                .path
+                .iter()
+                .map(|segment| match segment {
+                    PathSegment::Key { key, index: 0 } => key.clone(),
+                    other => panic!("{input:?}: {other:?}"),
+                })
+                .collect()
+        };
+        for (input, path) in [
+            ("_ = 1\n.include \"twice.inc\"\n# c", &["x", "y{"][..]),
+            ("o { .include \"twice.inc\"\n# c", &["o", "x", "y{"]),
+            (".include(key=\"k\") \"twice.inc\"\n# c", &["k", "x", "y{"]),
+            (
+                ".include(prefix=true) \"twice.inc\"\n# c",
+                &["twice.inc", "x", "y{"],
+            ),
+            (".include \"between.inc\"\nq = 1", &["x", "y{"]),
+            (".include \"entry.inc\"\n# c", &["x", "k"]),
+            (".include \"once.inc\"\n# c\n}", &["x", "y{"]),
+            (".include \"once.inc\"\n}\n# c", &["x", "y{"]),
+            (".include \"closed.inc\"\n# c", &["x", "a"]),
+            // Unchanged: closed by a bracketed container, as a section object, or by a nested
+            // file that took its brace over.
+            (".include \"by_object.inc\"\n# c", &["x"]),
+            ("s \"t{\" u\n.include \"once.inc\"\n# c", &["s"]),
+            ("_ = 1\n.include \"taken.inc\"\n# c", &["x"]),
+        ] {
+            assert_eq!(after(input), path, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn first_name_brace_after_text_in_place() {
+        // §13.2 keeps a section object open after text parsed in place, but not against the
+        // brace of its own that §9.4 gives a first name, which a `}` closes (§12.5; oracle
+        // runs). A bracketed container that closes in it no longer closes it.
+        let files = [
+            ("/c/entry.inc", "{ x \"y{\" z\n.emit \"\"\n}\nk = 2\n}"),
+            ("/c/inner.inc", "{ x \"y{\" z\n.emit \"\"\na { }\n}\n}"),
+            ("/c/open.inc", "{ x \"y{\" z\n.emit \"\"\na { }\n}"),
+        ];
+        let run = |input: &str| {
+            let mut p = parser(&files, ParserFlags::DEFAULT);
+            p.register_macro("emit", |call| {
+                let text = call.value().to_vec();
+                call.parse(text)
+            });
+            p.parse(input.as_bytes())
+        };
+        let v = run(".include \"entry.inc\"\nq = 3").unwrap();
+        assert_eq!(keys(&v), ["x", "k", "q"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{"]);
+        let v = run(".include \"inner.inc\"\nq = 1").unwrap();
+        assert_eq!(keys(&v), ["x", "q"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "a"]);
+        assert_eq!(
+            run(".include \"open.inc\"\nq = 1").unwrap_err().kind(),
+            &ErrorKind::UnterminatedObject
+        );
+    }
+
+    #[test]
     fn empty_files_and_merged_nulls() {
         // Oracle runs (QUESTIONS.md #43, #44).
         let files = [
