@@ -4420,3 +4420,37 @@
   - Commits: this reviewer log entry only on `c14/spec-q84`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #84, spec-v19 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`04a0f2f`), the draft `ab934b8`, the spec index and *Divergences decided by the
+    project*, `docs/COMPATIBILITY.md`, and pinned-oracle runs of the reviewer's examples and of the
+    new cases.
+  - Finding 1: §12.2 now makes the expected result with `zerocopy` the result this specification
+    gives for the same document without it: libucl's where the project follows libucl, the
+    project's where it differs, and uncertain where that is uncertain. The #84 answer, the index
+    summary and `docs/COMPATIBILITY.md` say the same.
+  - Finding 2: the included-file paragraph states the result as undefined and the crash as the
+    observation, says that empty and comment-only files and further inputs given as text give the
+    result without `zerocopy`, and cites three boundary cases: `zerocopy_include_empty_file`,
+    `zerocopy_include_comment_only_file` and `zerocopy_chunk_input`, each the same typed dump and
+    output in every format as without `zerocopy` in five of five oracle runs.
+  - Finding 3: the reason for having no case for the undefined results is now the one that holds,
+    in §12.2, the index and the #84 answer: a golden file records libucl's result with the case's
+    flags, which is undefined there, while the project's expected result is its result without
+    `zerocopy`.
+  - Notes taken: a key repeated inside the same text finds its entry,
+    `.emit "l = $ABI; l = s"` (one entry with two values), and the case
+    `zerocopy_emit_repeated_key_in_text_error` (`strategy:error`, an error in five of five runs
+    with `zerocopy` and without); the example of a later key finding an entry it does not match,
+    `.emit a $ABI⏎.emit b $ABI⏎.emit c $ABI` (two entries, the second with `b`'s and `c`'s values,
+    in three of three runs).
+  - Cases: the four above in `cases/spec/12-flags/`, with fixtures in the new
+    `cases/spec/12-flags/files/`; golden files only from `scripts/regen-golden.sh`, which changed
+    no existing golden file. The index counts 1,669 active cases plus the six pending `spec-v18`
+    cases, with the four rows added.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): expect the result without zerocopy` commit on
+    `c14/spec-q84`. Not tagged or pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.

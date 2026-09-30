@@ -15,9 +15,10 @@ None of them is written by hand.
 - `cases/additions/` holds 53 cases added with the first implementation plan.
 - `cases/errors/` holds inputs libucl rejects.
 - `cases/spec/NN-topic/` holds the cases cited by the behaviour spec in `docs/spec/`, one directory
-  per spec section. `cases/spec/09-macros/files/` and `cases/spec/08-duplicates/files/` hold files
-  that those cases include or load (`*.inc` and others, among them an empty file, a directory and a
-  symbolic link under `files/v4/`, and file names with `[` and `]` under `files/v5/g/`); they are
+  per spec section. `cases/spec/09-macros/files/`, `cases/spec/08-duplicates/files/` and
+  `cases/spec/12-flags/files/` hold files that those cases include or load (`*.inc` and others,
+  among them an empty file, a directory and a symbolic link under `files/v4/`, and file names
+  with `[` and `]` under `files/v5/g/`); they are
   not cases themselves (`files/v6/` and `files/v18/` among them, with fixtures for spec-v6 and
   spec-v18). Some `09-macros` cases include other cases, or themselves, by name, and
   some `10-output` and `08-duplicates` cases use `../09-macros/files/`.
