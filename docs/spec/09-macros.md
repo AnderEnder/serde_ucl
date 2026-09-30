@@ -536,7 +536,14 @@ create an object. The entries still go into the object where the macro stands
   `{ x: { "y{": "z" }, q: int 1 }`, and without the `}` it is an error; a file
   `{ x "y{" z⏎}⏎}` closes both (`include_braced_file_first_name_closed`,
   `include_braced_file_first_name_closed_root_open_error`,
-  `include_braced_file_first_name_and_brace_closed`). A `.priority` before the name makes no
+  `include_braced_file_first_name_and_brace_closed`). Like the objects that a section path leaves
+  open (§3.4), that name's object also closes when a container written with brackets that was
+  opened in it closes, and a `}` after that closes the brace taken over: a file
+  `{ x "y{" z⏎a { b = 1 }⏎}` → `.include "…"⏎q = 1` →
+  `{ x: { "y{": "z", a: { b: int 1 } }, q: int 1 }`, and a further `}` in the including unit is
+  an error (`include_braced_file_first_name_closed_by_object`,
+  `include_braced_file_first_name_closed_by_object_then_brace_error`). Which value a comment
+  after these closings attaches to is in §12.5. A `.priority` before the name makes no
   difference (`include_braced_file_priority_then_first_name`). Only that first name gets a brace:
   `{ a b "y{" z⏎}` is an error, because the `}` finds `b` without one, and so is a file whose
   first key is an ordinary entry, `{ a = 1⏎x "y{" z⏎}⏎}` (`include_braced_file_two_names_error`,

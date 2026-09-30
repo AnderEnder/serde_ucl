@@ -4120,3 +4120,30 @@
   - Removed: the C14 worktrees and clones whose work is on `main`; a duplicate of the
     vertical-tab classification entry, which `main` has, was discarded.
   - Commit: the following commit with this entry and the classification above.
+
+- 2026-09-30 — Role: spec team (draft). Item: C14 question #83, spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v17
+    §§3.4, 9.4 and 12.5, question #42 and its cases, the saved finding
+    `values-differ-b20d95e099eb5fa2` (input, flags, report), the pinned libucl source, the pinned
+    oracle built in this worktree, and the differential checker for black-box controls. No
+    Claude Code sessions or memory were read.
+  - Work: reproduced the finding in three identical oracle runs. With a braced included file
+    whose first key starts a section path (§9.4), the `}` that closes that first name's object
+    leaves the value created most recently unchanged, in the oracle, for a comment after the
+    include, in the file between the two `}`, after the file's last `}`, and after a further
+    entry in that object; the crate attaches the comment to the first name's object in each.
+    When a bracketed container opened in that object closes it, or when the `}` removing a brace
+    taken over by a section object closes it (§9.4), both parsers make the object the value
+    created most recently. Drafted a §12.5 rule and a §9.4 boundary sentence for the closing by
+    a bracketed container, and answered #83. Added `files/v18/` fixtures; three cases the crate
+    fails under `tests/conformance/pending/09-macros/` with a README, and three it passes in
+    `cases/spec/09-macros/`; golden files only from `scripts/regen-golden.sh`, which changed no
+    existing golden file. The oracle checkout was cloned into the main checkout's
+    `target/libucl-oracle/libucl`, where `LIBUCL_DIR` pointed. No implementation or fuzz file
+    was edited.
+  - Checks: `cargo test --test conformance` passed all three tests (1,663 cases, the four
+    expected failures unchanged); `scripts/ci.sh`; `git diff --check`.
+  - Commits: the following `docs(spec): draft C14 first-name brace comment rule` commit on
+    `c14/followups`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.

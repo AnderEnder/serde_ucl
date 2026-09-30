@@ -209,9 +209,13 @@ answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79,
 C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §9.4 exception.
 `spec-v16` answers #81 by narrowing the existing §12.5 uncertainty.
 `spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
+A draft for #83 says which value a comment attaches to after the `}` that closes the first
+name of a braced included file (§12.5, §9.4); it awaits independent review for `spec-v18`.
 
 The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
 cases moved there when the crate followed §9.4 in C14.
+The draft for #83 has three cases under `tests/conformance/pending/09-macros/` until the crate
+follows its §12.5 rule.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
 check (`tests/conformance/README.md`, *Golden files per platform*). The files next to each case
@@ -244,7 +248,7 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1660 cases in `cases/` and
+Every case in `tests/conformance/` and the section(s) that explain it: 1663 cases in `cases/` and
 `libucl/`.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
@@ -1056,6 +1060,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1660 case
 | `cases/spec/08-duplicates/strategy_rewrite` | §8 |
 | `cases/spec/09-macros/comments_carry_into_included_file` | §9, §12 |
 | `cases/spec/09-macros/comments_end_of_included_file` | §9, §12 |
+| `cases/spec/09-macros/comments_include_first_name_closed_by_object` | §9, §12 |
 | `cases/spec/09-macros/comments_include_key_array_object_most_recent` | §9, §12 |
 | `cases/spec/09-macros/comments_include_key_object_most_recent` | §9, §12 |
 | `cases/spec/09-macros/comments_include_key_takes_no_pending` | §9, §12 |
@@ -1075,6 +1080,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1660 case
 | `cases/spec/09-macros/include_braced_file_first_name_after_comment_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_first_name_and_brace_closed` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_first_name_closed` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_closed_by_object` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_first_name_closed_by_object_then_brace_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_first_name_closed_root_open_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_first_name_same_line_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_first_name_separator_newline_error` | §9, §3 |
@@ -1569,6 +1576,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1660 case
 | `cases/spec/09-macros/try_include_url_try_false_error` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
 | `cases/spec/09-macros/zero_byte_file_moves_filevars` | §9, §7 |
+| `pending/09-macros/comments_include_first_name_brace_after_entry` | §9, §12 |
+| `pending/09-macros/comments_include_first_name_brace_comment_in_file` | §9, §12 |
+| `pending/09-macros/comments_include_first_name_brace_keeps_most_recent` | §9, §12 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
 | `cases/spec/10-output/comments_output_before_and_after` | §10, §12 |

@@ -18,15 +18,16 @@ None of them is written by hand.
   per spec section. `cases/spec/09-macros/files/` and `cases/spec/08-duplicates/files/` hold files
   that those cases include or load (`*.inc` and others, among them an empty file, a directory and a
   symbolic link under `files/v4/`, and file names with `[` and `]` under `files/v5/g/`); they are
-  not cases themselves (`files/v6/` among them, with fixtures for spec-v6). Some `09-macros` cases
-  include other cases, or themselves, by name, and some `10-output` and `08-duplicates` cases use
-  `../09-macros/files/`. `cases/spec/13-inputs/files/` holds the further inputs of the §13 cases
+  not cases themselves (`files/v6/` and `files/v18/` among them, with fixtures for spec-v6 and
+  the draft for spec-v18). Some `09-macros` cases include other cases, or themselves, by name, and
+  some `10-output` and `08-duplicates` cases use `../09-macros/files/`.
+  `cases/spec/13-inputs/files/` holds the further inputs of the §13 cases
   (`<case>.<n>.inc`, `n01.inc`…`n16.inc`) and the files they include.
 - `pending/`, when present, holds cases from a spec draft or released version that the crate does
   not pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
-  `cases/spec/` when the crate passes it. At present there are no pending cases: the three
-  `spec-v15` cases moved into `cases/spec/09-macros/` in C14.
+  `cases/spec/` when the crate passes it. Three cases of the draft for question #83 (§12.5) are
+  pending under `pending/09-macros/` (see `pending/README.md`).
 - `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
   platform's C library; see *Golden files per platform* below.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
