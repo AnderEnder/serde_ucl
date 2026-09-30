@@ -400,7 +400,7 @@ Owner decision of 2026-09-28, on item 3:
    comparison (`scripts/bench-compare.sh`) runs this version, 0.5.0, libucl and serde_json in
    turns.
 
-## C15 — libucl-compatible C API (owner request of 2026-09-28; after C14, not started)
+## C15 — libucl-compatible C API (owner request of 2026-09-28; not started)
 
 A C API compatible with libucl's, so that C programs written for libucl can use the crate. Owner
 decisions of 2026-09-28:
@@ -411,8 +411,11 @@ decisions of 2026-09-28:
    constants and object layout, including the fields that callers read directly, so that a C
    program built against libucl's header links against the crate's library and runs unchanged,
    as long as it uses only what is provided.
-3. Packaging is still open: a separate package in this repository, its library types, and how
-   its header is made.
+3. Packaging (owner decision of 2026-09-30): a separate package `capi/` in this repository,
+   depending on the crate, that builds a static and a shared library named `ucl`. The spec team
+   writes its header from libucl's public header and documentation, and tests check the layout
+   of the types that callers read directly against libucl's. The crate itself gains no C
+   dependency and no feature for the C API.
 
 The spec team writes the C API's spec from libucl's public header and documentation: functions,
 types, constants, ownership and reference counting, error reporting. It also writes a test harness
