@@ -4,7 +4,7 @@ The conformance runners do not read this directory; `scripts/regen-golden.sh` re
 oracle goldens. Once the crate passes a case, move it and its golden files to
 `tests/conformance/cases/spec/09-macros/`.
 
-Fifteen cases of the `spec-v20` draft wait for implementation in the same way: questions #86
+Eighteen cases of the `spec-v20` draft wait for implementation in the same way: questions #86
 (§9.4, first-directory miss), #87 (§9.4, macros before an included file's first key) and #88
 (§9.4 and §12.5, the first name in a section object after text parsed in place). The fixtures
 under `files/v4/` and `files/v20/` are identical to the ones in `cases/spec/09-macros/` and can
@@ -27,6 +27,10 @@ be dropped on the move; `files/v4` also serves as the directory that one case lo
   `09-macros/include_braced_file_nested_text_before_first_name`,
   `09-macros/include_braced_file_nested_path_before_first_name`: a nested file or text before
   the first key does not end the brace takeover, and its keys are not the file's first.
+- `09-macros/include_braced_file_nested_path_then_braces`,
+  `09-macros/include_braced_file_nested_path_then_entry`,
+  `09-macros/include_braced_file_nested_path_one_brace_closed_by_includer`: a brace taken over
+  again is added to the one the file still holds, the innermost closing first.
 - `09-macros/comments_include_nested_braced_before_first_name`,
   `09-macros/comments_include_nested_text_before_first_name`: the comment after such a file goes
   to `z`.

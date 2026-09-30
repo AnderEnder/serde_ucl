@@ -1,0 +1,3 @@
+.include "files/v20/nested_path_then_entry_one_brace.inc"
+q = 1
+}

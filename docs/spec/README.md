@@ -262,8 +262,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1685 cases in `cases/` and
-`libucl/`, plus fifteen pending cases of the `spec-v20` draft.
+Every case in `tests/conformance/` and the section(s) that explain it: 1686 cases in `cases/` and
+`libucl/`, plus eighteen pending cases of the `spec-v20` draft.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1114,6 +1114,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1685 case
 | `cases/spec/09-macros/include_braced_file_first_name_unclosed_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_first_quoted_name_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_inside_braces_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_nested_path_one_brace_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_priority_then_first_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_then_entries` | §9 |
 | `cases/spec/09-macros/include_braced_file_twice` | §9 |
@@ -1615,6 +1616,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1685 case
 | `pending/09-macros/include_braced_file_nested_braced_then_entry` | §9 |
 | `pending/09-macros/include_braced_file_nested_close_brace_before_first_name` | §9, §3 |
 | `pending/09-macros/include_braced_file_nested_path_before_first_name` | §9, §3 |
+| `pending/09-macros/include_braced_file_nested_path_one_brace_closed_by_includer` | §9, §3 |
+| `pending/09-macros/include_braced_file_nested_path_then_braces` | §9, §3 |
+| `pending/09-macros/include_braced_file_nested_path_then_entry` | §9, §3 |
 | `pending/09-macros/include_braced_file_nested_text_before_first_name` | §9, §3, §13 |
 | `pending/09-macros/include_key_nested_close_brace_before_first_name` | §9, §3 |
 | `pending/09-macros/include_path_first_miss_load_try_after_each_miss_accepts` | §9 |

@@ -568,7 +568,9 @@ create an object. The entries still go into the object where the macro stands
   parsed in place in it (§13.2), reads are not the file's own: its first key is the first one it
   reads itself. Until then, the file takes a brace over again after each macro, that of the
   object its entries then go into, so a `}` of the nested file or text that removed the brace
-  taken over (above) does not end the takeover for the file:
+  taken over (above) does not end the takeover for the file. A brace taken over again is added to
+  any brace the file still holds, not put in its place, and the file's `}`s close the innermost
+  first:
   - With a file `{ .include "files/v4/braced.inc"⏎a2 = 2⏎}`, `.include "…"⏎q = 1` →
     `{ a: int 1, a2: int 2, q: int 1 }` (`include_braced_file_nested_braced_then_entry`).
   - The first name still gets its brace, and the file's last `}` closes the brace taken over: with
@@ -584,6 +586,17 @@ create an object. The entries still go into the object where the macro stands
     `}` closes both, as above: with a file `{ .include "files/v4/left_open.inc"⏎p "q{" r⏎}⏎}`,
     `.include "…"⏎q = 1` → `{ x: { "y{": "z", p: { "q{": "r" } }, q: int 1 }`
     (`include_braced_file_nested_path_before_first_name`).
+  - A nested file that leaves a section path open and removes no brace leaves the file holding
+    two: the section object's, taken over again, and the one it took over first, which stays with
+    the object where the macro stands. The file's first `}` closes the section object and its
+    second the other brace: with a file `{ .include "files/v4/left_open.inc"⏎w = 1⏎}⏎}`,
+    `.include "…"⏎q = 1` → `{ x: { "y{": "z", w: int 1 }, q: int 1 }`, and the same without
+    `w = 1`. With only the first `}` in the file, the root keeps the other brace, so
+    `.include "…"⏎q = 1` is an error and `.include "…"⏎q = 1⏎}` is accepted, with `w` in `x` and
+    `q` at the top level (`include_braced_file_nested_path_then_entry`,
+    `include_braced_file_nested_path_then_braces`,
+    `include_braced_file_nested_path_one_brace_error`,
+    `include_braced_file_nested_path_one_brace_closed_by_includer`).
   - Once the file has read a key of its own, a nested file's `}` removes the brace for good: a
     file `{ a0 = 0⏎.include "files/v4/braced.inc"⏎}` is an error, because its `}` has nothing
     left to close (`include_braced_file_entry_then_nested_braced_error`).

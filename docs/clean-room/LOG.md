@@ -5093,3 +5093,29 @@
   - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #87, spec-v20 draft re-review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent
+    re-review entry above (`ffc0964`), the draft `be864b7`, and pinned-oracle runs of the
+    reviewer's examples.
+  - Finding: reproduced every example in five of five oracle runs. §9.4, *Quirk: macros before
+    the first key*, now says that a brace taken over again is added to any brace the file still
+    holds, not put in its place, and that the file's `}`s close the innermost first, with a
+    bullet for a nested file that leaves a path open and removes no brace: the file's first `}`
+    closes the section object, its second the brace taken over first. New cases: pending
+    `include_braced_file_nested_path_then_entry` (`{ …left_open.inc"⏎w = 1⏎}⏎}`, with `w` in
+    `x`), `include_braced_file_nested_path_then_braces` (the same without `w = 1`) and
+    `include_braced_file_nested_path_one_brace_closed_by_includer` (one `}`, closed by the
+    including document), and active `include_braced_file_nested_path_one_brace_error` (one `}`,
+    not closed). The crate fails the three accepted forms like the other pending cases. The #87
+    answer says the same.
+  - Non-blocking note taken: the #88 answer says it replaces the #83 answer's description that
+    the first name gets no brace in a section object, with the results stated there unchanged.
+  - Cases: fixtures in `files/v20/`, with copies under `pending/09-macros/files/v20/`; golden
+    files only from `scripts/regen-golden.sh`, which changed no existing golden file. The index
+    counts 1,680 active cases plus six pending `spec-v18` and eighteen pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following commit on `c14/spec-q86`. Not tagged or pushed; independent re-review
+    pending.
+  - Attestation: the draft spec, question answers, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
