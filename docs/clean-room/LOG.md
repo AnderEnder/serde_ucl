@@ -4543,7 +4543,11 @@
     no difference.
   - Question: #84 (the first name's brace taken over by a nested file, text in place in its
     object, and a `}` in a file nested under a key there, which crashes the oracle).
-  - Commits: `fix(parse): keep the most recent value at a first name's own brace` and the
-    following `docs(clean-room)` commit with #84 and this entry. Not pushed.
+  - Commits: `fix(parse): keep the most recent value at a first name's own brace`
+    (`80bd69c`), `docs(clean-room): log the spec-v18 comment work and ask question 84`
+    (`4cd1846`, #84 and this entry), `docs(parse): cite question 84 for the first-name brace
+    choices` (`5d53dff`, comments only), and the following `docs(clean-room)` commit that lists
+    them here. The finding also replays as `agree` from its own directory
+    (`ucl-differential --replay`). Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
