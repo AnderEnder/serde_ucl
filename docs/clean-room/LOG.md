@@ -4931,3 +4931,48 @@
     Not tagged or pushed; independent review pending.
   - Attestation: the draft spec, question and answer, cases and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer. Item: C14 question #86, spec-v20 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `71de4a1..e16b977`
+    diff (§§9.4 and 9.6, `docs/spec/README.md`, the conformance and pending READMEs, question #86
+    and its answer, the six new cases, fixture and golden files, the spec-team entry), the
+    released §9.4 search-list rules and §9.6, and black-box runs of the pinned oracle binary of
+    the `c14-followups` worktree from this session's scratchpad. No libucl source,
+    implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: changes requested, one finding. No prohibited content. The oracle agrees with every
+    example and boundary of the text and answer (`string-input`, repeated runs identical): the
+    finding input gives `pa: int 1`; the §9.4 example gives `{ pa: int 1, x: int 1, after: int 2 }`,
+    also as file input, and `"files/v4"` or `"files/v4/dir"` as the `.load` path gives `pa` and
+    `after`; a `.load` that reads its file, one without `try=true`, one without a key, one before
+    the `.include` and a later `.include "pa.inc"` with nothing after it are errors. As the
+    wording "because its file is missing or unusable" says, a `.load` that inserts nothing for
+    another reason does not count: an empty file, with or without `try=true`, and
+    `target="float"` stayed errors. A skip inside a nested object, or after a miss inside one,
+    counts too.
+    1. `docs/spec/09-macros.md:903-905` and the #86 answer (`docs/clean-room/QUESTIONS.md:92`) say
+       a later first-directory miss after the skip "makes the document an error again". Only
+       without a further skip: one skip covers every miss before it, and a miss after it is
+       covered by a later skip. `.include(path=["", "files/v4/p1"]) "pa.inc"`, then
+       `.load(try=true, key="t") "missing.txt"`, `.include "pa.inc"` and
+       `.load(try=true, key="u") "missing.txt"` gives `pa: ⟨int 1 | int 1⟩`, as do two misses
+       followed by one `.load` skip, and the same orders with skipped URL includes or with one of
+       each. The crate already gives these results for URL skips, and fails the `.load` ones like
+       the two pending cases (checked in a scratch copy). Fix: state that a skip covers the
+       misses before it and not those after it, which need a later skip of their own, and cite
+       cases: pending `.load` cases for a miss, skip, miss, skip and for two misses and one skip,
+       and active URL ones if wanted.
+    Non-blocking: the sentence on file and text input (`09-macros.md:894-896`) now follows the
+    `.load` examples but cites only the URL case; a `.load` file-input case, and a boundary case
+    for a `.load(try=true)` of the empty file, which §9.6 also makes insert nothing, would pin
+    both. The spec-team entry above names the branch `c14/spec-q84` (`LOG.md:4549`); it is
+    `c14/spec-q86`.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,708 tracked golden files.
+    1,673 active and eight pending cases, one coverage row each (1,681); the pending fixture is
+    identical to the active one. `cargo test --test conformance` passed all three tests; in a
+    `git archive` copy of `e16b977` with the two #86 cases and my probes of finding 1 moved in,
+    only those two cases and the two `.load` probes failed besides the four expected failures
+    (`src/` compiled, not read). `git diff --check 71de4a1 e16b977`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
