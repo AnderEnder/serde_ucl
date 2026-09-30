@@ -4454,3 +4454,38 @@
     `c14/spec-q84`. Not tagged or pushed; independent re-review pending.
   - Attestation: the draft spec, question answer, cases and this log contain observable behavior
     only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #84,
+  spec-v19 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `04a0f2f..b13d3df`
+    diff (§12.2, `docs/spec/README.md`, `docs/COMPATIBILITY.md`, `tests/conformance/README.md`,
+    the #84 answer, the four new cases, their fixtures and golden files, the spec-team response
+    entry), my review entry above, and black-box runs of the pinned oracle binary of the
+    `c14-followups` worktree from this session's scratchpad. No libucl source, implementation or
+    fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: approved. The revision adds no prohibited content and resolves the three findings.
+    1. `docs/spec/12-flags.md:105-112`, the #84 answer, the index summary and both
+       `docs/COMPATIBILITY.md` rows make the expected result with `zerocopy` the one this
+       specification gives without it, divergences and uncertainties included.
+    2. `12-flags.md:97-103` states the crash as the observation, and the boundary is cited:
+       `zerocopy_include_empty_file`, `zerocopy_include_comment_only_file` and
+       `zerocopy_chunk_input` each gave the same typed dump and output in every format in five of
+       five runs, with `zerocopy` and without.
+    3. The reason for no golden of the undefined results is the one that holds (`12-flags.md`,
+       `docs/spec/README.md:241-247`, the #84 answer).
+    Both notes are taken: `zerocopy_emit_repeated_key_in_text_error` is an error in five of five
+    runs with `zerocopy` and without, `.emit "l = $ABI; l = s"` without `strategy:error` gives one
+    entry of two values, and the `a`/`b`/`c` example matches my earlier runs. Non-blocking: at
+    `12-flags.md:72-73`, "its keys are still intact" is not observable, and libucl's error
+    message for the case names the key `l = s` under `zerocopy` (`l` without); "While the text is
+    being parsed, a key repeated inside it finds its entry" says what is shown. The
+    `docs/COMPATIBILITY.md:30` row says a further input given as a file crashes; an empty or
+    comment-only one did not, so "a further input given as a file with entries" is exact (§12.2
+    may keep it undefined).
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,694 tracked golden files.
+    1,669 active and six pending cases, one coverage row each (1,675). `cargo test --test
+    conformance` passed all three tests. `git diff --check 04a0f2f b13d3df`.
+  - Commits: this reviewer log entry only on `c14/spec-q84`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
