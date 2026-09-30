@@ -4890,3 +4890,44 @@
     `src/`; not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team (classification and draft). Item: C14 fuzzer finding
+  `crate-rejects-6097f6b0b5dffecd`, question #86, spec-v20 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v19 §§9.4
+    and 9.6, the saved finding (input, original, flags, report), the case
+    `include_path_first_miss_then_optional_file_error` and the other first-directory cases, the
+    pinned libucl source, and the pinned oracle and the differential checker as black boxes. No
+    Claude Code sessions or memory were read.
+  - Classification: released spec-v19 determines the result, and it is not libucl's. §9.4 makes
+    the first-directory miss of `.include(p=[""⏎"files/v4/p1"])"pa.inc"` an error, with the one
+    exception of a later skipped URL include, and says the cases establish no other; the crate
+    rejects the input accordingly, so it has no bug. The pinned oracle accepts it (`pa: int 1`)
+    because the `.load(k="t";t=true)t` that follows skips its missing file. The spec is therefore
+    incomplete, and the answer is a spec change, filed as #86.
+  - Controls, in one to five oracle runs each, identical where repeated: a `.load(try=true)` of a
+    missing file, or of a directory, after the miss lets the document pass, with entries between and
+    after read, also inside a nested object and also for a document given as a file; any first
+    directory without the file behaves so (`""`, an existing directory, a missing one). The miss
+    stays an error when the `.load` reads an existing file, when a `.load` without `try=true` fails,
+    when a `.load(try=true)` without a key fails (§9.6), when the `.load` comes before the
+    `.include`, and when a later `.include` misses in the first directory again; without a later
+    directory that has the file it is an error, and a `.try_include` of a missing file changes
+    nothing, as already specified.
+  - Work: drafted the §9.4 quirk for both skipping macros, with a cross-reference in §9.6, and
+    added question #86 with its draft answer. Cases: two the crate fails under
+    `tests/conformance/pending/09-macros/` (`include_path_first_miss_then_load_try_accepts_later`,
+    `include_path_first_miss_then_load_try_directory_accepts_later`, with a copy of
+    `files/v4/p1/pa.inc`), and four it passes in `cases/spec/09-macros/`
+    (`include_path_first_miss_then_load_try_existing_file_error`,
+    `include_path_first_miss_then_load_missing_error`,
+    `include_path_first_miss_after_load_try_error`,
+    `include_path_first_miss_again_after_load_try_error`); golden files only from
+    `scripts/regen-golden.sh`, which changed no existing golden file. Updated the index (1,673
+    active cases, six pending `spec-v18` and two pending draft cases) and the conformance and
+    pending READMEs. `docs/COMPATIBILITY.md` lists quirks the crate reproduces, so its first-miss
+    row is left for when the crate follows the draft.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): draft C14 first-miss load rule` commit on `c14/spec-q84`.
+    Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question and answer, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.

@@ -217,6 +217,8 @@ C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §
 first name of a braced included file (§12.5, §9.4).
 `spec-v19` answers #84 by extending the §12.2 uncertainty under `zerocopy` to what depends on the
 changed keys and strings, and to included files.
+A draft for #86 extends the §9.4 first-directory quirk to a later `.load(try=true)` that skips
+its file; it awaits independent review for `spec-v20`.
 
 The cases of `spec-v13`, `spec-v15` and `spec-v18` are all in `cases/spec/`; the three
 `spec-v15` cases moved there when the crate followed §9.4 in C14, and the six `spec-v18` cases
@@ -258,8 +260,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1675 cases in `cases/` and
-`libucl/`.
+Every case in `tests/conformance/` and the section(s) that explain it: 1679 cases in `cases/` and
+`libucl/`, plus two pending cases of the #86 draft.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1232,6 +1234,10 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1675 case
 | `cases/spec/09-macros/include_param_prefix_names` | §9 |
 | `cases/spec/09-macros/include_path_empty_array_error` | §9 |
 | `cases/spec/09-macros/include_path_first_dir` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_after_load_try_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_again_after_load_try_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_load_missing_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_load_try_existing_file_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_optional_file_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_try_include_url_accepts_later` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_url_error` | §9 |
@@ -1594,6 +1600,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1675 case
 | `cases/spec/09-macros/try_include_url_try_false_error` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
 | `cases/spec/09-macros/zero_byte_file_moves_filevars` | §9, §7 |
+| `pending/09-macros/include_path_first_miss_then_load_try_accepts_later` | §9 |
+| `pending/09-macros/include_path_first_miss_then_load_try_directory_accepts_later` | §9 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
 | `cases/spec/10-output/comments_output_before_and_after` | §10, §12 |

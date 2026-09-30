@@ -879,21 +879,34 @@ project*. libucl behaves as follows:
     that has the file is used (`try_include_path_searches_all_dirs`), and a file found in none of
     them is an error, not a silent stop (`try_include_path_missing_error`). An empty list makes
     every include an error (`include_path_empty_array_error`).
-  - **Quirk: a later skipped URL include.** If the first directory of a `.include` without
-    `try=true` or `glob=true` lacks the file but a later directory has it, and a subsequent
-    `.include(try=true, url=true)` or `.try_include(url=true)` has `://` in its path and is
-    skipped, the document is accepted with the later directory's file included. Entries between
-    the two macros and after the URL macro are read too
-    (`include_path_first_miss_then_url_try_accepts_later`,
-    `include_path_first_miss_then_try_include_url_accepts_later`). This holds whether the
+  - **Quirk: a later skipped URL include or `.load`.** If the first directory of a `.include`
+    without `try=true` or `glob=true` lacks the file but a later directory has it, and a
+    subsequent macro skips its file, the document is accepted with the later directory's file
+    included. Entries between the two macros and after the second are read too. The macros that
+    count are a `.include(try=true, url=true)` or `.try_include(url=true)` with `://` in its path
+    that is skipped (`include_path_first_miss_then_url_try_accepts_later`,
+    `include_path_first_miss_then_try_include_url_accepts_later`), and a `.load` with `try=true`
+    whose file is missing or unusable, so that it inserts nothing (§9.6): after
+    `.include(path=["", "files/v4/p1"]) "pa.inc"`, the lines `x = 1`,
+    `.load(try=true, key="t") "missing.txt"` and `after = 2` give
+    `{ pa: int 1, x: int 1, after: int 2 }`, and so does the directory `"files/v4"` as the `.load`
+    path (`include_path_first_miss_then_load_try_accepts_later`,
+    `include_path_first_miss_then_load_try_directory_accepts_later`). This holds whether the
     document is given as a file or as text
     (`include_path_first_miss_then_url_try_accepts_later_file_input`). Without a matching later
     directory, or when the later URL include is not skippable, the document is an error
     (`include_path_first_miss_then_url_try_no_later_file`,
-    `include_path_first_miss_then_url_error`). A later optional ordinary file include does not
-    change the first-directory error (`include_path_first_miss_then_optional_file_error`). The
-    ordinary first-directory rule above applies otherwise. These cases do not establish an
-    exception for other later macros or other kinds of file failure.
+    `include_path_first_miss_then_url_error`). So it is when the `.load` reads its file, or,
+    without `try=true`, fails on a missing one
+    (`include_path_first_miss_then_load_try_existing_file_error`,
+    `include_path_first_miss_then_load_missing_error`), and when the skip comes before the
+    `.include` (`include_path_first_miss_after_load_try_error`). A later first-directory miss
+    after the skip makes the document an error again: the list stays in effect, so a later
+    `.include "pa.inc"` misses in `""` (`include_path_first_miss_again_after_load_try_error`). A
+    later optional ordinary file include does not change the first-directory error
+    (`include_path_first_miss_then_optional_file_error`). The ordinary first-directory rule above
+    applies otherwise. These cases do not establish an exception for other later macros or other
+    kinds of file failure.
   - With `glob=true`, the pattern is expanded in every directory, and all matches are included
     (`include_path_glob_all_dirs`). Without `try=true`, `.include` then fails when the **last**
     directory has no match, whatever the others had (`include_path_glob_last_dir_must_match_error`).
@@ -966,6 +979,9 @@ Parameters match as in §9.2, in the table's order within each type, so `t=true`
   `t = 1⏎.load(key="t", target="float") "files/num.txt"` and
   `t = 1⏎.load(key="t") "files/v4/empty.txt"` are errors (`load_try_missing_before_existing_key`,
   `load_existing_key_before_target`, `load_existing_key_before_empty_file`).
+- A `.load` with `try=true` that inserts nothing because its file is missing or unusable also
+  lets an earlier first-directory miss of a `.include` pass (§9.4, *Quirk: a later skipped URL
+  include or `.load`*).
 - The value's priority is the `priority` parameter only; `.priority` does not affect it
   (`load_ignores_priority_macro`).
 - If K already exists in the current object, it is an error (`load_existing_key_error`,

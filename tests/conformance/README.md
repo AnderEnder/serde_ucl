@@ -27,8 +27,8 @@ None of them is written by hand.
 - `pending/`, when present, holds cases from a spec draft or released version that the crate does
   not pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
-  `cases/spec/` when the crate passes it. At present there are no pending cases: the six
-  `spec-v18` cases moved into `cases/spec/09-macros/` in C14.
+  `cases/spec/` when the crate passes it. Two cases of the draft for question #86 (§9.4) are pending
+  under `pending/09-macros/` (see `pending/README.md`).
 - `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
   platform's C library; see *Golden files per platform* below.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
