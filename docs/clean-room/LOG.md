@@ -4509,6 +4509,7 @@
     as `spec-v19`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
+
 - 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, released spec-v18
   (question #83), on `c14/spec18-comments`.
   - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `WORKLIST.md` (C3 decisions, C14),
