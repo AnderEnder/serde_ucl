@@ -4541,13 +4541,20 @@
     `tests/conformance/cases/spec/09-macros`) prints `agree`. The new unit tests fail on the
     former `core.rs`. `scripts/ci.sh fuzz 180` (seed 1790780405951109000, 557,483 inputs) saved
     no difference.
-  - Question: #84 (the first name's brace taken over by a nested file, text in place in its
-    object, and a `}` in a file nested under a key there, which crashes the oracle).
+  - Question: #85 (the first name's brace taken over by a nested file, text in place in its
+    object, and a `}` in a file nested under a key there, which crashes the oracle). Filed first
+    as #84; renumbered to #85 at the coordinator's request, because another implementer filed #84
+    in parallel on another branch. The commit messages of `4cd1846` and `5d53dff` still say 84.
   - Commits: `fix(parse): keep the most recent value at a first name's own brace`
     (`80bd69c`), `docs(clean-room): log the spec-v18 comment work and ask question 84`
-    (`4cd1846`, #84 and this entry), `docs(parse): cite question 84 for the first-name brace
-    choices` (`5d53dff`, comments only), and the following `docs(clean-room)` commit that lists
-    them here. The finding also replays as `agree` from its own directory
-    (`ucl-differential --replay`). Not pushed.
+    (`4cd1846`, the question and this entry), `docs(parse): cite question 84 for the first-name
+    brace choices` (`5d53dff`, comments only), `docs(clean-room): list the spec-v18 comment
+    commits in the log` (`fec3c20`), and the following
+    `docs(clean-room): renumber the first-name brace question to 85`, which changes the
+    question's row, the three code comments that cite it and this entry. The finding also
+    replays as `agree` from its own directory (`ucl-differential --replay`). Not pushed.
+  - For the renumbering, the only other worktree content seen was the branch name, last
+    commit subjects and `git status` file list of the worktree `c14-spec-q84`, which was
+    announced as this session's working directory; no file there was opened.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
