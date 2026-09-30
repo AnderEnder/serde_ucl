@@ -4357,3 +4357,66 @@
     `c14/spec-q84`. Not tagged or pushed; independent review pending.
   - Attestation: the draft spec, question answer and this log contain observable behavior only,
     with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer. Item: C14 question #84, spec-v19 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the
+    `origin/main...HEAD` diff on `c14/spec-q84` (§12.2, §13.2's pointer, `docs/spec/README.md`,
+    `docs/COMPATIBILITY.md`, question #84 and its answer, the spec-team entry), the released
+    §13.2 table of test macros, the §9 lines on `.load` and `prefix`, the cases
+    `zerocopy_no_effect` and `zerocopy_registered_macros_stable`, the flag mapping in
+    `scripts/regen-golden.sh`, and black-box runs of the pinned oracle binary of the
+    `c14-followups` worktree (`target/libucl-oracle/ucl-dump`), as the coordinator allowed, from
+    this session's scratchpad. No libucl source, implementation or fuzzer source, `tools/`, or
+    Claude sessions or memory were read.
+  - Review: changes requested, three findings. No prohibited content: no internal names,
+    pseudo-code or source structure; `UCL_PARSER_ZEROCOPY` is the public flag name. Every
+    example of §12.2 and of #84's question and answer matches the oracle, with and without
+    `zerocopy` (`registered-macros`, `string-input`): separate entries for `.emit l $ABI⏎l = s`
+    and `.emit l $ABI⏎.emit l = s` (key `a0`), one entry under a NUL key for
+    `.emit l $ABI⏎.emit l $ABI`; `strategy:error` accepted, `merge` gave two entries, `.priority 5`
+    kept both values, `.inherit "a"` an error, each against the no-`zerocopy` result; `l = s` before
+    the text kept `l`; the `CURDIR`, `k = $ABI`, `literal` and `priority:3` examples. The oracle
+    crashed (SIGSEGV) on every included file and file input named, and not on a main document
+    given as a file.
+    1. `docs/spec/12-flags.md:102-104` and the #84 answer (`docs/clean-room/QUESTIONS.md:91`)
+       make "libucl's result for a document without `zerocopy`" the project's expected result with
+       it. The first half, that `zerocopy` changes no project result, is consistent with the
+       released spec; this sentence is not where the project's result without `zerocopy` is not
+       libucl's: the decided divergences (`divergence:argument-depth`, `divergence:signature`,
+       `non-utf8` in `xfail-new.txt`, `docs/COMPATIBILITY.md`), the rows where libucl crashes
+       without `zerocopy` too, and the uncertain results of §§9.7 and 12.5. Fix: make the expected
+       result with `zerocopy` the one this specification gives for the document without it,
+       libucl's where the spec follows libucl, the project's where it differs, with the same
+       uncertainties.
+    2. `12-flags.md:93-98`: "need not retain their bytes either once that file has been read" is
+       not observable, because libucl crashes before any result; "An empty file, or one with only
+       comments, made no difference" can be read as "crashed too", while the oracle did not crash
+       and gave the result without `zerocopy` (`.include` of an empty or comment-only file, then
+       `q = 1` → `q: int 1`; likewise as further inputs); and that boundary has no case. Fix: state
+       the crash as the observation (a document that includes a file with entries, or is given a
+       further input as a file with entries, crashed libucl in every run); say that empty and
+       comment-only files, and further inputs given as text, gave the result without `zerocopy`;
+       and cite a boundary case, as `zerocopy_registered_macros_stable` does for #79. A
+       comment-only included file and a further `chunk` input under `zerocopy` each gave the same
+       typed dump and output in every format in five of five runs, as without `zerocopy`.
+    3. The #84 answer (`QUESTIONS.md:91`) gives "the affected results are not stable" as the
+       reason for no case, but `.emit "a { x = $ABI }"⏎b { .inherit "a" }` was an error in ten of
+       ten runs, and `l = s⏎.emit l $ABI` and `.emit l $ABI⏎.emit l $ABI` gave the same NUL bytes
+       in ten of ten. Having no case for the undefined results is justified for another reason: a
+       golden records libucl's result with the case's flags, which is undefined here, while the
+       project's expected result is its result without `zerocopy`. Fix: state that reason.
+    Non-blocking: at `12-flags.md:66`, "once the macro has ended" is observable, since a key
+    repeated inside the same text still finds its entry (`.emit "l = $ABI; l = s"` gave one entry
+    with two values, and under `strategy:error` is an error with and without `zerocopy`); an
+    example would show it as a rule and could be a stable error case. `docs/COMPATIBILITY.md:29`
+    says a later key may "join one it should not", which §12.2 does not show; the oracle does:
+    `.emit a $ABI⏎.emit b $ABI⏎.emit c $ABI` gave two entries, the second with the values of both
+    `b` and `c`, in three of three runs. Add it to the bullet at `12-flags.md:77`.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case of this
+    worktree with that binary and writing only to the scratchpad, matched all 6,678 tracked
+    golden files, which ties the binary to the pinned commit; `scripts/regen-golden.sh` itself was
+    not run. The draft changes no case or test file, so `cargo test --test conformance` was not
+    run. `git diff --check origin/main...HEAD`.
+  - Commits: this reviewer log entry only on `c14/spec-q84`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
