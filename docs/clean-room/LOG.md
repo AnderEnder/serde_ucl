@@ -4509,3 +4509,41 @@
     as `spec-v19`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
+- 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, released spec-v18
+  (question #83), on `c14/spec18-comments`.
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `WORKLIST.md` (C3 decisions, C14),
+    `QUESTIONS.md` (#83 and the table's form), this log; released `spec-v18` §9.1 and §9.4
+    (`09-macros.md`), §12.5 (`12-flags.md`), §13.2 (`13-inputs-and-macros.md`) and the
+    `spec-v17..spec-v18` diff of `docs/spec/` (no edits after the tag); the six pending cases in
+    `tests/conformance/pending/09-macros/` (inputs, flags, golden files, fixtures) and the list of
+    them in `tests/conformance/pending/README.md`; the inputs and golden files of the related
+    active §9.4 cases; the crate's `src/parse/`, `tests/conformance.rs`, `fuzz/README.md`; the
+    saved finding `values-differ-b20d95e099eb5fa2` (input, flags, directory, report); the oracle
+    as a black box, built in this worktree by `scripts/regen-golden.sh` (every golden file
+    unchanged) and run through `ucl-differential --check` on probe files in
+    `target/c14-spec18/probe/`.
+  - Work: the object of a braced included file's first name, when the file's `{` took over the
+    brace of the root, of an object written with braces, or of a `key`/`prefix` object, now has
+    a close kind of its own (`src/parse/core.rs`): its `}` closes it as the object's own bracket,
+    so the value created most recently stays what it was (§12.5), for saved comments and for the
+    §9.1 reopen alike; a bracketed container that closes it, and a section object whose brace was
+    taken over, still make the outermost object closed the most recent value. Where the spec does
+    not say, the former behaviour is kept and checked against the oracle: a file included in that
+    object whose `{` takes its brace over closes it as a section object. Text parsed in place no
+    longer keeps the object open against its own `}` (§13.2 covers braces taken over; oracle runs
+    agree, the crate rejected these forms before). Unit tests for the spec's examples and those
+    probes (`src/parse/include.rs`); `CHANGELOG.md` under `## Unreleased`.
+  - Checks: in an rsync copy of the worktree with the six pending cases moved into
+    `cases/spec/09-macros/`, `cargo test --test conformance` passed: 1,671 cases, 1,667 pass and
+    the 4 expected failures, emitters and readback clean (before the change, exactly the six
+    failed). In the worktree `cargo test --test conformance` and `scripts/ci.sh` passed.
+    `ucl-differential --check` of the finding (`dump-comments`, `string-input`,
+    `tests/conformance/cases/spec/09-macros`) prints `agree`. The new unit tests fail on the
+    former `core.rs`. `scripts/ci.sh fuzz 180` (seed 1790780405951109000, 557,483 inputs) saved
+    no difference.
+  - Question: #84 (the first name's brace taken over by a nested file, text in place in its
+    object, and a `}` in a file nested under a key there, which crashes the oracle).
+  - Commits: `fix(parse): keep the most recent value at a first name's own brace` and the
+    following `docs(clean-room)` commit with #84 and this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
