@@ -4813,3 +4813,57 @@
     entry and the one carried over. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: fresh clean-room implementation reviewer. Item: C14, the differential fuzzer
+  under released spec-v19 §12.2; reviewed `git diff 71de4a1 c14/fuzz-zerocopy-work` in worktree
+  `agent-ae56e5508d126285c`, commits `3533a86` and `dcb2e33`.
+  - Inputs consulted: the coordinator's request; `docs/clean-room/PROTOCOL.md`; released
+    `spec-v19` §12.2 and the `spec-v18..spec-v19` diff of `docs/spec/` (no edits after the tag);
+    the branch diff (`fuzz/README.md`, `fuzz/src/main.rs`, `run.rs`, `uncertain.rs`, the LOG);
+    `tests/common/oracle.rs` (flags); `71de4a1`'s fuzzer through `git show`, built in a scratch
+    copy under `target/review-v19/`; the saved findings in
+    `/Users/andrii/work2/ucl-rust-lexer/target/fuzz-differential/findings/` (flags, directory,
+    input, generated input, report), a path the coordinator named, read only, each checked with
+    its case directory mapped into this worktree; the oracle as a black box. The guard refused
+    two commands: a grep whose paths included a spec-team document and two files outside the
+    named search directories, and this entry's first draft, which named that document. Nothing
+    was read or written by them.
+  - Review result: approved. No real difference is hidden:
+    - Non-`zerocopy` runs are unchanged. The removed recogniser fired only with `zerocopy`, and
+      `expectation_flags` returns the flags as given without it. Old and new fuzzers give the
+      same verdict on all 1,669 conformance cases with their own flags, on every non-`zerocopy`
+      finding and on 21 inputs that reach each uncertain rule, apart from the two that flap
+      (below).
+    - Every other flag reaches the oracle: the filter is an exact match, and the unit test
+      checks `priority:3` and `var:zerocopy=1`.
+    - `reproduce:` reproduces what was compared: reports written by `report()` under `zerocopy`
+      (two `.emit`, one `priority:3`, one include) and without it; each `reproduce:` line gave the
+      `oracle:` dump of its report.
+    - The recognisers apply as without `zerocopy`: with `zerocopy` added, the new fuzzer gives
+      the same verdict as without it on all 1,669 cases and the 21 probes. Two probes flapped
+      between runs because the oracle varies (§9.4 ended unit, §12.5 replaced comment), with and
+      without `zerocopy`. The 219 cases the old fuzzer skipped as crashes under `-z` now agree.
+      Taking the filter out fails two tests; passing the full flags to the recognisers fails one.
+  - Notes, not blocking:
+    1. `check` and `report` each build `oracle_options(&expectation_flags(flags))`; with `check`
+       changed to pass the full flags, all 19 fuzz unit tests still pass. One shared function
+       would keep the two from drifting.
+    2. The implementer's entry says the guard refused git in `.claude/worktrees/c14-fuzz-zerocopy`
+       and the work moved to this worktree, without the refused command or the reason. The
+       coordinator should confirm that the move was not a workaround of a clean-room refusal.
+       "my copies of the earlier runs' findings" does not say where they are.
+    3. `scripts/ci.sh fuzz` deletes `target/fuzz-differential/`, so my run removed the
+       implementer's two findings there; copies are in the main checkout's findings.
+  - Checks: 19 fuzz unit tests passed. `scripts/ci.sh` passed (687 tests; tree clean after).
+    `--check` of the named findings: `values-differ-3218009a94e2d9cb`, `-79ff7be944c9f2ba`,
+    `-0bdbfbd65e9562d3` and `-785cf48ef4fc728b` agree, their generated inputs too; the other
+    eight (`crate-accepts-28d2d688`, `-e04659ea`, `crate-rejects-0480fbc2`, `-6097f6b0`,
+    `-986bc4bf`, `values-differ-24470653`, `-6dc7de42`, `-b20d95e0`) give the same verdict as with
+    `71de4a1`'s fuzzer, input and generated input. `scripts/ci.sh fuzz 180` (seed
+    1790785188848068000, 564,579 inputs) exited 1 with one finding,
+    `crate-rejects-fc3ab208a2acd907` (`.seen(2})⏎.try_include(u=true)://`, no `zerocopy`), which
+    `71de4a1`'s fuzzer reports the same, near `986bc4bf`; nothing with `zerocopy`.
+  - Commits: this LOG-only review commit on `c14/fuzz-zerocopy-work`. No change to `fuzz/` or
+    `src/`; not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
