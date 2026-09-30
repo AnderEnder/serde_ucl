@@ -4234,3 +4234,46 @@
     `c14/followups`. Not tagged or pushed; independent re-review pending.
   - Attestation: the draft spec, question answer, cases and this log contain observable behavior
     only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #83,
+  spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `d132c38..6499a08`
+    revision diff (§§9.4 and 12.5, question #83's answer, `docs/spec/README.md`,
+    `tests/conformance/README.md`, `pending/README.md`, the four new cases and their golden
+    files), the spec-team response entry, my review entry above, the flag mapping in
+    `scripts/regen-golden.sh`, and pinned-oracle black-box runs of
+    `target/libucl-oracle/ucl-dump` in this session's scratchpad. No libucl source,
+    implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: approved. Both findings are resolved and the revision adds no prohibited content: the
+    new sentences state where the macro stands and what results follow, in the released spec's
+    terms, with no internal names, pseudo-code or source structure.
+    1. The first-name sentences of §9.4 (`09-macros.md:525-531`, `:541-553`), the §12.5 rule
+       (`12-flags.md:165-187`) and the #83 answer are limited to a brace taken over from the
+       root, an object written with braces, or the `key` or `prefix` object, and a section object
+       has its own sentences. The oracle agrees in every context: the section-object error at the
+       file's second `}` and the comment on `s` (the two new active cases); `z` inside `o { … }`
+       and under `key="k"` (the two new pending cases); `x` for the file closed by
+       `a { b = 1 }` inside `o { … }`; no brace for the first name after a name followed by the
+       macro (`"s".include "files/v6/q42_closed_twice.inc"w "v{" r⏎m = 1` is an error, and
+       `q42_closed.inc` there closes `s` with its one `}`); a brace, and `z`, with
+       `prefix=true`, with `key` and `target="array"`, with `key` inside a section object, and
+       at a braced root (`{⏎.include "…"⏎# c`).
+    2. `docs/spec/README.md:251-252` reads "1665 cases in `cases/` and `libucl/`, plus five
+       pending cases of the #83 draft"; the table has 1,670 rows, one for each case, including
+       `cases/spec/12-flags/zerocopy_registered_macros_stable`. The suggested §9.4 wording was
+       taken.
+    Non-blocking notes: the `prefix` clause has no case of its own (the `key` cases show the same
+    object, §9.4; `.include(prefix=true) "files/v6/q42_closed_twice.inc"⏎# c` gives `z` the
+    comment in the oracle); a pending case could pin it. `09-macros.md:531` ends in a short
+    "macro stands. So" line; rewrap the paragraph.
+  - Checks: the same flag and input mapping as `scripts/regen-golden.sh`, run over every case and
+    writing only to the scratchpad, matched all 6,672 tracked golden files; not
+    `scripts/regen-golden.sh` itself, which writes tracked files. 1,665 active and five pending
+    cases; the fixtures under `pending/09-macros/files/` are identical to those under
+    `cases/spec/09-macros/files/`. `cargo test --test conformance` passed all three tests; in a
+    `git archive` copy of `6499a08` in the scratchpad, with the pending cases moved in, only those
+    five failed besides the four expected failures (`src/` compiled, not read).
+    `git diff --check d132c38 6499a08`.
+  - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
