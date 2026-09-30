@@ -53,7 +53,7 @@ Release 0.3.0 renamed the package, the library and the repository to `serde_ucl`
 
 ```toml
 [dependencies]
-serde_ucl = "0.5"
+serde_ucl = "0.6"
 serde = { version = "1", features = ["derive"] }
 ```
 

@@ -2,7 +2,11 @@
 
 All notable changes to this crate are recorded here.
 
-## Unreleased
+## 0.6.0 - 2026-09-30
+
+Optional includes of files that do not exist and floats parse faster, and includes follow
+libucl in two more cases. A file that exists but cannot be read is now an error for an optional
+include, where 0.5.0 skipped it.
 
 ### Faster optional includes and floats
 

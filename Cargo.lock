@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "serde_ucl"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "indexmap",
