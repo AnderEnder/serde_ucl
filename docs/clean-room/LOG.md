@@ -4776,11 +4776,25 @@
     saved black-box findings `values-differ-3218009a94e2d9cb`, `-79ff7be944c9f2ba`,
     `-0bdbfbd65e9562d3` and `-785cf48ef4fc728b` in the main checkout's `target/`, and my copies of
     the earlier runs' findings; the oracle as a black box. No libucl source, `tools/`, or other
-    forbidden input was read.
-  - Branch: the worktree guard refused git in `.claude/worktrees/c14-fuzz-zerocopy`, so the work
-    is on branch `c14/fuzz-zerocopy-work` in worktree `agent-ae56e5508d126285c`, based on
-    `71de4a1` (the spec-v19 release, the tip of `c14/fuzz-zerocopy`), which can be fast-forwarded
-    to it. Branch `worktree-agent-ae56e5508d126285c` stays at `cc17491`, unmerged.
+    forbidden input was read. The copies are in worktree `agent-ae56e5508d126285c`, under
+    `target/c14-scratch/` (ignored by git, not committed): `fuzz-run1` to `fuzz-run6`, the six
+    300-second runs of the spec-v17 session (each `findings/` and `summary.txt`), and `v19-run1`
+    to `v19-run3`, the three runs below (only `v19-run3` has findings).
+  - Branch: the agent harness refused to run, in worktree `agent-ae56e5508d126285c`, the command
+    `cd /Users/andrii/work2/ucl-rust-lexer/.claude/worktrees/c14-fuzz-zerocopy && git status &&
+    git log --oneline -8 && git tag --sort=-v:refname -l 'spec-v*' | head -3`, with the reason:
+    "This agent is isolated in the worktree
+    /Users/andrii/work2/ucl-rust-lexer/.claude/worktrees/agent-ae56e5508d126285c, but this command
+    changes directory to the shared checkout
+    (/Users/andrii/work2/ucl-rust-lexer/.claude/worktrees/c14-fuzz-zerocopy) before running git.
+    Refusing to run it — a worktree-isolated agent's git operations must target its own worktree.
+    Run the equivalent from /Users/andrii/work2/ucl-rust-lexer/.claude/worktrees/agent-ae56e5508d126285c
+    without the redirect." That is the harness's worktree isolation, not the clean-room guard
+    (`.claude/hooks/clean-room-guard.py`): the command named no forbidden input. I did not retry
+    it in another form. So the work is on branch `c14/fuzz-zerocopy-work` in worktree
+    `agent-ae56e5508d126285c`, based on `71de4a1` (the spec-v19 release, the tip of
+    `c14/fuzz-zerocopy`), which can be fast-forwarded to it. Branch
+    `worktree-agent-ae56e5508d126285c` stays at `cc17491`, unmerged.
   - Carried over from `cc17491`: the log entry above, verbatim, for the provenance of what
     follows; the idea of its §8.7 test, rewritten for the new expectation
     (`zerocopy_under_priority_compares_the_entries_priorities`). Not carried over: the layout
@@ -4811,6 +4825,14 @@
     there.
   - Commits: `3533a86` (`fix(fuzz)`), and the following `docs(clean-room)` commit with this
     entry and the one carried over. Not pushed.
+  - Follow-up after the review below (note 1 and note 2): `611e562`
+    (`refactor(fuzz): share the oracle's options between check and report`) makes `check` and
+    the reports use one function, `run::expectation_options`, and adds a test that runs `check`
+    with a stand-in oracle writing the options it was given, then writes a report of it; the
+    test failed when `check`, and when `report`, built the options from the full flags, and
+    passes. 20 fuzz unit tests pass. The Branch and Inputs bullets above now name the refused
+    command, its reason, and where the copies of the findings are, in the following
+    `docs(clean-room)` commit. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
 
