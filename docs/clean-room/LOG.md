@@ -4520,9 +4520,9 @@
     active §9.4 cases; the crate's `src/parse/`, `tests/conformance.rs`, `fuzz/README.md`; the
     saved finding `values-differ-b20d95e099eb5fa2` (input, flags, directory, report), read from
     `/Users/andrii/work2/ucl-rust-lexer/target/fuzz-differential/findings/`, the path the
-    coordinator gave, in the main checkout's `target/`; the oracle as a black box, built in this worktree by `scripts/regen-golden.sh` (every golden file
-    unchanged) and run through `ucl-differential --check` on probe files in
-    `target/c14-spec18/probe/`.
+    coordinator gave, in the main checkout's `target/`; the oracle as a black box, built in this
+    worktree by `scripts/regen-golden.sh` (every golden file unchanged) and run through
+    `ucl-differential --check` on probe files in `target/c14-spec18/probe/`.
   - Work: the object of a braced included file's first name, when the file's `{` took over the
     brace of the root, of an object written with braces, or of a `key`/`prefix` object, now has
     a close kind of its own (`src/parse/core.rs`): its `}` closes it as the object's own bracket,
@@ -4533,8 +4533,8 @@
     object whose `{` takes its brace over closes it as a section object. Text parsed in place no
     longer keeps the object open against its own `}` (§13.2 covers braces taken over; oracle runs
     agree): the crate rejected two of these forms before, and accepted a third that is now an
-    error, as in libucl (the file `{ x "y{" z⏎.emit ""⏎a { }⏎}`, then `q = 1`; corrected after the
-    review of `2fa6b19`). Unit tests for the spec's examples and those probes
+    error, as in libucl (the file `{ x "y{" z⏎.emit ""⏎a { }⏎}`, then `q = 1`; corrected after
+    the review of `2fa6b19`). Unit tests for the spec's examples and those probes
     (`src/parse/include.rs`); `CHANGELOG.md` under `## Unreleased`.
   - Checks: in an rsync copy of the worktree with the six pending cases moved into
     `cases/spec/09-macros/`, `cargo test --test conformance` passed: 1,671 cases, 1,667 pass and
@@ -4621,5 +4621,38 @@
     a question or a fix of its own.
   - Commits: this LOG-only review commit on `c14/spec18-comments`. No change to `src/`; not
     pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, released spec-v18 (question
+  #83), the review findings of `2fa6b19` on `c14/spec18-comments`.
+  - Inputs consulted: the coordinator's message with findings 1 to 6, the reviewer's entry
+    (`2fa6b19`); released `spec-v18` §9.4, *Nesting under a key* (no edits after the tag); my
+    entry above, `CHANGELOG.md`, `QUESTIONS.md` #85; the crate's `src/parse/core.rs` and
+    `src/parse/include.rs`, and the pre-fix `core.rs` through `git show 480ae4c^:` for a
+    mutation check; the oracle as a black box through `ucl-differential --check` on probe files
+    in `target/c14-spec18/probe/`.
+  - Work: finding 1, the hashes in my entry are those after the rebase; finding 2, the changelog
+    names the form 0.6.0 accepted that is now an error, and the form now accepted with `a` in
+    `x`, and my entry no longer says every form was rejected before; finding 3, a unit test for
+    the key object's share of the first name's brace, and the comment and #85 (3) cite the §9.4
+    sentence that leaves an object holding only its own bracket undefined; finding 4, unit tests
+    for the §9.1 reopen of `k` (both parsers agree) and of `z`, which is left alone with
+    `Uncertain::ReopenedNotObject` (the oracle crashes); finding 5, my entry says the finding
+    was read from the main checkout's `target/fuzz-differential/findings/`; nits: the docs of
+    `Close::NameBrace`, `Frame::stays_open` and `keep_section_open`, and the section arm named,
+    with the impossible case marked unreachable.
+  - Checks: the new key-share test fails with `Close::NameBrace` taken out of the key object's
+    arm; the new reopen test and the two earlier tests fail on the pre-fix `core.rs`.
+    `scripts/ci.sh` passed (703 tests). In an rsync copy of the worktree with the six pending
+    cases moved into `cases/spec/09-macros/`, `cargo test --test conformance` passed: 1,671
+    cases, 1,667 pass and the 4 expected failures, emitters and readback clean. The saved finding
+    replays as `agree`; the probes of both reopen cases, the nested takeover and the section
+    object agree or are oracle crashes as before.
+  - Commits: `test(parse): cover the first-name brace under a key and the name-run reopen`
+    (`07e13fc`), `refactor(parse): name the section-object arm of the first-name brace`
+    (`db7a4ef`), `docs: correct the spec-v18 changelog, question 85 and log entry` (`ee97806`),
+    and the following `docs(clean-room)` commit with this entry and two rewrapped lines of the
+    entry above. Not pushed. `crate-rejects-6097f6b0b5dffecd` left alone, as asked.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
