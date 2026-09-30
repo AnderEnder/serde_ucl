@@ -4147,3 +4147,58 @@
     `c14/followups`. Not tagged or pushed; independent review pending.
   - Attestation: the draft spec, question answer, cases and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer. Item: C14 question #83, spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `2dd9894..b8b3d4b`
+    draft diff (§§9.4 and 12.5, question #83 and its answer, `docs/spec/README.md`,
+    `tests/conformance/README.md`, `pending/README.md`, the new cases, fixtures and golden files),
+    the released §§9.4 and 12.5 around the change, the spec-team entry for this draft and earlier
+    reviewer entries, `docs/spec/README.md` at `spec-v15` and `2dd9894`, the flag mapping in
+    `scripts/regen-golden.sh`, a grep of `tests/conformance.rs`, and pinned-oracle black-box runs
+    of `target/libucl-oracle/ucl-dump` in this session's scratchpad. No libucl source,
+    implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: changes requested, two findings. No prohibited content: the draft states inputs and
+    results in the released spec's terms ("a brace of its own", "the value created most
+    recently"), with no internal names, pseudo-code or source structure. Every new example matches
+    the oracle: the finding `_ 1⏎.include "files/v6/q42_closed_twice.inc"# ` (`dump-comments`,
+    `string-input`) gives `z` `"ca": ["# "]` in three identical runs, and as file input; the §12.5
+    examples give the comment to `z`, `z`, `k`'s value and, for the file closed by `a { b = 1 }`,
+    `x`; the §9.4 example and the error for a further `}` hold, with or without `string-input`.
+    1. `docs/spec/09-macros.md:539-546`, `docs/spec/12-flags.md:165-178` and the #83 answer
+       (`docs/clean-room/QUESTIONS.md:90`) do not say where the macro stands, and every cited case
+       includes at the top level. In an object left open by a section path the oracle gives the
+       first name no brace of its own: `s "t{" u⏎.include "files/v6/q42_closed_twice.inc"⏎q = 1`,
+       and the same with `files/v18/first_name_closed_by_object.inc`, are errors at the file's
+       last `}`, contrary to "a `}` after that closes the brace taken over"; the one `}` of a file
+       `{ x "y{" z⏎}` closes `x` and `s` together (`q` goes to the root), and
+       `s "t{" u⏎.include "…"⏎# c` gives the comment to `s`, where the new §12.5 sentence, read
+       as written, gives it to `z`. These results follow from the released section-object quirk
+       of §9.4 and the outermost rule of §12.5, and the crate already gives them. Inside
+       `o { … }` and under `key=` the draft holds:
+       `o { .include "files/v6/q42_closed_twice.inc"⏎# c` and
+       `.include(key="k") "files/v6/q42_closed_twice.inc"⏎# c` give the comment to `z`, and
+       `first_name_closed_by_object.inc` inside `o { … }` gives it to `x`; the crate fails the
+       first two like the three pending cases. Fix: limit the new sentences, and preferably the
+       released first-name sentence at `09-macros.md:525-528`, to a brace taken over from the
+       root, an object written with braces or a `key` object, and refer for a section object to
+       the released section-object rule; cite cases for both, for example an error case for the
+       section object and pending cases for `o { … }` and `key=`.
+    2. `docs/spec/README.md:251-252` counts "1663 cases in `cases/` and `libucl/`" while the table
+       now also lists the three pending cases; `spec-v15` wrote "…, plus three pending C14
+       cases". Fix: add ", plus three pending cases of the #83 draft".
+    Observation, not from this draft: the coverage table has had no row for
+    `cases/spec/12-flags/zerocopy_registered_macros_stable` since `c96b03f` (1,662 rows for
+    1,663 active cases); add it at release. Optional wording: at `09-macros.md:542`,
+    "a file `…` → `.include "…"⏎q = 1` → …" reads as if the file gave the include; "with a file
+    `…`, `.include "…"⏎q = 1` → …" is clearer.
+  - Checks: `scripts/regen-golden.sh` was not run, because it writes tracked golden files; the
+    same flag and input mapping run over every case, writing only to the scratchpad, matched all
+    6,653 tracked golden files, the new ones included. The fixtures under `pending/09-macros/files/`
+    are identical to those under `cases/spec/09-macros/files/`; 1,637 cases under `cases/` and 26
+    under `libucl/basic/` make 1,663, plus three pending. `cargo test --test conformance` passed
+    all three tests. In a `git archive` copy of `b8b3d4b` in the scratchpad, with the pending
+    cases moved in, only those three failed besides the four expected failures; the probes above
+    ran there as throwaway cases (`src/` compiled, not read). `git diff --check 2dd9894 b8b3d4b`.
+  - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
