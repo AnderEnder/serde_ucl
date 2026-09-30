@@ -1,6 +1,18 @@
 //! Documents and types shared by the benchmarks. Every generated document is valid libucl.
+//! `irregular.rs` generates irregular configurations; `files.rs` reads the documents that come
+//! from files.
 
-#![allow(dead_code, reason = "each bench uses part of this module")]
+#![allow(
+    dead_code,
+    unused_imports,
+    reason = "each bench uses part of this module"
+)]
+
+mod files;
+mod irregular;
+
+pub use files::{CORPUS, Corpus, Document, JSON_DOCUMENTS, corpus_documents, json_documents};
+pub use irregular::{IRREGULAR, irregular};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

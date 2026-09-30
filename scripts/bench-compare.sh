@@ -1,11 +1,12 @@
 #!/bin/sh
-# Compares serde_ucl with libucl and serde_json on the benchmarks' documents and the rspamd corpus,
-# for the README's section *Against libucl and serde_json* (tools/bench-compare/README.md).
+# Compares serde_ucl with its previous release, libucl and serde_json on the generated benchmark
+# documents, the pinned JSON documents when present, and the rspamd corpus, for the README's
+# *Against libucl and serde_json* section and performance work (tools/bench-compare/README.md).
 #
 # Builds libucl at the oracle's pinned commit as a CMake Release build (-O3), tools/bench-compare/
 # with the crate's release settings, and the C program tools/bench-compare/lucl.c; writes the
-# generated documents; runs the two programs in turns for ROUNDS rounds, the order rotated each
-# round; prints the medians over the rounds as tables. Every time includes freeing the result,
+# generated documents; runs the programs in turns for ROUNDS rounds, rotating their order
+# each round; prints the medians over the rounds as tables. Every time includes freeing the result,
 # except in the table that says it does not. Run it on a quiet machine.
 #
 # Usage: scripts/bench-compare.sh [ROUNDS]   (default 3)
@@ -15,6 +16,8 @@
 #   LIBUCL_DIR     existing libucl checkout at that commit (default: target/libucl-oracle/libucl,
 #                  cloned if missing)
 #   CC             C compiler (default: cc)
+#   BASELINE       the previous release to compare with, a tag (default: the latest `v*` tag
+#                  reachable from HEAD); `none` leaves it out
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,6 +30,7 @@ CC=${CC:-cc}
 WORK="$ROOT/target/bench-compare"
 DOCS="$WORK/documents"
 CORPUS="$ROOT/benches/corpus/rspamd"
+JSON_CORPUS="$ROOT/target/bench-corpus"
 
 case "$ROUNDS" in
 '' | *[!0-9]* | 0) echo "usage: scripts/bench-compare.sh [ROUNDS]" >&2; exit 2 ;;
@@ -48,7 +52,7 @@ if [ "$actual" != "$LIBUCL_COMMIT" ]; then
 	exit 1
 fi
 
-# A build configured from another checkout cannot be reused: CMake refuses a second source.
+# A build configured from another checkout cannot be reused by CMake.
 cache="$WORK/libucl-build/CMakeCache.txt"
 if [ -f "$cache" ] &&
 	[ "$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache")" != "$(cd "$LIBUCL_DIR" && pwd -P)" ]; then
@@ -73,18 +77,65 @@ cargo build --quiet --release --manifest-path "$ROOT/tools/bench-compare/Cargo.t
 	--target-dir "$WORK/cargo"
 TOOL="$WORK/cargo/release/bench-compare"
 
+# The previous release: its crate from the tag, and a copy of this package built against it. The
+# copy keeps this tree's documents module, so that both time the same documents.
+BASELINE=${BASELINE:-$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo none)}
+BASE_TOOL=
+if [ "$BASELINE" != none ]; then
+	commit=$(git -C "$ROOT" rev-parse --verify --quiet "$BASELINE^{commit}") || {
+		echo "error: BASELINE $BASELINE is not a commit" >&2
+		exit 1
+	}
+	# One directory per baseline commit. `tar -m` gives the files the time of extraction: with
+	# the commit's times, cargo would take an earlier build of another baseline as up to date.
+	base="$WORK/baseline-$commit"
+	rm -rf "$base"
+	mkdir -p "$base/crate" "$base/tool/src"
+	echo "building tools/bench-compare against $BASELINE ($commit)" >&2
+	git -C "$ROOT" archive "$commit" src benches Cargo.toml Cargo.lock README.md |
+		tar -x -m -C "$base/crate"
+	sed "s|^serde_ucl = { path = \"../..\" }|serde_ucl = { path = \"$base/crate\" }|" \
+		"$ROOT/tools/bench-compare/Cargo.toml" >"$base/tool/Cargo.toml"
+	cp "$ROOT/tools/bench-compare/Cargo.lock" "$base/tool/Cargo.lock"
+	sed "s|^#\[path = \"../../../benches/common/mod.rs\"\]|#[path = \"$ROOT/benches/common/mod.rs\"]|" \
+		"$ROOT/tools/bench-compare/src/main.rs" >"$base/tool/src/main.rs"
+	grep -q "path = \"$base/crate\"" "$base/tool/Cargo.toml" &&
+		grep -q "#\[path = \"$ROOT/benches" "$base/tool/src/main.rs" || {
+		echo "error: could not point the copy of tools/bench-compare at $BASELINE" >&2
+		exit 1
+	}
+	cargo build --quiet --release --manifest-path "$base/tool/Cargo.toml" \
+		--target-dir "$base/cargo"
+	BASE_TOOL="$base/cargo/release/bench-compare"
+fi
+
 "$TOOL" write "$DOCS"
 RESULTS="$WORK/results.txt"
-: >"$RESULTS"
+RESULTS_TMP="$WORK/results.incomplete.txt"
+RUN_OUTPUT="$WORK/run-output.txt"
+SUMMARY_TMP="$WORK/summary.incomplete.txt"
+: >"$RESULTS_TMP"
 
 run_rust() {
-	"$TOOL" run "$DOCS" "$CORPUS"
+	"$TOOL" run "$DOCS" "$CORPUS" "$JSON_CORPUS"
+}
+run_baseline() {
+	BENCH_COMPARE_LABEL="serde_ucl@${BASELINE#v}" "$BASE_TOOL" run "$DOCS" "$CORPUS" "$JSON_CORPUS"
 }
 run_libucl() {
-	"$WORK/lucl" "$DOCS/json-10000.json" "$DOCS/json-1000.json" "$DOCS/config-1000.ucl" \
-		"$DOCS/small.ucl" "$DOCS/small.json"
-	"$WORK/lucl" -v "CONFDIR=$(cd "$CORPUS" && pwd)" "$CORPUS/groups.conf" \
-		"$CORPUS/composites.conf" "$CORPUS/scores.d/rbl_group.conf"
+	set -- "$DOCS/json-10000.json" "$DOCS/json-1000.json" "$DOCS/config-1000.ucl" \
+		"$DOCS/small.ucl" "$DOCS/small.json" "$DOCS/irregular-60k.ucl" \
+		"$DOCS/irregular-600k.ucl"
+	for name in twitter citm_catalog canada; do
+		if [ -f "$JSON_CORPUS/$name.json" ]; then
+			set -- "$@" "$JSON_CORPUS/$name.json"
+		else
+			echo "bench-compare: skipping missing $JSON_CORPUS/$name.json" >&2
+		fi
+	done
+	"$WORK/lucl" "$@" || return 1
+	(cd "$CORPUS" && "$WORK/lucl" -v ABI=unknown -v CONFDIR=. groups.conf) || return 1
+	(cd "$CORPUS" && "$WORK/lucl" -v ABI=unknown composites.conf scores.d/rbl_group.conf) || return 1
 }
 
 # The one-minute load average, printed with each run: other work on the machine makes rounds
@@ -93,15 +144,35 @@ load() {
 	if [ -r /proc/loadavg ]; then cut -d' ' -f1 /proc/loadavg; else sysctl -n vm.loadavg | awk '{print $2}'; fi
 }
 
+# The programs run in turns, the order rotated by one each round.
+if [ -n "$BASE_TOOL" ]; then tools="rust baseline libucl"; else tools="rust libucl"; fi
 round=1
 while [ "$round" -le "$ROUNDS" ]; do
-	if [ $((round % 2)) -eq 1 ]; then order="rust libucl"; else order="libucl rust"; fi
+	set -- $tools
+	shift_by=$(((round - 1) % $#))
+	while [ "$shift_by" -gt 0 ]; do
+		first=$1
+		shift
+		set -- "$@" "$first"
+		shift_by=$((shift_by - 1))
+	done
+	order="$*"
 	for tool in $order; do
 		echo "round $round of $ROUNDS: $tool (load $(load))" >&2
-		"run_$tool" | sed "s/^/$round|/" >>"$RESULTS"
+		if ! "run_$tool" >"$RUN_OUTPUT"; then
+			echo "error: $tool failed in round $round; no summary produced" >&2
+			exit 1
+		fi
+		if [ ! -s "$RUN_OUTPUT" ]; then
+			echo "error: $tool produced no results in round $round; no summary produced" >&2
+			exit 1
+		fi
+		sed "s/^/$round|/" "$RUN_OUTPUT" >>"$RESULTS_TMP"
 	done
 	round=$((round + 1))
 done
 
+"$TOOL" summarize "$RESULTS_TMP" >"$SUMMARY_TMP"
+mv "$RESULTS_TMP" "$RESULTS"
 echo "results: $RESULTS" >&2
-"$TOOL" summarize "$RESULTS"
+cat "$SUMMARY_TMP"

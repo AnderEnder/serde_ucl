@@ -205,10 +205,13 @@ specifies the config output with saved comments. `spec-v7` answers #50–#54, `s
 answers #55, `spec-v9` records the decision on #56, `spec-v10` answers #57–#58 and adds
 §13 for several inputs and registered macros, `spec-v11` answers #59 (the rules where inputs
 join, §13.1), `spec-v12` answers #60–#69, found by the differential fuzzer, and `spec-v13`
-answers #70–#78, found by the fuzzer after `spec-v12`.
+answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79, found during
+C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §9.4 exception.
+`spec-v16` answers #81 by narrowing the existing §12.5 uncertainty.
+`spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
 
-The cases of `spec-v13` are all in `cases/spec/`; `tests/conformance/pending/` was removed when the
-crate followed them (C10a).
+The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
+cases moved there when the crate followed §9.4 in C14.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
 check (`tests/conformance/README.md`, *Golden files per platform*). The files next to each case
@@ -225,6 +228,12 @@ the project*.
 
 Two §13 rules have no case: a `{` after a zero-byte first input crashes libucl, and the file
 variables that an input given as a file sets would put the checkout path into the golden file.
+The undefined result for variable-expanded `.emit` text under `zerocopy` (§12.2) has no golden;
+`zerocopy_registered_macros_stable` covers its stable boundary.
+The §12.5 clarification for #81 has no golden because the replaced comment's later
+appearance is uncertain in libucl.
+The §9.4 access-failure rule for #82 has no portable golden because read access depends on
+the checkout's permissions and the identity running the test.
 
 Two rules are stated but have no committed case, because their golden files cannot be committed:
 
@@ -235,7 +244,7 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1653 cases in `cases/` and
+Every case in `tests/conformance/` and the section(s) that explain it: 1660 cases in `cases/` and
 `libucl/`.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
@@ -1198,6 +1207,12 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1653 case
 | `cases/spec/09-macros/include_param_prefix_names` | §9 |
 | `cases/spec/09-macros/include_path_empty_array_error` | §9 |
 | `cases/spec/09-macros/include_path_first_dir` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_optional_file_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_try_include_url_accepts_later` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_url_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_url_try_accepts_later` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_url_try_accepts_later_file_input` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_url_try_no_later_file` | §9 |
 | `cases/spec/09-macros/include_path_glob_all_dirs` | §9 |
 | `cases/spec/09-macros/include_path_glob_last_dir_must_match_error` | §9 |
 | `cases/spec/09-macros/include_path_later_list_replaces` | §9 |

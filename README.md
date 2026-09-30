@@ -9,7 +9,7 @@
 
 UCL (Universal Configuration Language) for Rust, with serde. The crate reads and writes UCL as
 [libucl](https://github.com/vstakhov/libucl), the C library used by FreeBSD, does. A conformance
-suite of 1,653 documents compares its parse results, and its output in four formats, with
+suite of 1,660 documents compares its parse results, and its output in four formats, with
 libucl's. The implementation is written independently of libucl's code, from a behaviour
 specification and libucl's observable output.
 
@@ -143,16 +143,16 @@ UCL from other guides or formats. The main ones (`docs/spec/` has all of them):
 
 ## Compatibility with libucl
 
-The conformance suite in `tests/conformance/` holds 1,653 cases: libucl's own test corpus, the
+The conformance suite in `tests/conformance/` holds 1,660 cases: libucl's own test corpus, the
 cases the behaviour spec cites, and documents libucl rejects. Its golden files are libucl's
 results at a pinned commit. Three tests compare the crate with them:
 
 - **Parse results.** Every case's value, with key order, value types, priorities and, where a
-  case saves them, comments; or the fact that libucl rejects it. 1,649 cases match. The 4 listed
+  case saves them, comments; or the fact that libucl rejects it. 1,656 cases match. The 4 listed
   exceptions are deliberate differences: two signature checks, one macro-argument nesting limit
   and one non-UTF-8 document.
-- **Output.** The 1,216 cases that libucl and the crate both parse are written in the config
-  format, JSON, compact JSON and YAML, and each output is compared byte for byte with libucl's.
+- **Output.** Of 1,224 cases with libucl output, 1,220 match in the config format, JSON,
+  compact JSON and YAML byte for byte; 4 have listed expected failures.
   The comparison also covers config output with saved comments (67 cases) and libucl's own
   `.res` files (24).
 - **Read-back.** The crate parses every output again, which must give the same value, apart from
@@ -911,45 +911,75 @@ rustc 1.98.1, median times:
 
 ### Against libucl and serde_json
 
-The benchmarks' documents (`benches/common/mod.rs`, the three entries also as JSON) and three
-rspamd configurations from `benches/corpus/`, parsed by this version of serde_ucl, by libucl at
-the reference commit (CMake Release build, `-O3`) and by serde_json 1.0.151, on an Apple M4 Max
-with rustc 1.98.1 and the release settings of `Cargo.toml` (fat LTO, one codegen unit). The
-programs ran in turns for three rounds. Each time is the median of the rounds, each round the
-median of 31 samples of at least 5 ms of repetitions, and includes freeing the result.
-`scripts/bench-compare.sh` reproduces these tables (`tools/bench-compare/README.md`).
+This version of serde_ucl, the previous release (`v0.5.0`), and libucl at the reference commit
+(CMake Release build, `-O3`) parsed the same documents. serde_json 1.0.151 parsed the JSON
+documents. The run used an Apple M4 Max with rustc 1.98.1. The crate and comparison tool used
+the release settings in `Cargo.toml` (fat LTO, one codegen unit); the tool times on a thread of
+its own, so that the size of the environment does not move the stack. The programs ran in turns over
+three rotated rounds; the measured one-minute load ranged from 3.74 to 4.44. Each result is the
+median of the rounds, each round the median of 31 samples of at least 5 ms of repetitions.
+`scripts/bench-compare.sh` reproduces the tables (`tools/bench-compare/README.md`). The three
+pinned JSON documents were present and passed their SHA-256 checks.
 
-Parsing into each library's value tree (`parse::parse`; libucl's `ucl_parser_add_chunk` and
-`ucl_parser_get_object`; `serde_json::Value`):
+The first table parses into each library's value tree (`parse::parse`, libucl's
+`ucl_parser_add_chunk` and `ucl_parser_get_object`, or `serde_json::Value`). The `change` column
+is this version's time relative to 0.5.0; a negative value is faster. For all three rspamd
+inputs, the Rust parser uses the file loader, corpus base directory and variables from
+`benches/common/files.rs`; libucl runs in that directory with the same variable values.
 
-| Document | serde_ucl | libucl | serde_json |
-| --- | ---: | ---: | ---: |
-| JSON, 10,000 records (1.4 MiB) | 15.0 ms | 26.4 ms | 10.8 ms |
-| JSON, 1,000 records (142 KiB) | 1.44 ms | 2.50 ms | 0.95 ms |
-| configuration, 1,000 services (499 KiB) | 2.36 ms | 3.43 ms | – |
-| three entries, UCL | 0.54 µs | 9.5 µs | – |
-| three entries, JSON | 0.55 µs | 9.5 µs | 0.22 µs |
-| rspamd `groups.conf` and the 14 files it includes, read from disk (54 KiB) | 1.02 ms | 1.62 ms | – |
-| rspamd `composites.conf` (8.9 KiB) | 31.9 µs | 94.3 µs | – |
-| rspamd `scores.d/rbl_group.conf` (13 KiB) | 55.5 µs | 89.6 µs | – |
+Medians over 3 rounds; each time includes freeing the result.
 
-Deserializing into a struct (`from_str`) whose strings are owned (`String`) or borrowed from the
-input (`&str`):
+| Document | serde_ucl | 0.5.0 | change | libucl | serde_json |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| JSON, 10,000 records | 15.3 ms | 15.3 ms | −0% | 26.5 ms | 10.9 ms |
+| JSON, 1,000 records | 1.48 ms | 1.47 ms | +0% | 2.58 ms | 0.97 ms |
+| configuration, 1,000 services | 2.43 ms | 2.43 ms | +0% | 3.59 ms | – |
+| three entries, UCL | 0.55 µs | 0.55 µs | +0% | 9.45 µs | – |
+| three entries, JSON | 0.57 µs | 0.56 µs | +1% | 9.48 µs | 0.22 µs |
+| irregular configuration, 78,466 bytes | 0.19 ms | 0.20 ms | −1% | 0.33 ms | – |
+| irregular configuration, 639,049 bytes | 2.33 ms | 2.37 ms | −2% | 3.28 ms | – |
+| twitter.json | 2.79 ms | 2.79 ms | −0% | 3.75 ms | 1.64 ms |
+| citm_catalog.json | 5.06 ms | 5.12 ms | −1% | 8.44 ms | 4.09 ms |
+| canada.json | 12.1 ms | 13.6 ms | −11% | 19.2 ms | 7.29 ms |
+| rspamd `groups.conf`, with its includes | 0.71 ms | 1.22 ms | −42% | 1.68 ms | – |
+| rspamd `composites.conf` | 33.6 µs | 57.2 µs | −41% | 98.5 µs | – |
+| rspamd `rbl_group.conf` | 56.4 µs | 56.9 µs | −1% | 93.2 µs | – |
 
-| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |
+The same without freeing the value in the timing (freed after each sample):
+
+| Document | serde_ucl | 0.5.0 | change | libucl |
 | --- | ---: | ---: | ---: | ---: |
-| JSON, 10,000 records | 14.6 ms | 13.4 ms | 4.79 ms | 4.05 ms |
-| JSON, 1,000 records | 1.36 ms | 1.28 ms | 0.47 ms | 0.40 ms |
-| three entries, JSON | 0.55 µs | 0.53 µs | 0.08 µs | 0.08 µs |
+| JSON, 10,000 records | 12.1 ms | 12.2 ms | −0% | 18.5 ms |
+| JSON, 1,000 records | 1.20 ms | 1.20 ms | −1% | 1.76 ms |
+| configuration, 1,000 services | 2.04 ms | 2.03 ms | +0% | 2.54 ms |
+| three entries, UCL | 0.52 µs | 0.51 µs | +1% | 9.23 µs |
+| three entries, JSON | 0.54 µs | 0.54 µs | +0% | 9.27 µs |
+| irregular configuration, 78,466 bytes | 0.18 ms | 0.19 ms | −3% | 0.27 ms |
+| irregular configuration, 639,049 bytes | 2.05 ms | 2.09 ms | −2% | 2.75 ms |
+| twitter.json | 2.35 ms | 2.34 ms | +0% | 2.80 ms |
+| citm_catalog.json | 4.18 ms | 4.27 ms | −2% | 5.96 ms |
+| canada.json | 10.3 ms | 11.7 ms | −12% | 14.0 ms |
+| rspamd `groups.conf`, with its includes | 0.67 ms | 1.19 ms | −44% | 1.61 ms |
+| rspamd `composites.conf` | 30.7 µs | 54.0 µs | −43% | 92.3 µs |
+| rspamd `rbl_group.conf` | 49.8 µs | 50.2 µs | −1% | 73.7 µs |
 
-serde_ucl parses 1.5 to 1.8 times as fast as libucl on the larger generated documents, 1.6 to 3
-times on the rspamd configurations, and 17 times on the three entries, where creating a libucl
-parser takes most of the time. serde_json builds its value 1.4 to 1.5 times as fast on the larger
-documents and 2.5 times on the small one, and fills a struct 3 to 7 times as fast: it
-deserializes straight from the text, while serde_ucl first builds the whole UCL value, which
-repeated keys, priorities and `.inherit` need. Borrowing saves serde_ucl 6% to 8% on the larger
-documents, whose strings are short, and serde_json 15%; building the value takes most of
-serde_ucl's time either way.
+Deserializing generated JSON into structs with owned (`String`) or borrowed (`&str`) strings:
+
+| Document | serde_ucl, owned | 0.5.0, owned | change | serde_ucl, borrowed | 0.5.0, borrowed | change | serde_json, owned | serde_json, borrowed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JSON, 10,000 records | 14.6 ms | 14.7 ms | −1% | 13.6 ms | 13.8 ms | −1% | 4.87 ms | 4.16 ms |
+| JSON, 1,000 records | 1.36 ms | 1.38 ms | −1% | 1.29 ms | 1.29 ms | −0% | 0.47 ms | 0.40 ms |
+| three entries, JSON | 0.56 µs | 0.56 µs | +1% | 0.54 µs | 0.54 µs | +1% | 0.08 µs | 0.08 µs |
+
+serde_ucl parses 1.3 to 1.7 times as fast as libucl on the larger documents, 1.6 to 2.9 times on
+the rspamd configurations, and 17 times on the three entries, where creating a libucl parser
+takes most of the time. Against 0.5.0, `canada.json`, mostly floats, parses 11% faster, and
+rspamd's `groups.conf` and `composites.conf`, which try optional includes that do not exist,
+about 40% faster; the other documents are within 2%. serde_json builds its value 1.2 to 1.7
+times as fast as serde_ucl on the larger documents and 2.6 times on the small one, and fills a
+struct 3 to 7 times as fast: it deserializes straight from the text, while serde_ucl first
+builds the whole UCL value, which repeated keys, priorities and `.inherit` need. These times
+describe this machine and run, not a fixed ratio.
 
 ## Repository layout
 
@@ -964,7 +994,7 @@ serde_ucl's time either way.
 | `docs/clean-room/` | the clean-room protocol, work list, log and spec questions |
 | `tests/` | integration tests, the conformance suite and the serde corpus |
 | `tools/ucl-dump/`, `scripts/` | the oracle that dumps libucl's results; CI and golden-file scripts |
-| `tools/bench-compare/` | the comparison with libucl and serde_json (`scripts/bench-compare.sh`) |
+| `tools/bench-compare/` | the comparison with the previous release, libucl and serde_json (`scripts/bench-compare.sh`) |
 | `fuzz/` | the differential fuzzer |
 | `examples/`, `benches/` | examples and benchmarks |
 | `benches/corpus/` | real configurations for the benchmarks (rspamd, Apache-2.0) |

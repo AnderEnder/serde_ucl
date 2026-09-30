@@ -262,10 +262,25 @@ fn compare_results(oracle: &OracleResult, krate: &CrateResult, ctx: &Context<'_>
         }
         (OracleResult::BadOutput(_), _) => Verdict::Skipped("oracle wrote no dump"),
         (OracleResult::Error, CrateResult::Rejected { .. }) => Verdict::Agree,
-        (OracleResult::Error, CrateResult::Dump(value)) => Verdict::Differs {
-            kind: Kind::CrateAccepts,
-            detail: format!("libucl rejects the input; crate accepted it as {value}"),
-        },
+        (OracleResult::Error, CrateResult::Dump(value)) => {
+            if uncertain::handler_in_single_include_path(ctx, value) {
+                Verdict::Skipped(uncertain::HANDLER)
+            } else {
+                Verdict::Differs {
+                    kind: Kind::CrateAccepts,
+                    detail: format!("libucl rejects the input; crate accepted it as {value}"),
+                }
+            }
+        }
+        (
+            OracleResult::Dump(golden),
+            CrateResult::Rejected {
+                kind: ErrorKind::MissingValue,
+                ..
+            },
+        ) if uncertain::handler_in_single_emit_value(ctx, golden) => {
+            Verdict::Skipped(uncertain::HANDLER)
+        }
         (OracleResult::Dump(_), CrateResult::Rejected { kind, message }) => match kind {
             // Project divergences (spec README, *Divergences decided by the project*).
             ErrorKind::InvalidUtf8 => Verdict::Skipped("divergence: non-UTF-8"),
@@ -421,6 +436,209 @@ mod tests {
         assert!(matches!(
             compare(&OracleResult::Crashed("signal 11".into()), &dump("a = 1")),
             Verdict::Skipped(_)
+        ));
+    }
+
+    #[test]
+    fn mixed_handler_include_path_skips_only_the_undefined_empty_result() {
+        let input = b".include(g=true,y=e)\"${H_}.*\"";
+        let make_verdict = |input: &[u8], flags: &[String]| {
+            let setup = Setup::from_flags(flags).unwrap();
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../tests/conformance/cases/spec/09-macros");
+            let (krate, notes) = run_crate(&setup, &dir, input);
+            let ctx = Context {
+                input,
+                flags,
+                dropped_comments: &notes.dropped_comments,
+                uncertain: &notes.uncertain,
+            };
+            compare(&OracleResult::Error, &krate, &ctx)
+        };
+        let handler = flags(&["string-input", "variable-handler"]);
+        assert!(matches!(
+            make_verdict(input, &handler),
+            Verdict::Skipped(uncertain::HANDLER)
+        ));
+        assert!(matches!(
+            make_verdict(input, &flags(&["string-input"])),
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        ));
+        assert!(matches!(
+            make_verdict(
+                input,
+                &flags(&["string-input", "variable-handler", "var:H_=x"])
+            ),
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        ));
+        assert!(matches!(
+            make_verdict(b".include(g=true,y=e)\"${H_}.*\"\nx=1", &handler),
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn mixed_handler_emit_text_rejection_skips_only_its_undefined_value() {
+        let input = b".emit \"x=${H_}c\"";
+        let flags = flags(&[
+            "registered-macros",
+            "dump-comments",
+            "string-input",
+            "variable-handler",
+        ]);
+        let setup = Setup::from_flags(&flags).unwrap();
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/13-inputs");
+        let (krate, notes) = run_crate(&setup, &dir, input);
+        assert!(matches!(
+            &krate,
+            CrateResult::Rejected {
+                kind: ErrorKind::MissingValue,
+                ..
+            }
+        ));
+        let ctx = Context {
+            input,
+            flags: &flags,
+            dropped_comments: &notes.dropped_comments,
+            uncertain: &notes.uncertain,
+        };
+        let oracle = |key: &str| {
+            OracleResult::Dump(serde_json::json!({
+                "t":"object","entries":[{"k":key,"v":[{"t":"string","v":"[handled]\0"}]}]
+            }))
+        };
+        assert!(matches!(
+            compare(&oracle("x"), &krate, &ctx),
+            Verdict::Skipped(uncertain::HANDLER)
+        ));
+        assert!(matches!(
+            compare(&oracle("y"), &krate, &ctx),
+            Verdict::Differs {
+                kind: Kind::CrateRejects,
+                ..
+            }
+        ));
+
+        let extra = b".emit \"x=${H_}c\"\nother=1";
+        let extra_ctx = Context {
+            input: extra,
+            flags: ctx.flags,
+            dropped_comments: ctx.dropped_comments,
+            uncertain: ctx.uncertain,
+        };
+        assert!(matches!(
+            compare(&oracle("x"), &krate, &extra_ctx),
+            Verdict::Differs {
+                kind: Kind::CrateRejects,
+                ..
+            }
+        ));
+        let wrong_error = CrateResult::Rejected {
+            kind: ErrorKind::UnexpectedTerminator,
+            message: "other error".into(),
+        };
+        assert!(matches!(
+            compare(&oracle("x"), &wrong_error, &ctx),
+            Verdict::Differs {
+                kind: Kind::CrateRejects,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn duplicate_reappearing_rewrite_comment_only_on_later_value() {
+        let input = b"# c\na d\na 2\nk d# c";
+        let run_flags = flags(&[
+            "dump-comments",
+            "strategy:rewrite",
+            "string-input",
+            "no-filevars",
+        ]);
+        let setup = Setup::from_flags(&run_flags).unwrap();
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
+        let (krate, notes) = run_crate(&setup, &dir, input);
+        assert!(matches!(&krate, CrateResult::Dump(_)));
+        assert_eq!(notes.dropped_comments, ["# c"]);
+        let ctx = Context {
+            input,
+            flags: &run_flags,
+            dropped_comments: &notes.dropped_comments,
+            uncertain: &notes.uncertain,
+        };
+        let golden = serde_json::json!({"t":"object","entries":[
+            {"k":"a","v":[{"t":"int","v":"2"}]},
+            {"k":"k","v":[{"t":"string","v":"d","c":["# c","# c"]}]}
+        ]});
+        let verdict = |dump| compare(&OracleResult::Dump(dump), &krate, &ctx);
+        assert!(matches!(
+            verdict(golden.clone()),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+        ));
+
+        let mut changed_value = golden.clone();
+        changed_value["entries"][1]["v"][0]["v"] = serde_json::json!("q");
+        assert!(matches!(verdict(changed_value), Verdict::Differs { .. }));
+        let mut unrelated_comment = golden.clone();
+        unrelated_comment["entries"][1]["v"][0]["c"][0] = serde_json::json!("# x");
+        assert!(matches!(
+            verdict(unrelated_comment),
+            Verdict::Differs { .. }
+        ));
+        let mut extra_entry = golden.clone();
+        extra_entry["entries"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"k":"z","v":[{"t":"int","v":"1"}]}));
+        assert!(matches!(verdict(extra_entry), Verdict::Differs { .. }));
+
+        let mut changed_first_value = golden;
+        changed_first_value["entries"][0]["v"][0]["v"] = serde_json::json!("3");
+        assert!(matches!(
+            verdict(changed_first_value),
+            Verdict::Differs { .. }
+        ));
+    }
+
+    #[test]
+    fn dropped_comment_cannot_reappear_on_an_earlier_value() {
+        let input = b"p { v 1 # c\n}\n# c\na 1\na 2\n";
+        let run_flags = flags(&["dump-comments", "strategy:rewrite", "string-input"]);
+        let setup = Setup::from_flags(&run_flags).unwrap();
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
+        let (krate, notes) = run_crate(&setup, &dir, input);
+        assert!(matches!(&krate, CrateResult::Dump(_)));
+        assert_eq!(notes.dropped_comments, ["# c"]);
+        let ctx = Context {
+            input,
+            flags: &run_flags,
+            dropped_comments: &notes.dropped_comments,
+            uncertain: &notes.uncertain,
+        };
+        let wrong_earlier_comment = serde_json::json!({"t":"object","entries":[
+            {"k":"p","v":[{"t":"object","entries":[
+                {"k":"v","v":[{"t":"int","v":"1","c":["# c","# c"]}]}
+            ]}]},
+            {"k":"a","v":[{"t":"int","v":"2"}]}
+        ]});
+        assert!(matches!(
+            compare(&OracleResult::Dump(wrong_earlier_comment), &krate, &ctx),
+            Verdict::Differs {
+                kind: Kind::ValuesDiffer,
+                ..
+            }
         ));
     }
 }

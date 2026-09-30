@@ -3,19 +3,24 @@
 //!
 //! ```text
 //! bench-compare write DIR                  write the generated documents into DIR
-//! bench-compare run DIR [CORPUS]           time serde_ucl and serde_json on them, and on CORPUS
+//! bench-compare run DIR [CORPUS] [JSON_CORPUS]
+//!                                         time the generated, rspamd and available JSON documents
 //! bench-compare summarize RESULTS...       median tables from the lines of the runs
 //! ```
 //!
 //! Every line of `run` is `tool|kind|document|seconds`: `kind` is `parse` (into the library's
 //! value tree, freed each time), `parse-nofree` (the values kept and freed after the timing),
 //! `typed` and `typed-borrowed` (`from_str` into a struct whose strings are owned or borrowed).
+//!
+//! `BENCH_COMPARE_LABEL` names the serde_ucl this binary was built with (default `serde_ucl`).
+//! `scripts/bench-compare.sh` builds a second copy against the previous release and runs it as
+//! `serde_ucl@VERSION`; that copy leaves serde_json out, which the first one times.
 
 #[path = "../../../benches/common/mod.rs"]
 mod common;
 
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -78,7 +83,7 @@ struct SmallBorrowed<'a> {
 
 /// The generated documents: file name, contents. JSON documents have a typed target.
 fn documents() -> Vec<(&'static str, String)> {
-    vec![
+    let mut docs = vec![
         ("json-10000.json", common::json(10000)),
         ("json-1000.json", common::json(1000)),
         ("config-1000.ucl", common::config(1000)),
@@ -87,16 +92,19 @@ fn documents() -> Vec<(&'static str, String)> {
             "small.json",
             r#"{"name": "svc", "port": 8080, "debug": true}"#.to_string(),
         ),
-    ]
+    ];
+    for (name, seed, size) in common::IRREGULAR {
+        docs.push((
+            match name {
+                "60k" => "irregular-60k.ucl",
+                "600k" => "irregular-600k.ucl",
+                _ => unreachable!("benchmark irregular document"),
+            },
+            common::irregular(seed, size),
+        ));
+    }
+    docs
 }
-
-/// The corpus documents, relative to the corpus directory (`benches/corpus/rspamd`), and
-/// whether they include files of it, through the variable `CONFDIR` (benches/corpus/README.md).
-const CORPUS: [(&str, bool); 3] = [
-    ("groups.conf", true),
-    ("composites.conf", false),
-    ("scores.d/rbl_group.conf", false),
-];
 
 /// Median time per call over 31 samples, each at least about 5 ms of repetitions.
 fn time<F: FnMut() -> bool>(mut f: F) -> f64 {
@@ -152,33 +160,42 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn run(dir: &Path, corpus: Option<&Path>) {
+fn run_value(ucl: &str, json: bool, name: &str, doc: &str) {
+    let t = time(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).is_ok());
+    println!("{ucl}|parse|{name}|{t:.9}");
+    let t = time_keep(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).unwrap());
+    println!("{ucl}|parse-nofree|{name}|{t:.9}");
+    if json && name.ends_with(".json") {
+        let t = time(|| serde_json::from_str::<serde_json::Value>(black_box(doc)).is_ok());
+        println!("serde_json|parse|{name}|{t:.9}");
+    }
+}
+
+fn run(dir: &Path, corpus: Option<&Path>, json_corpus: Option<&Path>) {
+    let ucl = std::env::var("BENCH_COMPARE_LABEL").unwrap_or_else(|_| "serde_ucl".into());
+    // A copy built against an earlier serde_ucl times only that serde_ucl.
+    let json = !ucl.contains('@');
     for (name, _) in documents() {
         let doc = read(&dir.join(name));
-        let t = time(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).is_ok());
-        println!("serde_ucl|parse|{name}|{t:.9}");
-        let t = time_keep(|| serde_ucl::parse::parse(black_box(doc.as_bytes())).unwrap());
-        println!("serde_ucl|parse-nofree|{name}|{t:.9}");
-        if name.ends_with(".json") {
-            let t = time(|| serde_json::from_str::<serde_json::Value>(black_box(&doc)).is_ok());
-            println!("serde_json|parse|{name}|{t:.9}");
-        }
+        run_value(&ucl, json, name, &doc);
         if name.starts_with("json") {
             let t = time(|| serde_ucl::from_str::<Items>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed|{name}|{t:.9}");
+            println!("{ucl}|typed|{name}|{t:.9}");
             let t = time(|| serde_ucl::from_str::<ItemsBorrowed>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed-borrowed|{name}|{t:.9}");
-            let t = time(|| serde_json::from_str::<Items>(black_box(&doc)).is_ok());
-            println!("serde_json|typed|{name}|{t:.9}");
-            let t = time(|| serde_json::from_str::<ItemsBorrowed>(black_box(&doc)).is_ok());
-            println!("serde_json|typed-borrowed|{name}|{t:.9}");
+            println!("{ucl}|typed-borrowed|{name}|{t:.9}");
+            if json {
+                let t = time(|| serde_json::from_str::<Items>(black_box(&doc)).is_ok());
+                println!("serde_json|typed|{name}|{t:.9}");
+                let t = time(|| serde_json::from_str::<ItemsBorrowed>(black_box(&doc)).is_ok());
+                println!("serde_json|typed-borrowed|{name}|{t:.9}");
+            }
         }
         if name.starts_with("small") {
             let t = time(|| serde_ucl::from_str::<Small>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed|{name}|{t:.9}");
+            println!("{ucl}|typed|{name}|{t:.9}");
             let t = time(|| serde_ucl::from_str::<SmallBorrowed>(black_box(&doc)).is_ok());
-            println!("serde_ucl|typed-borrowed|{name}|{t:.9}");
-            if name.ends_with(".json") {
+            println!("{ucl}|typed-borrowed|{name}|{t:.9}");
+            if json && name.ends_with(".json") {
                 let t = time(|| serde_json::from_str::<Small>(black_box(&doc)).is_ok());
                 println!("serde_json|typed|{name}|{t:.9}");
                 let t = time(|| serde_json::from_str::<SmallBorrowed>(black_box(&doc)).is_ok());
@@ -186,28 +203,43 @@ fn run(dir: &Path, corpus: Option<&Path>) {
             }
         }
     }
+    if let Some(json_corpus) = json_corpus {
+        for name in common::JSON_DOCUMENTS {
+            let filename = format!("{name}.json");
+            let path = json_corpus.join(&filename);
+            match std::fs::read_to_string(&path) {
+                Ok(doc) => run_value(&ucl, json, &filename, &doc),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("bench-compare: skipping missing {}", path.display());
+                }
+                Err(e) => panic!("{}: {e}", path.display()),
+            }
+        }
+    }
     let Some(corpus) = corpus else { return };
     let confdir = std::fs::canonicalize(corpus).expect("the corpus directory");
-    for (path, includes) in CORPUS {
+    for document in &common::CORPUS {
+        let path = Path::new(document.file)
+            .strip_prefix("rspamd")
+            .expect("rspamd corpus path");
         let doc = read(&confdir.join(path));
-        let name = Path::new(path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        // A parser as `parse::parse` makes one, with a file loader and `CONFDIR` for includes.
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        // Match Corpus::parser for the current crate and the previous release alike. Its
+        // CARGO_MANIFEST_DIR points at the baseline copy when built against that release.
         let parse = || {
             let mut parser = serde_ucl::parse::Parser::new();
-            if includes {
-                parser.set_loader(serde_ucl::parse::FsLoader::new());
-                parser.register_variable("CONFDIR", confdir.to_string_lossy().into_owned());
+            parser.set_loader(serde_ucl::parse::FsLoader::new());
+            parser.set_base_dir(&confdir);
+            parser.register_variable("ABI", "unknown");
+            for &(name, value) in document.variables {
+                parser.register_variable(name, value);
             }
             parser.parse(black_box(doc.as_bytes()))
         };
         let t = time(|| parse().is_ok());
-        println!("serde_ucl|parse|{name}|{t:.9}");
+        println!("{ucl}|parse|{name}|{t:.9}");
         let t = time_keep(|| parse().unwrap());
-        println!("serde_ucl|parse-nofree|{name}|{t:.9}");
+        println!("{ucl}|parse-nofree|{name}|{t:.9}");
     }
 }
 
@@ -219,6 +251,11 @@ fn label(name: &str) -> String {
         "config-1000.ucl" => "configuration, 1,000 services".into(),
         "small.ucl" => "three entries, UCL".into(),
         "small.json" => "three entries, JSON".into(),
+        "irregular-60k.ucl" => "irregular configuration, 78,466 bytes".into(),
+        "irregular-600k.ucl" => "irregular configuration, 639,049 bytes".into(),
+        "twitter.json" => "twitter.json".into(),
+        "citm_catalog.json" => "citm_catalog.json".into(),
+        "canada.json" => "canada.json".into(),
         "groups.conf" => "rspamd `groups.conf`, with its includes".into(),
         other => format!("rspamd `{other}`"),
     }
@@ -246,86 +283,201 @@ fn summarize(files: &[PathBuf]) {
     let mut values: BTreeMap<(String, String, String), Vec<f64>> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     for file in files {
+        let mut round_rows: BTreeMap<String, BTreeSet<(String, String, String)>> = BTreeMap::new();
+        let mut unnumbered = false;
         for line in read(file).lines() {
             let fields: Vec<&str> = line.split('|').collect();
-            // An optional round number first.
-            let fields = if fields.len() == 5 {
-                &fields[1..]
-            } else {
-                &fields[..]
+            let (round, fields) = match fields.len() {
+                5 => (Some(fields[0]), &fields[1..]),
+                4 => (None, &fields[..]),
+                _ => panic!("{}: malformed result line: {line}", file.display()),
             };
             let [tool, kind, doc, seconds] = fields else {
-                continue;
+                unreachable!()
             };
-            let Ok(seconds) = seconds.parse::<f64>() else {
-                continue;
-            };
+            let seconds = seconds
+                .parse::<f64>()
+                .unwrap_or_else(|_| panic!("{}: invalid time: {line}", file.display()));
+            assert!(
+                seconds.is_finite() && seconds > 0.0,
+                "{}: invalid time: {line}",
+                file.display()
+            );
+            let key = (tool.to_string(), kind.to_string(), doc.to_string());
+            if let Some(round) = round {
+                assert!(
+                    round_rows
+                        .entry(round.to_string())
+                        .or_default()
+                        .insert(key.clone()),
+                    "{}: duplicate result in round {round}: {line}",
+                    file.display()
+                );
+            } else {
+                unnumbered = true;
+            }
             if !order.iter().any(|d| d == doc) {
                 order.push(doc.to_string());
             }
-            values
-                .entry((tool.to_string(), kind.to_string(), doc.to_string()))
-                .or_default()
-                .push(seconds);
+            values.entry(key).or_default().push(seconds);
+        }
+        assert!(
+            !round_rows.is_empty() || unnumbered,
+            "{}: no results",
+            file.display()
+        );
+        assert!(
+            round_rows.is_empty() || !unnumbered,
+            "{}: mixed numbered and unnumbered results",
+            file.display()
+        );
+        if let Some((first_round, expected)) = round_rows.first_key_value() {
+            for (round, rows) in &round_rows {
+                assert_eq!(
+                    rows,
+                    expected,
+                    "{}: round {round} differs from round {first_round}",
+                    file.display()
+                );
+            }
         }
     }
-    let median = |tool: &str, kind: &str, doc: &str| -> String {
-        match values.get(&(tool.into(), kind.into(), doc.into())) {
-            Some(v) => {
-                let mut v = v.clone();
-                v.sort_by(f64::total_cmp);
-                let m = if v.len() % 2 == 1 {
-                    v[v.len() / 2]
-                } else {
-                    (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2.0
-                };
-                format_time(m)
+    let median = |tool: &str, kind: &str, doc: &str| -> Option<f64> {
+        let mut v = values.get(&(tool.into(), kind.into(), doc.into()))?.clone();
+        v.sort_by(f64::total_cmp);
+        Some(if v.len() % 2 == 1 {
+            v[v.len() / 2]
+        } else {
+            (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2.0
+        })
+    };
+    let time = |tool: &str, kind: &str, doc: &str| -> String {
+        median(tool, kind, doc).map_or_else(|| "–".into(), format_time)
+    };
+    // This serde_ucl against the previous one: the change in time.
+    let change = |base: &str, kind: &str, doc: &str| -> String {
+        match (median("serde_ucl", kind, doc), median(base, kind, doc)) {
+            (Some(now), Some(before)) => {
+                let percent = (now / before - 1.0) * 100.0;
+                let sign = if percent < 0.0 { "−" } else { "+" };
+                format!("{sign}{:.0}%", percent.abs())
             }
-            None => "–".into(),
+            _ => "–".into(),
         }
     };
+    // The previous release, when the script ran one: tools named `serde_ucl@VERSION`.
+    let base = values
+        .keys()
+        .map(|(tool, _, _)| tool.as_str())
+        .find(|tool| tool.starts_with("serde_ucl@"))
+        .map(str::to_owned);
     let rounds = values.values().map(Vec::len).max().unwrap_or(0);
     let plural = if rounds == 1 { "" } else { "s" };
     println!("Medians over {rounds} round{plural}; each time includes freeing the result.\n");
-    println!("| Document | serde_ucl | libucl | serde_json |");
-    println!("| --- | ---: | ---: | ---: |");
-    for doc in &order {
-        println!(
-            "| {} | {} | {} | {} |",
-            label(doc),
-            median("serde_ucl", "parse", doc),
-            median("libucl", "parse", doc),
-            median("serde_json", "parse", doc)
-        );
+    match &base {
+        Some(base) => {
+            let version = &base["serde_ucl@".len()..];
+            println!("| Document | serde_ucl | {version} | change | libucl | serde_json |");
+            println!("| --- | ---: | ---: | ---: | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse", doc),
+                    time(base, "parse", doc),
+                    change(base, "parse", doc),
+                    time("libucl", "parse", doc),
+                    time("serde_json", "parse", doc)
+                );
+            }
+        }
+        None => {
+            println!("| Document | serde_ucl | libucl | serde_json |");
+            println!("| --- | ---: | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse", doc),
+                    time("libucl", "parse", doc),
+                    time("serde_json", "parse", doc)
+                );
+            }
+        }
     }
     println!("\nThe same without freeing the value in the timing (freed after each sample):\n");
-    println!("| Document | serde_ucl | libucl |");
-    println!("| --- | ---: | ---: |");
-    for doc in &order {
-        println!(
-            "| {} | {} | {} |",
-            label(doc),
-            median("serde_ucl", "parse-nofree", doc),
-            median("libucl", "parse-nofree", doc)
-        );
+    match &base {
+        Some(base) => {
+            let version = &base["serde_ucl@".len()..];
+            println!("| Document | serde_ucl | {version} | change | libucl |");
+            println!("| --- | ---: | ---: | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse-nofree", doc),
+                    time(base, "parse-nofree", doc),
+                    change(base, "parse-nofree", doc),
+                    time("libucl", "parse-nofree", doc)
+                );
+            }
+        }
+        None => {
+            println!("| Document | serde_ucl | libucl |");
+            println!("| --- | ---: | ---: |");
+            for doc in &order {
+                println!(
+                    "| {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "parse-nofree", doc),
+                    time("libucl", "parse-nofree", doc)
+                );
+            }
+        }
     }
     println!();
-    println!(
-        "| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |"
-    );
-    println!("| --- | ---: | ---: | ---: | ---: |");
-    for doc in &order {
-        if !values.contains_key(&("serde_json".into(), "typed".into(), doc.clone())) {
-            continue;
+    let typed: Vec<&String> = order
+        .iter()
+        .filter(|doc| values.contains_key(&("serde_json".into(), "typed".into(), (*doc).clone())))
+        .collect();
+    match &base {
+        Some(base) => {
+            let version = &base["serde_ucl@".len()..];
+            println!(
+                "| Document | serde_ucl, owned | {version}, owned | change | serde_ucl, borrowed | {version}, borrowed | change | serde_json, owned | serde_json, borrowed |"
+            );
+            println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+            for doc in typed {
+                println!(
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "typed", doc),
+                    time(base, "typed", doc),
+                    change(base, "typed", doc),
+                    time("serde_ucl", "typed-borrowed", doc),
+                    time(base, "typed-borrowed", doc),
+                    change(base, "typed-borrowed", doc),
+                    time("serde_json", "typed", doc),
+                    time("serde_json", "typed-borrowed", doc)
+                );
+            }
         }
-        println!(
-            "| {} | {} | {} | {} | {} |",
-            label(doc),
-            median("serde_ucl", "typed", doc),
-            median("serde_ucl", "typed-borrowed", doc),
-            median("serde_json", "typed", doc),
-            median("serde_json", "typed-borrowed", doc)
-        );
+        None => {
+            println!(
+                "| Document | serde_ucl, owned | serde_ucl, borrowed | serde_json, owned | serde_json, borrowed |"
+            );
+            println!("| --- | ---: | ---: | ---: | ---: |");
+            for doc in typed {
+                println!(
+                    "| {} | {} | {} | {} | {} |",
+                    label(doc),
+                    time("serde_ucl", "typed", doc),
+                    time("serde_ucl", "typed-borrowed", doc),
+                    time("serde_json", "typed", doc),
+                    time("serde_json", "typed-borrowed", doc)
+                );
+            }
+        }
     }
 }
 
@@ -333,14 +485,29 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("write") if args.len() == 2 => write(Path::new(&args[1])),
-        Some("run") if (2..=3).contains(&args.len()) => {
-            run(Path::new(&args[1]), args.get(2).map(Path::new))
-        }
+        // The timings run on a thread of their own. The main thread's stack starts below the
+        // program's arguments and environment, so its alignment, and with it the parser's speed,
+        // changes with their size (by 12% on `config(1000)` for one extra variable); a thread's
+        // stack is page-aligned whatever they are, so the programs compared start alike.
+        Some("run") if (2..=4).contains(&args.len()) => std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                run(
+                    Path::new(&args[1]),
+                    args.get(2).map(Path::new),
+                    args.get(3).map(Path::new),
+                )
+            })
+            .expect("start the timing thread")
+            .join()
+            .expect("the timing thread"),
         Some("summarize") if args.len() >= 2 => {
             summarize(&args[1..].iter().map(PathBuf::from).collect::<Vec<_>>())
         }
         _ => {
-            eprintln!("usage: bench-compare write DIR | run DIR [CORPUS] | summarize RESULTS...");
+            eprintln!(
+                "usage: bench-compare write DIR | run DIR [CORPUS] [JSON_CORPUS] | summarize RESULTS..."
+            );
             std::process::exit(2);
         }
     }

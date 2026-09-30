@@ -58,7 +58,18 @@ key, so they form multi-value entries (`key_lowercase_merges_case`, §8.6).
 
 ## 12.2 `zerocopy`
 
-No observable effect on the value tree (`zerocopy_no_effect`).
+Ordinary input has no observable change to the value tree (`zerocopy_no_effect`).
+
+**Uncertain (undefined in libucl):** with `zerocopy`, when a registered `.emit` macro's VALUE
+contains a variable that expands and the resulting text is parsed in place (§13.2), keys and
+string values made from that text need not retain their input bytes. The affected bytes may be
+NUL, non-UTF-8 or different between runs. This includes literal text around the variable:
+`.emit $CURDIR 2` gives the expanded `CURDIR` as the key of `int 2` without `zerocopy`, but
+under `zerocopy` repeated oracle runs gave different non-UTF-8 keys of the same length;
+`.emit k = $ABI` gave a changed `k` and a changed string value. With `zerocopy`, direct
+`direct = $ABI`, `.seen $ABI`, and `.emit literal = stable` kept their expected bytes in the
+oracle (`zerocopy_registered_macros_stable`).
+The project keeps the expanded text's bytes. There is no golden case for the undefined result.
 
 ## 12.3 `no-time`
 
@@ -172,7 +183,13 @@ Comments and the rules of §8:
   (`comments_rewrite_drops_replaced_value_comments`). **Uncertain (undefined in libucl):** the
   comments of a value that was replaced, under `rewrite` or by a higher priority, can reappear on a
   value created later, depending on memory reuse (under `rewrite`, `# c⏎k = 2⏎k = 3⏎q = 4` gave
-  `q` the comment `# c`). No case pins this.
+  `q` the comment `# c`). With `dump-comments` and `rewrite`,
+  `# c⏎a d⏎a 2⏎k d# c` gave `a: int 2` without comments and `k: "d"` with
+  `"c": ["# c", "# c"]`: the earlier comment appears before `k`'s own trailing comment. The
+  project may instead give `k` only `"ca": ["# c"]`. This uncertainty covers a replaced value's
+  comment on a value created later. It does not cover a changed comment on an earlier unrelated
+  value, even when that comment has the same text, or any difference in the values. No case pins
+  the uncertain result.
 
 libucl's config output can include saved comments when the application passes them in; §10.10
 specifies that output. The other output formats of §10 never contain comments.

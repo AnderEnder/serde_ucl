@@ -2889,3 +2889,1191 @@
     in the README are unchanged.
   - Commits: `0ec83a3` (corpus), `fd3ba43` (comparison), and this entry, on branch `c14-spec` from
     `29f606f`. Not pushed.
+- 2026-09-28 — Role: implementation team (clean-implementer). Item: C14 item 1, the benchmark
+  documents (generator, fetch script, groups, check). Items 2 and 3 not started: item 2 is the
+  spec team's corpus, and the item 3 measurements wait for a quiet machine (coordinator's
+  instruction).
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `docs/clean-room/WORKLIST.md` (C11 to C15),
+    the end of this log; the released spec `spec-v13` through `git show` (§1, §2.1–§2.3, §3,
+    §4, §5.1–§5.8, §6), to write documents that are valid by construction; the crate's
+    `benches/`, `fuzz/README.md`, `fuzz/Cargo.toml`, `fuzz/src/main.rs` (`--check`),
+    `fuzz/src/generate.rs` (its `Rng`), `src/value.rs` and `src/value/string.rs` (the value
+    API), `src/lib.rs` (re-exports), `src/de.rs` (`from_str`), `tests/generated_documents.rs`,
+    `scripts/ci.sh`, `Cargo.toml`, `CHANGELOG.md`, `.gitignore`.
+  - Oracle: run as a black box only, through `ucl-differential --check`
+    (`target/libucl-oracle/ucl-dump`, already built).
+  - Network: `git ls-remote https://github.com/serde-rs/json-benchmark` (HEAD
+    `17b13dd2d7a5e5fdd5594e847077932f955b5e2b`) and the three files under `data/` at that
+    commit from raw.githubusercontent.com, with curl's default user agent (once a fixed string);
+    no personal data. Nothing from libucl's repository or a project that bundles it.
+  - Searches: `grep` over `benches/`, `tests/`, `src/` and `fuzz/src/`, and in the single files
+    `scripts/ci.sh`, `CHANGELOG.md` and `.gitignore`. Nothing under `~/.claude/` or
+    `/private/tmp/` was opened. Guard refusals: none.
+  - Work (`b483f3b`, `da4fefb`):
+    - `benches/common/irregular.rs`: seeded generator (SplitMix64, no new dependency). Section
+      sizes 0–3 (30 %), 4–15 (35 %), 16–40 (25 %), 41–120 (10 %); sections to depth 7 with
+      named sections, inline objects, JSON-style objects and nested arrays below; quoted strings
+      1 byte to 16 KB in seven alphabets, 40 % of double-quoted strings with escapes; keys in
+      twelve forms; every value form of `config(n)`. Benchmarked: seed 1 at 60 000 bytes
+      (78 466 bytes) and seed 2 at 600 000 bytes (639 049 bytes); `config(100)` has 50 571
+      bytes and `config(1000)` 510 495 (`da4fefb` corrects the docs, which said "about the
+      sizes").
+    - `benches/fetch-documents.sh`: pinned URLs, SHA-256 checks, download to `.part` then
+      rename, into `target/bench-corpus/`.
+    - `benches/common/files.rs`, the groups in `parse_benchmarks` and `serde_benchmarks`, and
+      `benches/check-documents.sh`; `tests/bench_documents.rs` (determinism, parse, variety,
+      digests); `benches/README.md`, `CHANGELOG.md`.
+  - Checks:
+    - `benches/check-documents.sh 20` and a separate run over 60 extra seeds: the two benchmark
+      documents, seeds 1000–1059 and the three JSON documents all `agree`, with libucl
+      accepting each one. No difference, so nothing for `QUESTIONS.md`. With a scratch corpus
+      holding a file that neither side accepts, the script reports it and exits 1.
+    - `benches/fetch-documents.sh`: a second run keeps the files; a copy with a wrong digest
+      removes the download and exits 1.
+    - `cargo fmt --check`, clippy `-D warnings`; `scripts/ci.sh`: 26 steps, exit 0.
+    - Short runs of the new groups, with `target/bench-corpus/` present and moved aside (the
+      groups skip with a message), and with a scratch corpus through `UCL_BENCH_CORPUS` (a
+      document that does not parse is skipped; metadata files are left out). `src/` is
+      unchanged, so no fuzz run was needed.
+  - Commits: `b483f3b`, `da4fefb` (comments only; the documents and digests are unchanged) and
+    this entry, on top of the coordinator's `f5a14a2` (WORKLIST C15 only), which landed during
+    the session. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: coordinator (handoff). Item: C14 continuation.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    `docs/clean-room/WORKLIST.md`, the end of this log, branch and worktree status,
+    and the latest Claude Code session transcript for this repository at the owner's
+    explicit request.
+  - Exposure: before reading the protocol, I opened `PLAN.md`, which is forbidden
+    to implementers. I also read the Claude Code session transcript to locate the
+    requested handoff. I have not read libucl source or written implementation code.
+    A fresh participant with no access to this session is required for implementation.
+  - Commits: this log entry only.
+- 2026-09-29 — Role: implementation team (clean-implementer). Item: C14 benchmark setup
+  continuation (serde_json groups only; no measurements or `src/` changes).
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C14 in
+    `docs/clean-room/WORKLIST.md`, and this log; `benches/serde_benchmarks.rs`,
+    `benches/parse_benchmarks.rs`, `benches/common/files.rs`, `benches/common/mod.rs`,
+    `benches/README.md`, `benches/fetch-documents.sh`, `benches/check-documents.sh`;
+    `Cargo.toml`; the documents in `benches/corpus/` through the checker; the three JSON
+    documents in `target/bench-corpus/` through the benchmark and checker. The latest spec tag
+    is `spec-v13`; the `docs/spec/` diff against it is empty. No spec section was needed.
+  - Work: `bafb337` adds serde_json `Value` and `IgnoredAny` groups alongside the serde_ucl
+    groups for each JSON document, sharing its input and byte throughput, and documents them.
+    Both groups skip a document that fails either deserializer's preflight check.
+  - Checks: `cargo bench --bench serde_benchmarks -- --list` before the change had no
+    `serde_json/json-corpus-*` entries; afterward it listed six (two per document).
+    `cargo bench --bench serde_benchmarks -- serde_json/json-corpus --test` succeeded for all
+    six. `benches/fetch-documents.sh` verified all three cached files as present with their
+    pinned hashes. `benches/check-documents.sh` reported 8 agreements, 0 failures, including
+    all three JSON documents and the three committed corpus configurations. `scripts/ci.sh`
+    exited 0. `git diff --check` found no whitespace errors. No benchmark measurements were
+    taken.
+  - Commits: `bafb337` and this log entry, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent implementation-side reviewer. Item: C14 benchmark setup
+  review (`0a7c8eb..442d1a8`).
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C14 in
+    `docs/clean-room/WORKLIST.md`, and this log;
+    `.superpowers/sdd/WORKLIST/review-0a7c8eb..442d1a8.diff`;
+    `benches/serde_benchmarks.rs`,
+    `benches/common/files.rs`, `benches/README.md`, and `Cargo.toml`;
+    the code-review and using-superpowers skill instructions.
+  - Review: the serde_json `Value` and `IgnoredAny` groups meet the C14 benchmark setup
+    request. No Critical or Important spec, code-quality, or benchmark-correctness findings.
+  - Checks: `cargo bench --bench serde_benchmarks -- --list` listed all six new cases;
+    `cargo bench --bench serde_benchmarks -- serde_json/json-corpus --test` passed all six.
+  - Commits: this log entry only, on `libucl-compat`.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: implementation team (fresh clean-room implementer). Item: C14 item 3,
+  performance measurements, low-risk fixes and fuzz follow-up.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, relevant entries of this log, `docs/clean-room/QUESTIONS.md`,
+    released `spec-v13` §§7.7 and 12.2; implementation source under `src/`, `fuzz/src/`,
+    benchmark source under `benches/`, benchmark documents under `benches/corpus/` and
+    `target/bench-corpus/`, previous C11/C13 performance reports, and implementation-side
+    scratch under `target/perf/c14/`. The oracle was used only as a black box. No spec edits
+    after `spec-v13` were used for implementation. I did not consult the previous Claude
+    session or memory.
+  - Work: measured every C11/C13 ablation against unmodified v0.5.0; retained the last-sibling
+    hint and 16-key small-object threshold; measured serde_json alongside serde_ucl where
+    supported. Tested broad and optional-only filesystem preflight on missing, found, mixed,
+    symlink and custom-loader cases; committed only the optional path. Reused a validated
+    UTF-8 slice for float parsing. Evaluated memchr and a safe word-scan proxy in scratch only.
+    Full measurements and limitations are in `target/perf/C14-report.md`. Filed
+    `docs/clean-room/QUESTIONS.md` #79 for unstable oracle keys under `zerocopy`.
+  - Checks: `benches/check-documents.sh 20` gave 28 agreements, 0 failures;
+    `scripts/ci.sh` passed all 26 steps. Conformance counts were unchanged: new core
+    1649/1653 passes with four established expected failures; emitters 1216/1220 matches
+    with four established expected failures; readback config [1201,12,3,0], JSON
+    [1213,0,3,0], YAML [1204,9,3,0]. `scripts/ci.sh fuzz 300` ran 300 seconds on seed
+    1790703414275939000, 1,080,551 inputs, and **exited 1 with two findings**. Both reduced
+    findings reproduce with v0.5.0, the first C14 commit alone, and final code, so they are
+    pre-existing, not a C14 regression. One is the `zerocopy` question #79; the other is a
+    handler result with trailing text in an include path, already undefined by released §7.7.
+    The five-minute zero-difference fuzz gate is unresolved. Full fuzz log and findings are
+    preserved in `target/perf/c14/` and `target/fuzz-differential/findings/`.
+  - Commits: `55289a5` (optional filesystem preflight), `e508a72` (float UTF-8 reuse),
+    and the following documentation commit, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 performance
+  changes (`41d021b..0638cae`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, released `spec-v13` §§5 and 9, the C14 review diff,
+    `src/parse/` and focused tests, `target/perf/C14-report.md`, C14 guard and fuzz logs,
+    saved findings, and the fuzzer's documented replay command. The oracle was used only
+    as a black box.
+  - Checks: number tests 10/10 and include tests 29/29 passed; the optional-loader guard
+    matched its v0.5.0 control; both saved fuzz findings replayed against v0.5.0 and still
+    differed from the oracle. `git diff --check` passed.
+  - Verdict: no Critical or Important defect found in the two code changes. The new Loader
+    method has a backward-compatible default; ordinary filesystem, symlink and error paths
+    matched the control, with the report's permission and mount caveat. The float slice is
+    derived from the same input unit and uses the old validated fallback. Important process
+    finding: the C11/C14 five-minute zero-difference fuzz gate is not met (`fuzz 300` exited
+    1 with two findings), although both are proven pre-existing and the report says so.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: implementation team (same clean-room implementer). Item: C14 item 3,
+  differential fuzz gate follow-up.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, this log and question #79; released `spec-v13`
+    README *Divergences decided by the project* and *Uncertain behaviour*, §§7.7 and 12.2;
+    `fuzz/src/`, `tests/common/oracle.rs`, and the two saved black-box findings and fuzz logs
+    under `target/`. No spec-team branch or draft spec was read.
+  - Work: the §7.7 handler result combined with other text was already an allowed project
+    divergence. Added a narrow fuzzer skip for oracle rejection of a single `.include` whose
+    simple quoted path has an unshadowed handler-resolved reference plus other text and whose
+    crate result is empty. Its regression test also checks that no handler, variable shadowing,
+    and an adjacent extra entry remain differences. The `zerocopy` finding remains unsuppressed:
+    released §12.2 says the flag has no observable value-tree effect, so question #79 requires a
+    spec ruling before a skip can be justified.
+  - Checks: the new test failed before the change and passed afterward; all 11 fuzzer unit
+    tests passed. `scripts/ci.sh` passed all 26 steps. Replaying the saved findings with the
+    updated release fuzzer skipped only the §7.7 case and still reported #79 as `values-differ`.
+    `scripts/ci.sh fuzz 300` then exited 0 on seed 1790704509759185000: 934,779 inputs,
+    933,133 agreements and zero findings saved. The full log is preserved at
+    `target/perf/c14/logs/fuzz-after-handler-skip.log`. The prior failing run and both saved
+    findings remain preserved and documented in `target/perf/C14-report.md`.
+  - Commits: the following C14 fuzzer/documentation commit, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: implementation team (same clean-room implementer). Item: C14 item 3,
+  released spec-v14 answer to question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, and this log; only the released `spec-v14` §12.2 and §13.2
+    (`git show spec-v14:docs/spec/12-flags.md` and
+    `git show spec-v14:docs/spec/13-inputs-and-macros.md`), plus the released
+    `zerocopy_registered_macros_stable` conformance case; `fuzz/src/`, the exact reduced
+    inputs and prior black-box logs under `target/perf/c14/`. No spec-team branch or draft spec
+    was read; the oracle was used only as a black box.
+  - Work: spec-v14 now marks expanded registered `.emit` text under `zerocopy` uncertain in
+    libucl; the project keeps the expanded bytes. Added a fuzzer-only recognizer for a single
+    registered `.emit` with a known expanding variable, excusing same-length key and string
+    value bytes while leaving other differences visible. The focused test failed before the
+    change and passed after it; it also checks changed numeric values, wrong-length keys,
+    direct values, `.seen`, literal `.emit`, no file variables and extra entries. No parser
+    behavior changed. Corrected the C14 report: a prior clean fuzz run removed the default
+    finding directory, so the two exact reduced inputs, flags and directories were restored
+    under `target/perf/c14/reduced-findings/` from recorded checks; full original fuzz logs
+    remain preserved.
+  - Checks: all 12 fuzzer unit tests passed. Replaying both restored reduced inputs with the
+    updated release fuzzer skipped #79 under §12.2 and the handler-path case under §7.7;
+    `target/perf/c14/logs/replay-v14.log` records both reasons. The released stable conformance
+    input compared as `agree` using the oracle as a black box. `scripts/ci.sh` passed all 26
+    steps. `scripts/ci.sh fuzz 300` exited 0 on seed 1790705519133757000: 1,101,512 inputs,
+    1,099,766 agreements and zero saved findings. Its full log is
+    `target/perf/c14/logs/fuzz-v14-skip.log`.
+  - Commits: the following C14 fuzzer/documentation commit, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 fuzz-gate
+  follow-up (`da65b1a..a761284`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in
+    `docs/clean-room/WORKLIST.md`, the review diff, released `spec-v13` §7.7 and annotated
+    `spec-v14` §§12.2 and 13.2, `fuzz/src/run.rs` and `fuzz/src/uncertain.rs`, focused
+    tests, the C14 report, saved reduced findings, and implementation-side fuzz logs.
+    The oracle was used only as a black box.
+  - Checks: all 12 fuzzer unit tests passed. Replaying the two exact prior findings with the
+    current release fuzzer classified them as the specific §7.7 and §12.2 uncertainties.
+    The recorded final `scripts/ci.sh` completed 26 steps, and `fuzz 300` exited 0 after
+    1,101,512 inputs with zero findings. `git diff --check` passed.
+  - Verdict: the prior Important five-minute fuzz-gate finding is addressed. Both skips are
+    bounded by their released uncertainty rules; the tests leave unrelated flags, values,
+    lengths and extra entries visible. No new Critical or Important finding.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, `QUESTIONS.md`
+    #79 and C14 `WORKLIST.md`; released `spec-v13` §§12.2 and 13.2; the oracle's public
+    options and test-macro setup in `tools/ucl-dump/`; pinned libucl source at
+    `24c8b399062ae4691168c243e3b7345ef7f31956` (spec team only). I did not read
+    Claude Code sessions or memory, or implementation source.
+  - Reproduction: built the pinned oracle in this worktree's ignored `target/`, wrote
+    temporary inputs under `target/libucl-oracle/probes/`, and ran each against
+    `ucl-dump -R -S`, with and without `-z`, from that directory. For `.emit $CURDIR 2`,
+    20/20 runs without `-z` gave the same expanded path key and `int 2`; 20/20 with `-z`
+    gave distinct non-UTF-8 keys of the path's byte length and `int 2`. For
+    `.emit k = $ABI`, `-z` changed both the literal key and string value. Controls
+    `k = $ABI`, `.seen $ABI`, and `.emit k = stable` under `-z` retained the expected
+    bytes in 12/12 runs each. A registered `$MYVAR=abc` expansion in `.emit $MYVAR 2`
+    also changed the key; `.emit k = $NUM` with `$NUM=2` changed the literal key.
+  - Finding: the oracle's bytes for keys and strings from variable-expanded `.emit`
+    text under `zerocopy` are undefined. The project may retain the expanded bytes.
+    No golden case was added because the oracle result is not stable. A fuzzer skip
+    is justified only when `zerocopy` is set, a registered `.emit` VALUE actually
+    expands a variable, and its parsed text supplies a key or string value to the
+    result. This is a draft answer pending independent spec review and release.
+  - Work: drafted behavior-only amendments to §§12.2 and 13.2 and an answer to #79.
+    I inadvertently sent the coordinator a source-derived mechanism in an interim
+    message; I immediately flagged the clean-room exposure and instructed any
+    implementation-role recipient to follow the protocol. No such detail appears
+    in the spec or question answer.
+  - Commits: the following spec-team draft commit on `c14/spec79`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: spec team (same participant). Item: C14 question #79, independent
+  review follow-up.
+  - Inputs consulted: the independent review request; current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, §§12.2 and 13.2, the conformance corpus layout and
+    `scripts/regen-golden.sh`; the pinned oracle built in this spec-team worktree.
+  - Work: added `zerocopy_registered_macros_stable` with `zerocopy`,
+    `registered-macros` and `string-input`. Its input combines direct `$ABI` expansion,
+    `.seen $ABI`, and `.emit` of literal text. The case establishes the stable boundary
+    of the undefined result in §12.2; its five golden files came solely from the pinned
+    `ucl-dump` oracle. No golden file was made for expanded `.emit` text under `zerocopy`.
+  - Checks: 20 oracle runs were byte-identical for each of the typed, config, JSON,
+    compact JSON and YAML outputs; `cargo test --test conformance` passed all three
+    conformance tests. `git diff --check` passed.
+  - Commits: `57fb924` (initial spec draft) and the following stable-control commit on
+    `c14/spec79`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md` and
+    `QUESTIONS.md` #79; released `spec-v13` §§7, 12.2 and 13.2; diff
+    `da65b1a..57fb924` limited to `docs/spec/12-flags.md`,
+    `docs/spec/13-inputs-and-macros.md`, `docs/clean-room/QUESTIONS.md` and this log;
+    named conformance case inputs and flags for `zerocopy_no_effect` and
+    `macro_registered_value_variables`; the pinned `ucl-dump` binary as a black box.
+  - Verdict: changes requested before release. The draft states observable behavior,
+    contains no libucl internal names, source structure, pseudo-code or mechanism, and
+    does not conflict with the released variable or registered-macro rules. The
+    unstable output needs no golden case. However, the stable controls and the limit
+    of the uncertainty have no conformance case combining `zerocopy` with
+    `registered-macros`. Add a reproducible control case and cite it in §12.2 before
+    release, as `PROTOCOL.md` requires case evidence for spec rules. The existing
+    `zerocopy_no_effect` and `macro_registered_value_variables` cases exercise the
+    two features separately. A black-box check of `.emit k = $NUM` with `-R -S -z`
+    and `-v NUM=2` independently returned a NUL key, consistent with the draft's
+    example of possible affected bytes.
+  - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
+  - Attestation: I did not read libucl source code, implementation `src/`, Claude
+    Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #79,
+  scoped re-review of `f5232b2..07f117d`.
+  - Inputs consulted: the scoped diff in §12.2, `QUESTIONS.md`, this log and the new
+    `zerocopy_registered_macros_stable` case; the pinned `ucl-dump` binary as a black box.
+  - Verdict: approved. The case combines `zerocopy`, `registered-macros` and
+    `string-input`, pins the three stable controls, and is cited in §12.2. Its typed
+    golden matched an independent oracle run; `git diff --check` passed. The prior
+    finding is resolved, and the diff adds no prohibited content or spec conflict.
+  - Commits: this reviewer log entry only, on `c14/spec79`. Not pushed.
+  - Attestation: I did not read libucl source code, implementation `src/`, Claude
+    Code session files, or any forbidden input listed in `docs/clean-room/PROTOCOL.md`.
+- 2026-09-29 — Role: spec team (release). Item: C14 question #79, spec-v14.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    `QUESTIONS.md` #79, the approved v14 draft in `docs/spec/`, the stable control case
+    and oracle goldens, and the independent reviewer entries in this log.
+  - Work: after independent approval, updated the spec index for #79 and the new
+    case count, then committed and locally tagged the reviewed behavior as `spec-v14`.
+    The undefined oracle result has no golden file.
+  - Checks: latest previous spec tag was `spec-v13`; `cargo test --test conformance`
+    passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v14` commit on `c14/spec79`,
+    tagged locally as `spec-v14`; not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+
+
+- 2026-09-29 — Role: coordinator (spec integration). Item: C14 question #79.
+  - Inputs consulted: the reviewed local `spec-v14` release and its spec-team/reviewer
+    log entries, the `libucl-compat` branch status, and conformance test results.
+  - Work: merged the reviewed spec release and stable oracle case into `libucl-compat`,
+    retaining both sides' log entries. A spec-team interim message disclosed a
+    source-derived mechanism to this coordinator only; it was not forwarded to any
+    clean-room implementer. This coordinator had already recorded a forbidden-input
+    exposure and wrote no implementation code.
+  - Checks: `git diff --check` and `cargo test --test conformance` (3/3) passed.
+  - Commits: the following merge commit. Not pushed.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 benchmark comparison.
+  - Inputs consulted: current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, `benches/README.md`, `benches/common/` document definitions,
+    `benches/fetch-documents.sh`, `tools/bench-compare/`, `scripts/bench-compare.sh`,
+    the README comparison, and the pinned JSON files in `target/bench-corpus/`.
+    No Claude Code sessions or memory were read.
+  - Work: extended the comparison to both seeded irregular configurations and the three
+    pinned JSON files when present. The current crate, `v0.5.0` and libucl time the same
+    files; serde_json also times each JSON file. Missing pinned files skip with a message.
+    Refreshed the README tables directly from the script's final summary.
+  - Checks: `cargo fmt --manifest-path tools/bench-compare/Cargo.toml --check`,
+    `cargo check --quiet --manifest-path tools/bench-compare/Cargo.toml`,
+    `sh -n scripts/bench-compare.sh`, and `git diff --check`; a one-round smoke comparison;
+    a run with an absent JSON directory that skipped all three files; and
+    `BASELINE=v0.5.0 scripts/bench-compare.sh 3` on the final C14 crate at `bb8328b`.
+    The three-round run used libucl `24c8b399062ae4691168c243e3b7345ef7f31956`,
+    `v0.5.0` at `3266195e83b2b52c4a24d1627ed083d2b11c4da1`, serde_json 1.0.151,
+    and rustc 1.98.1 on an Apple M4 Max. Its one-minute load readings ranged from 4.21 to
+    4.57. The summary and per-round results are under `target/bench-compare/`.
+  - Commits: the following `docs(bench): compare C14 documents` commit on
+    `libucl-compat`. Not pushed.
+  - Attestation: this spec-side tooling and documentation contain observable benchmark
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent spec-side reviewer. Item: C14 benchmark comparison.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, `tools/bench-compare/README.md`, the README comparison, the
+    `review-bb8328b..269ac64.diff` package, spec-team comparison tooling, the saved
+    `target/bench-compare/` run, and the benchmark document and parser settings.
+  - Checks: `sh -n scripts/bench-compare.sh`; regenerated the three-round summary from
+    `results.txt`; compared its tables with README; checked pinned JSON SHA-256 digests;
+    ran `UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture` (3 pass).
+  - Verdict: Important: rspamd corpus parser settings differ across the Rust, libucl and
+    Criterion runs, masking the optional-include gain on `composites.conf`; a failed tool
+    in the shell pipeline can leave a successful partial summary. Minor: README
+    conformance counts are stale after spec-v14 (1654/1650 parse, 1221/1217 emit).
+    The README benchmark numbers match the saved summary. No implementation files changed.
+  - Commits: this log-only review commit. Not pushed.
+  - Attestation: this review and log contain observable benchmark behavior only, with no
+    libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: spec team (same participant). Item: C14 benchmark comparison review fixes.
+  - Inputs consulted: the review at `fc955c5`, current `CLAUDE.md` and clean-room protocol,
+    C14 work item, the comparison tooling and saved results, `benches/common/files.rs`,
+    `benches/corpus/README.md`, corpus documents, the oracle check script, and the conformance
+    report. No Claude Code sessions or memory were read.
+  - Work: made the current and `v0.5.0` Rust comparison use the corpus parser's file loader,
+    base directory, `ABI=unknown`, and per-document variables for every rspamd input. The
+    libucl corpus run uses that directory as its process working directory and the same
+    variable values. Stopped the script on any tool failure, retained only complete results,
+    and made the summarizer reject malformed or incomplete rounds. Replaced the README tables
+    from the corrected run and updated the spec-v14 conformance counts.
+  - Checks: `benches/check-documents.sh 0` found 8 agreements and no failures;
+    `UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture` passed all 3 tests
+    and reported 1,654 cases/1,650 parse matches and 1,221 output cases/1,217 matches.
+    A one-round comparison passed. An injected libucl failure exited nonzero, printed no
+    summary and left the last complete results unchanged; a deliberately truncated two-round
+    result made the summarizer exit nonzero without a table. The corrected quiet run was
+    `BASELINE=v0.5.0 scripts/bench-compare.sh 3`, with one-minute load 3.44–4.03,
+    libucl `24c8b399062ae4691168c243e3b7345ef7f31956`, `v0.5.0` at
+    `3266195e83b2b52c4a24d1627ed083d2b11c4da1`, and the C14 crate source at
+    `bb8328b`. Its summary and per-round results are under `target/bench-compare/`.
+  - Commits: the following C14 review-fix commit on `libucl-compat`. Not pushed.
+  - Attestation: this spec-side tooling and documentation contain observable benchmark
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent spec-side reviewer. Item: C14 comparison re-review.
+  - Inputs consulted: the `fc955c5` review, `review-fc955c5..2e90d6b.diff`, current
+    comparison tooling and README, the benchmark corpus settings, and the saved corrected
+    three-round run under `target/bench-compare/`. No Claude Code sessions or memory read.
+  - Checks: `sh -n scripts/bench-compare.sh`; re-summarized `results.txt` and matched every
+    README table row; verified the saved truncated round is rejected; inspected the injected
+    failure log; `UCL_CONFORMANCE_REPORT=1 cargo test --test conformance -- --nocapture`
+    passed 3 tests and confirmed 1654/1650 parse and 1221/1217 output counts;
+    `git diff --check fc955c5..2e90d6b` passed.
+  - Verdict: all three findings addressed. Rust and libucl corpus settings now align with
+    the benchmark setup; tool failures stop the script without replacing complete results,
+    and incomplete rounds are rejected; README conformance counts are current. No new
+    breakage found in the scoped fix diff. No implementation files changed in this review.
+  - Commits: this log-only re-review commit. Not pushed.
+  - Attestation: this review and log contain observable benchmark behavior only, with no
+    libucl code, pseudo-code, internal names or source structure.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 final branch review (`65ed378...7556c1a`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §§9.2, 12.2 and 13.2, implementation-owned branch diff under `src/parse/`, `fuzz/`, `benches/` (excluding corpus), `tests/*.rs`, and implementation-side log entries; `target/perf/C14-report.md`. Oracle used only as a black box.
+  - Checks: `cargo test`, fuzzer unit tests (12/12), benchmark-document tests (5/5), `benches/check-documents.sh` (8 agreements), pinned JSON hash check, serde benchmark listing, and scoped `git diff --check` passed. `.emit (a=$ABI) k=stable` with `registered-macros`, `zerocopy`, `string-input` agreed with the oracle.
+  - Verdict: one Important finding in `fuzz/src/uncertain.rs`: `single_expanded_emit` scans ARGUMENTS for `$ABI`, although §9.2 does not expand application variables there and §12.2 requires expansion in VALUE. It can excuse same-length key/string differences for the agreeing control. Add a negative test for variable text in ARGUMENTS and restrict recognition to VALUE. No Critical finding or parser/benchmark defect found. Performance figures were assessed from the report, not rerun.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer (C14 review follow-up). Item: C14 differential-fuzzer uncertainty boundaries.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released spec-v14 §§7.7, 9.2, 9.4, 12.2 and 12.5 via the tag, existing implementation-side `fuzz/` code and tests, conformance inputs, the oracle only as a black box, and saved implementation-side `target/perf/c14/` findings and logs. No libucl source, `tools/`, draft spec branch, Claude Code session or memory was read.
+  - Work: tightened the §12.2 recognizer so application-variable text in `.emit` ARGUMENTS is not mistaken for expansion in VALUE. Isolated one expanded `.emit` entry structurally when alone or adjacent to one simple literal entry, requiring the literal entry's entire dump to agree. Added narrowly scoped §7.7 handling for a mixed handler result in one quoted `.emit` VALUE and the §9.2 ignored final `.` case. Added red/green tests for ARGUMENTS-only variables, compact/literal prefix and suffix entries, and nearby genuine differences. Opened QUESTIONS.md #80 for a pre-existing include-path discrepancy under the released §9.4 rule. Updated the ignored `target/perf/C14-report.md` with full runs and limitations.
+  - Checks: 19/19 fuzzer unit tests passed; `scripts/ci.sh` passed all 26 steps (`target/perf/c14/logs/ci-v14-suffix.log`). The latest completed `scripts/ci.sh fuzz 300` **exited 1**, seed `1790709424304949000`, 944,790 inputs and three saved findings (`target/perf/c14/logs/fuzz-v14-dollar.log`); it ran before the final compact-prefix and suffix edits. With final code, replay of the six preserved findings from the last two fuzz samples classifies four released §12.2 cases and still reports #80 plus a pre-existing §12.5 duplicate-comment difference. The latter and #80 reproduce with v0.5.0. No further full fuzz run was made pending #80's spec ruling; the zero-difference gate is open. Findings and full logs are preserved under `target/perf/c14/`.
+  - Commits: the following C14 fuzzer review-fix commit on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 scoped re-review (`1c5ad9b..dab0150`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §§9.2 and 12.2, implementation-side C14 log entries, `fuzz/src/run.rs`, `fuzz/src/uncertain.rs`, and the C14 report. Oracle used only as a black box.
+  - Checks: all 19 fuzzer unit tests and scoped `git diff --check` passed. `.emit /* c */(a=$ABI) k=stable` with `registered-macros`, `zerocopy`, `string-input` yielded the same stable object on both sides (`agree`).
+  - Verdict: the previous Important finding is **not addressed in full**. Direct ARGUMENTS are excluded, but a block comment before `(` bypasses `single_expanded_emit`'s `starts_with(b"(")` check, leaving `$ABI` in ARGUMENTS eligible to excuse same-length key/string differences. Released §9.2 permits the comment and does not expand application variables in ARGUMENTS. Add this negative control and recognize the VALUE boundary after comments and ARGUMENTS. The new structural prefix/suffix checks and the §7.7 emit rejection skip showed no further finding in this scoped review.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer (C14 scoped review follow-up). Item: §12.2 fuzzer boundary after macro comments.
+  - Inputs consulted: current clean-room instructions, released spec-v14 §9.2 and §12.2, the independent implementation review in this log, existing implementation-side `fuzz/src/uncertain.rs`, saved C14 findings under `target/perf/c14/`, and the oracle as a black box. No libucl source, `tools/`, draft spec branch, Claude Code session or memory was read.
+  - Work: reproduced the agreeing control `.emit /* c */(a=$ABI) k=stable` and agreeing comment-only controls. A new synthetic-dump test showed the old §12.2 recognizer falsely excused same-length key/string differences when `$ABI` was in ARGUMENTS after a block comment. The recognizer now declines block-comment markers and parentheses, leaving ambiguous forms reportable. A line-comment control with `$ABI` is tested too. The simple expanded-VALUE cases stay eligible. Updated `target/perf/C14-report.md` with this limitation.
+  - Checks: the new negative test failed before the fix and passed after it. All 20 fuzzer unit tests and `scripts/ci.sh` passed (`target/perf/c14/logs/ci-v14-comment-args-guard-final.log`). Final release replay of eleven preserved C14 findings classified nine §7.7/§12.2 cases (one sometimes under the non-UTF-8 divergence) and still reported the pre-existing #80 include-path and §12.5 duplicate-comment differences. No new `fuzz 300` run was started pending #80's spec ruling; the latest completed 300-second run **exited 1** with three findings, as recorded above, and the zero-difference gate remains open.
+  - Commits: the following C14 comment/ARGUMENTS guard commit on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 scoped re-review (`1962483..541c1f2`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §§9.2 and 12.2, implementation-side C14 log entries, and the implementation-owned fix diff in `fuzz/src/uncertain.rs`. Oracle used only as a black box in the prior control check.
+  - Checks: all 20 fuzzer unit tests and scoped `git diff --check` passed. The new negative controls cover commented ARGUMENTS and variables appearing only in comments; the existing positive §12.2 tests remain passing.
+  - Verdict: the previous Important commented-ARGUMENTS finding is **addressed**. Rejecting block-comment syntax and parentheses before scanning prevents the agreeing `.emit /* c */(a=$ABI) k=stable` control from excusing key/string differences. This diff only narrows the recognizer; no new skip breadth or other finding. The separate five-minute fuzz gate remains open after the latest reported nonzero run on #80 and §12.5 cases; this review did not rerun it.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer (C14 fuzz follow-up). Item: §12.5 replaced-comment uncertainty.
+  - Inputs consulted: current clean-room instructions, released spec-v14 §12.5, implementation-side `fuzz/src/run.rs` and `fuzz/src/uncertain.rs`, the exact reduced C14 finding under `target/perf/c14/findings-v14-dollar/`, and the oracle only as a black box. No libucl source, `tools/`, draft spec branch, Claude Code session or memory was read.
+  - Work: replayed `# c⏎a d⏎a 2⏎k d# c` on v0.5.0 and current code; both reported the same duplicate-comment difference. The crate's parse records one `# c` dropped from the replaced `a` value and another attached after `k`; the oracle dumps two equal comments before `k`, within released §12.5's undefined reappearance rule. Added a narrow fuzzer classification for `strategy:rewrite`, oracle `c:[x,x]`, crate `ca:[x]`, and x in dropped-comment notes. No parser behavior changed. Updated `target/perf/C14-report.md`.
+  - Checks: the integration-style positive test failed before the change and passed after it; negative variants keep changed values, unrelated comments, extra entries and a non-rewrite context visible. All 21 fuzzer unit tests and `scripts/ci.sh` passed (`target/perf/c14/logs/ci-v14-duplicate-comment.log`). Final release replay classified this finding as uncertain §12.5 and the earlier §7.7/§12.2 cases as before; #80 still reports. No new `fuzz 300` run pending a reviewed spec-v15 ruling for #80; the latest completed 300-second fuzz run **exited 1** with three findings and the zero-difference gate remains open.
+  - Commits: the following C14 duplicate-comment fuzzer commit on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 §12.5 fuzz-skip review (`6916c3b..837c469`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §12.5, implementation-side C14 log entries, and the implementation-owned fix diff in `fuzz/src/run.rs` and `fuzz/src/uncertain.rs`. Oracle used only as a black box.
+  - Checks: all 21 fuzzer unit tests and scoped `git diff --check` passed. With `dump-comments`, `strategy:rewrite`, `string-input`, `no-filevars`, `p { v 1 # c\n}\n# c\na 1\na 2\n` yielded matching oracle/crate dumps: the earlier `p.v` has `ca:["# c"]`, and `a` is 2.
+  - Verdict: Important skip-breadth finding at `fuzz/src/uncertain.rs` lines 600–615. The new rule uses a global dropped-comment text match, without checking that the normalized node was created after the replaced value as released §12.5 requires. For the control above, a synthetic oracle `p.v` with `c:["# c","# c"]` would be skipped though `p.v` precedes the dropped comment. Add that earlier-value negative control and a position-aware guard, or remove this special skip. The five-minute fuzz gate remains open on #80; this review did not rerun it.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer (C14 §12.5 review follow-up). Item: remove overbroad duplicate-comment skip.
+  - Inputs consulted: current clean-room instructions, released spec-v14 §12.5, the independent implementation review in this log, implementation-side `fuzz/src/run.rs` and `fuzz/src/uncertain.rs`, saved C14 finding under `target/perf/c14/`, and the oracle only as a black box. No libucl source, `tools/`, draft spec branch, Claude Code session or memory was read.
+  - Work: verified that `p { v 1 # c⏎}⏎# c⏎a 1⏎a 2` agrees black-box. A real-parse synthetic-oracle test showed that the candidate §12.5 rule falsely skipped an extra `# c` on earlier `p.v`. The fuzzer's dropped-comment notes contain text but not source positions or value creation order, so the candidate duplicate-comment rule was removed. The saved `# c⏎a d⏎a 2⏎k d# c` finding remains reportable; no parser behavior changed. Updated `target/perf/C14-report.md`.
+  - Checks: the earlier-value negative test failed before removal and passed after. All 22 fuzzer unit tests and `scripts/ci.sh` passed (`target/perf/c14/logs/ci-v14-comment-order-rollback.log`). Final release replay still reports the duplicate-comment finding and #80 and retains the earlier §7.7/§12.2 classifications. No new `fuzz 300` run was started before the reviewed #80 spec/implementation decision; the latest completed 300-second run **exited 1**, and the zero-difference gate remains open.
+  - Commits: the following C14 §12.5 skip rollback commit on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, question #80, released spec-v14 §9.4, the existing include-path and URL
+    conformance inputs and goldens, `tools/ucl-dump/`, the pinned libucl source, and
+    black-box runs of the pinned oracle. No Claude Code sessions or memory were read.
+  - Work: checked the reduced two-include input against controls that vary the search
+    directories, URL option and `try` option. The oracle rejects the first-directory miss
+    alone and accepts the compound input only when a later directory supplies the file and
+    the later URL include is skippable. Answered #80 from the released first-directory
+    rule: the crate's error is required, with no spec amendment or implementation change.
+    Existing conformance cases cover the separate rules; the conflicting compound result
+    was not added as a golden case. Recommended narrowly recognizing that compound oracle
+    discrepancy in differential fuzzing.
+  - Checks: repeated the reduced oracle run and its rejection controls; `git diff --check`.
+  - Commits: the following `docs(clean-room): resolve C14 include-path question` commit on
+    `c14/spec80`. Not released, tagged or pushed; independent review pending.
+  - Attestation: the question answer and this log contain observable behavior only, with
+    no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C14 in
+    `WORKLIST.md`, question #80 and the `dab0150..b45466d` clean-room diff,
+    released spec-v14 §9.4 and its README, the named include-path and URL
+    conformance inputs and goldens, `files/v4/p1/pa.inc`, and black-box runs of
+    the pinned oracle from the case directory. No libucl source, implementation
+    source, fuzzer source, or Claude sessions or memory were read.
+  - Review: changes requested. The released first-directory rule requires the
+    crate's error for the reduced input, but five repeated oracle runs accepted
+    the compound input and returned `pa: int 1`. Controls rejected the first
+    include alone, a missing later directory, a non-skippable URL include, and
+    a later include without URL recognition. The stable compound result is a
+    concrete exception to the spec's description of libucl, not evidence of an
+    undefined result. The two existing cases pin separate rules but not their
+    combination. Resolving an implementer question only in `QUESTIONS.md`
+    conflicts with the protocol's requirement that answers land in a reviewed,
+    tagged spec version. A new compound oracle golden is reproducible; a crate
+    mismatch alone is not a reason to omit it. If the project keeps the error,
+    record that as a deliberate divergence and arrange conformance handling.
+    A fuzzer known-difference exception is defensible only for the demonstrated
+    compound shape and exact first-directory-error versus oracle-success
+    mismatch, with all other differences still compared.
+  - Checks: pinned oracle probes through `/dev/stdin`; scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #80.
+  - Inputs consulted: the independent review at `a76fbe1`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, C14 in `WORKLIST.md`, question #80, released
+    spec-v14 §9.4, the named include-path and URL conformance cases, the pinned
+    oracle and its source, and `scripts/regen-golden.sh` for the golden procedure.
+    No Claude Code sessions or memory were read.
+  - Work: superseded the first ruling after the review and coordinator's decision
+    to match the stable oracle result. Drafted a narrow §9.4 exception for a
+    first-directory miss, a matching later directory, and a subsequent skipped
+    URL include. Added three pending acceptance cases for file and string input,
+    both skippable URL macro forms, and an intervening entry; added three active
+    rejection controls. Generated every new golden from the pinned oracle, updated
+    #80, and corrected the spec index and case counts. Other combinations remain
+    unspecified pending evidence. No implementation-owned file was edited.
+  - Checks: fresh pinned-oracle runs matched all six new typed goldens and all
+    output goldens for the three accepted cases; active case count 1,657 and
+    pending case count 3; `cargo test --test conformance` passed all three tests;
+    `git diff --check` passed.
+  - Commits: the following `docs(spec): draft C14 include-path exception` commit
+    on `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names
+    or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v14 §9.4, the `a76fbe1..897fb6e` draft diff, question #80,
+    the six new conformance inputs, flags and goldens, their included fixture,
+    `tests/conformance/README.md`, and black-box runs of the pinned oracle. No
+    libucl source, implementation or fuzzer source, or Claude sessions or
+    memory were read.
+  - Review: changes requested for corpus documentation only. The earlier
+    protocol finding is addressed by a draft §9.4 answer awaiting independent
+    review and release; the earlier case finding is addressed by three pending
+    oracle-acceptance cases with goldens and three active rejection controls.
+    The exception describes observable behavior, cites each case, and leaves
+    untested combinations open. The case counts are correct: 1,657 active and
+    three pending. All six typed goldens matched fresh pinned-oracle runs; a
+    three-directory probe also found the first matching later file as described.
+    But `tests/conformance/README.md` still says `pending/` has no cases and
+    requires a pending README that is absent; its layout description must be
+    brought up to date. Also the coverage table in `docs/spec/README.md` claims
+    to map every case, yet omits the six new case IDs; add their §9 mappings.
+  - Checks: six typed-golden comparisons with the pinned oracle and scoped
+    `git diff --check`; no implementation tests were run in this re-review.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #80 corpus documentation.
+  - Inputs consulted: independent re-review at `94b9e53`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, the six C14 conformance cases, `tests/conformance/README.md`,
+    the prior pending README at `spec-v13`, and the coverage table in `docs/spec/README.md`.
+    No Claude Code sessions or memory were read.
+  - Work: corrected the conformance layout description for the three pending C14 cases,
+    added `pending/README.md` with the case list and move procedure, and mapped all six
+    new case IDs to §9 in the spec coverage table. The §9.4 rule and goldens are unchanged.
+  - Checks: `git diff --check`; verified each of the six IDs occurs once in the coverage
+    table, each pending ID occurs once in its README, and counts remain 1,657 active and
+    three pending cases.
+  - Commits: the following `docs(spec): document C14 pending cases` commit on
+    `c14/spec80`. Not released, tagged or pushed; independent re-review pending.
+  - Attestation: these documents contain observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (final re-review). Item: C14 question #80.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `94b9e53..966ce48` documentation diff, §9.4's six named cases,
+    `docs/spec/README.md`, `tests/conformance/README.md`, and the new
+    `tests/conformance/pending/README.md`. No libucl source, implementation or
+    fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. The pending layout now permits draft cases, states that
+    three C14 cases are pending, and links to a pending README that lists each
+    once with its expected role and move procedure. The coverage table maps
+    each of the three active rejection controls and three pending acceptance
+    cases to §9 exactly once. Counts remain 1,657 active and three pending;
+    the pending `pa.inc` fixture is byte-identical to the active fixture.
+    The revised §9.4 answer and its cases remain ready for spec release under
+    the clean-room protocol. No new finding in this documentation-only diff.
+  - Checks: scoped `git diff --check`, exact-ID occurrence counts in both
+    READMEs, fixture `cmp`, and case-file counts. The prior re-review checked
+    all six typed goldens against the pinned oracle.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #80, spec-v15.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the
+    approved §9.4 draft and six C14 cases, question #80, the independent reviewer
+    entries through `f73b874`, and the pending-case documentation. No Claude Code
+    sessions or memory were read.
+  - Work: after independent approval, changed draft wording to `spec-v15` in the
+    spec index, question answer and pending README. Committed and locally tagged
+    the reviewed behavior as `spec-v15`; the three acceptance cases remain pending
+    until the crate follows the released rule.
+  - Checks: previous latest spec tag was `spec-v14`; the worktree was clean before
+    release edits; 1,657 active cases and three pending cases; `cargo test --test
+    conformance` passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v15` commit on `c14/spec80`,
+    tagged locally as `spec-v15`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code,
+    pseudo-code, internal names or source structure.
+
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 §12.5 rollback re-review (`6273f6b..a27bb90`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v14` §12.5, implementation-side C14 log entry and CI record, the implementation-owned `fuzz/src/` diff, and the exact saved duplicate-comment finding under `target/perf/c14/`. Oracle used only as a black box.
+  - Checks: all 22 fuzzer unit tests and scoped `git diff --check` passed. Rebuilt the release fuzzer and replayed the saved `values-differ-28d7b8d64fdadefa` input with its exact flags and directory: exit 1, `values-differ` at `$.entries[1].v[0]` (oracle `c:["# c","# c"]`, crate `ca:["# c"]`). The implementation-side log records a passing `scripts/ci.sh` run.
+  - Verdict: the previous Important skip-breadth finding is **addressed**. The two-to-one rewrite normalization is removed; the real-parse earlier-value negative test and saved finding both remain reportable. Other skip logic is unchanged in this diff and its focused tests pass. No new finding. The five-minute zero-difference fuzz gate remains open on #80; this review did not rerun it.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 question #80, released spec-v15 §9.4.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v15` §9.4, C14 work item and question #80, the three pending acceptance inputs and golden result, the active rejection-control case names, implementation-owned `src/parse/` and `tests/conformance.rs`, and the test-driven-development skill. No unreleased spec draft was used.
+  - Work: a plain `.include` whose first search directory lacks the file may tentatively include a file from a later directory; the original first-directory error remains pending until a later skippable URL include in the same input clears it. Added a regression test for both URL macro forms, file input, intervening and following entries, and rejection controls.
+  - Checks: the new test failed first with `FileNotFound { path: "p1/pa.inc" }`, then passed after implementation; `cargo test --test conformance` passed all three tests; `scripts/ci.sh` passed; the strengthened value assertions passed in a final focused test; `git diff --check` passed.
+  - Commits: `c6600e6` (`fix(parse): recover searched include after skipped URL`); this LOG entry is in a separate follow-up commit. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 spec-v15 §9.4 implementation review (`91eb500..665fd0c`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v15` §9.4, three pending acceptance inputs/goldens and three active rejection controls, implementation-owned `src/parse/` diff and C14 LOG entry, and reviewer scratch under `target/perf/c14/`. Oracle used only as a black box; no draft spec was read.
+  - Checks: two string-input acceptance cases and all three rejection controls agreed black-box; a scratch `parse_file` check matched the file-input golden's `pa=1, after=2`; the focused parser test, all three conformance tests and scoped `git diff --check` passed. The implementer LOG records a passing `scripts/ci.sh` run.
+  - Verdict: Important regression at `src/parse/include.rs` lines 353–360 and `src/parse/core.rs` lines 199–209. Before any skipped URL appears, the code parses a later-directory file and the remaining input, allowing their errors to replace the first-directory `FileNotFound`. With `p1` missing and valid `p2/pa.inc`, `.include(path=["p1","p2"]) "pa.inc"\nx = [` now reports `UnterminatedArray` at line 3; malformed `p2/pa.inc` likewise reports its error. Released §9.4 says the first directory normally decides and that rule applies without the later skipped URL. Preserve the first-miss kind and position outside the new recovery case. No clean-room provenance issue found.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh question). Item: C14 question #81.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v15 §12.5, the existing comment conformance cases, the saved
+    C14 finding's input, flags and typed dumps under `target/perf/c14/`, the
+    pinned oracle and its source, and black-box control runs. No Claude Code
+    sessions or memory were read.
+  - Work: reproduced the exact `rewrite`, `dump-comments`, `string-input`,
+    `no-filevars` finding. The oracle gives the later `k` two before-comments;
+    without the replaced value's comment or without the replacement, it gives
+    one after-comment. Distinct comment texts show the earlier comment before
+    `k`'s own, and an unrelated earlier value with the same text keeps its own
+    comment without changing `k`. Answered #81 as already covered by the
+    released §12.5 uncertainty: the crate may retain only `k`'s own comment.
+    No spec amendment or golden case is needed; a fuzzer allowance must be
+    confined to comments of a replaced value on a later value.
+  - Checks: repeated the exact pinned-oracle result and asserted seven black-box
+    control outputs; `git diff --check` passed.
+  - Commits: the following `docs(clean-room): resolve C14 duplicate-comment question`
+    commit on `c14/spec80`. No tag or push.
+  - Attestation: the question answer and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #81.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `ff1af40^..ff1af40` question and log diff, released spec-v15 §12.5,
+    the named comment conformance input, flags and golden, and pinned-oracle
+    black-box runs of the exact question input and seven controls. The saved
+    C14 finding under `target/perf/c14/` was not present in this worktree.
+    No libucl source, implementation or fuzzer source, or Claude sessions or
+    memory were read.
+  - Review: changes requested on protocol grounds. The oracle returned the
+    exact `rewrite`, `dump-comments`, `string-input`, `no-filevars` result
+    recorded in #81: `k` had two before-comments, while `a` had no saved
+    comment. `append`, `merge`, removing the first comment, removing the
+    replacement, distinct earlier comment text, removing the final comment,
+    and an unrelated earlier value with the same comment text gave the stated
+    controls. Released §12.5 already classifies a replaced value's comment
+    reappearing on a later value as uncertain; the proposed difference boundary
+    does not broaden that rule, and an oracle golden for this undefined outcome
+    is not needed. However, `docs/clean-room/PROTOCOL.md` requires answers to
+    implementer questions to land in a new reviewed and tagged spec version,
+    never as code or hints. #81's resolved answer and fuzzer allowance appear
+    only in `QUESTIONS.md` after spec-v15, with no new release proposed. A pure
+    duplicate classification could cite spec-v15 without adding normative or
+    implementation guidance; otherwise the answer needs the normal release.
+  - Checks: exact and seven control black-box oracle outputs; scoped
+    `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: independent review at `8326eab`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, released spec-v15 §12.5, the #81 black-box
+    controls and the spec index. No Claude Code sessions or memory were read.
+  - Work: moved #81's narrow observable classification into §12.5 for review as
+    spec-v16, updated the question answer and index to mark the draft, and stated
+    why the uncertain result has no golden. A replaced comment may appear on a
+    later value before that value's own trailing comment; comments on earlier
+    unrelated values and value differences remain outside this allowance. The
+    three pending spec-v15 include cases remain intact. No implementation file
+    was edited.
+  - Checks: `git diff --check`; `cargo test --test conformance` passed all three
+    tests; latest released tag remained `spec-v15`.
+  - Commits: the following `docs(spec): draft C14 comment uncertainty` commit
+    on `c14/spec80`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source
+    structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `8326eab..ede677a` draft diff, released spec-v15 §12.5, the Q81
+    black-box input and flags, and the pinned oracle. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: changes requested for the Q81 answer only. The draft §12.5 text
+    describes the observable `rewrite` result and the project's narrow choice
+    without code, pseudo-code, internal names or source structure. The example
+    reproduced both with its exact `string-input` and `no-filevars` flags and
+    without those flags; the earlier seven controls support its boundary. The
+    README and question mark spec-v16 as a draft, the latest released tag is
+    still spec-v15, and no pending conformance file changed. This prepares the
+    question to be answered through a reviewed spec release. However, the Q81
+    answer still says what differential fuzzing may recognize and require.
+    `QUESTIONS.md` and `PROTOCOL.md` prohibit implementation hints in answers;
+    remove that fuzzer-specific sentence. The observable boundary is already
+    stated in §12.5 and can remain in the answer as a spec summary.
+  - Checks: pinned-oracle replay under both flag sets; scoped
+    `git diff --check`; changed-file list and latest spec tag.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (review revision). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: independent review at `dbf5a26`, current `CLAUDE.md`,
+    `docs/clean-room/PROTOCOL.md`, and the draft #81 answer. No Claude Code
+    sessions or memory were read.
+  - Work: removed the fuzzer-specific sentence from #81. The draft §12.5
+    observable boundary, index and cases are unchanged.
+  - Checks: scoped `git diff --check`.
+  - Commits: the following `docs(clean-room): clarify C14 comment answer` commit
+    on `c14/spec80`. Not tagged or pushed; independent re-review pending.
+  - Attestation: the question answer and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #81, spec-v16 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `dbf5a26..75eac67` question-and-log diff, the unchanged draft §12.5
+    text, and the Q81 answer. No libucl source, implementation or fuzzer
+    source, or Claude sessions or memory were read.
+  - Review: approved. The answer no longer directs differential fuzzing; it
+    states only the observable boundary and the project's choice already in
+    draft §12.5. The draft spec remains unchanged from the prior review and
+    still contains no prohibited code or internal names. The latest released
+    tag remains spec-v15; a reviewed spec-v16 release will carry this answer
+    to implementers under the protocol. No new finding in this scoped diff.
+  - Checks: scoped `git diff --check` and changed-file list. The prior review
+    reproduced the oracle example with and without `string-input` and
+    `no-filevars`, and verified the seven controls.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #81, spec-v16.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    approved #81 draft §12.5 and question answer, the independent reviewer
+    entries through `1ae55ec`, and the spec index. No Claude Code sessions or
+    memory were read.
+  - Work: after independent approval, changed the #81 answer and spec index
+    from draft wording to `spec-v16`, then committed and locally tagged the
+    reviewed clarification. No golden was added for the uncertain result;
+    the three pending spec-v15 include cases remain intact.
+  - Checks: latest previous spec tag was `spec-v15`; worktree was clean before
+    release edits; 1,657 active and three pending cases; `cargo test --test
+    conformance` passed all three tests; `git diff --check` passed.
+  - Commits: the following `docs(spec): release spec v16` commit on
+    `c14/spec80`, tagged locally as `spec-v16`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §9.4 first-directory error precedence follow-up.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §9.4 (the C14 rule released in `spec-v15`), the parent-provided independent-review finding, the six C14 conformance inputs and goldens, implementation-owned `src/parse/` and conformance test utilities. No unreleased draft or forbidden input was read.
+  - Work: record the first-directory `FileNotFound` before parsing a later matching file, and return it if that input ends or fails before a later skippable URL include clears it. Added controls for a malformed later file and bad trailing input.
+  - Checks: the new focused test failed first with `UnterminatedArray` instead of the first-directory `FileNotFound`; both focused tests passed after the fix. A temporary test harness checked all three pending acceptance cases against typed and four emitter goldens and all three active rejection controls against their error goldens; it passed and was removed. `scripts/ci.sh` and `git diff --check` passed.
+  - Commits: `50c9b88` (`fix(parse): preserve first search miss error precedence`); this LOG entry is in a separate follow-up commit. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 spec-v16 §9.4 precedence re-review (`dce7819..c67ddf2`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, C11/C14 in `WORKLIST.md`, released `spec-v16` §9.4, the three pending acceptance inputs/goldens and three active rejection controls, implementation-owned `src/parse/` diff and C14 LOG entry, and reviewer scratch under `target/perf/c14/`. Oracle used only as a black box; no draft spec was read.
+  - Checks: both focused first-search-miss tests, all three conformance tests and scoped `git diff --check` passed. Two pending text-input acceptances matched the oracle; a `parse_file` check matched the file-input golden's `pa=1, after=2`; all three active rejection controls agreed. Rebuilt release fuzzer: malformed later file and malformed trailing input now both report first-directory `FileNotFound` at line 1, column 29. The prior review observed `UnterminatedArray` for these controls before the fix; the implementer LOG records the new test failing before and passing after, plus a passing `scripts/ci.sh` run.
+  - Verdict: the prior Important error-precedence finding is **addressed**. Recording the pending miss before speculative parsing and returning it on input failure preserves the ordinary first-directory kind and position without losing the released later-URL acceptance. No new issue found in this scoped diff. A five-minute fuzz run was not repeated in this review.
+  - Commits: this log entry only, on `libucl-compat`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (fresh participant). Item: C14 spec-v15 case activation.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §9.4 and index, `tests/conformance/README.md`, the
+    `pending/README.md` move procedure and three case inputs, flags and
+    goldens, the existing active fixture, approved C14 integration commit
+    `e22cadd`, and the pinned oracle only as a black box. No Claude Code
+    sessions or memory were read.
+  - Work: from `e22cadd`, created the isolated `c14/activate-spec15` worktree.
+    Moved three spec-v15 include-acceptance cases and their goldens unchanged
+    into `cases/spec/09-macros/`. Removed the pending fixture after verifying
+    it is byte-identical to the active fixture, and removed the now-empty
+    pending README and directory. Updated both corpus and spec coverage
+    documentation to 1,660 active cases and no pending cases. No implementation
+    or fuzz file was edited.
+  - Checks: baseline and final `cargo test --test conformance` each passed all
+    three tests. Fresh pinned-oracle runs matched each moved typed golden and
+    four emitter goldens byte for byte. Verified all three case IDs occur once
+    in the spec index, 1,660 active cases, no pending directory, and staged
+    and unstaged `git diff --check` passed.
+  - Commits: the following `test(conformance): activate spec-v15 include cases`
+    commit on `c14/activate-spec15`. Not pushed; independent review pending.
+  - Attestation: this case move and documentation contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 spec-v15 case activation.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `e22cadd..61ecc520` activation diff, the three moved case inputs,
+    flags and goldens, the active include fixture, both corpus and spec index
+    READMEs, and the pinned oracle only as a black box. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. Git records all 20 case, flag and golden files as
+    byte-identical renames from `pending/09-macros/` into `cases/spec/09-macros/`.
+    The removed pending `pa.inc` fixture has the same blob ID as the active
+    fixture. All three new active IDs occur once in the §9 coverage table;
+    its count of 1,660 active cases is correct, and the pending directory is
+    absent. The corpus README now describes that state. The move changes no
+    spec rule, implementation file or fuzzer file, and follows the pending
+    case move procedure. No new finding.
+  - Checks: fresh pinned-oracle output matched all three typed goldens and
+    all 12 emitter goldens byte for byte; `cargo test --test conformance`
+    passed all three tests; scoped `git diff --check`, case counts, blob IDs
+    and index occurrence counts passed.
+  - Commits: this reviewer log entry only on `c14/activate-spec15`. Not tagged
+    or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.5 duplicate-comment uncertainty.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §12.5, own `fuzz/src/uncertain.rs` and `fuzz/src/run.rs`,
+    and the saved black-box finding under `target/perf/c14/findings/`.
+  - Work: on isolated branch `c14-comments-v16` from `7a90c8f`, restricted the
+    uncertainty skip to an unambiguous four-line rewrite input that proves the
+    replaced comment precedes the distinct later value. The complete dump must
+    agree after normalizing only that later value's duplicate comment list.
+    Earlier unrelated values with the same comment text, changed values,
+    unrelated comments and extra entries remain reportable. More complex
+    input forms remain reportable when source order cannot be proved.
+  - Checks: a focused test failed before the classifier change, then passed;
+    `cargo test --manifest-path fuzz/Cargo.toml` passed 22 tests;
+    `scripts/ci.sh` passed; release-build replay of the preserved §12.5
+    finding exited 0 as `skipped: uncertain: comments of a replaced value
+    (§12.5)`; `git diff --check` passed. No full fuzz run was requested or
+    performed for this isolated follow-up.
+  - Commits: the following `fix(fuzz): scope replaced-comment skip to later simple value`
+    commit on `c14-comments-v16`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 isolated spec-v16 §12.5 fuzzer review (`7a90c8f..7c09e52`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §12.5, the implementation-owned `fuzz/src/` diff and C14 LOG entry, and the preserved reduced §12.5 finding under `target/perf/c14/findings/`. The oracle was used only as a black box through its built executable; no forbidden input was read.
+  - Checks: all 22 fuzzer unit tests, three conformance tests, five benchmark-document/corpus tests and scoped `git diff --check` passed. A release fuzzer replay of the exact saved input and flags returned `skipped: uncertain: comments of a replaced value (§12.5)`. The implementer LOG records a passing `scripts/ci.sh` run; no full fuzz run was made in this review.
+  - Verdict: no Critical or Important defect found. The four-line source recognizer proves that the dropped comment precedes the distinct later value; it requires exact flags and one dropped comment. It changes only that later value's duplicate comment list, then requires whole-dump equality. The earlier-value negative and changed-comment, changed-value and extra-entry controls remain differences. Other corpus documents lack this exact flagged source shape and their tests pass.
+  - Commits: this log entry only, on `c14-comments-v16`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (classification). Item: C14 expanded `.emit` under `zerocopy`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §§9.2, 12.2 and 13.2, the saved C14 finding's input and
+    typed report, `zerocopy_registered_macros_stable`, the pinned oracle and
+    its source, and black-box controls. No Claude Code sessions or memory
+    were read.
+  - Work: classified `.emit r $ABI` with or without the trailing `.s` as the
+    already uncertain §12.2 result. With `zerocopy`, the oracle gave a one-byte
+    NUL key and seven NUL value bytes in eight repeated runs; without it,
+    the key was `r` and the value `unknown`. The trailing `.s` changed neither
+    result. Under `zerocopy`, a literal `.emit`, a direct variable value,
+    `.seen` with a variable, and a variable only in `.emit` arguments kept
+    their expected bytes. The released rule already covers the changed key
+    and value. No new question, spec amendment or golden case was added.
+  - Checks: repeated black-box oracle runs for the finding and controls;
+    `git diff --check` passed.
+  - Commits: the following `docs(clean-room): classify C14 zerocopy finding`
+    commit on `c14/spec80`. Not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 final `zerocopy` finding classification.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `0842f018^..0842f018` LOG-only diff, released spec-v16 §§9.2, 12.2
+    and 13.2, the named stable `zerocopy` conformance case, and the pinned
+    oracle only as a black box. No libucl source, implementation or fuzzer
+    source, or Claude sessions or memory were read.
+  - Review: approved. Eight runs of `.emit r $ABI` followed by `.s`, with
+    `zerocopy`, `registered-macros` and `string-input`, returned the recorded
+    one-NUL-byte key and seven-NUL-byte string. Omitting `.s` gave the same
+    result; without `zerocopy`, both forms gave `r: "unknown"`. Under
+    `zerocopy`, literal `.emit`, direct `$ABI`, `.seen $ABI`, and a variable
+    only in `.emit` arguments retained their expected bytes. Released §12.2
+    already marks key and string bytes parsed from variable-expanded `.emit`
+    VALUE text as uncertain; §9.2 explains the ignored final `.s`. This
+    classification adds no rule, implementation hint or forbidden content,
+    so it needs no new question, spec release or golden.
+  - Checks: eight exact oracle repetitions, paired trailing-macro and
+    `zerocopy` controls, four stable controls, scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` VALUE before an ignored macro name.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §§7.1, 9.2, 12.2 and 13.2, own `fuzz/src/`, the saved
+    finding `values-differ-721c495bc7cf91fb`, and black-box oracle runs.
+  - Work: on isolated branch `c14-emit-eof` from `436db65`, classified only
+    `.emit r $ABI` followed by terminal `.s`, optionally after one simple
+    literal entry. The source and exact flags prove that the variable expands
+    in VALUE and that `.s` adds no entry. The crate result must retain `r` and
+    `unknown`; only same-length oracle key and string bytes may differ, and
+    the complete normalized dump must then agree. Changed crate values or
+    keys, a changed prefix, extra entries, ARGUMENTS or comment variables,
+    and content after `.s` remain reportable.
+  - Checks: the focused saved-shape test failed before the classifier change
+    and passed after; all 23 fuzz unit tests and `scripts/ci.sh` passed;
+    release-build replay of the saved finding exited 0 as `skipped: uncertain:
+    expanded .emit text under zerocopy (§12.2)`; `git diff --check` passed.
+    No full fuzz run was requested or performed for this isolated follow-up.
+  - Commits: the following `fix(fuzz): classify expanded emit before ignored macro name`
+    commit on `c14-emit-eof`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 §12.2/§9.2 isolated `.emit` EOF fuzzer review (`436db65..1914c38`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §§9.2 and 12.2, the scoped implementation diff, implementation-side C14 LOG entry, saved replay input, and recorded CI log. The oracle executable was used only as a black box.
+  - Checks: 23 fuzzer unit tests and scoped `git diff --check` passed. Release fuzzer replay of `.emit r $ABI\n.s` and its one-entry prefix returned the intended §12.2 skip; ARGUMENTS and comment-variable controls agreed with the oracle. The exact source recognizer, exact flags, emitted-entry shape, and whole-dump equality keep changed key/value/prefix/entries and trailing-content differences reportable. The implementer CI log records a successful run; no full fuzz run was performed in this review.
+  - Verdict: no Critical or Important defect found. The skip is confined to the expanded VALUE before a terminal ignored macro name under the specified flags; the optional literal prefix must agree unchanged.
+  - Commits: this reviewer LOG entry only on `c14-emit-eof`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (draft). Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v16 §§9.4 and 9.5, the saved C14 input and report, existing
+    glob and parameter-prefix conformance cases, the pinned oracle and its
+    source, and black-box controls. No Claude Code sessions or memory were read.
+  - Work: reproduced `.include(g=true,t=true) "/.*"` as an oracle error on a
+    host where the pattern matches unreadable regular `/.file`. Full parameter
+    names and direct inclusion of that file gave the same error. Controlled
+    unreadable hidden and ordinary regular files also errored for direct and
+    glob optional includes and `.try_include`; missing files and directories
+    were skipped. Drafted the missing §9.4 read-denial row and answered #82.
+    The exact root pattern depends on host files and permissions, so no
+    portable golden case was added. No implementation or fuzz file was edited.
+  - Checks: pinned-oracle controls above, `cargo test --test conformance`
+    passed all three tests, and `git diff --check` passed.
+  - Commits: the following `docs(spec): draft C14 unreadable include rule`
+    commit on `c14/spec80`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names
+    or source structure.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer. Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `f98a9b1^..f98a9b1` draft diff, released spec-v16 §9.4, the named
+    dot-glob and parameter-prefix conformance cases, and pinned-oracle
+    black-box runs with host `/.file` and controlled unreadable regular files
+    under ignored `target/`. No libucl source, implementation or fuzzer source,
+    or Claude sessions or memory were read.
+  - Review: changes requested for one Q82 question phrase only. On this host,
+    `/.file` is an unreadable regular file and both abbreviated and full-name
+    optional dot-glob includes, and direct optional inclusion, were errors.
+    Controlled hidden and ordinary unreadable files also errored for plain
+    and optional `.include`, optional glob inclusion, `.try_include`, and
+    `.try_include(try=false)`. The draft §9.4 row states these observable
+    outcomes without prohibited content; the host-dependent absolute glob
+    and permission-dependent case justify the absence of a portable golden.
+    The draft is unreleased and follows the question-and-review protocol.
+    However, Q82 says missing files and directories were "skipped" after
+    describing `.try_include` controls. With entries after the macro, the
+    oracle showed `.include(try=true)` skipped them, while `.try_include`
+    stopped silently and `.try_include(try=false)` of a directory errored,
+    exactly as the released §9.4 table says. State those outcomes precisely.
+  - Checks: pinned-oracle direct and glob controls; scoped `git diff --check`.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team. Item: C14 question #82, spec-v17 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released §9.4, Q82 and the independent Q82 review entry.
+  - Change: clarified Q82's missing-file and directory controls by naming the
+    observable outcomes for `.include(try=true)`, `.try_include`, and
+    `.try_include(try=false)` with a later entry. No normative rule changed.
+  - Checks: scoped diff and `git diff --check`.
+  - Commit: pending this entry's commit. Not tagged or pushed.
+  - Attestation: the question and specification contain behavior only.
+
+- 2026-09-29 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #82, spec-v17 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    the `0431255..f978214` question-and-log diff, unchanged draft §9.4,
+    and the prior pinned-oracle marker controls. No libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. Q82 now says that `.include(try=true)` skips missing
+    files and directories and reads a later entry; `.try_include` stops before
+    that entry for both; `.try_include(try=false)` stops for a missing file but
+    errors for a directory. These are the outcomes of the prior controlled
+    oracle probes and match released §9.4. The answer remains observable and
+    contains no implementation hint. Draft §9.4 and its host-dependent
+    no-portable-golden rationale are unchanged. No new finding.
+  - Checks: scoped `git diff --check` and changed-file list; prior review's
+    pinned-oracle controls cover the corrected text.
+  - Commits: this reviewer log entry only on `c14/spec80`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (release). Item: C14 question #82, spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    reviewed #82 draft §9.4 and question answer, the independent reviewer
+    entries through `39a234a`, the spec index, and conformance case lists.
+    No Claude Code sessions or memory were read.
+  - Work: after independent approval, changed the #82 answer and spec index
+    from draft wording to `spec-v17`. The §9.4 behavior rule is unchanged;
+    host-dependent read access has no portable golden.
+  - Checks: latest previous spec tag was `spec-v16`; worktree was clean before
+    release edits; 1,657 active and three pending cases; all three tests in
+    `cargo test --test conformance` passed; scoped `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v17` commit on
+    `c14/spec80`, tagged locally as `spec-v17`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-29 — Role: clean-room implementer. Item: released spec-v17 §9.4 read-denied regular includes.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, `spec-v17:docs/spec/09-macros.md` via the released tag only, implementation-owned `src/parse/include.rs` and `src/parse/loader.rs`, and the active conformance suite. No post-release spec edits or forbidden input were read.
+  - Work: a regular file that the loader cannot read now errors for `.include`, `.include(try=true)`, `.try_include`, and glob matches. A custom loader returns `PermissionDenied` deterministically; the regression also checks missing and nonregular files retain their optional behavior.
+  - Checks: the focused test failed first because `.include(try=true)` returned a value after skipping the denied file; it passed after the fix. `cargo test --test conformance` passed all three tests, `scripts/ci.sh` passed, and `git diff --check` passed.
+  - Commits: `6af6133` (`fix(parse): reject unreadable regular includes with try`); this LOG entry is in a separate follow-up commit. Not pushed.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` after stable neighbors.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v16` §§12.2 and 13.2, own `fuzz/src/`, the saved
+    `values-differ-b2f0d092b5866768` and `values-differ-8f6dc6b3a6b6eea2`
+    findings including the latter's original input, and black-box oracle runs.
+  - Work: on isolated branch `c14-emit-seen-prefix` from `adce859`, extended
+    the §12.2 classifier to three exact source shapes: `.seen I` before the
+    expanded `.emit`; the reduced finding with `r= s` after it; and the
+    second finding's original input with stable entries on both sides.
+    Only the identified emitted entry's key and string may normalize at equal
+    byte lengths. The crate key must match its source and its value must be
+    `unknown`; the complete dump, including nested `.seen` data and arguments
+    and any other entries, must then agree. Other source shapes stay reportable.
+  - Finding triage: before this change, the first reduced finding replayed
+    as `values-differ`. The second reduced finding replayed as a non-UTF-8
+    skip on one run, while its original input remained a live difference.
+    Subsequent reduced replays alternated between §12.2 and non-UTF-8 skips
+    as oracle bytes varied. The fuzzer checks a candidate while reducing and
+    rechecks it for the saved report; the saved `skipped` report reflects that
+    later run and does not prove the original ceased to differ. No counting
+    bug was established.
+  - Checks: both new focused tests failed before the classifier change and
+    passed after; all 25 fuzz unit tests and `scripts/ci.sh` passed. The
+    release fuzzer replay of both reduced findings and a check of the second
+    original input exited 0 as a §12.2 skip on the final run; five earlier
+    repeats of each also exited 0, with one non-UTF-8 skip on the second
+    reduced input. `git diff --check` passed. No full 300-second fuzz run was
+    requested or performed on this isolated branch.
+  - Commits: the following `fix(fuzz): preserve stable neighbors of expanded emit`
+    commit on `c14-emit-seen-prefix`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: independent clean-room implementation reviewer. Item: C14 isolated §12.2 fuzzer review (`adce859..38eedab`), stopped on exposure.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the scoped `fuzz/src/uncertain.rs` and implementation LOG diff, and a search of current `docs/spec/` before restricting reads to the released tag.
+  - Exposure: the search output included lines from current `docs/spec/README.md`; `git diff --name-only spec-v16 -- docs/spec` confirms that file has post-release edits. This is unreleased spec-team material forbidden to implementers. I stopped review at that point and did not inspect the unreleased diff or make a verdict.
+  - Commits: this exposure LOG entry only on `c14-emit-seen-prefix`; no implementation edits or push. A fresh clean-room reviewer must complete the review.
+
+- 2026-09-29 — Role: fresh clean-room implementation reviewer. Item: C14 §12.2 expanded `.emit` with stable neighbors; implementation commit `38eedab` (LOG exposure commit `0657b8d` excluded from technical verdict).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v16` §§12.2 and 13.2 via `git show`, commit `38eedab`'s `fuzz/src/uncertain.rs` diff and its implementer LOG addition, relevant own fuzz and conformance-runner code, the saved black-box findings `values-differ-b2f0d092b5866768` and `values-differ-8f6dc6b3a6b6eea2` (including the latter's `original.ucl`), and the oracle executable as a black box. I did not use the previous reviewer's partial observations.
+  - Verdict: no Critical or Important defect found within this C14 scope. The three added exact source forms identify one expanded `.emit` entry under the exact three flags. The classifier checks root and entry shapes, source-expected crate key and `unknown` string, and oracle key and string byte lengths. It changes only that entry's key and string, then requires equality of the complete normalized dump; nested `.seen` data and arguments, both stable neighbors in the original input, entry count, and any extra fields remain visible. Existing and new negative controls reject changed stable entries, wrong entry count, missing `zerocopy`, unrelated source forms, wrong emitted type, and wrong byte lengths. Non-UTF-8 oracle strings remain a separate preexisting fuzzer skip before this classifier runs.
+  - Verification: all 25 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check 38eedab^ 38eedab` passed. One initial replay and three further replays of both saved reduced findings returned `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. One initial check and three further checks of `values-differ-8f6dc6b3a6b6eea2/original.ucl` returned the same skip with both stable entries equal; the oracle's six-byte emitted key varied between checks. No sustained fuzz campaign was run for this review.
+  - Commits: this LOG-only review commit on `c14-emit-seen-prefix`; no implementation edits or push.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: fresh clean-room implementation reviewer. Item: C14 released spec-v17 §9.4 read-denied regular includes; reviewed `6af6133` plus implementer LOG commit `989d394` on `libucl-compat` at `a4d174d`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v17:docs/spec/09-macros.md` through `git show` only, the scoped implementation diff and own `src/parse/include.rs` and `src/parse/loader.rs`, relevant conformance case names and tests, and the implementer LOG addition. No current or post-release `docs/spec/` content was opened.
+  - Verdict: no Critical or Important defect found. The changed branch runs after canonicalization and `FileKind::File`, so a read error now fails `.include`, `.include(try=true)`, `.try_include`, and matched glob files as §9.4 requires. Missing and nonregular paths still use the unchanged optional or silent-stop branches. Search-path first-miss and later skipped-URL logic was not changed, and its focused regression tests pass. Minor documentation note: the existing module-level file-outcome table does not yet list the read-denied regular-file row, although the changed branch cites the released rule.
+  - Red/green and checks: the pre-fix `Err(_) => unusable(...)` branch would skip the denied regular file for `.include(try=true)`, causing the new regression's `unwrap_err()` to fail; the implementer logged this red run. I independently ran the new focused test green, both `first_search_miss` tests, all three conformance tests, and `scripts/ci.sh`; all passed. `git diff --check 6af6133^ 6af6133` passed. I did not mutate implementation code or independently rerun the pre-fix test.
+  - Commits: this LOG-only review commit; no implementation edits or push.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit` VALUE after VT.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v17` §§7.1, 9.2, 12.2 and 13.2 through `git show` only,
+    own `fuzz/src/uncertain.rs`, the saved black-box finding
+    `values-differ-9fa8bfc0f8579219`, and black-box oracle runs. Current
+    `docs/spec/` and unreleased spec changes were not read.
+  - Work: in isolated local checkout `c14-emit-vt` from `521786a`, added only
+    the exact source `t I\n.emit\x0b$ABI e` under the exact three flags to the
+    §12.2 classifier. Released §9.2 makes VT a separator before the macro
+    VALUE, and §12.2 leaves bytes from that expanded VALUE uncertain. The
+    classifier requires the crate's `unknown: "e"`, equal byte lengths for
+    the oracle's second key and string, and complete dump equality after
+    normalizing only those two fields. Changes to the stable `t: "I"` prefix,
+    extra entries, types, byte lengths, or crate values remain reportable;
+    variables only in ARGUMENTS or comments do not qualify.
+  - Checks: the focused test failed before the change and passed after; all
+    26 fuzz unit tests and `scripts/ci.sh` passed; release fuzzer replay of
+    the saved finding exited 0 as `skipped: uncertain: expanded .emit text
+    under zerocopy (§12.2)`; `git diff --check` passed. No full fuzz run was
+    requested or performed.
+  - Commits: the following `fix(fuzz): classify expanded emit after vertical tab`
+    commit on `c14-emit-vt`. Not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: fresh clean-room implementation reviewer. Item: C14 §12.2 expanded `.emit` VALUE after VT; implementation commit `d8e3e36` on `c14-emit-vt`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v17:docs/spec/09-macros.md` and `spec-v17:docs/spec/12-flags.md` through `git show`, the scoped implementation and implementer LOG diff, relevant own `fuzz/src/uncertain.rs`, `fuzz/src/main.rs`, `fuzz/README.md`, `scripts/ci.sh`, and the saved black-box finding `values-differ-9fa8bfc0f8579219` (input, flags, directory and report). No current or post-release `docs/spec/` content was opened.
+  - Verdict: no Critical or Important defect found in this C14 scope. The new exact source shape has VT between `.emit` and its expanded VALUE as released §9.2 permits. Under exactly `zerocopy`, `registered-macros` and `string-input`, the classifier identifies the second entry, requires the crate's `unknown: "e"`, checks equal byte lengths for the oracle's second key and string, rewrites only those two fields, and then requires equality of the complete dump. The stable `t: "I"` prefix, entry count, types, other fields and source shapes remain visible. The focused negatives cover altered prefix key or value, extra entry, wrong byte lengths or type, altered crate key or value, missing flag, variables only in arguments or comments, and trailing input.
+  - Verification: all 26 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check d8e3e36^ d8e3e36` passed. The release fuzzer replay of the saved reduced finding, using its recorded flags and working directory and the oracle executable as a black box, exited 0 with `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. No sustained fuzz campaign was run for this review.
+  - Commits: this LOG-only review commit on `c14-emit-vt`; no implementation edits or push.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-29 — Role: spec team (classification). Item: C14 vertical-tab `.emit` finding under released spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released
+    spec-v17 §§9.2, 12.2 and 13.2, the saved finding's input, flags and typed
+    report, `zerocopy_registered_macros_stable`, the pinned oracle as a black
+    box, and pinned libucl source. No Claude Code sessions or memory were read.
+  - Work: classified `t I⏎.emit␋$ABI e` with `zerocopy`, `registered-macros`
+    and `string-input` as the already undefined §12.2 byte result. §9.2 treats
+    VT as whitespace after the macro name, so the VALUE contains `$ABI` and
+    expands. The oracle kept `t: "I"` and gave a seven-NUL key and one-NUL
+    string for the emitted entry in three runs; the crate kept `t: "I"` and
+    the expanded key and string. Space and TAB separators gave the same oracle
+    result. Without `zerocopy`, the oracle gave `unknown: "e"`; with a literal
+    VALUE under `zerocopy`, it also gave `unknown: "e"`. A direct `k $ABI`
+    entry under `zerocopy` gave `k: "unknown"`; without registered macros,
+    `.emit` was an error. Released spec-v17 already covers the difference; no
+    new question, normative amendment, golden or tag is needed.
+  - Checks: repeated pinned-oracle runs and narrow controls; scoped
+    `git diff --check`.
+  - Commit: this classification log carried forward from `c14/spec-emit-vt`;
+    not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: clean-room implementer. Item: C14 §12.2 expanded `.emit`
+  VALUE after one stable scalar prefix.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released `spec-v17:docs/spec/12-flags.md` via `git show`, own
+    `fuzz/src/uncertain.rs` and `fuzz/src/main.rs`, saved black-box finding
+    `values-differ-3e5f081c503a0f82`, and the oracle executable as a black
+    box. No current `docs/spec/` content or forbidden source was read.
+  - Work: recognized one simple, stable scalar prefix before `.emit r $ABI`
+    across whitespace and all ordinary placements of `=`. Under exactly
+    `zerocopy`, `registered-macros`, and `string-input`, the classifier requires
+    the crate's source-expected emitted key and string, equal byte lengths for
+    the oracle's emitted key and string, and whole-dump equality after changing
+    only those emitted fields. A recognized source shape whose values fail
+    those checks remains reportable instead of falling through to the broader
+    recognizer. No parser or spec files were changed.
+  - Checks: the focused test failed on `t= I` and then `t =I` before their
+    implementation changes, and passed after; all 27 fuzz unit tests and
+    `scripts/ci.sh` passed. Release fuzzer replay of the saved finding exited
+    0 as `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`.
+    Negative controls keep changes to the stable prefix, emitted crate key or
+    value, type, lengths, entries, flags, and trailing source text visible.
+    `git diff --check` passed. No full fuzz campaign was run.
+  - Commit: the following `fix(fuzz): classify expanded emit after simple equals prefix`
+    commit on isolated `c14-emit-vt`; not merged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed
+    in docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: independent clean-room implementation reviewer. Item: C14 §12.2 expanded `.emit` after one stable scalar prefix; implementation commit `a28f12a` on `c14-emit-vt`.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released `spec-v17:docs/spec/12-flags.md` §12.2 through `git show`, scoped implementation and implementer LOG diff, own `fuzz/src/uncertain.rs`, the saved black-box finding `values-differ-3e5f081c503a0f82` (input, flags, directory and report), and the oracle executable as a black box. No current or post-release `docs/spec/` content was opened.
+  - Verdict: no Critical or Important defect found in this C14 scope. The source parser accepts one alphanumeric scalar prefix with whitespace or the ordinary placements of `=`, followed by exactly `.emit KEY $ABI`, with an alphanumeric KEY. The exact three flags gate the classifier. It requires the crate's source-expected emitted key and `unknown` string, checks equal byte lengths for the oracle's emitted key and string, normalizes only those two fields, then requires whole-dump equality. A recognized shape that fails validation returns without reaching the broader classifier, keeping same-length crate errors and changed stable entries reportable. Focused negatives cover the stable prefix, extra entries, wrong types or lengths, crate key or value, flags, arguments, and trailing source text.
+  - Verification: all 27 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check a28f12a^ a28f12a` passed. The release fuzzer replay of the saved reduced finding exited 0 with `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. No sustained fuzz campaign was run for this review.
+  - Commit: this LOG-only review commit on `c14-emit-vt`; no implementation edits or push.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-30 — Role: coordinator (oracle side). Item: C14 review and completion of PR #20.
+  - Inputs consulted: PR #20 (`a69fb31`): its commits, this log's entries of 2026-09-28 to
+    2026-09-30 and their recorded exposures, the diffs of `src/parse/`, `fuzz/src/`,
+    `docs/spec/`, the conformance cases, `tools/bench-compare/` and `scripts/bench-compare.sh`;
+    the oracle as a black box through the differential fuzzer.
+  - Review: the recorded exposures (the handoff coordinator's reading of `PLAN.md` and of a
+    session transcript, a spec-team message to that coordinator, a reviewer's view of unreleased
+    spec text) were each followed by the protocol's steps; no implementation commit follows an
+    exposure of its author.
+  - Checks on `a69fb31`: `scripts/ci.sh` passed (695 tests); `scripts/ci.sh fuzz 300` (820,543
+    inputs) saved three differences, which the crate gives identically on `main`:
+    `values-differ-3218009a94e2d9cb` and `values-differ-79ff7be944c9f2ba` are expanded `.emit`
+    text under `zerocopy`, the undefined result of released §12.2, which the fuzzer's
+    classifier misses next to these neighbours; `values-differ-b20d95e099eb5fa2` is question #83.
+  - Measurement: the comparison's two builds differed by up to 9% on large documents from the
+    stack alignment that the environment's size sets; one extra environment variable changed
+    `config(1000)` by 12% in the same binary. The tool now times on a thread of its own, and a
+    stale baseline build is no longer reused (`522a8e2`). The README's figures come from a run
+    of that tool (load 3.74 to 4.44).
+  - Commits: `522a8e2`, `9c8a486`, `2757ae7`, and the following commit with question #83, two
+    rows of `docs/COMPATIBILITY.md` and this entry.

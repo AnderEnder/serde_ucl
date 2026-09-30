@@ -196,6 +196,13 @@ impl<'t> Document<'t> {
             sizes: Sizes::default(),
         };
         let result = core.read_input(boundary);
+        let result = match core.includes.pending_search_miss.take() {
+            Some((pending_unit, error)) if pending_unit == unit => Err(error),
+            pending => {
+                core.includes.pending_search_miss = pending;
+                result
+            }
+        };
         self.boundary = match &result {
             Ok(()) => core.boundary_at_end(),
             Err(_) => Boundary::Entry,
@@ -3173,7 +3180,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         let start = self.pos;
         if matches!(self.peek(), Some(b'0'..=b'9' | b'-')) {
             let no_time = self.settings.flags.contains(ParserFlags::NO_TIME);
-            match number::scan(self.src, start, no_time) {
+            match number::scan(self.src, self.utf8, start, no_time) {
                 Number::Value(value, end) => {
                     self.pos = end;
                     return Ok((value, false));

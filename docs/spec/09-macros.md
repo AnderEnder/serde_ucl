@@ -647,6 +647,7 @@ files record that tree, and §11.1 counts it as a result, not an error.
 | --- | --- | --- | --- | --- |
 | does not exist, including the empty path | error (`include_missing_error`) | skipped (`include_try_missing`, `include_empty_path_try`, `libucl/basic/14`) | stops silently (`try_include_missing_stops_parsing`, `try_include_empty_path_stops_parsing`) | stops silently (`try_include_try_false_missing_stops`) |
 | is a directory or another non-regular file | error (`include_directory_error`) | skipped (`include_directory_try`) | stops silently (`try_include_directory_stops_parsing`) | error (`try_include_try_false_directory_error`) |
+| exists as a regular file but cannot be opened for reading | error | error | error | error |
 | is the file that holds the macro (resolved path, §9.3) | error (`include_self_error`, `include_main_document_itself_error`) | error (`include_self_with_try_error`) | stops silently (`try_include_self_stops_parsing`, `try_include_main_document_itself_stops`) | stops silently (`try_include_try_false_self_stops`) |
 | exists and is readable | included (`try_include_present`) | included | included | included |
 
@@ -655,6 +656,14 @@ behaves as `.try_include` (`try_include_try_true_directory_stops`). Only the fil
 macro counts as itself; a cycle through other files ends at the nesting limit (above), for
 `.try_include` too. `libucl/basic/9` ends with a `.try_include` of a missing file, so nothing is
 lost there.
+
+**Filesystem-dependent access failure.** A glob match that is a regular file but cannot be
+opened for reading is also an error, even with `try=true` or `.try_include`. On the oracle host,
+`/.file` is such a file and is among the matches of `"/.*"`, so
+`.include(g=true,t=true) "/.*"` is an error. The same pattern may have a different result on a
+host with different files or permissions. No portable golden case pins read denial: the case
+files cannot guarantee it across checkouts and test identities. The neighboring rules for `.*`
+and `t=true` are pinned by `include_glob_dot_star_try` and `include_param_prefix_names`.
 
 A silent stop inside an included file ends the parse in every open unit, also when the file was a
 match of a glob pattern of `.include`, with or without `try=true`
@@ -849,13 +858,28 @@ project*. libucl behaves as follows:
   - The list stays in effect for every later include of the whole parse, with or without `path`
     (`include_path_persists`).
   - While a list is in effect, each path is tried as `DIR/PATH`, absolute paths included, for
-    the directories in order. For `.include`, the first directory decides: if the file is missing
-    there, that is an error at once (`include_path_first_dir`,
+    the directories in order. For `.include`, the first directory normally decides: if the file
+    is missing there, the document is an error (`include_path_first_dir`,
     `include_path_missing_in_first_dir_error`), and with `try=true` it is skipped without looking
     further (`include_path_try_first_dir_only`). `.try_include` does search: the first directory
     that has the file is used (`try_include_path_searches_all_dirs`), and a file found in none of
     them is an error, not a silent stop (`try_include_path_missing_error`). An empty list makes
     every include an error (`include_path_empty_array_error`).
+  - **Quirk: a later skipped URL include.** If the first directory of a `.include` without
+    `try=true` or `glob=true` lacks the file but a later directory has it, and a subsequent
+    `.include(try=true, url=true)` or `.try_include(url=true)` has `://` in its path and is
+    skipped, the document is accepted with the later directory's file included. Entries between
+    the two macros and after the URL macro are read too
+    (`include_path_first_miss_then_url_try_accepts_later`,
+    `include_path_first_miss_then_try_include_url_accepts_later`). This holds whether the
+    document is given as a file or as text
+    (`include_path_first_miss_then_url_try_accepts_later_file_input`). Without a matching later
+    directory, or when the later URL include is not skippable, the document is an error
+    (`include_path_first_miss_then_url_try_no_later_file`,
+    `include_path_first_miss_then_url_error`). A later optional ordinary file include does not
+    change the first-directory error (`include_path_first_miss_then_optional_file_error`). The
+    ordinary first-directory rule above applies otherwise. These cases do not establish an
+    exception for other later macros or other kinds of file failure.
   - With `glob=true`, the pattern is expanded in every directory, and all matches are included
     (`include_path_glob_all_dirs`). Without `try=true`, `.include` then fails when the **last**
     directory has no match, whatever the others had (`include_path_glob_last_dir_must_match_error`).
