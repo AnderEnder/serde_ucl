@@ -5048,3 +5048,48 @@
     `c14/spec-q86`. Not tagged or pushed; independent review pending.
   - Attestation: the draft spec, questions and answers, cases and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 questions #86 to
+  #88, spec-v20 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `1f74cd0..be864b7`
+    diff (§§9.4, 12.5 and 13.2, `docs/spec/README.md`, the conformance and pending READMEs,
+    questions #86 to #88 and their answers, the new cases, fixtures and golden files, the
+    spec-team entries), the released §9.4 brace-takeover rules and §13.2's section-object quirk,
+    and black-box runs of the pinned oracle binary of the `c14-followups` worktree from this
+    session's scratchpad. No libucl source, implementation or fuzzer source, `tools/`, or Claude
+    sessions or memory were read.
+  - Review: changes requested, one finding. No prohibited content: #87 and #88 are stated in the
+    released spec's own brace-takeover terms, each consequence with an example and a case, with
+    no internal names or pseudo-code; "takes a brace over again after each macro" is a rule about
+    which `}` the file's own text may still close, not a narration of control flow. My #86
+    finding is resolved: a skip covers the misses before it and none after it, with cases for
+    each order and kind, and the empty-file boundary and the file-input case are added. Every
+    example of the delta matches the oracle and the golden files, and further probes agree with
+    the rules: two nested braced files before the first key; text `{ a = 1 }` then an entry, and
+    after a key of the file's own an error; text leaving a section path open before the first
+    name; the #88 section-object results.
+    1. `docs/spec/09-macros.md:567-571` does not say that the brace the file takes over again is
+       in addition to one it still holds. When the nested file leaves a section path open and
+       removes no brace, the file then holds two: the section object's, and the brace it took
+       over first, which stays with the object where the macro stands. The file
+       `{ .include "files/v4/left_open.inc"⏎}` closes `x` with its `}`, and `.include "…"⏎q = 1`
+       is an error until the including unit adds a `}`; `{ …left_open.inc"⏎}⏎}` and
+       `{ …left_open.inc"⏎w = 1⏎}⏎}` are accepted, `w` in `x`. Read as a replacement, the rule
+       gives the opposite results. Only `include_braced_file_nested_path_before_first_name`
+       implies this, through "the name's `}` closes both". The crate fails the accepted forms, as
+       it fails the pending cases (checked in a scratch copy). Fix: say that a brace the file
+       still holds stays with it, the innermost closing first, and cite pending cases, for
+       example `{ …left_open.inc"⏎w = 1⏎}⏎}` accepted and an error for the same file with one `}`.
+    Non-blocking: the released #83 answer (`docs/clean-room/QUESTIONS.md:90`) says the first name
+    gets no brace in a section object; the #88 answer could say that it supersedes that
+    description, with results unchanged.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,794 tracked golden files.
+    1,679 active and 21 pending cases (six `spec-v18`, fifteen draft), one coverage row each
+    (1,700), and 21 entries in `pending/README.md`; the pending fixtures are identical to the
+    active ones. `cargo test --test conformance` passed all three tests; in a `git archive` copy
+    of `be864b7` with the fifteen draft cases moved in, only those fifteen failed besides the
+    four expected failures (`src/` compiled, not read). `git diff --check 1f74cd0 be864b7`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
