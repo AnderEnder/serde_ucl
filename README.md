@@ -914,8 +914,9 @@ rustc 1.98.1, median times:
 This version of serde_ucl, the previous release (`v0.5.0`), and libucl at the reference commit
 (CMake Release build, `-O3`) parsed the same documents. serde_json 1.0.151 parsed the JSON
 documents. The run used an Apple M4 Max with rustc 1.98.1. The crate and comparison tool used
-the release settings in `Cargo.toml` (fat LTO, one codegen unit). The programs ran in turns over
-three rotated rounds; the measured one-minute load ranged from 3.44 to 4.03. Each result is the
+the release settings in `Cargo.toml` (fat LTO, one codegen unit); the tool times on a thread of
+its own, so that the size of the environment does not move the stack. The programs ran in turns over
+three rotated rounds; the measured one-minute load ranged from 3.74 to 4.44. Each result is the
 median of the rounds, each round the median of 31 samples of at least 5 ms of repetitions.
 `scripts/bench-compare.sh` reproduces the tables (`tools/bench-compare/README.md`). The three
 pinned JSON documents were present and passed their SHA-256 checks.
@@ -930,52 +931,55 @@ Medians over 3 rounds; each time includes freeing the result.
 
 | Document | serde_ucl | 0.5.0 | change | libucl | serde_json |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| JSON, 10,000 records | 14.3 ms | 14.5 ms | −1% | 25.1 ms | 10.1 ms |
-| JSON, 1,000 records | 1.39 ms | 1.40 ms | −1% | 2.36 ms | 0.94 ms |
-| configuration, 1,000 services | 2.30 ms | 2.28 ms | +1% | 3.31 ms | – |
-| three entries, UCL | 0.53 µs | 0.53 µs | −1% | 8.54 µs | – |
-| three entries, JSON | 0.55 µs | 0.55 µs | +1% | 8.49 µs | 0.22 µs |
-| irregular configuration, 78,466 bytes | 0.19 ms | 0.19 ms | −0% | 0.30 ms | – |
-| irregular configuration, 639,049 bytes | 2.12 ms | 2.11 ms | +0% | 2.99 ms | – |
-| twitter.json | 2.56 ms | 2.58 ms | −1% | 3.47 ms | 1.57 ms |
-| citm_catalog.json | 4.90 ms | 4.93 ms | −1% | 7.91 ms | 3.91 ms |
-| canada.json | 11.5 ms | 12.9 ms | −11% | 18.7 ms | 6.79 ms |
-| rspamd `groups.conf`, with its includes | 0.65 ms | 1.13 ms | −43% | 1.52 ms | – |
-| rspamd `composites.conf` | 32.8 µs | 55.2 µs | −41% | 92.8 µs | – |
-| rspamd `rbl_group.conf` | 54.4 µs | 55.2 µs | −2% | 88.4 µs | – |
+| JSON, 10,000 records | 15.3 ms | 15.3 ms | −0% | 26.5 ms | 10.9 ms |
+| JSON, 1,000 records | 1.48 ms | 1.47 ms | +0% | 2.58 ms | 0.97 ms |
+| configuration, 1,000 services | 2.43 ms | 2.43 ms | +0% | 3.59 ms | – |
+| three entries, UCL | 0.55 µs | 0.55 µs | +0% | 9.45 µs | – |
+| three entries, JSON | 0.57 µs | 0.56 µs | +1% | 9.48 µs | 0.22 µs |
+| irregular configuration, 78,466 bytes | 0.19 ms | 0.20 ms | −1% | 0.33 ms | – |
+| irregular configuration, 639,049 bytes | 2.33 ms | 2.37 ms | −2% | 3.28 ms | – |
+| twitter.json | 2.79 ms | 2.79 ms | −0% | 3.75 ms | 1.64 ms |
+| citm_catalog.json | 5.06 ms | 5.12 ms | −1% | 8.44 ms | 4.09 ms |
+| canada.json | 12.1 ms | 13.6 ms | −11% | 19.2 ms | 7.29 ms |
+| rspamd `groups.conf`, with its includes | 0.71 ms | 1.22 ms | −42% | 1.68 ms | – |
+| rspamd `composites.conf` | 33.6 µs | 57.2 µs | −41% | 98.5 µs | – |
+| rspamd `rbl_group.conf` | 56.4 µs | 56.9 µs | −1% | 93.2 µs | – |
 
 The same without freeing the value in the timing (freed after each sample):
 
 | Document | serde_ucl | 0.5.0 | change | libucl |
 | --- | ---: | ---: | ---: | ---: |
-| JSON, 10,000 records | 11.6 ms | 11.7 ms | −1% | 17.9 ms |
-| JSON, 1,000 records | 1.13 ms | 1.14 ms | −1% | 1.68 ms |
-| configuration, 1,000 services | 1.91 ms | 1.93 ms | −1% | 2.39 ms |
-| three entries, UCL | 0.49 µs | 0.50 µs | −0% | 8.29 µs |
-| three entries, JSON | 0.52 µs | 0.51 µs | +2% | 8.42 µs |
-| irregular configuration, 78,466 bytes | 0.17 ms | 0.17 ms | −0% | 0.24 ms |
-| irregular configuration, 639,049 bytes | 1.87 ms | 1.88 ms | −0% | 2.51 ms |
-| twitter.json | 2.20 ms | 2.19 ms | +0% | 2.62 ms |
-| citm_catalog.json | 4.07 ms | 4.05 ms | +1% | 5.63 ms |
-| canada.json | 9.80 ms | 11.3 ms | −13% | 14.0 ms |
-| rspamd `groups.conf`, with its includes | 0.61 ms | 1.10 ms | −44% | 1.44 ms |
-| rspamd `composites.conf` | 28.9 µs | 51.7 µs | −44% | 84.7 µs |
-| rspamd `rbl_group.conf` | 47.1 µs | 47.6 µs | −1% | 67.5 µs |
+| JSON, 10,000 records | 12.1 ms | 12.2 ms | −0% | 18.5 ms |
+| JSON, 1,000 records | 1.20 ms | 1.20 ms | −1% | 1.76 ms |
+| configuration, 1,000 services | 2.04 ms | 2.03 ms | +0% | 2.54 ms |
+| three entries, UCL | 0.52 µs | 0.51 µs | +1% | 9.23 µs |
+| three entries, JSON | 0.54 µs | 0.54 µs | +0% | 9.27 µs |
+| irregular configuration, 78,466 bytes | 0.18 ms | 0.19 ms | −3% | 0.27 ms |
+| irregular configuration, 639,049 bytes | 2.05 ms | 2.09 ms | −2% | 2.75 ms |
+| twitter.json | 2.35 ms | 2.34 ms | +0% | 2.80 ms |
+| citm_catalog.json | 4.18 ms | 4.27 ms | −2% | 5.96 ms |
+| canada.json | 10.3 ms | 11.7 ms | −12% | 14.0 ms |
+| rspamd `groups.conf`, with its includes | 0.67 ms | 1.19 ms | −44% | 1.61 ms |
+| rspamd `composites.conf` | 30.7 µs | 54.0 µs | −43% | 92.3 µs |
+| rspamd `rbl_group.conf` | 49.8 µs | 50.2 µs | −1% | 73.7 µs |
 
 Deserializing generated JSON into structs with owned (`String`) or borrowed (`&str`) strings:
 
 | Document | serde_ucl, owned | 0.5.0, owned | change | serde_ucl, borrowed | 0.5.0, borrowed | change | serde_json, owned | serde_json, borrowed |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| JSON, 10,000 records | 13.6 ms | 13.7 ms | −1% | 12.7 ms | 13.0 ms | −2% | 4.59 ms | 3.97 ms |
-| JSON, 1,000 records | 1.29 ms | 1.31 ms | −1% | 1.22 ms | 1.23 ms | −1% | 0.45 ms | 0.39 ms |
-| three entries, JSON | 0.54 µs | 0.55 µs | −1% | 0.53 µs | 0.52 µs | +0% | 0.08 µs | 0.08 µs |
+| JSON, 10,000 records | 14.6 ms | 14.7 ms | −1% | 13.6 ms | 13.8 ms | −1% | 4.87 ms | 4.16 ms |
+| JSON, 1,000 records | 1.36 ms | 1.38 ms | −1% | 1.29 ms | 1.29 ms | −0% | 0.47 ms | 0.40 ms |
+| three entries, JSON | 0.56 µs | 0.56 µs | +1% | 0.54 µs | 0.54 µs | +1% | 0.08 µs | 0.08 µs |
 
-On the new irregular and pinned JSON inputs, serde_ucl parses faster than libucl. Against
-0.5.0, its parse time on those five inputs ranges from 11% faster to less than 1% slower in
-this run. With the corpus loader and optional include attempts active for both Rust versions,
-`groups.conf` and `composites.conf` are 43% and 41% faster than 0.5.0 respectively. serde_json
-parses its JSON value tree faster; its typed deserializer does not build that value tree first.
-These times describe this machine and run, rather than a fixed speed ratio.
+serde_ucl parses 1.3 to 1.7 times as fast as libucl on the larger documents, 1.6 to 2.9 times on
+the rspamd configurations, and 17 times on the three entries, where creating a libucl parser
+takes most of the time. Against 0.5.0, `canada.json`, mostly floats, parses 11% faster, and
+rspamd's `groups.conf` and `composites.conf`, which try optional includes that do not exist,
+about 40% faster; the other documents are within 2%. serde_json builds its value 1.2 to 1.7
+times as fast as serde_ucl on the larger documents and 2.6 times on the small one, and fills a
+struct 3 to 7 times as fast: it deserializes straight from the text, while serde_ucl first
+builds the whole UCL value, which repeated keys, priorities and `.inherit` need. These times
+describe this machine and run, not a fixed ratio.
 
 ## Repository layout
 
@@ -990,8 +994,10 @@ These times describe this machine and run, rather than a fixed speed ratio.
 | `docs/clean-room/` | the clean-room protocol, work list, log and spec questions |
 | `tests/` | integration tests, the conformance suite and the serde corpus |
 | `tools/ucl-dump/`, `scripts/` | the oracle that dumps libucl's results; CI and golden-file scripts |
+| `tools/bench-compare/` | the comparison with the previous release, libucl and serde_json (`scripts/bench-compare.sh`) |
 | `fuzz/` | the differential fuzzer |
 | `examples/`, `benches/` | examples and benchmarks |
+| `benches/corpus/` | real configurations for the benchmarks (rspamd, Apache-2.0) |
 
 Changes to `src/` follow the clean-room rules in
 [docs/clean-room/PROTOCOL.md](docs/clean-room/PROTOCOL.md): they are made from the spec and the
