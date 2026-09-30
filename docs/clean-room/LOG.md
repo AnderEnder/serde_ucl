@@ -4656,3 +4656,51 @@
     entry above. Not pushed. `crate-rejects-6097f6b0b5dffecd` left alone, as asked.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: fresh clean-room implementation reviewer (re-review). Item: C14 follow-up,
+  released spec-v18 (question #83); reviewed `git diff 2fa6b19 HEAD` on `c14/spec18-comments`,
+  commits `07e13fc`, `db7a4ef`, `ee97806` and `02456be`.
+  - Inputs consulted: the coordinator's request; the `2fa6b19..HEAD` diff (`src/parse/core.rs`,
+    `src/parse/include.rs`, `CHANGELOG.md`, `QUESTIONS.md` #85, the implementer's two LOG
+    entries); released `spec-v18` §9.4 and §13.2 (searched for nested braces taken over);
+    `origin/main`'s `core.rs` through `git show`; the oracle as a black box through
+    `ucl-differential --check` on probe files in `target/c14-review/probe/`; the two findings of
+    my fuzz run. The harness moved the session's working directory to the main checkout; every
+    command named this worktree, and nothing in the main checkout was opened.
+  - Review result: approved. Findings 1 to 6 of `2fa6b19` are resolved: hashes corrected;
+    CHANGELOG and the implementer's entry name the three `.emit` forms; a unit test for the #85
+    (3) share, with the comment and #85 citing §9.4's sentence; a unit test for both §9.1
+    reopens; the finding's source disclosed (the main checkout's `target/`, a path the
+    coordinator gave; not verified, as I work in this worktree only); the nits done. My entry of
+    `2fa6b19` is unchanged.
+  - The `unreachable!` in `names()` (core.rs:2992) cannot be reached: `object_step` sets
+    `section_shares` only while the top frame is `IncludedBrace(_)`, nothing between that and the
+    first name pushes a frame or changes its close, and nested units start with the flag false.
+    60 new probes (a nested `.include`, `.emit` or `key` include before the first key, at the top
+    level, in `o { }`, after a section object and under `key`), conformance and the fuzz run show
+    no panic. I prefer the panic: an error needs a public `ErrorKind` that no input produces, a
+    no-op would hide a broken invariant, and it matches the file's `expect`s. Caveat: the oracle
+    gives the first name a brace in exactly the states the guard excludes (below); fixing those
+    makes the arm reachable.
+  - Differences found while probing, the same with `origin/main`'s `core.rs`, not blocking; they
+    need a question (implementer or coordinator):
+    - The file `{ .include "braced.inc"⏎x "y{" z⏎}⏎}` (`{ a = 1 }`), at the top level or after
+      `s "t{" u`: libucl accepts it and `z` gets `# c`; the crate stops at the first `}`. Also
+      `.include(key="k")` of `{ .include "close_brace.inc"⏎x "y{" z⏎}`, and a nested `p "q{" r`
+      (by `.include` or `.emit {p "q{" r}`) before `x`. §9.4's "after comments and macros" gives
+      `x` a brace; whether a nested file's `}` removes the outer brace taken over is not stated.
+    - `s "t{" u⏎.include "…"⏎# c` with the file `{ .emit ""⏎x "y{" z⏎}⏎}` (`registered-macros`):
+      values agree, but libucl gives `z` the comment and the crate `x` (§12.5 with §13.2, the
+      section object kept open); the same with `.emit {{ a = 1}` or `.emit {{}`.
+  - Checks: `scripts/ci.sh` passed (703 tests; tree clean after). The copy, refreshed to HEAD
+    with the six pending cases moved: 1,671 cases, 1,667 pass, 4 expected failures, emitters and
+    readback clean. The finding-3 mutation fails `first_name_brace_shared_with_a_key_object`
+    (which passes on the old core, as it pins 0.6.0's result); on the old core the other three
+    tests of the branch fail. `scripts/ci.sh fuzz 180` (seed 1790782996186240000, 572,737 inputs)
+    exited 1 with `values-differ-97305b1d8e1497fe` (§12.2, `.emit l $ABI` under `zerocopy` with
+    text after it) and `crate-rejects-f8376e9b1c0a7067` (a `path` list with an empty first
+    entry), the classes of the first run, both reproduced with the old core; no `crate-panics`.
+  - Commits: this LOG-only re-review commit on `c14/spec18-comments`. No change to `src/`; not
+    pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
