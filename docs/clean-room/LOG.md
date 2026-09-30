@@ -5119,3 +5119,29 @@
     pending.
   - Attestation: the draft spec, question answers, cases and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 questions #86 to
+  #88, spec-v20 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `ffc0964..7b39153`
+    diff (§9.4, `docs/spec/README.md`, the conformance and pending READMEs, the #87 and #88
+    answers, the four new cases, fixtures and golden files, the spec-team entry), and black-box
+    runs of the pinned oracle binary of the `c14-followups` worktree from this session's
+    scratchpad. No libucl source, implementation or fuzzer source, `tools/`, or Claude sessions
+    or memory were read.
+  - Review: approved. The delta resolves my #87 finding and adds no prohibited content:
+    `docs/spec/09-macros.md:571-573` says a brace taken over again is added to any brace the file
+    still holds, the innermost closing first, and the bullet at `:589-599` gives the results my
+    probes showed: `{ …left_open.inc"⏎w = 1⏎}⏎}` and the same without `w = 1` put `q` at the top
+    level, with `w` in `x`; with one `}`, `.include "…"⏎q = 1` is an error and
+    `.include "…"⏎q = 1⏎}` is accepted. The #87 answer says the same, and the #88 answer takes my
+    note on the #83 wording. No new finding.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,810 tracked golden files.
+    1,680 active and 24 pending cases (six `spec-v18`, eighteen draft), one coverage row each
+    (1,704), 24 entries in `pending/README.md`, identical pending fixtures. `cargo test --test
+    conformance` passed all three tests; in a `git archive` copy of `7b39153` with the eighteen
+    draft cases moved in, only those failed besides the four expected failures (`src/` compiled,
+    not read). `git diff --check ffc0964 7b39153`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
