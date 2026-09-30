@@ -4077,3 +4077,251 @@
     of that tool (load 3.74 to 4.44).
   - Commits: `522a8e2`, `9c8a486`, `2757ae7`, and the following commit with question #83, two
     rows of `docs/COMPATIBILITY.md` and this entry.
+
+- 2026-09-30 — Role: spec team (classification). Item: C14 priority on expanded `.emit` under released spec-v17.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    released spec-v17 §§8.3, 8.7, 9.2, 12.2 and 13.2, the saved finding's input,
+    flags and typed report, priority and registered-macro conformance cases,
+    pinned libucl source, and pinned-oracle black-box controls. No Claude Code
+    sessions or memory were read.
+  - Work: classified `n I⏎.emit l=$ABI⏎.s` at `priority:3` with
+    `zerocopy`, `registered-macros` and `string-input`. The emitted key and
+    string differ within the existing §12.2 uncertainty. The terminal `.s`
+    adds nothing: omitting it gave the same typed values in the oracle. The
+    oracle root had priority 3, while the crate's root dump omitted it; that
+    omission also occurred for plain `n I`, a terminal `.s` alone, a literal
+    `.emit` VALUE, and expanded `.emit` without `zerocopy`. In all four stable
+    controls, both sides had priority 3 on the child values and the differential
+    comparison reported agreement. A `.ctx` copy of a root created at priority
+    3 carried priority 3 in both parsers, with and without `zerocopy`. §8.7
+    states that the outer root priority has no effect on the result except
+    through such a copy, so this finding needs no parser change or new spec
+    answer. No normative spec, conformance, or fuzzer file changed.
+  - Checks: saved finding and narrow controls with the pinned oracle and
+    differential checker; scoped `git diff --check`.
+  - Commit: the following classification commit on
+    `c14/spec-priority-finding`; not tagged or pushed.
+  - Attestation: this log contains observable behavior only, with no libucl
+    code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: coordinator (oracle side). Item: C14 leftovers after release 0.6.0.
+  - Inputs consulted: the local worktrees and clones left by C14, their branches, their
+    uncommitted changes and file times, and the saved fuzzer findings.
+  - The clone `c14-spec-priority`, cloned from the implementer clone `c14-emit-vt`, holds the
+    spec-team classification above (`a96000f`, 2026-09-30 00:17:54 +0200), whose session
+    consulted pinned libucl source. `c14-emit-vt` held an uncommitted edit of
+    `fuzz/src/uncertain.rs`, last modified at 00:19:16 +0200, with no log entry. It is committed
+    unreviewed to the local branch `quarantine/c14-emit-priority` (`be61c09`), which is not
+    pushed and not an input for implementation. The classification is carried over here.
+  - The finding of that clone, `values-differ-0bdbfbd65e9562d3` (`priority:3`), and the three
+    that the coordinator entry on PR #20 names are kept under `target/fuzz-differential/findings/`
+    of the main checkout. The classifier work for the three `.emit` findings goes to a fresh
+    implementer, and question #83 to the spec team.
+  - Removed: the C14 worktrees and clones whose work is on `main`; a duplicate of the
+    vertical-tab classification entry, which `main` has, was discarded.
+  - Commit: the following commit with this entry and the classification above.
+
+- 2026-09-30 — Role: spec team (draft). Item: C14 question #83, spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v17
+    §§3.4, 9.4 and 12.5, question #42 and its cases, the saved finding
+    `values-differ-b20d95e099eb5fa2` (input, flags, report), the pinned libucl source, the pinned
+    oracle built in this worktree, and the differential checker for black-box controls. No
+    Claude Code sessions or memory were read.
+  - Work: reproduced the finding in three identical oracle runs. With a braced included file
+    whose first key starts a section path (§9.4), the `}` that closes that first name's object
+    leaves the value created most recently unchanged, in the oracle, for a comment after the
+    include, in the file between the two `}`, after the file's last `}`, and after a further
+    entry in that object; the crate attaches the comment to the first name's object in each.
+    When a bracketed container opened in that object closes it, or when the `}` removing a brace
+    taken over by a section object closes it (§9.4), both parsers make the object the value
+    created most recently. Drafted a §12.5 rule and a §9.4 boundary sentence for the closing by
+    a bracketed container, and answered #83. Added `files/v18/` fixtures; three cases the crate
+    fails under `tests/conformance/pending/09-macros/` with a README, and three it passes in
+    `cases/spec/09-macros/`; golden files only from `scripts/regen-golden.sh`, which changed no
+    existing golden file. The oracle checkout was cloned into the main checkout's
+    `target/libucl-oracle/libucl`, where `LIBUCL_DIR` pointed. No implementation or fuzz file
+    was edited.
+  - Checks: `cargo test --test conformance` passed all three tests (1,663 cases, the four
+    expected failures unchanged); `scripts/ci.sh`; `git diff --check`.
+  - Commits: the following `docs(spec): draft C14 first-name brace comment rule` commit on
+    `c14/followups`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer. Item: C14 question #83, spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `2dd9894..b8b3d4b`
+    draft diff (§§9.4 and 12.5, question #83 and its answer, `docs/spec/README.md`,
+    `tests/conformance/README.md`, `pending/README.md`, the new cases, fixtures and golden files),
+    the released §§9.4 and 12.5 around the change, the spec-team entry for this draft and earlier
+    reviewer entries, `docs/spec/README.md` at `spec-v15` and `2dd9894`, the flag mapping in
+    `scripts/regen-golden.sh`, a grep of `tests/conformance.rs`, and pinned-oracle black-box runs
+    of `target/libucl-oracle/ucl-dump` in this session's scratchpad. No libucl source,
+    implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: changes requested, two findings. No prohibited content: the draft states inputs and
+    results in the released spec's terms ("a brace of its own", "the value created most
+    recently"), with no internal names, pseudo-code or source structure. Every new example matches
+    the oracle: the finding `_ 1⏎.include "files/v6/q42_closed_twice.inc"# ` (`dump-comments`,
+    `string-input`) gives `z` `"ca": ["# "]` in three identical runs, and as file input; the §12.5
+    examples give the comment to `z`, `z`, `k`'s value and, for the file closed by `a { b = 1 }`,
+    `x`; the §9.4 example and the error for a further `}` hold, with or without `string-input`.
+    1. `docs/spec/09-macros.md:539-546`, `docs/spec/12-flags.md:165-178` and the #83 answer
+       (`docs/clean-room/QUESTIONS.md:90`) do not say where the macro stands, and every cited case
+       includes at the top level. In an object left open by a section path the oracle gives the
+       first name no brace of its own: `s "t{" u⏎.include "files/v6/q42_closed_twice.inc"⏎q = 1`,
+       and the same with `files/v18/first_name_closed_by_object.inc`, are errors at the file's
+       last `}`, contrary to "a `}` after that closes the brace taken over"; the one `}` of a file
+       `{ x "y{" z⏎}` closes `x` and `s` together (`q` goes to the root), and
+       `s "t{" u⏎.include "…"⏎# c` gives the comment to `s`, where the new §12.5 sentence, read
+       as written, gives it to `z`. These results follow from the released section-object quirk
+       of §9.4 and the outermost rule of §12.5, and the crate already gives them. Inside
+       `o { … }` and under `key=` the draft holds:
+       `o { .include "files/v6/q42_closed_twice.inc"⏎# c` and
+       `.include(key="k") "files/v6/q42_closed_twice.inc"⏎# c` give the comment to `z`, and
+       `first_name_closed_by_object.inc` inside `o { … }` gives it to `x`; the crate fails the
+       first two like the three pending cases. Fix: limit the new sentences, and preferably the
+       released first-name sentence at `09-macros.md:525-528`, to a brace taken over from the
+       root, an object written with braces or a `key` object, and refer for a section object to
+       the released section-object rule; cite cases for both, for example an error case for the
+       section object and pending cases for `o { … }` and `key=`.
+    2. `docs/spec/README.md:251-252` counts "1663 cases in `cases/` and `libucl/`" while the table
+       now also lists the three pending cases; `spec-v15` wrote "…, plus three pending C14
+       cases". Fix: add ", plus three pending cases of the #83 draft".
+    Observation, not from this draft: the coverage table has had no row for
+    `cases/spec/12-flags/zerocopy_registered_macros_stable` since `c96b03f` (1,662 rows for
+    1,663 active cases); add it at release. Optional wording: at `09-macros.md:542`,
+    "a file `…` → `.include "…"⏎q = 1` → …" reads as if the file gave the include; "with a file
+    `…`, `.include "…"⏎q = 1` → …" is clearer.
+  - Checks: `scripts/regen-golden.sh` was not run, because it writes tracked golden files; the
+    same flag and input mapping run over every case, writing only to the scratchpad, matched all
+    6,653 tracked golden files, the new ones included. The fixtures under `pending/09-macros/files/`
+    are identical to those under `cases/spec/09-macros/files/`; 1,637 cases under `cases/` and 26
+    under `libucl/basic/` make 1,663, plus three pending. `cargo test --test conformance` passed
+    all three tests. In a `git archive` copy of `b8b3d4b` in the scratchpad, with the pending
+    cases moved in, only those three failed besides the four expected failures; the probes above
+    ran there as throwaway cases (`src/` compiled, not read). `git diff --check 2dd9894 b8b3d4b`.
+  - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #83, spec-v18 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`d132c38`), the draft `b8b3d4b`, released §§9.4 and 12.5, the pinned libucl
+    source, and pinned-oracle and differential-checker runs of the reviewer's probes and of
+    further controls.
+  - Finding 1: reproduced every probe, three identical oracle runs each. The first name gets a
+    brace of its own when the brace taken over is the root's, a braced object's, or that of the
+    object `key` or `prefix` creates (also with `target="array"`, and under a section object);
+    it gets none when the brace taken over is a section object's, whether left open by a path or
+    the object of a name followed by the macro, and then the released section-object rule of §9.4
+    and the outermost rule of §12.5 give the results, which the crate already produces. Limited
+    the released first-name sentence of §9.4, the draft §9.4 boundary and the draft §12.5 rule to
+    those braces; added for a section object a §9.4 sentence with an error case and a §12.5
+    sentence with a comment case, and pending cases for `o { … }` and `key="k"`. Rewrote #83's
+    answer to match.
+  - Finding 2 and the observation: the coverage count now reads 1665 active cases plus five
+    pending cases of the #83 draft, and the table has the missing row for
+    `cases/spec/12-flags/zerocopy_registered_macros_stable` (1,665 active rows). Took the
+    suggested "with a file `…`, `.include …` → …" wording.
+  - Cases: `include_braced_file_first_name_in_section_object_error` and
+    `comments_include_first_name_in_section_object` in `cases/spec/09-macros/`, which the crate
+    passes; `comments_include_first_name_brace_in_braced_object` and
+    `comments_include_first_name_brace_under_key` under `pending/09-macros/`, which it fails like
+    the other three. Golden files only from `scripts/regen-golden.sh`, which changed no existing
+    golden file.
+  - Checks: `cargo test --test conformance` passed all three tests (1,665 cases, the four expected
+    failures unchanged); `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): limit the C14 first-name brace rule` commit on
+    `c14/followups`. Not tagged or pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #83,
+  spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `d132c38..6499a08`
+    revision diff (§§9.4 and 12.5, question #83's answer, `docs/spec/README.md`,
+    `tests/conformance/README.md`, `pending/README.md`, the four new cases and their golden
+    files), the spec-team response entry, my review entry above, the flag mapping in
+    `scripts/regen-golden.sh`, and pinned-oracle black-box runs of
+    `target/libucl-oracle/ucl-dump` in this session's scratchpad. No libucl source,
+    implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: approved. Both findings are resolved and the revision adds no prohibited content: the
+    new sentences state where the macro stands and what results follow, in the released spec's
+    terms, with no internal names, pseudo-code or source structure.
+    1. The first-name sentences of §9.4 (`09-macros.md:525-531`, `:541-553`), the §12.5 rule
+       (`12-flags.md:165-187`) and the #83 answer are limited to a brace taken over from the
+       root, an object written with braces, or the `key` or `prefix` object, and a section object
+       has its own sentences. The oracle agrees in every context: the section-object error at the
+       file's second `}` and the comment on `s` (the two new active cases); `z` inside `o { … }`
+       and under `key="k"` (the two new pending cases); `x` for the file closed by
+       `a { b = 1 }` inside `o { … }`; no brace for the first name after a name followed by the
+       macro (`"s".include "files/v6/q42_closed_twice.inc"w "v{" r⏎m = 1` is an error, and
+       `q42_closed.inc` there closes `s` with its one `}`); a brace, and `z`, with
+       `prefix=true`, with `key` and `target="array"`, with `key` inside a section object, and
+       at a braced root (`{⏎.include "…"⏎# c`).
+    2. `docs/spec/README.md:251-252` reads "1665 cases in `cases/` and `libucl/`, plus five
+       pending cases of the #83 draft"; the table has 1,670 rows, one for each case, including
+       `cases/spec/12-flags/zerocopy_registered_macros_stable`. The suggested §9.4 wording was
+       taken.
+    Non-blocking notes: the `prefix` clause has no case of its own (the `key` cases show the same
+    object, §9.4; `.include(prefix=true) "files/v6/q42_closed_twice.inc"⏎# c` gives `z` the
+    comment in the oracle); a pending case could pin it. `09-macros.md:531` ends in a short
+    "macro stands. So" line; rewrap the paragraph.
+  - Checks: the same flag and input mapping as `scripts/regen-golden.sh`, run over every case and
+    writing only to the scratchpad, matched all 6,672 tracked golden files; not
+    `scripts/regen-golden.sh` itself, which writes tracked files. 1,665 active and five pending
+    cases; the fixtures under `pending/09-macros/files/` are identical to those under
+    `cases/spec/09-macros/files/`. `cargo test --test conformance` passed all three tests; in a
+    `git archive` copy of `6499a08` in the scratchpad, with the pending cases moved in, only those
+    five failed besides the four expected failures (`src/` compiled, not read).
+    `git diff --check d132c38 6499a08`.
+  - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #83, spec-v18 draft re-review notes (`9c7871c`).
+  - Added the pending case `comments_include_first_name_brace_under_prefix` (the oracle gives `z`
+    the comment in three identical runs; the crate fails it like the other five), cited it in
+    §12.5, and updated the README row and counts (1,665 active, six pending), the pending READMEs
+    and #83's answer; rewrapped the §9.4 first-name paragraph. Golden files only from
+    `scripts/regen-golden.sh`, no existing one changed. Checks: `cargo test --test conformance`,
+    `scripts/ci.sh`, `git diff --check`. Not tagged or pushed. Attestation: observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #83,
+  spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `9c7871c..ac935b8`
+    diff (§§9.4 and 12.5, question #83's answer, the spec, conformance and pending READMEs, the
+    new pending case and its golden files), the spec-team entry for it, and pinned-oracle
+    black-box runs of `target/libucl-oracle/ucl-dump` in this session's scratchpad. No libucl
+    source, implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: approved. The delta takes both non-blocking notes of the re-review above and adds no
+    prohibited content: `pending/09-macros/comments_include_first_name_brace_under_prefix`
+    (`.include(prefix=true) "files/v6/q42_closed_twice.inc"⏎# c`) gives `z` the comment under the
+    key `q42_closed_twice.inc` in three identical oracle runs, as §12.5 and the #83 answer now
+    say; the §9.4 paragraph is rewrapped without a change of wording. No new finding.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case and
+    writing only to the scratchpad, matched all 6,678 tracked golden files. 1,665 active and six
+    pending cases, one coverage row each (1,671), as the READMEs and the #83 answer count them.
+    `cargo test --test conformance` passed all three tests; in a `git archive` copy of `ac935b8`
+    with the pending cases moved in, only those six failed besides the four expected failures
+    (`src/` compiled, not read). `git diff --check 9c7871c ac935b8`.
+  - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team (release). Item: C14 question #83, spec-v18.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed #83 draft
+    of §§9.4 and 12.5 and its question answer, the independent reviewer entries through
+    `cc5c68d`, the spec index and the conformance case lists. No Claude Code sessions or memory
+    were read.
+  - Work: after independent approval, changed the #83 answer, the spec index and the conformance
+    READMEs from draft wording to `spec-v18`. The §9.4 and §12.5 rules are unchanged from
+    `ac935b8`; the six cases stay under `tests/conformance/pending/09-macros/` until the crate
+    passes them.
+  - Checks: the latest previous spec tag was `spec-v17`; the worktree was clean before the
+    release edits; 1,665 active and six pending cases; all three tests in
+    `cargo test --test conformance` passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v18` commit on `c14/followups`, tagged
+    locally as `spec-v18`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.

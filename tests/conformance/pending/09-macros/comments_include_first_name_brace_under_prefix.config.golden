@@ -1,0 +1,5 @@
+q42_closed_twice.inc {
+    x {
+        "y{" = "z";
+    }
+}

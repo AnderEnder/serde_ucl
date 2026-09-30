@@ -522,12 +522,14 @@ create an object. The entries still go into the object where the macro stands
   `include_taken_over_section_closed_inside_braces`). A later `}` then has nothing to close:
   `x "y{" z⏎.include "files/v4/open_brace.inc"⏎m { }⏎}` is an error
   (`include_taken_over_section_closed_then_brace_error`).
-- **Quirk.** When the file's leading `{` has taken over a brace and the first key the file then
-  reads, after comments and macros, is the first name of a section path (§3.4), that name's object
-  gets a brace of its own: a `}` closes it, and if it is still open at the end of the file, the
-  check below reports it. The brace taken over stays with the object where the macro stands. So
-  a file `{⏎x "y{" z` is an error, also written `{ x "y{" z`, `{⏎# c⏎x "y{" z`, `{ "q" "y{" z`,
-  `{⏎c "x{" =⏎` or `{⏎"s".priority {3}⏎` (`include_braced_file_first_name_unclosed_error`,
+- **Quirk.** When the file's leading `{` has taken over the brace of the root, of an object written
+  with braces, or of the object that `key` or `prefix` creates for the file (below), and the first
+  key the file then reads, after comments and macros, is the first name of a section path (§3.4),
+  that name's object gets a brace of its own: a `}` closes it, and if it is still open at the end
+  of the file, the check below reports it. The brace taken over stays with the object where the
+  macro stands. So a file `{⏎x "y{" z` is an error, also written `{ x "y{" z`, `{⏎# c⏎x "y{" z`,
+  `{ "q" "y{" z`, `{⏎c "x{" =⏎` or `{⏎"s".priority {3}⏎`
+  (`include_braced_file_first_name_unclosed_error`,
   `include_braced_file_first_name_same_line_error`,
   `include_braced_file_first_name_after_comment_error`, `include_braced_file_first_quoted_name_error`,
   `include_braced_file_first_name_separator_newline_error`,
@@ -536,7 +538,19 @@ create an object. The entries still go into the object where the macro stands
   `{ x: { "y{": "z" }, q: int 1 }`, and without the `}` it is an error; a file
   `{ x "y{" z⏎}⏎}` closes both (`include_braced_file_first_name_closed`,
   `include_braced_file_first_name_closed_root_open_error`,
-  `include_braced_file_first_name_and_brace_closed`). A `.priority` before the name makes no
+  `include_braced_file_first_name_and_brace_closed`). Like the objects that a section path leaves
+  open (§3.4), that name's object also closes when a container written with brackets that was
+  opened in it closes, and a `}` after that closes the brace taken over: with a file
+  `{ x "y{" z⏎a { b = 1 }⏎}`, `.include "…"⏎q = 1` →
+  `{ x: { "y{": "z", a: { b: int 1 } }, q: int 1 }`, and a further `}` in the including unit is
+  an error (`include_braced_file_first_name_closed_by_object`,
+  `include_braced_file_first_name_closed_by_object_then_brace_error`). When the brace taken over
+  is that of a section object without a bracket of its own (above), the first name gets no brace:
+  the file's first `}` removes the brace taken over and closes the section object together with
+  the name's object, by the rule for section objects above, so with the file
+  `files/v6/q42_closed_twice.inc`, `{ x "y{" z⏎}⏎}`, `s "t{" u⏎.include "…"⏎q = 1` is an error at
+  the file's second `}` (`include_braced_file_first_name_in_section_object_error`). Which value a
+  comment after these closings attaches to is in §12.5. A `.priority` before the name makes no
   difference (`include_braced_file_priority_then_first_name`). Only that first name gets a brace:
   `{ a b "y{" z⏎}` is an error, because the `}` finds `b` without one, and so is a file whose
   first key is an ordinary entry, `{ a = 1⏎x "y{" z⏎}⏎}` (`include_braced_file_two_names_error`,
