@@ -400,6 +400,15 @@ Owner decision of 2026-09-28, on item 3:
    comparison (`scripts/bench-compare.sh`) runs this version, 0.5.0, libucl and serde_json in
    turns.
 
+Owner decision of 2026-09-30, on the C14 report's `memchr` proposal (2.8–6.9% on the irregular
+documents):
+
+3. `memchr` becomes an optional dependency behind a Cargo feature `memchr`, off by default. With
+   the feature, the scans the report measured use it; without it, the current code stays. Both
+   give the same results; the tests and the checks of `scripts/ci.sh` cover the crate with and
+   without the feature, and the gain is measured against the latest release (0.6.0) with the
+   crate's benchmarks. The README's feature list and `CHANGELOG.md` name the feature.
+
 ## C15 — libucl-compatible C API (owner request of 2026-09-28; not started)
 
 A C API compatible with libucl's, so that C programs written for libucl can use the crate. Owner
