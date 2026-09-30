@@ -58,18 +58,50 @@ key, so they form multi-value entries (`key_lowercase_merges_case`, §8.6).
 
 ## 12.2 `zerocopy`
 
-Ordinary input has no observable change to the value tree (`zerocopy_no_effect`).
+Apart from the two cases below, the flag has no observable effect on the value tree
+(`zerocopy_no_effect`).
 
 **Uncertain (undefined in libucl):** with `zerocopy`, when a registered `.emit` macro's VALUE
 contains a variable that expands and the resulting text is parsed in place (§13.2), keys and
-string values made from that text need not retain their input bytes. The affected bytes may be
-NUL, non-UTF-8 or different between runs. This includes literal text around the variable:
-`.emit $CURDIR 2` gives the expanded `CURDIR` as the key of `int 2` without `zerocopy`, but
-under `zerocopy` repeated oracle runs gave different non-UTF-8 keys of the same length;
-`.emit k = $ABI` gave a changed `k` and a changed string value. With `zerocopy`, direct
+string values made from that text need not retain their input bytes once the macro has ended. The
+affected bytes may be NUL, non-UTF-8 or different between runs. This includes literal text around
+the variable: `.emit $CURDIR 2` gives the expanded `CURDIR` as the key of `int 2` without
+`zerocopy`, but under `zerocopy` repeated oracle runs gave different non-UTF-8 keys of the same
+length; `.emit k = $ABI` gave a changed `k` and a changed string value. With `zerocopy`, direct
 `direct = $ABI`, `.seen $ABI`, and `.emit literal = stable` kept their expected bytes in the
 oracle (`zerocopy_registered_macros_stable`).
-The project keeps the expanded text's bytes. There is no golden case for the undefined result.
+
+The undefined result is not limited to those bytes: whatever later depends on such a key or
+string is undefined too.
+
+- Whether a later key finds the entry the text created. `.emit l $ABI⏎l = s` gave two entries, one
+  with a one-byte key that is not UTF-8 and then `l: "s"`, where without `zerocopy` both values
+  are under `l`; the same with `.emit l = s` as the second line. `.emit l $ABI⏎.emit l $ABI`, on
+  the other hand, gave one entry with two values under a changed key. So what §8 does with a
+  repeated key is undefined for such an entry: under `strategy:error`, `.emit l $ABI⏎l = s` was
+  accepted, which without `zerocopy` is an error; under `merge`,
+  `.emit "a { x = $ABI }"⏎a { y = 1 }` gave two entries, not one merged object; and
+  `.emit l $ABI⏎.priority 5⏎l = s` kept both values, where without `zerocopy` the higher
+  priority replaces the first.
+- Finding such an entry by name: `.emit "a { x = $ABI }"⏎b { .inherit "a" }` was an error, which
+  without `zerocopy` gives `b` a copy of `a` (§9.7).
+- The output formats (§10), which write those bytes.
+
+An entry that exists before the text does not depend on it: `l = s⏎.emit l $ABI` gave `l` both
+values, and only the bytes of the second changed.
+
+**Uncertain (undefined in libucl):** with `zerocopy`, keys and string values read from an
+included file (§9.4), or from a further input given as a file (§13.1), need not retain their
+bytes either once that file has been read. libucl crashed in every run: on
+`.include "files/v4/braced.inc"` (`{ a = 1 }`), with `.try_include`, `glob`, `key` or `priority`
+as well, and on a further input `b = 2` given as a file. An empty file, or one with only
+comments, made no difference.
+
+The project keeps the bytes of its input and of every text parsed in place, so `zerocopy` has no
+effect on its results: a document gives, with `zerocopy`, the result it gives without it, all
+other settings unchanged. libucl's result for a document without `zerocopy` is therefore the
+project's expected result for it with `zerocopy`, also where libucl's own result with
+`zerocopy` is undefined or a crash. There is no golden case for the undefined results.
 
 ## 12.3 `no-time`
 

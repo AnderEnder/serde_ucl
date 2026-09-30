@@ -191,6 +191,10 @@ platform, is left uncertain:
   (§13.2, *What the handler can do*).
 - The bytes after the first NUL of a string that `.inherit` or a test macro copies (§9.7), and the
   key of a collected array in the copy of ARGUMENTS that `.seen` makes (§13.2, *The test macros*).
+- Under `zerocopy`, the keys and strings made from an expanded `.emit` VALUE and whatever later
+  depends on them, such as whether a later key finds their entry, and the keys and strings of an
+  included file or of an input given as a file, on which libucl crashes (§12.2). The project's
+  result with `zerocopy` is its result without it.
 - A glob pattern that ends in `/` and a symbolic link to a regular file, and a plain path that ends
   in `/` after the name of a file: this depends on the operating system (§9.4, *Globs*).
 
@@ -211,6 +215,8 @@ C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §
 `spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
 `spec-v18` answers #83 by saying which value a comment attaches to after the `}` that closes the
 first name of a braced included file (§12.5, §9.4).
+A draft for #84 extends the §12.2 uncertainty under `zerocopy` to what depends on the changed keys
+and strings, and to included files; it awaits independent review for `spec-v19`.
 
 The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
 cases moved there when the crate followed §9.4 in C14.
@@ -232,8 +238,9 @@ the project*.
 
 Two §13 rules have no case: a `{` after a zero-byte first input crashes libucl, and the file
 variables that an input given as a file sets would put the checkout path into the golden file.
-The undefined result for variable-expanded `.emit` text under `zerocopy` (§12.2) has no golden;
-`zerocopy_registered_macros_stable` covers its stable boundary.
+The undefined results under `zerocopy` (§12.2) have no golden: the expanded `.emit` text, what
+depends on it, and the keys and strings of included files, on which libucl crashes;
+`zerocopy_registered_macros_stable` covers the stable boundary.
 The §12.5 clarification for #81 has no golden because the replaced comment's later
 appearance is uncertain in libucl.
 The §9.4 access-failure rule for #82 has no portable golden because read access depends on

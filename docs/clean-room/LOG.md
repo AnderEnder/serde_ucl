@@ -4325,3 +4325,35 @@
     locally as `spec-v18`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
+
+- 2026-09-30 — Role: spec team (draft). Item: C14 question #84, spec-v19 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v18
+    §§8, 9.4, 9.7, 12.2, 13.1 and 13.2, question #84, the pinned libucl source, `tools/ucl-dump/`,
+    the saved §12.2 findings of the C14 fuzz runs 2 to 6 (inputs, originals, flags, reports), and
+    the pinned oracle and the differential checker as black boxes. No Claude Code sessions or
+    memory were read.
+  - Work: reproduced #84's examples. Under `zerocopy`, whether a later key finds an entry made
+    from expanded `.emit` text varied with the document: `.emit l $ABI⏎l = s` gave separate
+    entries, `.emit l $ABI⏎.emit l $ABI` one entry under a changed key. With that, under
+    `zerocopy` the oracle accepted a repeated key under `strategy:error`, did not merge under
+    `merge`, kept a value that a higher `.priority` replaces without `zerocopy`, and failed
+    `.inherit` of an object the text made; an entry made before the text was found by it. A
+    document including a file with entries, or given a further input as a file, crashed the
+    oracle in every run under `zerocopy` (`.include`, `.try_include`, `glob`, `key`, `priority`);
+    an empty or comment-only file did not. Drafted §12.2 for both, with the project's result
+    stated as its result without `zerocopy`; updated §13.2's pointer, the spec index and
+    `docs/COMPATIBILITY.md`, and answered #84. No case was added: every result that depends on
+    the changed bytes varies with memory, and a result that does not depend on them is the same
+    without `zerocopy`.
+  - Checks of the stated expectation: the crate's result with `zerocopy`, against the oracle's
+    without it and the other flags the same, agreed on all 20 saved §12.2 inputs and originals,
+    on #84's examples and on 1,200 generated documents with expanded `.emit` text (repeated and
+    nested keys, `.priority`, `.inherit`, `.seen`, strategies, `key-lowercase`,
+    `no-implicit-arrays`, `priority:3`), once the priorities that §8.7 makes unobservable (the
+    root's and array elements') were set aside, as the fuzzer already does. The crate's result
+    never depended on `zerocopy`; the oracle's did in 552 of the generated documents, all with
+    expanded `.emit` text. `cargo test --test conformance`; `git diff --check`.
+  - Commits: the following `docs(spec): draft C14 zerocopy dependents rule` commit on
+    `c14/spec-q84`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, question answer and this log contain observable behavior only,
+    with no libucl code, pseudo-code, internal names or source structure.
