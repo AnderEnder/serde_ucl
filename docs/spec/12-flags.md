@@ -69,9 +69,9 @@ the variable: `.emit $CURDIR 2` gives the expanded `CURDIR` as the key of `int 2
 `zerocopy`, but under `zerocopy` repeated oracle runs gave different non-UTF-8 keys of the same
 length; `.emit k = $ABI` gave a changed `k` and a changed string value. With `zerocopy`, direct
 `direct = $ABI`, `.seen $ABI`, and `.emit literal = stable` kept their expected bytes in the
-oracle (`zerocopy_registered_macros_stable`). While the text is being parsed, its keys are still
-intact: a key repeated inside the same text finds its entry, so `.emit "l = $ABI; l = s"` gave one
-entry with two values, and under `strategy:error` it is an error with and without `zerocopy`
+oracle (`zerocopy_registered_macros_stable`). While the text is being parsed, a key repeated
+inside it finds its entry: `.emit "l = $ABI; l = s"` gave one entry with two values, and under
+`strategy:error` it is an error with and without `zerocopy`
 (`zerocopy_emit_repeated_key_in_text_error`).
 
 The undefined result is not limited to those bytes: whatever depends on such a key or string after

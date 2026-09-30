@@ -215,8 +215,8 @@ C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §
 `spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
 `spec-v18` answers #83 by saying which value a comment attaches to after the `}` that closes the
 first name of a braced included file (§12.5, §9.4).
-A draft for #84 extends the §12.2 uncertainty under `zerocopy` to what depends on the changed keys
-and strings, and to included files; it awaits independent review for `spec-v19`.
+`spec-v19` answers #84 by extending the §12.2 uncertainty under `zerocopy` to what depends on the
+changed keys and strings, and to included files.
 
 The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
 cases moved there when the crate followed §9.4 in C14.

@@ -4489,3 +4489,23 @@
   - Commits: this reviewer log entry only on `c14/spec-q84`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team (release). Item: C14 question #84, spec-v19.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed #84 draft
+    of §12.2 and its question answer, the independent reviewer entries through `bb00d5f`, the spec
+    index, `docs/COMPATIBILITY.md` and the conformance case lists. No Claude Code sessions or
+    memory were read.
+  - Work: after independent approval, changed the #84 answer and the spec index from draft
+    wording to `spec-v19`, and took the reviewer's two non-blocking wording notes: §12.2 now says
+    "While the text is being parsed, a key repeated inside it finds its entry" in place of a
+    statement about the keys being intact, which cannot be observed; the `docs/COMPATIBILITY.md`
+    row says "a further input given as a file with entries". The §12.2 rules are otherwise
+    unchanged from `b13d3df`; the six `spec-v18` cases stay under
+    `tests/conformance/pending/09-macros/`.
+  - Checks: the latest previous spec tag was `spec-v18`; the worktree was clean before the release
+    edits; 1,669 active and six pending cases; all three tests in `cargo test --test conformance`
+    passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v19` commit on `c14/spec-q84`, tagged locally
+    as `spec-v19`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.
