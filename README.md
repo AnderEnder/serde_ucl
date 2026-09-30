@@ -1,7 +1,7 @@
 # serde_ucl
 
-[![CI](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml/badge.svg)](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml)
-[![Coverage](https://github.com/AnderEnder/serde_ucl/actions/workflows/coverage.yml/badge.svg)](https://github.com/AnderEnder/serde_ucl/actions/workflows/coverage.yml)
+[![CI](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnderEnder/serde_ucl/actions/workflows/ci.yml)
+[![Coverage](https://github.com/AnderEnder/serde_ucl/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/AnderEnder/serde_ucl/actions/workflows/coverage.yml)
 [![crates.io](https://img.shields.io/crates/v/serde_ucl.svg)](https://crates.io/crates/serde_ucl)
 [![docs.rs](https://img.shields.io/docsrs/serde_ucl)](https://docs.rs/serde_ucl)
 [![MSRV](https://img.shields.io/crates/msrv/serde_ucl)](https://github.com/AnderEnder/serde_ucl/blob/main/Cargo.toml)
