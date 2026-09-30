@@ -321,7 +321,7 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   compare `macro_registered_text_include_differs`). Comments in it are saved as in the input
   (`macro_registered_text_comments`), and a silent stop in it stops the input
   (`macro_registered_text_stop_stops_all`). Under `zerocopy`, text from an expanded macro VALUE
-  has an undefined byte result for keys and strings (§12.2).
+  has an undefined result for its keys and strings and for what later depends on them (§12.2).
 
   **Quirk: text in place and a section object left open.** When text is parsed in place while
   the innermost open object is a section object (§3.4), that object stops closing on its own for

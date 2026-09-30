@@ -191,6 +191,10 @@ platform, is left uncertain:
   (§13.2, *What the handler can do*).
 - The bytes after the first NUL of a string that `.inherit` or a test macro copies (§9.7), and the
   key of a collected array in the copy of ARGUMENTS that `.seen` makes (§13.2, *The test macros*).
+- Under `zerocopy`, the keys and strings made from an expanded `.emit` VALUE and whatever depends
+  on them after the macro, such as whether a later key finds their entry, and documents that
+  include a file with entries or are given an input as a file, on which libucl crashes (§12.2).
+  The project's result with `zerocopy` is the one this specification gives without it.
 - A glob pattern that ends in `/` and a symbolic link to a regular file, and a plain path that ends
   in `/` after the name of a file: this depends on the operating system (§9.4, *Globs*).
 
@@ -211,6 +215,8 @@ C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §
 `spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
 `spec-v18` answers #83 by saying which value a comment attaches to after the `}` that closes the
 first name of a braced included file (§12.5, §9.4).
+`spec-v19` answers #84 by extending the §12.2 uncertainty under `zerocopy` to what depends on the
+changed keys and strings, and to included files.
 
 The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
 cases moved there when the crate followed §9.4 in C14.
@@ -232,8 +238,13 @@ the project*.
 
 Two §13 rules have no case: a `{` after a zero-byte first input crashes libucl, and the file
 variables that an input given as a file sets would put the checkout path into the golden file.
-The undefined result for variable-expanded `.emit` text under `zerocopy` (§12.2) has no golden;
-`zerocopy_registered_macros_stable` covers its stable boundary.
+The undefined results under `zerocopy` (§12.2) have no golden, because a golden file records
+libucl's result with the case's flags, which is undefined there, while the project's expected
+result is its result without `zerocopy`: the expanded `.emit` text, what depends on it, and
+documents with included files or inputs given as files, on which libucl crashes. Their stable
+boundaries have cases: `zerocopy_registered_macros_stable`,
+`zerocopy_emit_repeated_key_in_text_error`, `zerocopy_include_empty_file`,
+`zerocopy_include_comment_only_file` and `zerocopy_chunk_input`.
 The §12.5 clarification for #81 has no golden because the replaced comment's later
 appearance is uncertain in libucl.
 The §9.4 access-failure rule for #82 has no portable golden because read access depends on
@@ -248,7 +259,7 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1665 cases in `cases/` and
+Every case in `tests/conformance/` and the section(s) that explain it: 1669 cases in `cases/` and
 `libucl/`, plus six pending `spec-v18` cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
@@ -1713,6 +1724,10 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1665 case
 | `cases/spec/12-flags/no_filevars` | §12 |
 | `cases/spec/12-flags/no_time` | §12 |
 | `cases/spec/12-flags/save_comments_no_effect_on_values` | §12 |
+| `cases/spec/12-flags/zerocopy_chunk_input` | §12, §13 |
+| `cases/spec/12-flags/zerocopy_emit_repeated_key_in_text_error` | §12, §13, §8 |
+| `cases/spec/12-flags/zerocopy_include_comment_only_file` | §12, §9 |
+| `cases/spec/12-flags/zerocopy_include_empty_file` | §12, §9 |
 | `cases/spec/12-flags/zerocopy_no_effect` | §12 |
 | `cases/spec/12-flags/zerocopy_registered_macros_stable` | §12, §13 |
 | `cases/spec/13-inputs/inputs_array_root_then_array_error` | §13 |
