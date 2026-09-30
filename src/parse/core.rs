@@ -394,7 +394,7 @@ enum Revert {
     /// objects around it, as when a bracketed container opened in it closes. Also the object of
     /// a first name with a brace of its own ([`Close::NameBrace`]) whose brace a file included in
     /// it takes over: it closes then as a section object, and counts as the value created most
-    /// recently (oracle runs).
+    /// recently (oracle runs, QUESTIONS.md #84).
     Section,
 }
 
@@ -2323,7 +2323,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         // that share and closes nothing (spec §9.4, *Nesting under a key*; oracle runs for
         // `target="array"`, `prefix` and section objects, QUESTIONS.md #39). The brace of its
         // own that §9.4 gives a first name ([`Close::NameBrace`]) is shared the same way, as the
-        // project's choice: the oracle crashes on a `}` in such a file.
+        // project's choice: the oracle crashes on a `}` in such a file (QUESTIONS.md #84).
         let inner_close = match self.top().close {
             Close::IncludedBrace(_) | Close::NameBrace => Close::IncludedBrace(Revert::Open),
             _ => Close::Eof,
@@ -2562,7 +2562,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                 // braces, so the value created most recently stays what it was (§12.5). Text
                 // parsed in place does not keep it open: §13.2 stops only its closing by a
                 // bracketed container inside it and by a `}` that removes a brace taken over
-                // (oracle runs).
+                // (oracle runs, QUESTIONS.md #84).
                 self.pos += 1;
                 self.close_container()
             }
