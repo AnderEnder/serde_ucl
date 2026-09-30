@@ -4704,3 +4704,15 @@
     pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 spec-v18 case activation. Moved the six `spec-v18`
+  cases and their golden files unchanged from `tests/conformance/pending/09-macros/` into
+  `cases/spec/09-macros/`, dropped the three fixture copies (byte-identical to the active ones) and
+  the pending README and directory, and updated the spec index (1,671 active cases, no pending),
+  its six rows, the §12.5 citations of the six cases (paths only) and
+  `tests/conformance/README.md`. A fresh `scripts/regen-golden.sh` run changed no golden file.
+  Checks: `cargo test --test conformance` (1,671 cases, the four expected failures unchanged),
+  `scripts/ci.sh`, `git diff --check`. Commit: the following
+  `test(conformance): activate spec-v18 comment cases` commit on `c14/spec18-comments`. Not
+  pushed. Attestation: the case move and documentation contain observable behavior only, with no
+  libucl code, pseudo-code, internal names or source structure.
