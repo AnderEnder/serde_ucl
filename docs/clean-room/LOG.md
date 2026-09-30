@@ -4717,3 +4717,99 @@
   `test(conformance): activate spec-v18 comment cases` commit on `c14/spec18-comments`. Not
   pushed. Attestation: the case move and documentation contain observable behavior only, with no
   libucl code, pseudo-code, internal names or source structure.
+- 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, the differential fuzzer's
+  classification of expanded `.emit` text under `zerocopy` (§12.2).
+  - Inputs consulted: the embedded current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
+    `WORKLIST.md`, `QUESTIONS.md` and the end of this log; released spec-v17 §§1.6, 4.1–4.6,
+    7.1–7.5, 8.7, 9.2, 12.2, 12.5 and 13.2 through `git show spec-v17:` only (the working tree's
+    `docs/spec/README.md` has unreleased edits and was not opened); own `fuzz/src/`,
+    `fuzz/README.md`, `tests/common/oracle.rs` and `scripts/ci.sh`; the saved black-box findings
+    `values-differ-3218009a94e2d9cb`, `values-differ-79ff7be944c9f2ba` and
+    `values-differ-0bdbfbd65e9562d3` (input, generated input, flags, directory, report); the case
+    `zerocopy_registered_macros_stable`; the oracle, built in this worktree with
+    `scripts/regen-golden.sh` (golden files unchanged) and run as a black box. No libucl source,
+    `tools/`, or other forbidden input was read.
+  - Work: the §12.2 classifier matched a list of exact source forms. It now reads documents of
+    simple lines (scalar entries, `.seen WORD`, literal and expanded `.emit KEY VALUE`, empty and
+    indented lines, an ignored macro or a null key at the end) and predicts from the source the
+    root entries, their order and value counts, and the crate's text for each value from
+    expanded text; the crate's dump must match that. Only the key of an entry the text created
+    and the strings parsed from it are rewritten, where libucl's bytes (`k`/`khex`, `v`/`hex`)
+    have the crate's length; the whole dump must then agree. The gate is exactly `zerocopy`,
+    `registered-macros` and `string-input`, with at most one `priority:N`; the root's priority is
+    removed before, as §8.7 allows. A later line with the key of an entry that expanded text
+    created is refused and stays reported (question #84). The non-UTF-8 skip now runs after the
+    excuses and not for such a document, which is ASCII: finding `79ff7be9` flapped between that
+    skip and values-differ, and a changed stable neighbour was hidden whenever the emitted bytes
+    were not UTF-8.
+  - Checks: all three findings pass `ucl-differential --check` with their flags and the
+    worktree's `cases/spec/12-flags`, 20 runs out of 20 each on the final code, as
+    `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`; the generated input of
+    `0bdbfbd6` passes too, those of `3218009a` and `79ff7be9` stay reported (#84). The new
+    compare-level and excuse-level tests failed on the previous sources and pass; all 36 fuzz
+    unit tests pass; `scripts/ci.sh` passed after every commit (704 tests at the end). Six runs
+    of `scripts/ci.sh fuzz 300` (805,895, 916,552, 945,591, 669,094, 853,080 and 772,272 inputs)
+    saved 14 findings. Seven were §12.2 forms that the reader did not yet cover
+    (`a47471eec401ab5d`, `6f825a08798d369e`, `d687f8da08ddedfd`, `bacd5dd57240abf4`,
+    `a1c143ecfe97170f`, `a0fd4d6840640735`, `86764a39ddd9e95c`); each is now excused, in the
+    commits below. Two more are §12.2 outside the reader and stay reported: `5821d5c830221170`
+    (VT inside a stable line) and `9e3f0c4257fb713e` (non-ASCII text); both agree without
+    `zerocopy`. `888455ebf35d9eaa` is #84. The other four are classified under released uncertain
+    rules that existing recognizers cover only in narrower forms: `6dc7de42c47fd96a`, a replaced
+    value's comment under `rewrite` on a later value (§12.5; with `append` the comment is on the
+    replaced value, and with a distinct text the oracle gives `["# x", "# c"]`);
+    `244706530c4e7da6`, a NUL string copied by `.ctx` from an included file (§13.2, §9.7);
+    `e04659ea272d36c7` and `28d2d688c1a509e9`, a handler result mixed with other text in an
+    include path or `.emit` VALUE (§7.7; both agree without the handler or with a registered
+    name). No fuzzer change was made for those four.
+  - Questions: #84 (a later key and the entry that expanded `.emit` text created, §12.2).
+  - Commits: `afbef56`, `81ac28c`, `0f502d0`, `c60f2ce`, `b62529a` (`fix(fuzz)`), and the
+    following `docs(clean-room)` commit with #84 and this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: clean-room implementer. Item: C14, the differential fuzzer under released
+  spec-v19 §12.2 (the answer to question #84).
+  - Inputs consulted: the embedded current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the #84
+    answer in `QUESTIONS.md`; released spec-v19 §12.2 through `git show spec-v19:` (no edits to
+    `docs/spec/` after the tag); own `fuzz/src/`, `fuzz/README.md`, `tests/common/oracle.rs`; the
+    saved black-box findings `values-differ-3218009a94e2d9cb`, `-79ff7be944c9f2ba`,
+    `-0bdbfbd65e9562d3` and `-785cf48ef4fc728b` in the main checkout's `target/`, and my copies of
+    the earlier runs' findings; the oracle as a black box. No libucl source, `tools/`, or other
+    forbidden input was read.
+  - Branch: the worktree guard refused git in `.claude/worktrees/c14-fuzz-zerocopy`, so the work
+    is on branch `c14/fuzz-zerocopy-work` in worktree `agent-ae56e5508d126285c`, based on
+    `71de4a1` (the spec-v19 release, the tip of `c14/fuzz-zerocopy`), which can be fast-forwarded
+    to it. Branch `worktree-agent-ae56e5508d126285c` stays at `cc17491`, unmerged.
+  - Carried over from `cc17491`: the log entry above, verbatim, for the provenance of what
+    follows; the idea of its §8.7 test, rewritten for the new expectation
+    (`zerocopy_under_priority_compares_the_entries_priorities`). Not carried over: the layout
+    recognizer and its tests, which spec-v19 replaces; the reordered non-UTF-8 skip, because no
+    remaining recogniser rewrites a `hex` field, so the order changes no verdict; the #84 row.
+  - Work: the oracle runs with every flag but `zerocopy` (`run::expectation_flags`), the crate
+    with all of them, and the uncertain-rule recognisers see the oracle's flags, so they apply as
+    without `zerocopy`. `check_against` holds the comparison, so unit tests use the fuzzer's own
+    flag and context construction. Reports and `--check` name the oracle's flags, and the
+    `reproduce:` line runs it without `-z`. The §12.2 recogniser (`ZEROCOPY_EMIT`, its source
+    forms and 13 tests) is removed. New tests: the helper; a real difference under `zerocopy`
+    (emitted key or value, a stable neighbour, an extra or missing entry, libucl's changed
+    bytes); the #84 shape; entry priorities under `priority:3` with the root's removed (§8.7);
+    the §12.5 recogniser with `zerocopy` added. The helper test and the last test failed with
+    `zerocopy` kept in the expectation, and pass.
+  - Checks: 19 fuzz unit tests pass; `scripts/ci.sh` passed at `3533a86` (687 tests; 17 fewer
+    fuzz tests than on the old branch). The four findings and their generated inputs, checked
+    with their flags and this worktree's `cases/spec/12-flags`, agree; so do the ten §12.2
+    findings of my earlier runs and their generated inputs, including `888455eb` (#84),
+    `5821d5c8` and `9e3f0c42`. Three runs of `scripts/ci.sh fuzz 300` (923,406, 934,482 with
+    seed 42, and 605,509 inputs) saved no finding with `zerocopy`. The third saved two of another
+    class, recorded here and not classified: `crate-rejects-0480fbc2420ab897`
+    (`.seen(😀 1,')⏎.load(k="k",t=true)t`, `registered-macros key-lowercase`; the crate reports a
+    single-quoted key, the oracle gives `seen` with empty data) and
+    `crate-rejects-986bc4bfe9f1b299` (`n {}.seen("f")⏎.include(t=true,u=true)://`,
+    `registered-macros`; the crate reports a key without a value). The four other-class findings
+    of the entry above (`6dc7de42`, `24470653`, `e04659ea`, `28d2d688`) still differ as recorded
+    there.
+  - Commits: `3533a86` (`fix(fuzz)`), and the following `docs(clean-room)` commit with this
+    entry and the one carried over. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
