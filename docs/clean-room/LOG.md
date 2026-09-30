@@ -4056,3 +4056,24 @@
   - Verification: all 27 fuzz unit tests passed; `scripts/ci.sh` completed successfully; `git diff --check a28f12a^ a28f12a` passed. The release fuzzer replay of the saved reduced finding exited 0 with `skipped: uncertain: expanded .emit text under zerocopy (§12.2)`. No sustained fuzz campaign was run for this review.
   - Commit: this LOG-only review commit on `c14-emit-vt`; no implementation edits or push.
   - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+- 2026-09-30 — Role: coordinator (oracle side). Item: C14 review and completion of PR #20.
+  - Inputs consulted: PR #20 (`a69fb31`): its commits, this log's entries of 2026-09-28 to
+    2026-09-30 and their recorded exposures, the diffs of `src/parse/`, `fuzz/src/`,
+    `docs/spec/`, the conformance cases, `tools/bench-compare/` and `scripts/bench-compare.sh`;
+    the oracle as a black box through the differential fuzzer.
+  - Review: the recorded exposures (the handoff coordinator's reading of `PLAN.md` and of a
+    session transcript, a spec-team message to that coordinator, a reviewer's view of unreleased
+    spec text) were each followed by the protocol's steps; no implementation commit follows an
+    exposure of its author.
+  - Checks on `a69fb31`: `scripts/ci.sh` passed (695 tests); `scripts/ci.sh fuzz 300` (820,543
+    inputs) saved three differences, which the crate gives identically on `main`:
+    `values-differ-3218009a94e2d9cb` and `values-differ-79ff7be944c9f2ba` are expanded `.emit`
+    text under `zerocopy`, the undefined result of released §12.2, which the fuzzer's
+    classifier misses next to these neighbours; `values-differ-b20d95e099eb5fa2` is question #83.
+  - Measurement: the comparison's two builds differed by up to 9% on large documents from the
+    stack alignment that the environment's size sets; one extra environment variable changed
+    `config(1000)` by 12% in the same binary. The tool now times on a thread of its own, and a
+    stale baseline build is no longer reused (`522a8e2`). The README's figures come from a run
+    of that tool (load 3.74 to 4.44).
+  - Commits: `522a8e2`, `9c8a486`, `2757ae7`, and the following commit with question #83, two
+    rows of `docs/COMPATIBILITY.md` and this entry.
