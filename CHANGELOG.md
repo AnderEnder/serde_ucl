@@ -2,6 +2,34 @@
 
 All notable changes to this crate are recorded here.
 
+## Unreleased
+
+### Comments after the first name of a braced included file (spec-v18)
+
+Clean-room work item C14. When an included file's leading `{` takes over the brace of the root,
+of an object written with braces, or of the object that `key` or `prefix` creates, and the
+file's first key starts a section path, the first name's object has a brace of its own
+(spec §9.4). Under `SAVE_COMMENTS`, the `}` that closes that object now closes it as the
+object's own bracket, so the value created most recently stays what it was (spec §12.5).
+
+- With the file `{ x "y{" z⏎}⏎}`, a comment after the include, or between the file's two `}`,
+  goes after the string `z`; 0.6.0 attached it to the object `x`. The same holds for an include
+  inside `o { … }` and under `key` or `prefix`. With the file `{ x "y{" z⏎k = 2⏎}⏎}`, the value
+  of `k` gets it.
+- Unchanged: when a container written with brackets closes the name's object (the file
+  `{ x "y{" z⏎a { b = 1 }⏎}`), `x` gets the comment, and when the brace taken over is a section
+  object's, the section object gets it.
+- The value created most recently also decides what a macro directly after a name, followed by
+  comments to the end of its unit, reopens (spec §9.1). After such a file that is `z` now, not
+  `x`; a value that is not an object is left alone, where the spec leaves the result undefined.
+- Text parsed in place by a registered macro inside that object no longer keeps it open against
+  its own `}` (spec §13.2 applies to braces taken over, not to this one), as in libucl:
+  - The file `{ x "y{" z⏎.emit ""⏎}⏎}` is now accepted, instead of an error at its second `}`.
+  - The file `{ x "y{" z⏎.emit ""⏎a { }⏎}⏎}` is accepted too, with `a` in `x`.
+  - With the file `{ x "y{" z⏎.emit ""⏎a { }⏎}`, its `}` now closes `x`, so the including
+    document must close the brace the file took over, as for `{ x "y{" z⏎}`:
+    `.include "…"⏎q = 1` is now an error, where 0.6.0 put `q` into `x`.
+
 ## 0.6.0 - 2026-09-30
 
 Optional includes of files that do not exist and floats parse faster, and includes follow

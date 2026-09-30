@@ -211,12 +211,12 @@ Where they attach:
   `"ca": ["# c"]`, not the object `x`, and likewise with `o { .include "…"⏎# c`,
   `.include(key="k") "…"⏎# c` and `.include(prefix=true) "…"⏎# c`; a comment in the file between
   its two `}` goes to `z` as well, and with the file `{ x "y{" z⏎k = 2⏎}⏎}` the value of `k` gets it
-  (`pending/09-macros/comments_include_first_name_brace_keeps_most_recent`,
-  `pending/09-macros/comments_include_first_name_brace_in_braced_object`,
-  `pending/09-macros/comments_include_first_name_brace_under_key`,
-  `pending/09-macros/comments_include_first_name_brace_under_prefix`,
-  `pending/09-macros/comments_include_first_name_brace_comment_in_file`,
-  `pending/09-macros/comments_include_first_name_brace_after_entry`). When a container written
+  (`cases/spec/09-macros/comments_include_first_name_brace_keeps_most_recent`,
+  `cases/spec/09-macros/comments_include_first_name_brace_in_braced_object`,
+  `cases/spec/09-macros/comments_include_first_name_brace_under_key`,
+  `cases/spec/09-macros/comments_include_first_name_brace_under_prefix`,
+  `cases/spec/09-macros/comments_include_first_name_brace_comment_in_file`,
+  `cases/spec/09-macros/comments_include_first_name_brace_after_entry`). When a container written
   with brackets that was opened in that object closes it instead (§9.4), it closes like the objects
   a section path leaves open, and it counts as the value created most recently, as above: with the
   file `{ x "y{" z⏎a { b = 1 }⏎}`, `x` gets it

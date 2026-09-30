@@ -4509,3 +4509,211 @@
     as `spec-v19`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
+
+- 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, released spec-v18
+  (question #83), on `c14/spec18-comments`.
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `WORKLIST.md` (C3 decisions, C14),
+    `QUESTIONS.md` (#83 and the table's form), this log; released `spec-v18` §9.1 and §9.4
+    (`09-macros.md`), §12.5 (`12-flags.md`), §13.2 (`13-inputs-and-macros.md`) and the
+    `spec-v17..spec-v18` diff of `docs/spec/` (no edits after the tag); the six pending cases in
+    `tests/conformance/pending/09-macros/` (inputs, flags, golden files, fixtures) and the list of
+    them in `tests/conformance/pending/README.md`; the inputs and golden files of the related
+    active §9.4 cases; the crate's `src/parse/`, `tests/conformance.rs`, `fuzz/README.md`; the
+    saved finding `values-differ-b20d95e099eb5fa2` (input, flags, directory, report), read from
+    `/Users/andrii/work2/ucl-rust-lexer/target/fuzz-differential/findings/`, the path the
+    coordinator gave, in the main checkout's `target/`; the oracle as a black box, built in this
+    worktree by `scripts/regen-golden.sh` (every golden file unchanged) and run through
+    `ucl-differential --check` on probe files in `target/c14-spec18/probe/`.
+  - Work: the object of a braced included file's first name, when the file's `{` took over the
+    brace of the root, of an object written with braces, or of a `key`/`prefix` object, now has
+    a close kind of its own (`src/parse/core.rs`): its `}` closes it as the object's own bracket,
+    so the value created most recently stays what it was (§12.5), for saved comments and for the
+    §9.1 reopen alike; a bracketed container that closes it, and a section object whose brace was
+    taken over, still make the outermost object closed the most recent value. Where the spec does
+    not say, the former behaviour is kept and checked against the oracle: a file included in that
+    object whose `{` takes its brace over closes it as a section object. Text parsed in place no
+    longer keeps the object open against its own `}` (§13.2 covers braces taken over; oracle runs
+    agree): the crate rejected two of these forms before, and accepted a third that is now an
+    error, as in libucl (the file `{ x "y{" z⏎.emit ""⏎a { }⏎}`, then `q = 1`; corrected after
+    the review of `2fa6b19`). Unit tests for the spec's examples and those probes
+    (`src/parse/include.rs`); `CHANGELOG.md` under `## Unreleased`.
+  - Checks: in an rsync copy of the worktree with the six pending cases moved into
+    `cases/spec/09-macros/`, `cargo test --test conformance` passed: 1,671 cases, 1,667 pass and
+    the 4 expected failures, emitters and readback clean (before the change, exactly the six
+    failed). In the worktree `cargo test --test conformance` and `scripts/ci.sh` passed.
+    `ucl-differential --check` of the finding (`dump-comments`, `string-input`,
+    `tests/conformance/cases/spec/09-macros`) prints `agree`. The new unit tests fail on the
+    former `core.rs`. `scripts/ci.sh fuzz 180` (seed 1790780405951109000, 557,483 inputs) saved
+    no difference.
+  - Question: #85 (the first name's brace taken over by a nested file, text in place in its
+    object, and a `}` in a file nested under a key there, which crashes the oracle). Filed first
+    as #84; renumbered to #85 at the coordinator's request, because another implementer filed #84
+    in parallel on another branch. The commit messages of `ce615d7` and `4e3299e` still say 84.
+  - Commits (hashes after the coordinator's rebase onto `main`):
+    `fix(parse): keep the most recent value at a first name's own brace` (`480ae4c`),
+    `docs(clean-room): log the spec-v18 comment work and ask question 84` (`ce615d7`, the
+    question and this entry), `docs(parse): cite question 84 for the first-name brace choices`
+    (`4e3299e`, comments only), `docs(clean-room): list the spec-v18 comment commits in the log`
+    (`3bda2ec`), and `docs(clean-room): renumber the first-name brace question to 85`
+    (`f985edb`), which changes the question's row, the three code comments that cite it and this
+    entry. The finding also replays as `agree` from its own directory
+    (`ucl-differential --replay`). Not pushed.
+  - For the renumbering, the only other worktree content seen was the branch name, last
+    commit subjects and `git status` file list of the worktree `c14-spec-q84`, which was
+    announced as this session's working directory; no file there was opened.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: fresh clean-room implementation reviewer. Item: C14 follow-up, released
+  spec-v18 (question #83); reviewed `git diff origin/main...HEAD` on `c14/spec18-comments`,
+  commits `480ae4c`, `ce615d7`, `4e3299e`, `3bda2ec` and `f985edb`.
+  - Inputs consulted: `CLAUDE.md` (current), `docs/clean-room/PROTOCOL.md`, `WORKLIST.md`,
+    `QUESTIONS.md` (#83, #85), this log (the implementer's entry, earlier reviewer entries for
+    the form, entry headers); released `spec-v18` §3.4, §9.1, §9.2 (*VALUE*), §9.4, §12.5 and
+    §13.2 and the `spec-v17..spec-v18` diff of `docs/spec/` (no edits after the tag); the branch
+    diff, the crate's `src/parse/core.rs`, `src/parse/include.rs` (tests) and `src/parse/mod.rs`
+    (API), and `origin/main`'s `src/parse/core.rs` through `git show` for the old-code check;
+    `tests/conformance/pending/` (README, the six cases, fixtures); `fuzz/README.md`,
+    `scripts/ci.sh`; the oracle as a black box through `ucl-differential --check` on probe files
+    in `target/c14-review/probe/`; the two findings my fuzz run saved (input, flags, report). The
+    harness's start-up git snapshot named branch `c14/spec-q84` with `main`'s commit subjects;
+    nothing in that worktree was opened. `tools/`, copied with the worktree, was not opened.
+  - Review result: not approved yet. The parser change follows §9.4 and §12.5, including the
+    cases that stay unchanged; no behaviour defect found. Findings:
+    1. The implementer's LOG entry cites commits that are not on the branch (earlier hashes of
+       the same subjects, before a rebase): `80bd69c`, `4cd1846`, `5d53dff`, `fec3c20` at
+       LOG.md:4364-4369 should be `480ae4c`, `ce615d7`, `4e3299e`, `3bda2ec`.
+    2. `CHANGELOG.md:25-28` names one form only. It omits that `{ x "y{" z⏎.emit ""⏎a { }⏎}`,
+       then `q = 1` in the includer, was accepted by 0.6.0 (`x: { "y{", a, q }`) and is now an
+       error, as in libucl, and that `{ x "y{" z⏎.emit ""⏎a { }⏎}⏎}` is now accepted with `a` in
+       `x`. LOG.md:4351 ("the crate rejected these forms before") is wrong for the first.
+    3. The #85 (3) choice is untested: without `Close::NameBrace` in the `inner_close` arm
+       (`src/parse/core.rs:2328`) every unit and conformance test passes. Add a unit test for
+       `{ x "y{" z⏎.include(key="k") "close_brace.inc"⏎}⏎}`. Released §9.4 (*Nesting under a
+       key*) already leaves "the object holds only its own bracket" undefined, and §12.5 calls
+       this brace the object's own bracket; the crate rejects that sibling case
+       (`x { .include(key="k") … }`). The comment at core.rs:2321-2326 and #85 (3) should cite
+       that sentence and say why this choice differs (0.6.0 behaviour kept).
+    4. The §9.1 reopen change that `CHANGELOG.md:22-24` names has no test. Oracle runs: file
+       `"s".include(key="q") {e.inc} # c`, `e.inc` = `{ x "y{" z⏎.emit ""⏎k { }⏎}⏎}`, then `m = 1`
+       puts `m` into `s.q.x.k` in both parsers; with `twice.inc` instead the oracle crashes and
+       the crate leaves `z` alone (`Uncertain::ReopenedNotObject`). A unit test for each.
+    5. The implementer's entry lists the saved finding `values-differ-b20d95e099eb5fa2` as an
+       input and replays it "from its own directory", but no such finding is under this
+       worktree's `target/fuzz-differential/`. The entry should say where it was read from.
+    6. Nits: "with the section objects around it" (core.rs:376) cannot happen, since the
+       parent is always an `IncludedBrace(Revert::Open)` object; the docs of `Frame::stays_open`
+       (core.rs:641-645) and `keep_section_open` (core.rs:1163-1164) say "section object" but now
+       cover this object too; the `_` arm at core.rs:2981 could name
+       `IncludedBrace(Revert::Section)`.
+  - Checks: `scripts/ci.sh` in the worktree passed (699 tests; tree clean after). In an rsync
+    copy under `target/c14-review/` (without `target/` and `.git`), with the six pending cases
+    moved into `cases/spec/09-macros/` (fixtures identical, dropped), `cargo test --test
+    conformance`: 1,671 cases, 1,667 pass, 4 expected failures, emitters and readback clean; with
+    `origin/main`'s `core.rs`, exactly those six fail and both new unit tests fail. Mutations of
+    `NameBrace` in `has_bracket`, `closes_with_inner` and `run_included` are caught; the one in
+    finding 3 is not. 85 oracle probes: 79 agree, 6 skipped as oracle crashes (#85 (3), the
+    non-object reopen); the #83 finding input agrees. `scripts/ci.sh fuzz 180` (seed
+    1790781652173464000, 479,776 inputs) exited 1 with two findings, both reproduced with
+    `origin/main`'s `core.rs`, so older than this change and outside this review:
+    `values-differ-785cf48ef4fc728b`, `.emit l $ABI⏎.e` under `zerocopy`, is skipped as §12.2
+    uncertain without the trailing `.e` (a gap of `fuzz/src/uncertain.rs`);
+    `crate-rejects-6097f6b0b5dffecd`, a `path` list whose first entry is empty (§9.4), needs
+    a question or a fix of its own.
+  - Commits: this LOG-only review commit on `c14/spec18-comments`. No change to `src/`; not
+    pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, released spec-v18 (question
+  #83), the review findings of `2fa6b19` on `c14/spec18-comments`.
+  - Inputs consulted: the coordinator's message with findings 1 to 6, the reviewer's entry
+    (`2fa6b19`); released `spec-v18` §9.4, *Nesting under a key* (no edits after the tag); my
+    entry above, `CHANGELOG.md`, `QUESTIONS.md` #85; the crate's `src/parse/core.rs` and
+    `src/parse/include.rs`, and the pre-fix `core.rs` through `git show 480ae4c^:` for a
+    mutation check; the oracle as a black box through `ucl-differential --check` on probe files
+    in `target/c14-spec18/probe/`.
+  - Work: finding 1, the hashes in my entry are those after the rebase; finding 2, the changelog
+    names the form 0.6.0 accepted that is now an error, and the form now accepted with `a` in
+    `x`, and my entry no longer says every form was rejected before; finding 3, a unit test for
+    the key object's share of the first name's brace, and the comment and #85 (3) cite the §9.4
+    sentence that leaves an object holding only its own bracket undefined; finding 4, unit tests
+    for the §9.1 reopen of `k` (both parsers agree) and of `z`, which is left alone with
+    `Uncertain::ReopenedNotObject` (the oracle crashes); finding 5, my entry says the finding
+    was read from the main checkout's `target/fuzz-differential/findings/`; nits: the docs of
+    `Close::NameBrace`, `Frame::stays_open` and `keep_section_open`, and the section arm named,
+    with the impossible case marked unreachable.
+  - Checks: the new key-share test fails with `Close::NameBrace` taken out of the key object's
+    arm; the new reopen test and the two earlier tests fail on the pre-fix `core.rs`.
+    `scripts/ci.sh` passed (703 tests). In an rsync copy of the worktree with the six pending
+    cases moved into `cases/spec/09-macros/`, `cargo test --test conformance` passed: 1,671
+    cases, 1,667 pass and the 4 expected failures, emitters and readback clean. The saved finding
+    replays as `agree`; the probes of both reopen cases, the nested takeover and the section
+    object agree or are oracle crashes as before.
+  - Commits: `test(parse): cover the first-name brace under a key and the name-run reopen`
+    (`07e13fc`), `refactor(parse): name the section-object arm of the first-name brace`
+    (`db7a4ef`), `docs: correct the spec-v18 changelog, question 85 and log entry` (`ee97806`),
+    and the following `docs(clean-room)` commit with this entry and two rewrapped lines of the
+    entry above. Not pushed. `crate-rejects-6097f6b0b5dffecd` left alone, as asked.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: fresh clean-room implementation reviewer (re-review). Item: C14 follow-up,
+  released spec-v18 (question #83); reviewed `git diff 2fa6b19 HEAD` on `c14/spec18-comments`,
+  commits `07e13fc`, `db7a4ef`, `ee97806` and `02456be`.
+  - Inputs consulted: the coordinator's request; the `2fa6b19..HEAD` diff (`src/parse/core.rs`,
+    `src/parse/include.rs`, `CHANGELOG.md`, `QUESTIONS.md` #85, the implementer's two LOG
+    entries); released `spec-v18` §9.4 and §13.2 (searched for nested braces taken over);
+    `origin/main`'s `core.rs` through `git show`; the oracle as a black box through
+    `ucl-differential --check` on probe files in `target/c14-review/probe/`; the two findings of
+    my fuzz run. The harness moved the session's working directory to the main checkout; every
+    command named this worktree, and nothing in the main checkout was opened.
+  - Review result: approved. Findings 1 to 6 of `2fa6b19` are resolved: hashes corrected;
+    CHANGELOG and the implementer's entry name the three `.emit` forms; a unit test for the #85
+    (3) share, with the comment and #85 citing §9.4's sentence; a unit test for both §9.1
+    reopens; the finding's source disclosed (the main checkout's `target/`, a path the
+    coordinator gave; not verified, as I work in this worktree only); the nits done. My entry of
+    `2fa6b19` is unchanged.
+  - The `unreachable!` in `names()` (core.rs:2992) cannot be reached: `object_step` sets
+    `section_shares` only while the top frame is `IncludedBrace(_)`, nothing between that and the
+    first name pushes a frame or changes its close, and nested units start with the flag false.
+    60 new probes (a nested `.include`, `.emit` or `key` include before the first key, at the top
+    level, in `o { }`, after a section object and under `key`), conformance and the fuzz run show
+    no panic. I prefer the panic: an error needs a public `ErrorKind` that no input produces, a
+    no-op would hide a broken invariant, and it matches the file's `expect`s. Caveat: the oracle
+    gives the first name a brace in exactly the states the guard excludes (below); fixing those
+    makes the arm reachable.
+  - Differences found while probing, the same with `origin/main`'s `core.rs`, not blocking; they
+    need a question (implementer or coordinator):
+    - The file `{ .include "braced.inc"⏎x "y{" z⏎}⏎}` (`{ a = 1 }`), at the top level or after
+      `s "t{" u`: libucl accepts it and `z` gets `# c`; the crate stops at the first `}`. Also
+      `.include(key="k")` of `{ .include "close_brace.inc"⏎x "y{" z⏎}`, and a nested `p "q{" r`
+      (by `.include` or `.emit {p "q{" r}`) before `x`. §9.4's "after comments and macros" gives
+      `x` a brace; whether a nested file's `}` removes the outer brace taken over is not stated.
+    - `s "t{" u⏎.include "…"⏎# c` with the file `{ .emit ""⏎x "y{" z⏎}⏎}` (`registered-macros`):
+      values agree, but libucl gives `z` the comment and the crate `x` (§12.5 with §13.2, the
+      section object kept open); the same with `.emit {{ a = 1}` or `.emit {{}`.
+  - Checks: `scripts/ci.sh` passed (703 tests; tree clean after). The copy, refreshed to HEAD
+    with the six pending cases moved: 1,671 cases, 1,667 pass, 4 expected failures, emitters and
+    readback clean. The finding-3 mutation fails `first_name_brace_shared_with_a_key_object`
+    (which passes on the old core, as it pins 0.6.0's result); on the old core the other three
+    tests of the branch fail. `scripts/ci.sh fuzz 180` (seed 1790782996186240000, 572,737 inputs)
+    exited 1 with `values-differ-97305b1d8e1497fe` (§12.2, `.emit l $ABI` under `zerocopy` with
+    text after it) and `crate-rejects-f8376e9b1c0a7067` (a `path` list with an empty first
+    entry), the classes of the first run, both reproduced with the old core; no `crate-panics`.
+  - Commits: this LOG-only re-review commit on `c14/spec18-comments`. No change to `src/`; not
+    pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 spec-v18 case activation. Moved the six `spec-v18`
+  cases and their golden files unchanged from `tests/conformance/pending/09-macros/` into
+  `cases/spec/09-macros/`, dropped the three fixture copies (byte-identical to the active ones) and
+  the pending README and directory, and updated the spec index (1,671 active cases, no pending),
+  its six rows, the §12.5 citations of the six cases (paths only) and
+  `tests/conformance/README.md`. A fresh `scripts/regen-golden.sh` run changed no golden file.
+  Checks: `cargo test --test conformance` (1,671 cases, the four expected failures unchanged),
+  `scripts/ci.sh`, `git diff --check`. Commit: the following
+  `test(conformance): activate spec-v18 comment cases` commit on `c14/spec18-comments`. Not
+  pushed. Attestation: the case move and documentation contain observable behavior only, with no
+  libucl code, pseudo-code, internal names or source structure.
