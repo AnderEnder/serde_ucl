@@ -4558,3 +4558,64 @@
     announced as this session's working directory; no file there was opened.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: fresh clean-room implementation reviewer. Item: C14 follow-up, released
+  spec-v18 (question #83); reviewed `git diff origin/main...HEAD` on `c14/spec18-comments`,
+  commits `480ae4c`, `ce615d7`, `4e3299e`, `3bda2ec` and `f985edb`.
+  - Inputs consulted: `CLAUDE.md` (current), `docs/clean-room/PROTOCOL.md`, `WORKLIST.md`,
+    `QUESTIONS.md` (#83, #85), this log (the implementer's entry, earlier reviewer entries for
+    the form, entry headers); released `spec-v18` §3.4, §9.1, §9.2 (*VALUE*), §9.4, §12.5 and
+    §13.2 and the `spec-v17..spec-v18` diff of `docs/spec/` (no edits after the tag); the branch
+    diff, the crate's `src/parse/core.rs`, `src/parse/include.rs` (tests) and `src/parse/mod.rs`
+    (API), and `origin/main`'s `src/parse/core.rs` through `git show` for the old-code check;
+    `tests/conformance/pending/` (README, the six cases, fixtures); `fuzz/README.md`,
+    `scripts/ci.sh`; the oracle as a black box through `ucl-differential --check` on probe files
+    in `target/c14-review/probe/`; the two findings my fuzz run saved (input, flags, report). The
+    harness's start-up git snapshot named branch `c14/spec-q84` with `main`'s commit subjects;
+    nothing in that worktree was opened. `tools/`, copied with the worktree, was not opened.
+  - Review result: not approved yet. The parser change follows §9.4 and §12.5, including the
+    cases that stay unchanged; no behaviour defect found. Findings:
+    1. The implementer's LOG entry cites commits that are not on the branch (earlier hashes of
+       the same subjects, before a rebase): `80bd69c`, `4cd1846`, `5d53dff`, `fec3c20` at
+       LOG.md:4364-4369 should be `480ae4c`, `ce615d7`, `4e3299e`, `3bda2ec`.
+    2. `CHANGELOG.md:25-28` names one form only. It omits that `{ x "y{" z⏎.emit ""⏎a { }⏎}`,
+       then `q = 1` in the includer, was accepted by 0.6.0 (`x: { "y{", a, q }`) and is now an
+       error, as in libucl, and that `{ x "y{" z⏎.emit ""⏎a { }⏎}⏎}` is now accepted with `a` in
+       `x`. LOG.md:4351 ("the crate rejected these forms before") is wrong for the first.
+    3. The #85 (3) choice is untested: without `Close::NameBrace` in the `inner_close` arm
+       (`src/parse/core.rs:2328`) every unit and conformance test passes. Add a unit test for
+       `{ x "y{" z⏎.include(key="k") "close_brace.inc"⏎}⏎}`. Released §9.4 (*Nesting under a
+       key*) already leaves "the object holds only its own bracket" undefined, and §12.5 calls
+       this brace the object's own bracket; the crate rejects that sibling case
+       (`x { .include(key="k") … }`). The comment at core.rs:2321-2326 and #85 (3) should cite
+       that sentence and say why this choice differs (0.6.0 behaviour kept).
+    4. The §9.1 reopen change that `CHANGELOG.md:22-24` names has no test. Oracle runs: file
+       `"s".include(key="q") {e.inc} # c`, `e.inc` = `{ x "y{" z⏎.emit ""⏎k { }⏎}⏎}`, then `m = 1`
+       puts `m` into `s.q.x.k` in both parsers; with `twice.inc` instead the oracle crashes and
+       the crate leaves `z` alone (`Uncertain::ReopenedNotObject`). A unit test for each.
+    5. The implementer's entry lists the saved finding `values-differ-b20d95e099eb5fa2` as an
+       input and replays it "from its own directory", but no such finding is under this
+       worktree's `target/fuzz-differential/`. The entry should say where it was read from.
+    6. Nits: "with the section objects around it" (core.rs:376) cannot happen, since the
+       parent is always an `IncludedBrace(Revert::Open)` object; the docs of `Frame::stays_open`
+       (core.rs:641-645) and `keep_section_open` (core.rs:1163-1164) say "section object" but now
+       cover this object too; the `_` arm at core.rs:2981 could name
+       `IncludedBrace(Revert::Section)`.
+  - Checks: `scripts/ci.sh` in the worktree passed (699 tests; tree clean after). In an rsync
+    copy under `target/c14-review/` (without `target/` and `.git`), with the six pending cases
+    moved into `cases/spec/09-macros/` (fixtures identical, dropped), `cargo test --test
+    conformance`: 1,671 cases, 1,667 pass, 4 expected failures, emitters and readback clean; with
+    `origin/main`'s `core.rs`, exactly those six fail and both new unit tests fail. Mutations of
+    `NameBrace` in `has_bracket`, `closes_with_inner` and `run_included` are caught; the one in
+    finding 3 is not. 85 oracle probes: 79 agree, 6 skipped as oracle crashes (#85 (3), the
+    non-object reopen); the #83 finding input agrees. `scripts/ci.sh fuzz 180` (seed
+    1790781652173464000, 479,776 inputs) exited 1 with two findings, both reproduced with
+    `origin/main`'s `core.rs`, so older than this change and outside this review:
+    `values-differ-785cf48ef4fc728b`, `.emit l $ABI⏎.e` under `zerocopy`, is skipped as §12.2
+    uncertain without the trailing `.e` (a gap of `fuzz/src/uncertain.rs`);
+    `crate-rejects-6097f6b0b5dffecd`, a `path` list whose first entry is empty (§9.4), needs
+    a question or a fix of its own.
+  - Commits: this LOG-only review commit on `c14/spec18-comments`. No change to `src/`; not
+    pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
