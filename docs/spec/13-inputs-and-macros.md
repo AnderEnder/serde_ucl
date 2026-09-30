@@ -346,7 +346,9 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
     `macro_registered_text_braced_after_name_in_braced_root_error`).
   - A later included file whose `{` takes over the brace does not close it either:
     `t "{"1⏎.emit ""⏎.include "braced.inc"⏎c 3` puts `c` into `t`
-    (`macro_registered_text_then_braced_file_keeps_section_open`).
+    (`macro_registered_text_then_braced_file_keeps_section_open`). When the first key of such a
+    file is the first name of a section path, that name's `}` closes only the name's object
+    (§9.4, *Quirk*, the first name of a braced file).
   - An innermost object written with braces, or the root, is not affected, and neither is a
     handler that only adds entries (`macro_registered_text_in_braced_object_no_effect`,
     `macro_registered_entries_keep_section_closing`).

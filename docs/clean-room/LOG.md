@@ -4927,7 +4927,7 @@
     pending READMEs. `docs/COMPATIBILITY.md` lists quirks the crate reproduces, so its first-miss
     row is left for when the crate follows the draft.
   - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
-  - Commit: the following `docs(spec): draft C14 first-miss load rule` commit on `c14/spec-q84`.
+  - Commit: the following `docs(spec): draft C14 first-miss load rule` commit on `c14/spec-q86`.
     Not tagged or pushed; independent review pending.
   - Attestation: the draft spec, question and answer, cases and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
@@ -4976,3 +4976,75 @@
   - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #86, spec-v20 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`1f74cd0`), the draft `e16b977`, and pinned-oracle runs of the reviewer's
+    orders and of the new cases.
+  - Finding: §9.4 and the #86 answer now say that a skip covers every first-directory miss before
+    it and none after it, so a later miss needs a later skip of its own; a miss, skip, miss with
+    no second skip is still an error. New cases: pending
+    `include_path_first_miss_load_try_after_each_miss_accepts`,
+    `include_path_two_first_misses_then_load_try_accepts` and
+    `include_path_first_miss_url_then_load_try_accepts` (one skip of each kind), and active
+    `include_path_first_miss_url_try_after_each_miss_accepts` and
+    `include_path_two_first_misses_then_url_try_accepts`; each gave `pa: ⟨int 1 | int 1⟩` in five
+    of five oracle runs.
+  - Non-blocking notes taken: the file-and-text sentence cites the new pending
+    `include_path_first_miss_then_load_try_accepts_later_file_input`; the active boundary
+    `include_path_first_miss_then_load_try_empty_file_error` pins that a `.load(try=true)` of an
+    empty file, which reads its file and inserts nothing, does not count, and the §9.4 wording
+    says "reads nothing" for the skip; the branch named in the draft entry is corrected to
+    `c14/spec-q86`, where `e16b977` now is.
+  - Commit: the following commit on `c14/spec-q86`, together with the entry below. Not tagged or
+    pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: spec team (classification and draft). Item: C14 questions #87 and #88,
+  found by the implementation reviewer of the spec-v18 fix, spec-v20 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v19
+    §§3.4, 9.4, 12.5 and 13.2, the reviewer's descriptions of both differences, the pinned libucl
+    source, and the pinned oracle and the differential checker as black boxes.
+  - #87 classification: not determined by the released spec. §9.4 counts the first key "after
+    comments and macros", which the crate does not follow when a nested file or text reads keys
+    first, but it says nothing on a nested file's `}` that removes a brace an including file had
+    taken over; read literally, the including file's own `}` then has nothing to close, and the
+    oracle instead accepts. Oracle controls, five identical runs each: a nested braced file,
+    `close_brace.inc`, text `{ a = 1 }` parsed in place, or a nested file that leaves a path open,
+    before the first key, all leave the brace taken over again for the including file, and its
+    first key, when a first name, gets its brace; under `key="k"` the same in `k`; after a key of
+    the file's own, a nested `}` removes the brace for good (an error), and a nested file with a
+    second `}` of its own is an error. Drafted *Quirk: macros before the first key* in §9.4 and
+    the matching §12.5 sentence, and added #87.
+  - #88 classification: not determined either. The released §9.4 says the first name gets no
+    brace in a section object and the file's first `}` closes the section object with it; with
+    §13.2's quirk that the section object no longer closes, that reading leaves the file's second
+    `}` with nothing to close, while both parsers accept, and it gives the comment to `x`, while
+    the oracle gives it to `z`. The oracle's results for all cases fit one rule: the first name
+    gets its brace in a section object too, and its `}` closes the section object as a bracketed
+    container opened in it does, unless §13.2 has made the section object stop closing, when it
+    closes only the name's object. The same held with the `.emit ""` before the `.include`.
+    Rewrote the section-object sentences of §9.4 and §12.5 to that rule, which keeps every
+    earlier result, added a §13.2 cross-reference, and added #88.
+  - Cases: pending (the crate fails them), with copies of `files/v4/braced.inc`,
+    `close_brace.inc`, `left_open.inc` and the `files/v20/` fixtures they use:
+    `include_braced_file_nested_braced_then_entry`,
+    `include_braced_file_nested_braced_before_first_name`,
+    `include_braced_file_nested_close_brace_before_first_name`,
+    `include_key_nested_close_brace_before_first_name`,
+    `include_braced_file_nested_text_before_first_name`,
+    `include_braced_file_nested_path_before_first_name`,
+    `comments_include_nested_braced_before_first_name`,
+    `comments_include_nested_text_before_first_name` (#87) and
+    `comments_include_first_name_in_section_object_after_text` (#88); active (the crate passes
+    them): `include_braced_file_entry_then_nested_braced_error` (#87),
+    `include_braced_file_first_name_in_section_object_after_text` and
+    `include_braced_file_first_name_in_section_object_after_text_unclosed_error` (#88). Golden
+    files only from `scripts/regen-golden.sh`, which changed no existing golden file. The index
+    counts 1,679 active cases plus six pending `spec-v18` and fifteen pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): draft C14 nested takeover and first-name rules` commit on
+    `c14/spec-q86`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, questions and answers, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
