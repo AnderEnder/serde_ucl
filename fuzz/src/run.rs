@@ -27,6 +27,13 @@ pub fn expectation_flags(flags: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The options the oracle runs with for an input with `flags`: those of the
+/// [`expectation_flags`]. Running it ([`check`]) and telling how to run it again (the fuzzer's
+/// reports) both use this.
+pub fn expectation_options(flags: &[String]) -> Result<Vec<String>, String> {
+    oracle_options(&expectation_flags(flags))
+}
+
 /// The oracle's options for the entries of a `.flags` file, mapped as `scripts/regen-golden.sh`
 /// maps them.
 pub fn oracle_options(flags: &[String]) -> Result<Vec<String>, String> {
@@ -358,9 +365,9 @@ pub struct Checked {
 }
 
 /// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both: the
-/// oracle with the [`expectation_flags`], the crate with `flags`.
+/// oracle with the [`expectation_options`], the crate with `flags`.
 pub fn check(target: &Target<'_>, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
-    let options = oracle_options(&expectation_flags(flags)).expect("the fuzzer's flags are known");
+    let options = expectation_options(flags).expect("the fuzzer's flags are known");
     fs::write(target.file, bytes).expect("the work file can be written");
     let oracle = run_oracle(target.oracle, &options, target.file, dir, target.timeout);
     check_against(oracle, bytes, flags, dir)
