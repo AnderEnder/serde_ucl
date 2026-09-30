@@ -4202,3 +4202,35 @@
   - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #83, spec-v18 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`d132c38`), the draft `b8b3d4b`, released §§9.4 and 12.5, the pinned libucl
+    source, and pinned-oracle and differential-checker runs of the reviewer's probes and of
+    further controls.
+  - Finding 1: reproduced every probe, three identical oracle runs each. The first name gets a
+    brace of its own when the brace taken over is the root's, a braced object's, or that of the
+    object `key` or `prefix` creates (also with `target="array"`, and under a section object);
+    it gets none when the brace taken over is a section object's, whether left open by a path or
+    the object of a name followed by the macro, and then the released section-object rule of §9.4
+    and the outermost rule of §12.5 give the results, which the crate already produces. Limited
+    the released first-name sentence of §9.4, the draft §9.4 boundary and the draft §12.5 rule to
+    those braces; added for a section object a §9.4 sentence with an error case and a §12.5
+    sentence with a comment case, and pending cases for `o { … }` and `key="k"`. Rewrote #83's
+    answer to match.
+  - Finding 2 and the observation: the coverage count now reads 1665 active cases plus five
+    pending cases of the #83 draft, and the table has the missing row for
+    `cases/spec/12-flags/zerocopy_registered_macros_stable` (1,665 active rows). Took the
+    suggested "with a file `…`, `.include …` → …" wording.
+  - Cases: `include_braced_file_first_name_in_section_object_error` and
+    `comments_include_first_name_in_section_object` in `cases/spec/09-macros/`, which the crate
+    passes; `comments_include_first_name_brace_in_braced_object` and
+    `comments_include_first_name_brace_under_key` under `pending/09-macros/`, which it fails like
+    the other three. Golden files only from `scripts/regen-golden.sh`, which changed no existing
+    golden file.
+  - Checks: `cargo test --test conformance` passed all three tests (1,665 cases, the four expected
+    failures unchanged); `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): limit the C14 first-name brace rule` commit on
+    `c14/followups`. Not tagged or pushed; independent re-review pending.
+  - Attestation: the draft spec, question answer, cases and this log contain observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.

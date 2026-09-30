@@ -162,20 +162,29 @@ Where they attach:
   path left open (§3.4): `x "y{" z⏎a { b = 1 }⏎# c` → `x` gets `"ca": ["# c"]`. At the end of input
   they close without making a difference: `x "y{" z⏎# c` → the value `z` gets it
   (`comments_left_open_sections_closed_by_bracket`, `comments_left_open_sections_at_end`).
-- The object that §9.4 gives the first name of an included file's first key, after the file's
-  leading `{` has taken over a brace, has a brace of its own. The `}` that closes it is that
+- When an included file's leading `{` has taken over the brace of the root, of an object written
+  with braces, or of the object that `key` or `prefix` creates for the file, §9.4 gives the first
+  name of the file's first key a brace of its own. The `}` that closes that name's object is the
   object's own bracket, as in `e { f { g = 1 } # c3⏎}` above, so the value created most recently
   stays what it was, and the object does not become it. With the file
   `files/v6/q42_closed_twice.inc`, `{ x "y{" z⏎}⏎}`, `_ = 1⏎.include "…"⏎# c` → the value `z` gets
-  `"ca": ["# c"]`, not the object `x`; a comment in the file between its two `}` goes to `z` as
-  well, and with the file `{ x "y{" z⏎k = 2⏎}⏎}` the value of `k` gets it
+  `"ca": ["# c"]`, not the object `x`, and likewise with `o { .include "…"⏎# c` and
+  `.include(key="k") "…"⏎# c`; a comment in the file between its two `}` goes to `z` as well, and
+  with the file `{ x "y{" z⏎k = 2⏎}⏎}` the value of `k` gets it
   (`pending/09-macros/comments_include_first_name_brace_keeps_most_recent`,
+  `pending/09-macros/comments_include_first_name_brace_in_braced_object`,
+  `pending/09-macros/comments_include_first_name_brace_under_key`,
   `pending/09-macros/comments_include_first_name_brace_comment_in_file`,
   `pending/09-macros/comments_include_first_name_brace_after_entry`). When a container written
   with brackets that was opened in that object closes it instead (§9.4), it closes like the objects
   a section path leaves open, and it counts as the value created most recently, as above: with the
   file `{ x "y{" z⏎a { b = 1 }⏎}`, `x` gets it
-  (`cases/spec/09-macros/comments_include_first_name_closed_by_object`).
+  (`cases/spec/09-macros/comments_include_first_name_closed_by_object`). When the brace taken over
+  is that of a section object without a bracket of its own, the first name gets no brace (§9.4):
+  the file's `}` closes the section object together with the name's object, and the outermost of
+  them counts as the value created most recently, as above: with the file `{ x "y{" z⏎}`,
+  `s "t{" u⏎.include "…"⏎# c` → the object `s` gets it
+  (`cases/spec/09-macros/comments_include_first_name_in_section_object`).
 - Comments after the closing bracket of a braced root are ignored like the rest of the input
   (§1.1; `comments_after_braced_root_ignored`).
 
