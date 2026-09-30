@@ -217,10 +217,9 @@ C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §
 first name of a braced included file (§12.5, §9.4).
 `spec-v19` answers #84 by extending the §12.2 uncertainty under `zerocopy` to what depends on the
 changed keys and strings, and to included files.
-A draft for #86 to #88 extends the §9.4 first-directory quirk to a later `.load(try=true)` that
-skips its file, and says how an included file's brace is taken over again before its first key
-and how the first name closes in a section object (§9.4, §12.5); it awaits independent review
-for `spec-v20`.
+`spec-v20` answers #86 to #88: it extends the §9.4 first-directory quirk to a later
+`.load(try=true)` that skips its file, and says how an included file's brace is taken over again
+before its first key and how the first name closes in a section object (§9.4, §12.5).
 
 The cases of `spec-v13`, `spec-v15` and `spec-v18` are all in `cases/spec/`; the three
 `spec-v15` cases moved there when the crate followed §9.4 in C14, and the six `spec-v18` cases
@@ -263,7 +262,7 @@ Two rules are stated but have no committed case, because their golden files cann
 ## Coverage
 
 Every case in `tests/conformance/` and the section(s) that explain it: 1686 cases in `cases/` and
-`libucl/`, plus eighteen pending cases of the `spec-v20` draft.
+`libucl/`, plus eighteen pending `spec-v20` cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the

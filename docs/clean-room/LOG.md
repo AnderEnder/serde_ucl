@@ -5145,3 +5145,30 @@
   - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team (release). Item: C14 questions #86 to #88, spec-v20.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed §§9.4,
+    9.6, 12.5 and 13.2 of the draft and the answers to #86 to #88, the independent reviewer
+    entries through `0e66606`, the spec index and the conformance case lists. No Claude Code
+    sessions or memory were read.
+  - Work: after independent approval, changed the answers to #86 to #88, the spec index and the
+    conformance and pending READMEs from draft wording to `spec-v20`. The rules are unchanged from
+    `7b39153`. The eighteen `spec-v20` cases stay under `tests/conformance/pending/09-macros/`
+    until the crate passes them; the six `spec-v18` cases stay pending on this branch, since they
+    are activated on another branch.
+  - Checks: the latest previous spec tag was `spec-v19`; the worktree was clean before the release
+    edits; 1,680 active and 24 pending cases; all three tests in `cargo test --test conformance`
+    passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v20` commit on `c14/spec-q86`, tagged locally
+    as `spec-v20`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.
+
+- 2026-10-01 — Role: spec team. Item: C14 spec-v20 rebase onto `main` (`c671e72`, after #23 and
+  #24). Rebased `c14/spec-q86` from `71de4a1` and reconciled the index, the conformance and
+  pending READMEs and `QUESTIONS.md` with `main`, where the six `spec-v18` cases are active: the
+  branch now has 1,686 active cases and the eighteen `spec-v20` cases pending, and the counts and
+  rows above in this branch's entries are those before the rebase. The local tag `spec-v20` moves
+  to the rebased release commit; its `docs/spec/` also carries `main`'s path-only edits of the
+  §12.5 citations of the six `spec-v18` cases. The rules are unchanged from the reviewed text.
+  Golden files are as generated. Not pushed.

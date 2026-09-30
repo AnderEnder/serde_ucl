@@ -4,7 +4,7 @@ The conformance runners do not read this directory; `scripts/regen-golden.sh` re
 oracle goldens. Once the crate passes a case, move it and its golden files to
 `tests/conformance/cases/spec/09-macros/`.
 
-Eighteen cases of the `spec-v20` draft wait for implementation in the same way: questions #86
+Eighteen `spec-v20` cases wait for implementation in the same way: questions #86
 (§9.4, first-directory miss), #87 (§9.4, macros before an included file's first key) and #88
 (§9.4 and §12.5, the first name in a section object after text parsed in place). The fixtures
 under `files/v4/` and `files/v20/` are identical to the ones in `cases/spec/09-macros/` and can
