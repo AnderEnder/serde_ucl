@@ -4,6 +4,33 @@ All notable changes to this crate are recorded here.
 
 ## Unreleased
 
+### Faster optional includes and floats
+
+Clean-room work item C14. Against 0.5.0, on an Apple M4 Max, with `scripts/bench-compare.sh`:
+
+- An optional include (`.include(try=true)`, `.try_include`) of a path that does not exist fails
+  with one filesystem call in `FsLoader`, instead of resolving the whole path first. rspamd's
+  `groups.conf`, which includes 14 files and tries 42 that do not exist, parses in 0.71 ms
+  instead of 1.22 ms, and `composites.conf` in 34 µs instead of 57 µs.
+- A float's text is no longer checked as UTF-8 a second time: `canada.json`, mostly floats,
+  parses 11% faster.
+- The other benchmark documents are within 2% of 0.5.0.
+
+### Include behaviour (spec-v15 to spec-v17)
+
+- A `.include` with a search path whose first directory lacks the file is an error, as before,
+  except when a later directory has the file and a skipped URL include
+  (`.include(try=true, url=true)` or `.try_include(url=true)` with `://` in its path) follows in
+  the same input: the document is then accepted with the later directory's file, as libucl
+  accepts it (spec §9.4).
+- A regular file that exists but cannot be read is an error for optional includes too
+  (`try=true`, `.try_include`, also when a glob selects it); before, it was skipped (spec §9.4).
+
+### API
+
+- `parse::Loader::canonicalize_optional`: the canonical path of an optional include. Its default
+  calls `canonicalize`; `FsLoader` checks that the path exists first.
+
 ### Benchmarks
 
 - Irregular configurations from a seeded generator, whose keys, section sizes, order, depth and
@@ -11,8 +38,10 @@ All notable changes to this crate are recorded here.
   which `benches/fetch-documents.sh` fetches at a pinned commit with SHA-256 checks. New groups
   `parse/irregular`, `parse/json-corpus`, `parse/corpus`, `serde/irregular-*`,
   `serde/json-corpus-*` and `serde/corpus-*`; the corpus groups parse three rspamd
-  configurations of `benches/corpus/`, one with the 14 files it includes. `benches/check-documents.sh` checks every document against libucl
-  (clean-room work item C14).
+  configurations of `benches/corpus/`, one with the 14 files it includes.
+  `benches/check-documents.sh` checks every document against libucl (clean-room work item C14).
+- `scripts/bench-compare.sh` also times the previous release, and runs the timings on a thread
+  of their own, so that the size of the environment does not move the stack and the results.
 
 ## 0.5.0 - 2026-09-28
 
