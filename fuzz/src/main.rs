@@ -631,9 +631,12 @@ fn report(options: &Options, input: &Input, dir: &Path, checked: &Checked) -> St
     let _ = writeln!(text, "input: {}", input.origin);
     let _ = writeln!(text, "flags: {}", input.flags.join(" "));
     let _ = writeln!(text, "working directory: {}", input.dir.display());
+    if let Some(line) = oracle_flags_line(&input.flags) {
+        let _ = writeln!(text, "{line}");
+    }
     let _ = writeln!(text, "oracle: {}", oracle_text(&checked.oracle));
     let _ = writeln!(text, "crate:  {}", crate_text(&checked.krate));
-    let options_text = run::oracle_options(&input.flags)
+    let options_text = run::oracle_options(&run::expectation_flags(&input.flags))
         .unwrap_or_default()
         .join(" ");
     let _ = writeln!(
@@ -649,6 +652,18 @@ fn report(options: &Options, input: &Input, dir: &Path, checked: &Checked) -> St
         String::from_utf8_lossy(&fs::read(dir.join("input.ucl")).unwrap_or_default())
     );
     text
+}
+
+/// For flags the oracle does not run with all of ([`run::expectation_flags`]), a line that says
+/// which it runs with.
+fn oracle_flags_line(flags: &[String]) -> Option<String> {
+    let expected = run::expectation_flags(flags);
+    (expected.len() < flags.len()).then(|| {
+        format!(
+            "oracle flags: {} (the expected result is the one without zerocopy, spec §12.2)",
+            expected.join(" ")
+        )
+    })
 }
 
 fn oracle_text(result: &OracleResult) -> String {
@@ -692,6 +707,9 @@ fn check_one(options: &Options, file: &Path) -> ExitCode {
     };
     let dir = options.check_dir.clone().expect("set by parse_options");
     let checked = run::check(&target, &bytes, &flags, &dir);
+    if let Some(line) = oracle_flags_line(&flags) {
+        println!("{line}");
+    }
     println!("oracle: {}", oracle_text(&checked.oracle));
     println!("crate:  {}", crate_text(&checked.krate));
     match &checked.verdict {

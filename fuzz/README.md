@@ -66,6 +66,13 @@ seeds' relative include paths find their files (spec §9.3). A seed's other flag
 under `dump-comments` the saved comments are compared too (§12.5), and under
 `variable-handler` the handler's results (§7.7).
 
+The oracle runs with every flag but `zerocopy`, which the crate still parses with. Spec §12.2
+(spec-v19) gives a document with `zerocopy` the result the spec gives it without the flag, all
+other settings unchanged, while libucl's own result with it is undefined for the text of an
+expanded `.emit` and what depends on it, and for documents that include a file with entries. So
+the crate's result with `zerocopy` is compared with the oracle's without it, and the rules below
+apply as for that run; a report then names the flags the oracle ran with.
+
 ## Verdicts
 
 - **agree**: the same value, or both reject the input.
