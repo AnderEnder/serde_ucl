@@ -82,12 +82,18 @@ TOOL="$WORK/cargo/release/bench-compare"
 BASELINE=${BASELINE:-$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo none)}
 BASE_TOOL=
 if [ "$BASELINE" != none ]; then
-	base="$WORK/baseline"
+	commit=$(git -C "$ROOT" rev-parse --verify --quiet "$BASELINE^{commit}") || {
+		echo "error: BASELINE $BASELINE is not a commit" >&2
+		exit 1
+	}
+	# One directory per baseline commit. `tar -m` gives the files the time of extraction: with
+	# the commit's times, cargo would take an earlier build of another baseline as up to date.
+	base="$WORK/baseline-$commit"
 	rm -rf "$base"
 	mkdir -p "$base/crate" "$base/tool/src"
-	echo "building tools/bench-compare against $BASELINE" >&2
-	git -C "$ROOT" archive "$BASELINE" src benches Cargo.toml Cargo.lock README.md |
-		tar -x -C "$base/crate"
+	echo "building tools/bench-compare against $BASELINE ($commit)" >&2
+	git -C "$ROOT" archive "$commit" src benches Cargo.toml Cargo.lock README.md |
+		tar -x -m -C "$base/crate"
 	sed "s|^serde_ucl = { path = \"../..\" }|serde_ucl = { path = \"$base/crate\" }|" \
 		"$ROOT/tools/bench-compare/Cargo.toml" >"$base/tool/Cargo.toml"
 	cp "$ROOT/tools/bench-compare/Cargo.lock" "$base/tool/Cargo.lock"
@@ -99,8 +105,8 @@ if [ "$BASELINE" != none ]; then
 		exit 1
 	}
 	cargo build --quiet --release --manifest-path "$base/tool/Cargo.toml" \
-		--target-dir "$WORK/cargo-baseline"
-	BASE_TOOL="$WORK/cargo-baseline/release/bench-compare"
+		--target-dir "$base/cargo"
+	BASE_TOOL="$base/cargo/release/bench-compare"
 fi
 
 "$TOOL" write "$DOCS"

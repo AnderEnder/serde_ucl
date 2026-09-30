@@ -485,11 +485,22 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("write") if args.len() == 2 => write(Path::new(&args[1])),
-        Some("run") if (2..=4).contains(&args.len()) => run(
-            Path::new(&args[1]),
-            args.get(2).map(Path::new),
-            args.get(3).map(Path::new),
-        ),
+        // The timings run on a thread of their own. The main thread's stack starts below the
+        // program's arguments and environment, so its alignment, and with it the parser's speed,
+        // changes with their size (by 12% on `config(1000)` for one extra variable); a thread's
+        // stack is page-aligned whatever they are, so the programs compared start alike.
+        Some("run") if (2..=4).contains(&args.len()) => std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                run(
+                    Path::new(&args[1]),
+                    args.get(2).map(Path::new),
+                    args.get(3).map(Path::new),
+                )
+            })
+            .expect("start the timing thread")
+            .join()
+            .expect("the timing thread"),
         Some("summarize") if args.len() >= 2 => {
             summarize(&args[1..].iter().map(PathBuf::from).collect::<Vec<_>>())
         }
