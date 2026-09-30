@@ -4286,3 +4286,25 @@
     `scripts/regen-golden.sh`, no existing one changed. Checks: `cargo test --test conformance`,
     `scripts/ci.sh`, `git diff --check`. Not tagged or pushed. Attestation: observable behavior
     only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-09-30 — Role: independent clean-room spec reviewer (re-review). Item: C14 question #83,
+  spec-v18 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `9c7871c..ac935b8`
+    diff (§§9.4 and 12.5, question #83's answer, the spec, conformance and pending READMEs, the
+    new pending case and its golden files), the spec-team entry for it, and pinned-oracle
+    black-box runs of `target/libucl-oracle/ucl-dump` in this session's scratchpad. No libucl
+    source, implementation or fuzzer source, `tools/`, or Claude sessions or memory were read.
+  - Review: approved. The delta takes both non-blocking notes of the re-review above and adds no
+    prohibited content: `pending/09-macros/comments_include_first_name_brace_under_prefix`
+    (`.include(prefix=true) "files/v6/q42_closed_twice.inc"⏎# c`) gives `z` the comment under the
+    key `q42_closed_twice.inc` in three identical oracle runs, as §12.5 and the #83 answer now
+    say; the §9.4 paragraph is rewrapped without a change of wording. No new finding.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case and
+    writing only to the scratchpad, matched all 6,678 tracked golden files. 1,665 active and six
+    pending cases, one coverage row each (1,671), as the READMEs and the #83 answer count them.
+    `cargo test --test conformance` passed all three tests; in a `git archive` copy of `ac935b8`
+    with the pending cases moved in, only those six failed besides the four expected failures
+    (`src/` compiled, not read). `git diff --check 9c7871c ac935b8`.
+  - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
