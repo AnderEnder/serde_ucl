@@ -1598,6 +1598,70 @@ mod tests {
     }
 
     #[test]
+    fn first_name_brace_shared_with_a_key_object() {
+        // A file nested under a key in the first name's object uses up a share of its brace
+        // with a `}`, as under a brace taken over (§9.4, *Nesting under a key*). §9.4 leaves an
+        // object that holds only its own bracket undefined; the crate keeps 0.6.0's result here
+        // and rejects the `}` under an object written with braces (QUESTIONS.md #85).
+        let files = [
+            ("/c/close_brace.inc", "a = 1 }"),
+            (
+                "/c/nest.inc",
+                "{ x \"y{\" z\n.include(key=\"k\") \"close_brace.inc\"\n}\n}",
+            ),
+        ];
+        let v = run(&files, ".include \"nest.inc\"\nq = 1").unwrap();
+        assert_eq!(keys(&v), ["x", "q"]);
+        let x = &obj(&v)["x"];
+        assert_eq!(keys(x), ["y{", "k"]);
+        assert_eq!(obj(&obj(x)["k"])["a"].as_integer(), Some(1));
+        assert!(matches!(
+            run(&files, "x { .include(key=\"k\") \"close_brace.inc\"\nq = 1")
+                .unwrap_err()
+                .kind(),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+    }
+
+    #[test]
+    fn name_run_reopens_the_value_before_the_first_name_brace() {
+        // §9.1: comments to the end of a unit after a macro directly after a name reopen the
+        // value created most recently, which the first name's own `}` leaves as it was (§12.5).
+        use crate::parse::Uncertain;
+        let files = [
+            ("/c/twice.inc", "{ x \"y{\" z\n}\n}"),
+            ("/c/e.inc", "{ x \"y{\" z\n.emit \"\"\nk { }\n}\n}"),
+            ("/c/reopen_e.inc", "\"s\".include(key=\"q\") {e.inc} # c"),
+            (
+                "/c/reopen_twice.inc",
+                "\"s\".include(key=\"q\") {twice.inc} # c",
+            ),
+        ];
+        let run = |input: &str| {
+            let mut p = parser(&files, ParserFlags::DEFAULT);
+            p.register_macro("emit", |call| {
+                let text = call.value().to_vec();
+                call.parse(text)
+            });
+            let v = p.parse(input.as_bytes()).unwrap();
+            (v, p.uncertain_reached())
+        };
+        // `k` is the value created most recently: it is reopened, as by the oracle.
+        let (v, reached) = run(".include \"reopen_e.inc\"\nm = 1");
+        assert_eq!(keys(&v), ["s"]);
+        let x = &obj(&obj(&obj(&v)["s"])["q"])["x"];
+        assert_eq!(keys(x), ["y{", "k"]);
+        assert_eq!(keys(&obj(x)["k"]), ["m"]);
+        assert_eq!(reached, []);
+        // `z` is: not an object, so nothing is reopened (§9.1, *Uncertain*; the oracle crashes).
+        let (v, reached) = run(".include \"reopen_twice.inc\"\nm = 1");
+        assert_eq!(keys(&v), ["s"]);
+        assert_eq!(keys(&obj(&v)["s"]), ["q", "m"]);
+        assert_eq!(keys(&obj(&obj(&obj(&v)["s"])["q"])["x"]), ["y{"]);
+        assert_eq!(reached, [Uncertain::ReopenedNotObject]);
+    }
+
+    #[test]
     fn empty_files_and_merged_nulls() {
         // Oracle runs (QUESTIONS.md #43, #44).
         let files = [
