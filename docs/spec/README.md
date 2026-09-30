@@ -214,7 +214,7 @@ name of a braced included file (§12.5, §9.4); it awaits independent review for
 
 The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
 cases moved there when the crate followed §9.4 in C14.
-The draft for #83 has five cases under `tests/conformance/pending/09-macros/` until the crate
+The draft for #83 has six cases under `tests/conformance/pending/09-macros/` until the crate
 follows its §12.5 rule.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
@@ -249,7 +249,7 @@ Two rules are stated but have no committed case, because their golden files cann
 ## Coverage
 
 Every case in `tests/conformance/` and the section(s) that explain it: 1665 cases in `cases/` and
-`libucl/`, plus five pending cases of the #83 draft.
+`libucl/`, plus six pending cases of the #83 draft.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1583,6 +1583,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1665 case
 | `pending/09-macros/comments_include_first_name_brace_in_braced_object` | §9, §12 |
 | `pending/09-macros/comments_include_first_name_brace_keeps_most_recent` | §9, §12 |
 | `pending/09-macros/comments_include_first_name_brace_under_key` | §9, §12 |
+| `pending/09-macros/comments_include_first_name_brace_under_prefix` | §9, §12 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
 | `cases/spec/10-output/comments_output_before_and_after` | §10, §12 |

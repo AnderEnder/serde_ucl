@@ -527,9 +527,9 @@ create an object. The entries still go into the object where the macro stands
   key the file then reads, after comments and macros, is the first name of a section path (§3.4),
   that name's object gets a brace of its own: a `}` closes it, and if it is still open at the end
   of the file, the check below reports it. The brace taken over stays with the object where the
-  macro stands. So
-  a file `{⏎x "y{" z` is an error, also written `{ x "y{" z`, `{⏎# c⏎x "y{" z`, `{ "q" "y{" z`,
-  `{⏎c "x{" =⏎` or `{⏎"s".priority {3}⏎` (`include_braced_file_first_name_unclosed_error`,
+  macro stands. So a file `{⏎x "y{" z` is an error, also written `{ x "y{" z`, `{⏎# c⏎x "y{" z`,
+  `{ "q" "y{" z`, `{⏎c "x{" =⏎` or `{⏎"s".priority {3}⏎`
+  (`include_braced_file_first_name_unclosed_error`,
   `include_braced_file_first_name_same_line_error`,
   `include_braced_file_first_name_after_comment_error`, `include_braced_file_first_quoted_name_error`,
   `include_braced_file_first_name_separator_newline_error`,

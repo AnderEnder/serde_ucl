@@ -168,12 +168,13 @@ Where they attach:
   object's own bracket, as in `e { f { g = 1 } # c3⏎}` above, so the value created most recently
   stays what it was, and the object does not become it. With the file
   `files/v6/q42_closed_twice.inc`, `{ x "y{" z⏎}⏎}`, `_ = 1⏎.include "…"⏎# c` → the value `z` gets
-  `"ca": ["# c"]`, not the object `x`, and likewise with `o { .include "…"⏎# c` and
-  `.include(key="k") "…"⏎# c`; a comment in the file between its two `}` goes to `z` as well, and
-  with the file `{ x "y{" z⏎k = 2⏎}⏎}` the value of `k` gets it
+  `"ca": ["# c"]`, not the object `x`, and likewise with `o { .include "…"⏎# c`,
+  `.include(key="k") "…"⏎# c` and `.include(prefix=true) "…"⏎# c`; a comment in the file between
+  its two `}` goes to `z` as well, and with the file `{ x "y{" z⏎k = 2⏎}⏎}` the value of `k` gets it
   (`pending/09-macros/comments_include_first_name_brace_keeps_most_recent`,
   `pending/09-macros/comments_include_first_name_brace_in_braced_object`,
   `pending/09-macros/comments_include_first_name_brace_under_key`,
+  `pending/09-macros/comments_include_first_name_brace_under_prefix`,
   `pending/09-macros/comments_include_first_name_brace_comment_in_file`,
   `pending/09-macros/comments_include_first_name_brace_after_entry`). When a container written
   with brackets that was opened in that object closes it instead (§9.4), it closes like the objects

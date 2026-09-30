@@ -4277,3 +4277,12 @@
   - Commits: this reviewer log entry only on `c14/followups`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 — Role: spec team. Item: C14 question #83, spec-v18 draft re-review notes (`9c7871c`).
+  - Added the pending case `comments_include_first_name_brace_under_prefix` (the oracle gives `z`
+    the comment in three identical runs; the crate fails it like the other five), cited it in
+    §12.5, and updated the README row and counts (1,665 active, six pending), the pending READMEs
+    and #83's answer; rewrapped the §9.4 first-name paragraph. Golden files only from
+    `scripts/regen-golden.sh`, no existing one changed. Checks: `cargo test --test conformance`,
+    `scripts/ci.sh`, `git diff --check`. Not tagged or pushed. Attestation: observable behavior
+    only, with no libucl code, pseudo-code, internal names or source structure.
