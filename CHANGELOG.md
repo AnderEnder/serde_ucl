@@ -23,9 +23,12 @@ object's own bracket, so the value created most recently stays what it was (spec
   comments to the end of its unit, reopens (spec §9.1). After such a file that is `z` now, not
   `x`; a value that is not an object is left alone, where the spec leaves the result undefined.
 - Text parsed in place by a registered macro inside that object no longer keeps it open against
-  its own `}` (spec §13.2 applies to braces taken over, not to this one): the file
-  `{ x "y{" z⏎.emit ""⏎}⏎}` is now accepted, as libucl accepts it, instead of an error at its
-  second `}`.
+  its own `}` (spec §13.2 applies to braces taken over, not to this one), as in libucl:
+  - The file `{ x "y{" z⏎.emit ""⏎}⏎}` is now accepted, instead of an error at its second `}`.
+  - The file `{ x "y{" z⏎.emit ""⏎a { }⏎}⏎}` is accepted too, with `a` in `x`.
+  - With the file `{ x "y{" z⏎.emit ""⏎a { }⏎}`, its `}` now closes `x`, so the including
+    document must close the brace the file took over, as for `{ x "y{" z⏎}`:
+    `.include "…"⏎q = 1` is now an error, where 0.6.0 put `q` into `x`.
 
 ## 0.6.0 - 2026-09-30
 

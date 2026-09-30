@@ -4518,8 +4518,9 @@
     `tests/conformance/pending/09-macros/` (inputs, flags, golden files, fixtures) and the list of
     them in `tests/conformance/pending/README.md`; the inputs and golden files of the related
     active §9.4 cases; the crate's `src/parse/`, `tests/conformance.rs`, `fuzz/README.md`; the
-    saved finding `values-differ-b20d95e099eb5fa2` (input, flags, directory, report); the oracle
-    as a black box, built in this worktree by `scripts/regen-golden.sh` (every golden file
+    saved finding `values-differ-b20d95e099eb5fa2` (input, flags, directory, report), read from
+    `/Users/andrii/work2/ucl-rust-lexer/target/fuzz-differential/findings/`, the path the
+    coordinator gave, in the main checkout's `target/`; the oracle as a black box, built in this worktree by `scripts/regen-golden.sh` (every golden file
     unchanged) and run through `ucl-differential --check` on probe files in
     `target/c14-spec18/probe/`.
   - Work: the object of a braced included file's first name, when the file's `{` took over the
@@ -4531,8 +4532,10 @@
     not say, the former behaviour is kept and checked against the oracle: a file included in that
     object whose `{` takes its brace over closes it as a section object. Text parsed in place no
     longer keeps the object open against its own `}` (§13.2 covers braces taken over; oracle runs
-    agree, the crate rejected these forms before). Unit tests for the spec's examples and those
-    probes (`src/parse/include.rs`); `CHANGELOG.md` under `## Unreleased`.
+    agree): the crate rejected two of these forms before, and accepted a third that is now an
+    error, as in libucl (the file `{ x "y{" z⏎.emit ""⏎a { }⏎}`, then `q = 1`; corrected after the
+    review of `2fa6b19`). Unit tests for the spec's examples and those probes
+    (`src/parse/include.rs`); `CHANGELOG.md` under `## Unreleased`.
   - Checks: in an rsync copy of the worktree with the six pending cases moved into
     `cases/spec/09-macros/`, `cargo test --test conformance` passed: 1,671 cases, 1,667 pass and
     the 4 expected failures, emitters and readback clean (before the change, exactly the six
@@ -4544,15 +4547,16 @@
   - Question: #85 (the first name's brace taken over by a nested file, text in place in its
     object, and a `}` in a file nested under a key there, which crashes the oracle). Filed first
     as #84; renumbered to #85 at the coordinator's request, because another implementer filed #84
-    in parallel on another branch. The commit messages of `4cd1846` and `5d53dff` still say 84.
-  - Commits: `fix(parse): keep the most recent value at a first name's own brace`
-    (`80bd69c`), `docs(clean-room): log the spec-v18 comment work and ask question 84`
-    (`4cd1846`, the question and this entry), `docs(parse): cite question 84 for the first-name
-    brace choices` (`5d53dff`, comments only), `docs(clean-room): list the spec-v18 comment
-    commits in the log` (`fec3c20`), and the following
-    `docs(clean-room): renumber the first-name brace question to 85`, which changes the
-    question's row, the three code comments that cite it and this entry. The finding also
-    replays as `agree` from its own directory (`ucl-differential --replay`). Not pushed.
+    in parallel on another branch. The commit messages of `ce615d7` and `4e3299e` still say 84.
+  - Commits (hashes after the coordinator's rebase onto `main`):
+    `fix(parse): keep the most recent value at a first name's own brace` (`480ae4c`),
+    `docs(clean-room): log the spec-v18 comment work and ask question 84` (`ce615d7`, the
+    question and this entry), `docs(parse): cite question 84 for the first-name brace choices`
+    (`4e3299e`, comments only), `docs(clean-room): list the spec-v18 comment commits in the log`
+    (`3bda2ec`), and `docs(clean-room): renumber the first-name brace question to 85`
+    (`f985edb`), which changes the question's row, the three code comments that cite it and this
+    entry. The finding also replays as `agree` from its own directory
+    (`ucl-differential --replay`). Not pushed.
   - For the renumbering, the only other worktree content seen was the branch name, last
     commit subjects and `git status` file list of the worktree `c14-spec-q84`, which was
     announced as this session's working directory; no file there was opened.
