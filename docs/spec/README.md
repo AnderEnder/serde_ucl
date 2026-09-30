@@ -209,13 +209,13 @@ answers #70–#78, found by the fuzzer after `spec-v12`. `spec-v14` answers #79,
 C14's differential fuzzing (§12.2 and §13.2). `spec-v15` answers #80 with a §9.4 exception.
 `spec-v16` answers #81 by narrowing the existing §12.5 uncertainty.
 `spec-v17` answers #82 by clarifying the §9.4 outcome for a file that cannot be opened for reading.
-A draft for #83 says which value a comment attaches to after the `}` that closes the first
-name of a braced included file (§12.5, §9.4); it awaits independent review for `spec-v18`.
+`spec-v18` answers #83 by saying which value a comment attaches to after the `}` that closes the
+first name of a braced included file (§12.5, §9.4).
 
 The cases of `spec-v13` and `spec-v15` are all in `cases/spec/`; the three `spec-v15`
 cases moved there when the crate followed §9.4 in C14.
-The draft for #83 has six cases under `tests/conformance/pending/09-macros/` until the crate
-follows its §12.5 rule.
+`spec-v18` has six cases under `tests/conformance/pending/09-macros/` until the crate follows
+its §12.5 rule.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
 check (`tests/conformance/README.md`, *Golden files per platform*). The files next to each case
@@ -249,7 +249,7 @@ Two rules are stated but have no committed case, because their golden files cann
 ## Coverage
 
 Every case in `tests/conformance/` and the section(s) that explain it: 1665 cases in `cases/` and
-`libucl/`, plus six pending cases of the #83 draft.
+`libucl/`, plus six pending `spec-v18` cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the

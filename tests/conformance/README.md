@@ -19,14 +19,14 @@ None of them is written by hand.
   that those cases include or load (`*.inc` and others, among them an empty file, a directory and a
   symbolic link under `files/v4/`, and file names with `[` and `]` under `files/v5/g/`); they are
   not cases themselves (`files/v6/` and `files/v18/` among them, with fixtures for spec-v6 and
-  the draft for spec-v18). Some `09-macros` cases include other cases, or themselves, by name, and
+  spec-v18). Some `09-macros` cases include other cases, or themselves, by name, and
   some `10-output` and `08-duplicates` cases use `../09-macros/files/`.
   `cases/spec/13-inputs/files/` holds the further inputs of the §13 cases
   (`<case>.<n>.inc`, `n01.inc`…`n16.inc`) and the files they include.
 - `pending/`, when present, holds cases from a spec draft or released version that the crate does
   not pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
-  `cases/spec/` when the crate passes it. Six cases of the draft for question #83 (§12.5) are
+  `cases/spec/` when the crate passes it. Six `spec-v18` cases for question #83 (§12.5) are
   pending under `pending/09-macros/` (see `pending/README.md`).
 - `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
   platform's C library; see *Golden files per platform* below.

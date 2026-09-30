@@ -1,6 +1,6 @@
 # Pending cases
 
-Six cases for question #83 (§12.5, draft for `spec-v18`) are waiting for implementation. The
+Six cases for question #83 (§12.5, `spec-v18`) are waiting for implementation. The
 conformance runners do not read this directory; `scripts/regen-golden.sh` regenerates its oracle
 goldens. Once the crate passes them, move the cases and their golden files to
 `tests/conformance/cases/spec/09-macros/`. The fixtures under `files/` are identical to the ones
