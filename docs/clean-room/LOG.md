@@ -5321,3 +5321,39 @@
   - Attestation: the draft spec, question answer, cases, tool change and this log contain
     observable behavior only, with no libucl code, pseudo-code, internal names or source
     structure.
+
+- 2026-10-01 — Role: independent clean-room spec reviewer (re-review). Item: C14 questions #89 and
+  #90, spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `aa1b0df..8460ba7`
+    diff of `docs/` and `tests/` (§§9.2, 9.4 and 13.1, `docs/spec/README.md`, the conformance and
+    pending READMEs, the #89 answer, the eleven new cases, further inputs and golden files, the
+    spec-team entry), and black-box runs of two pinned oracle binaries from this session's
+    scratchpad: this worktree's `target/libucl-oracle/ucl-dump`, built after the tool change, and
+    the older one of the `c14-followups` worktree. `tools/` was not opened; no libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. The revision resolves my finding and adds no prohibited content: §13.1
+    states that an error ends its input and a later input's skip does not discard it, and, as a
+    quirk, that a skip in a later input discards a rejected argument document and a
+    first-directory miss; §§9.2 and 9.4 say "in the same input or a later one". With the new
+    binary my probes match the text: `.priority(x) 3⏎a = 1` then an input with a `.load(try=true)`
+    skip gives `{ a: int 1 @3, b: int 2 }`, also with an input between and as a file input; a
+    first-directory miss with a later input's URL or `.load` skip gives `pa: int 1`; without a
+    later skip, or with the skip in an earlier input, the result is an error; and
+    `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by a skip input is an error. The older
+    binary accepts that last document, as the spec team describes: comparing every golden file
+    with it, it differs only on `inputs_missing_include_then_skip_in_later_input_error`, which the
+    tool change accounts for; not a finding. The silent stop in an argument document, the
+    rejection in text parsed in place and `.try_include(x)"missing.inc"` give the results the new
+    sentences and cases state. No new finding.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with the
+    new binary and writing only to the scratchpad, matched all 6,887 tracked golden files.
+    1,693 active and 32 pending cases (eighteen `spec-v20`, fourteen draft), one coverage row each
+    (1,725), and the same 32 in `pending/README.md`; the pending fixtures shared with active cases
+    are identical, and the further inputs of the pending `13-inputs` cases are under
+    `pending/13-inputs/files/`. `cargo test --test conformance` passed all three tests; in a
+    `git archive` copy of `8460ba7` with the fourteen draft cases moved in, only those fourteen
+    failed besides the four expected failures (`src/` compiled, not read).
+    `git diff --check aa1b0df 8460ba7 -- docs tests`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
