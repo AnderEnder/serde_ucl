@@ -187,8 +187,8 @@ impl<'t> Document<'t> {
             run_macro_end: None,
             outer_run: false,
             recent: None,
-            first_key_shares: false,
-            section_shares: false,
+            taking_over: false,
+            first_name_brace: false,
             bracket_scan: (usize::MAX, 0),
             pending: None,
             unseparated: false,
@@ -289,8 +289,8 @@ impl<'t> Document<'t> {
                 run_macro_end: None,
                 outer_run: false,
                 recent: None,
-                first_key_shares: false,
-                section_shares: false,
+                taking_over: false,
+                first_name_brace: false,
                 bracket_scan: (usize::MAX, 0),
                 pending: None,
                 unseparated: false,
@@ -834,10 +834,10 @@ pub(super) struct Core<'s, 't, 'e, 'v, 'l> {
     /// key nor a `}` of its own since: after a macro it takes a brace over again
     /// ([`Core::take_brace_again`]), and the first name of its first key gets a brace of its own
     /// ([`Close::NameBrace`]).
-    first_key_shares: bool,
+    taking_over: bool,
     /// The key being read is that first key: if it starts a section path, the object of its
     /// first name gets a brace of its own ([`Close::NameBrace`], §9.4).
-    section_shares: bool,
+    first_name_brace: bool,
     /// The last scan of [`Core::line_has_bracket`]: from the first offset, the first LF, CR,
     /// `,`, `;`, `{` or `[` is at the second (the input's length if there is none).
     bracket_scan: (usize, usize),
@@ -2153,8 +2153,8 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
             run_macro_end: None,
             outer_run,
             recent: self.recent.take(),
-            first_key_shares: false,
-            section_shares: false,
+            taking_over: false,
+            first_name_brace: false,
             bracket_scan: (usize::MAX, 0),
             pending: None,
             unseparated: false,
@@ -2214,7 +2214,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                     Close::NameBrace => Revert::Section,
                     _ => Revert::Open,
                 });
-                self.first_key_shares = true;
+                self.taking_over = true;
             }
             _ => self.skip_space_checking_hash(after_space)?,
         }
@@ -2590,7 +2590,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                 // The unit's own `}` ends its takeover (oracle runs, QUESTIONS.md #92): later
                 // macros take no brace over, and a later first name gets none. Before its first
                 // key, a unit's `}` can only remove a brace taken over.
-                self.first_key_shares = false;
+                self.taking_over = false;
                 let frame = self.frames.last_mut().expect("a container is open");
                 if frame.close == Close::IncludedBrace(Revert::Section) {
                     frame.close = Close::Section;
@@ -2610,15 +2610,15 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
             Some(_) => {
                 let key = self.read_key()?;
                 // The unit's first key, while the brace its leading `{` took over is still held.
-                let first_shares = std::mem::take(&mut self.first_key_shares)
+                let first_name_brace = std::mem::take(&mut self.taking_over)
                     && matches!(self.top().close, Close::IncludedBrace(_));
                 if std::mem::take(&mut self.name_run) {
                     self.run_macro_end = None;
                     return self.key_after_name_run(key);
                 }
-                self.section_shares = first_shares;
+                self.first_name_brace = first_name_brace;
                 let result = self.after_key(key);
-                self.section_shares = false;
+                self.first_name_brace = false;
                 result
             }
         }
@@ -2939,7 +2939,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         if self.name_run {
             self.run_macro_end = Some(self.pos);
         }
-        if self.first_key_shares && self.pos < self.src.len() {
+        if self.taking_over && self.pos < self.src.len() {
             self.take_brace_again();
         }
         Ok(())
@@ -2966,8 +2966,12 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         frame.close = match frame.close {
             Close::Eof | Close::Brace => Close::IncludedBrace(Revert::Open),
             Close::Section | Close::LeftOpen => Close::IncludedBrace(Revert::Section),
-            // Still held, or a bracket the unit's end check requires a nested unit to close.
-            close @ (Close::IncludedBrace(_) | Close::NameBrace | Close::Bracket) => close,
+            // A brace still held: the object keeps it, and does not get a second one.
+            close @ Close::IncludedBrace(_) => close,
+            // Neither occurs here: `Bracket` closes arrays only, and a first name gets its brace
+            // at this unit's first key, which ends the takeover, or in a nested unit, which must
+            // close it before it ends. Listed for exhaustiveness.
+            close @ (Close::NameBrace | Close::Bracket) => close,
         };
     }
 
@@ -3021,7 +3025,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
             // the section object too ([`Core::close_sections`]), unless text parsed in place
             // keeps it open (§13.2): then it closes only the name's object, and the value created
             // most recently stays what it was (§12.5).
-            let close = if std::mem::take(&mut self.section_shares) {
+            let close = if std::mem::take(&mut self.first_name_brace) {
                 debug_assert!(
                     matches!(self.top().close, Close::IncludedBrace(_)),
                     "set only while the top frame holds a brace taken over"
