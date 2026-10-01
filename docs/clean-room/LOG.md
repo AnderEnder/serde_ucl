@@ -5227,3 +5227,53 @@
     commit on `c14/spec-q86`. Not tagged or pushed; independent review pending.
   - Attestation: the draft spec, questions and answers, cases and this log contain observable
     behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-10-01 — Role: independent clean-room spec reviewer. Item: C14 questions #89 and #90,
+  spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `1cbbd48..fa75a0b`
+    diff (§§7.7, 9.2 and 9.4, `docs/spec/README.md`, the conformance and pending READMEs,
+    questions #89 and #90 and their answers, the ten new cases, fixtures and golden files, the
+    spec-team entry), the released §9.2 *ARGUMENTS* and §13.1 *Errors and silent stops*, and
+    black-box runs of the pinned oracle binary of the `c14-followups` worktree from this
+    session's scratchpad. No libucl source, implementation or fuzzer source, `tools/`, or Claude
+    sessions or memory were read.
+  - Review: changes requested, one finding. No prohibited content: "the macro runs without
+    ARGUMENTS" and "stops the parse" are the released §9.2 and §13.1 terms, and each consequence
+    has an example and a case. Every example matches the oracle, in repeated runs: `a: int 1 @3`
+    after `.priority(x) 3` with either skip, with `.priority(.foo 1) 3`, and for `args_bad.inc`
+    `b: int 1 @1`; `.include(x)"files/a.inc"` includes the file; `.seen(x) v` gets the VALUE
+    `" v"` and no ARGUMENTS; one skip covers a miss and a rejection in either order and two
+    rejections, and none after it; a `.load` that reads its file does not count. With a later
+    skip, `.include(x) "b.inc"` includes a file named ` "b.inc"`, space and quotes included, as
+    the §9.2 sentence on ` "files/a.inc"` says. The §7.7 examples are errors with `${H_}` and
+    accepted with `[handled]`, in `cases/spec/09-macros` and `cases/spec/13-inputs`.
+    1. `docs/spec/09-macros.md:236-241` and the §9.4 cross-reference say the document is an error
+       unless "a later macro" skips its file, but not whether that macro may stand in a later
+       input (§13.1), and released `docs/spec/13-inputs-and-macros.md:183` says an error in any
+       input makes the result an error. The oracle accepts: `.priority(x) 3⏎a = 1`, then an input
+       `b = 2⏎.load(try=true, key="t") "missing.txt"`, gives `{ a: int 1 @3, b: int 2 }`, also
+       with an input between them and with the second given as a file; a first-directory miss
+       followed by an input with a skipped URL include or `.load` gives `pa: int 1`. Without a skip
+       in a later input both are errors, and a skip in an earlier input covers nothing after it.
+       Beyond the draft, `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by such an input gives
+       `{ a: int 1, b: int 2 }`, while the same include is an error within one document even with
+       a skip after it. The crate rejects all of these, the released URL form included (checked
+       in a scratch copy). Fix: find whether this is libucl's behaviour or how the oracle reports
+       an earlier input's error, then state in §13.1 and §§9.2 and 9.4 which errors a skip in a
+       later input discards, with cases (pending where the crate fails), or say why it is left
+       out.
+    Non-blocking: a silent stop in the argument document, `.priority(.try_include "missing") 3`,
+    and a rejection in text parsed in place, `.emit ".priority(x) 3"`, followed by a skip, are
+    accepted by the oracle and rejected by the crate, without a case; pending cases would pin
+    both. At `09-macros.md:256-258`, a macro that stops silently without ARGUMENTS also ends in an
+    error (`.try_include(x)"missing.inc"` then a skip), so "fails or stops" would be exact.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,848 tracked golden files.
+    1,689 active and 25 pending cases (eighteen `spec-v20`, seven draft), one coverage row each
+    (1,714), 25 case entries in `pending/README.md`, identical pending fixtures.
+    `cargo test --test conformance` passed all three tests; in a `git archive` copy of `fa75a0b`
+    with the seven draft cases and my probes moved in, the seven failed, the three boundary
+    cases passed (`src/` compiled, not read). `git diff --check 1cbbd48 fa75a0b`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
