@@ -5357,3 +5357,20 @@
   - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team (release). Item: C14 questions #89 and #90, spec-v21.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed §§7.7,
+    9.2, 9.4 and 13.1 of the draft and the answers to #89 and #90, the independent reviewer
+    entries through `72e199f`, the spec index and the conformance case lists. No Claude Code
+    sessions or memory were read.
+  - Work: after independent approval, changed the answers to #89 and #90, the spec index and the
+    conformance and pending READMEs from draft wording to `spec-v21`. The rules are unchanged from
+    `8460ba7`. The fourteen `spec-v21` and eighteen `spec-v20` cases stay under
+    `tests/conformance/pending/` until the crate passes them.
+  - Checks: the latest previous spec tag was `spec-v20`; the worktree was clean before the release
+    edits; 1,693 active and 32 pending cases; all three tests in `cargo test --test conformance`
+    passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v21` commit on `c14/spec-q86`, tagged locally
+    as `spec-v21`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.

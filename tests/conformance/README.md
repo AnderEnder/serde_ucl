@@ -27,7 +27,7 @@ None of them is written by hand.
   not pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
   `cases/spec/` when the crate passes it. Eighteen `spec-v20` cases for questions #86 to #88 (§9.4,
-  §12.5) and fourteen cases of the `spec-v21` draft for question #89 (§9.2, §13.1) are pending under
+  §12.5) and fourteen `spec-v21` cases for question #89 (§9.2, §13.1) are pending under
   `pending/09-macros/` and `pending/13-inputs/` (see `pending/README.md`).
 - `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
   platform's C library; see *Golden files per platform* below.

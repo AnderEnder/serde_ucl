@@ -38,7 +38,7 @@ be dropped on the move; `files/v4` also serves as the directory that one case lo
   place in a section object, the first name's `}` leaves the value created most recently as it
   was.
 
-Fourteen cases of the `spec-v21` draft, for question #89 (§9.2 and §13.1, a rejected argument
+Fourteen `spec-v21` cases, for question #89 (§9.2 and §13.1, a rejected argument
 document or a first-directory miss and a later skip), wait in the same way, seven under
 `09-macros/` and seven under `13-inputs/`. The fixtures
 `files/a.inc` and `files/v12/args_bad.inc` under `09-macros/` are identical to the active ones.

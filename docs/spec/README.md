@@ -220,10 +220,8 @@ changed keys and strings, and to included files.
 `spec-v20` answers #86 to #88: it extends the §9.4 first-directory quirk to a later
 `.load(try=true)` that skips its file, and says how an included file's brace is taken over again
 before its first key and how the first name closes in a section object (§9.4, §12.5).
-A draft for #89 and #90 extends the same skips to a rejected argument document (§9.2) and to
-later inputs (§13.1), and
-applies the §7.7 handler uncertainty to macro VALUEs; it awaits independent review for
-`spec-v21`.
+`spec-v21` answers #89 and #90: it extends the same skips to a rejected argument document
+(§9.2) and to later inputs (§13.1), and applies the §7.7 handler uncertainty to macro VALUEs.
 
 The cases of `spec-v13`, `spec-v15` and `spec-v18` are all in `cases/spec/`; the three
 `spec-v15` cases moved there when the crate followed §9.4 in C14, and the six `spec-v18` cases
@@ -266,8 +264,7 @@ Two rules are stated but have no committed case, because their golden files cann
 ## Coverage
 
 Every case in `tests/conformance/` and the section(s) that explain it: 1693 cases in `cases/` and
-`libucl/`, plus eighteen pending `spec-v20` cases and fourteen pending cases of the `spec-v21`
-draft.
+`libucl/`, plus eighteen pending `spec-v20` cases and fourteen pending `spec-v21` cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
