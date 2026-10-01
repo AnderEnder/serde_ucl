@@ -181,7 +181,24 @@ needs one; the `joins_*` cases show each of them.
 ### Errors and silent stops
 
 - An error in any input makes the result an error, whatever the other inputs hold
-  (`inputs_error_in_first_input`, `inputs_error_in_later_input`).
+  (`inputs_error_in_first_input`, `inputs_error_in_later_input`). An error ends its input, as in
+  one document, and a skip in a later input does not discard it:
+  `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by an input
+  `b = 2⏎.load(try=true, key="t") "missing.txt"` is an error
+  (`inputs_missing_include_then_skip_in_later_input_error`).
+- **Quirk.** The two errors that do not end the parse, a rejected argument document (§9.2,
+  *ARGUMENTS*) and the first-directory miss of a `.include` (§9.4, *Quirk: a later skipped URL
+  include or `.load`*), are discarded by a skip in a later input as by one later in their own:
+  `.priority(x) 3⏎a = 1` followed by that input gives `{ a: int 1 @3, b: int 2 }`, also with an
+  input in between and with the input given as a file; the first-directory miss of
+  `.include(path=["", "…/files/v4/p1"]) "pa.inc"` followed by an input with a skipped URL include
+  or that `.load` gives `pa: int 1` and `b: int 2`. Without such a skip in a later input the result
+  is an error, and a skip in an earlier input covers nothing after it
+  (`inputs_args_rejected_then_skip_in_later_input`, `inputs_args_rejected_skip_two_inputs_later`,
+  `inputs_args_rejected_skip_in_later_file_input`, `inputs_first_miss_then_url_skip_in_later_input`,
+  `inputs_first_miss_then_load_skip_in_later_input`,
+  `inputs_args_rejected_later_input_without_skip_error`,
+  `inputs_skip_in_earlier_input_covers_nothing_error`).
 - A silent stop (§9.4, *Missing and unusable files*; a failing registered macro, §13.2) ends the
   input that holds the macro, with every file it was including, and nothing else: the next input
   is read, and goes on where the stopped one left off (`joins_stopped_include_next_input_read`) (`inputs_stop_then_later_inputs`,

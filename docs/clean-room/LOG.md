@@ -5172,3 +5172,205 @@
   to the rebased release commit; its `docs/spec/` also carries `main`'s path-only edits of the
   §12.5 citations of the six `spec-v18` cases. The rules are unchanged from the reviewed text.
   Golden files are as generated. Not pushed.
+
+- 2026-10-01 — Role: spec team (classification and draft). Item: C14, the seven open fuzzer
+  findings under `target/fuzz-differential/findings/`, questions #89 and #90, spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v20
+    §§7.7, 9.2, 9.4, 9.6, 9.7, 12.5 and 13.2, the seven findings (input, original, flags,
+    directory, report), the fuzzer's classifier (`fuzz/src/uncertain.rs`) to tell a classifier gap
+    from a crate bug, the pinned libucl source, and the pinned oracle and the differential checker
+    as black boxes, with controls in three or five identical runs each.
+  - `crate-rejects-0480fbc2420ab897`, `crate-rejects-986bc4bfe9f1b299`,
+    `crate-rejects-fc3ab208a2acd907`: not libucl's result under the released spec, which makes a
+    rejected argument document an error (§9.2); the crate follows it. Each document ends with a
+    later skip, and the oracle accepts it the way §9.4's first-directory quirk describes for a
+    miss: the macro has run without ARGUMENTS with its VALUE directly after the `)`, and the skip
+    discards the error. Controls: the same with `.priority(x) 3`, with an unknown macro or a silent
+    stop in the argument document, and with the rejection in an included file; one skip covers a
+    rejection and a first-directory miss before it; a rejection after the skip, a `.load` that
+    reads its file, a `.try_include` of a missing file, and a macro that fails without ARGUMENTS
+    stay errors. New rule, #89: drafted in §9.2 with a cross-reference in §9.4.
+  - `values-differ-6dc7de42c47fd96a`: decided by the released spec as uncertain. Under
+    `rewrite`, the oracle gives the last `a` value the comment of a replaced value before its own
+    (`"c": ["# c", "# c"]`), the crate only its own (`"ca": ["# c"]`); §12.5 (#81) allows exactly
+    this, "the earlier comment appears before `k`'s own trailing comment. The project may instead
+    give `k` only `"ca": ["# c"]`". With distinct texts (`# c`, `# e`) the classifier already
+    excuses it; it misses the case where the reappearing comment has the same text as the value's
+    own. Fuzzer classifier gap.
+  - `values-differ-244706530c4e7da6`: decided as uncertain. The difference is the bytes after the
+    first NUL of a string that `.ctx` copies (`"\u0000\u0000"` against `"\u0000\""`), which §9.7
+    and §13.2 leave undefined. The classifier knows the class, but looks for the copying macro
+    only in the input itself, and here `.ctx` stands in the included `files/macro_ctx.inc`.
+    Fuzzer classifier gap.
+  - `crate-accepts-e04659ea272d36c7`, `crate-accepts-28d2d688c1a509e9`: decided as uncertain by
+    §7.7, whose wording speaks of the value; drafted a clarification, #90. A handler-resolved
+    reference shares a macro VALUE with other text (`"${H_}*/"`, `"a ${H_}"`). The oracle rejects
+    both; with `[handled]` written in place of the reference it accepts both and gives the crate's
+    results (an empty object; `a: ["handled"]` and `"{": []`). The crate is right under the
+    project's decision. Fuzzer classifier gap.
+  - Cases for #89: pending, because the crate fails them,
+    `macro_args_rejected_then_load_try_accepts`, `macro_args_rejected_then_url_try_accepts`,
+    `macro_args_rejected_unknown_macro_then_load_try_accepts`,
+    `macro_args_rejected_in_included_file_then_load_try_accepts`,
+    `macro_args_rejected_include_runs_without_args`,
+    `macro_args_rejected_and_first_miss_then_one_skip_accepts` (under `pending/09-macros/`, with
+    copies of `files/a.inc` and `files/v12/args_bad.inc`) and
+    `macro_registered_args_rejected_then_load_try_accepts` (under the new `pending/13-inputs/`);
+    active, because the crate passes them, `macro_args_rejected_after_skip_error`,
+    `macro_args_rejected_then_load_existing_file_error` and
+    `macro_args_rejected_include_space_value_error`. No case for #90: the oracle's result is
+    undefined there. Golden files only from `scripts/regen-golden.sh`, which changed no existing
+    golden file. The index counts 1,689 active cases, plus eighteen pending `spec-v20` and seven
+    pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): draft C14 rejected-arguments and handler VALUE rules`
+    commit on `c14/spec-q86`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, questions and answers, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-10-01 — Role: independent clean-room spec reviewer. Item: C14 questions #89 and #90,
+  spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `1cbbd48..fa75a0b`
+    diff (§§7.7, 9.2 and 9.4, `docs/spec/README.md`, the conformance and pending READMEs,
+    questions #89 and #90 and their answers, the ten new cases, fixtures and golden files, the
+    spec-team entry), the released §9.2 *ARGUMENTS* and §13.1 *Errors and silent stops*, and
+    black-box runs of the pinned oracle binary of the `c14-followups` worktree from this
+    session's scratchpad. No libucl source, implementation or fuzzer source, `tools/`, or Claude
+    sessions or memory were read.
+  - Review: changes requested, one finding. No prohibited content: "the macro runs without
+    ARGUMENTS" and "stops the parse" are the released §9.2 and §13.1 terms, and each consequence
+    has an example and a case. Every example matches the oracle, in repeated runs: `a: int 1 @3`
+    after `.priority(x) 3` with either skip, with `.priority(.foo 1) 3`, and for `args_bad.inc`
+    `b: int 1 @1`; `.include(x)"files/a.inc"` includes the file; `.seen(x) v` gets the VALUE
+    `" v"` and no ARGUMENTS; one skip covers a miss and a rejection in either order and two
+    rejections, and none after it; a `.load` that reads its file does not count. With a later
+    skip, `.include(x) "b.inc"` includes a file named ` "b.inc"`, space and quotes included, as
+    the §9.2 sentence on ` "files/a.inc"` says. The §7.7 examples are errors with `${H_}` and
+    accepted with `[handled]`, in `cases/spec/09-macros` and `cases/spec/13-inputs`.
+    1. `docs/spec/09-macros.md:236-241` and the §9.4 cross-reference say the document is an error
+       unless "a later macro" skips its file, but not whether that macro may stand in a later
+       input (§13.1), and released `docs/spec/13-inputs-and-macros.md:183` says an error in any
+       input makes the result an error. The oracle accepts: `.priority(x) 3⏎a = 1`, then an input
+       `b = 2⏎.load(try=true, key="t") "missing.txt"`, gives `{ a: int 1 @3, b: int 2 }`, also
+       with an input between them and with the second given as a file; a first-directory miss
+       followed by an input with a skipped URL include or `.load` gives `pa: int 1`. Without a skip
+       in a later input both are errors, and a skip in an earlier input covers nothing after it.
+       Beyond the draft, `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by such an input gives
+       `{ a: int 1, b: int 2 }`, while the same include is an error within one document even with
+       a skip after it. The crate rejects all of these, the released URL form included (checked
+       in a scratch copy). Fix: find whether this is libucl's behaviour or how the oracle reports
+       an earlier input's error, then state in §13.1 and §§9.2 and 9.4 which errors a skip in a
+       later input discards, with cases (pending where the crate fails), or say why it is left
+       out.
+    Non-blocking: a silent stop in the argument document, `.priority(.try_include "missing") 3`,
+    and a rejection in text parsed in place, `.emit ".priority(x) 3"`, followed by a skip, are
+    accepted by the oracle and rejected by the crate, without a case; pending cases would pin
+    both. At `09-macros.md:256-258`, a macro that stops silently without ARGUMENTS also ends in an
+    error (`.try_include(x)"missing.inc"` then a skip), so "fails or stops" would be exact.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,848 tracked golden files.
+    1,689 active and 25 pending cases (eighteen `spec-v20`, seven draft), one coverage row each
+    (1,714), 25 case entries in `pending/README.md`, identical pending fixtures.
+    `cargo test --test conformance` passed all three tests; in a `git archive` copy of `fa75a0b`
+    with the seven draft cases and my probes moved in, the seven failed, the three boundary
+    cases passed (`src/` compiled, not read). `git diff --check 1cbbd48 fa75a0b`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team. Item: C14 question #89, spec-v21 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`aa1b0df`), the draft `fa75a0b`, released §13.1, `tools/ucl-dump/ucl_dump.c`, the
+    pinned libucl source, and a probe program linked against the pinned libucl (in the session
+    scratchpad) that reports each add call's result and the parser's error after it.
+  - Finding, whether libucl's or the tool's: both, by kind of error. For the rejected argument
+    document and the first-directory miss, libucl's add call returns success with an error
+    message set, and a later skip clears the message, in the same input or a later one; every
+    call then returned success and no message is left, so accepting is libucl's own result. For
+    an error that ends its input (`.include "nonexistent.inc"`), the add call returns failure with
+    a message; libucl still reads later inputs, and a skip there clears the message. The tool
+    checked only the message after the last input, contrary to its own description ("an error if
+    any input reported one"), so it accepted these. Fixed in `tools/ucl-dump/ucl_dump.c`: an
+    input whose add call fails with a message makes the result an error, whatever later inputs
+    clear; a silent stop, which fails without one, does not. A full `scripts/regen-golden.sh` run
+    with the fixed tool changed no golden file. `tests/conformance/README.md` describes the
+    criterion.
+  - Spec: §13.1 now says that an error ends its input and a skip in a later input does not
+    discard it, and, as a quirk, that a skip in a later input discards the two errors that do not
+    end the parse; §9.2 and §9.4 say "in the same input or a later one". Cases: pending
+    `inputs_args_rejected_then_skip_in_later_input`, `inputs_args_rejected_skip_two_inputs_later`,
+    `inputs_args_rejected_skip_in_later_file_input`,
+    `inputs_first_miss_then_url_skip_in_later_input` and
+    `inputs_first_miss_then_load_skip_in_later_input`; active
+    `inputs_args_rejected_later_input_without_skip_error`,
+    `inputs_skip_in_earlier_input_covers_nothing_error` and
+    `inputs_missing_include_then_skip_in_later_input_error`, all in five of five identical runs.
+  - Non-blocking notes taken: pending `macro_args_stopped_then_load_try_accepts` (a silent stop in
+    the argument document) and
+    `pending/13-inputs/macro_registered_text_args_rejected_then_load_try_accepts` (a rejection in
+    text parsed in place); "fails or stops silently", with the active
+    `macro_args_rejected_try_include_stops_error`.
+  - Observation: in a copy with every pending case moved in, the crate fails all of them except
+    the `spec-v20` case `comments_include_nested_text_before_first_name`, which it now passes on
+    this base; it can be activated with the other `spec-v20` cases.
+  - Cases: golden files only from `scripts/regen-golden.sh`. The index counts 1,693 active cases,
+    plus eighteen pending `spec-v20` and fourteen pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following commit on `c14/spec-q86`. Not tagged or pushed; independent re-review
+    pending.
+  - Attestation: the draft spec, question answer, cases, tool change and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names or source
+    structure.
+
+- 2026-10-01 — Role: independent clean-room spec reviewer (re-review). Item: C14 questions #89 and
+  #90, spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `aa1b0df..8460ba7`
+    diff of `docs/` and `tests/` (§§9.2, 9.4 and 13.1, `docs/spec/README.md`, the conformance and
+    pending READMEs, the #89 answer, the eleven new cases, further inputs and golden files, the
+    spec-team entry), and black-box runs of two pinned oracle binaries from this session's
+    scratchpad: this worktree's `target/libucl-oracle/ucl-dump`, built after the tool change, and
+    the older one of the `c14-followups` worktree. `tools/` was not opened; no libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. The revision resolves my finding and adds no prohibited content: §13.1
+    states that an error ends its input and a later input's skip does not discard it, and, as a
+    quirk, that a skip in a later input discards a rejected argument document and a
+    first-directory miss; §§9.2 and 9.4 say "in the same input or a later one". With the new
+    binary my probes match the text: `.priority(x) 3⏎a = 1` then an input with a `.load(try=true)`
+    skip gives `{ a: int 1 @3, b: int 2 }`, also with an input between and as a file input; a
+    first-directory miss with a later input's URL or `.load` skip gives `pa: int 1`; without a
+    later skip, or with the skip in an earlier input, the result is an error; and
+    `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by a skip input is an error. The older
+    binary accepts that last document, as the spec team describes: comparing every golden file
+    with it, it differs only on `inputs_missing_include_then_skip_in_later_input_error`, which the
+    tool change accounts for; not a finding. The silent stop in an argument document, the
+    rejection in text parsed in place and `.try_include(x)"missing.inc"` give the results the new
+    sentences and cases state. No new finding.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with the
+    new binary and writing only to the scratchpad, matched all 6,887 tracked golden files.
+    1,693 active and 32 pending cases (eighteen `spec-v20`, fourteen draft), one coverage row each
+    (1,725), and the same 32 in `pending/README.md`; the pending fixtures shared with active cases
+    are identical, and the further inputs of the pending `13-inputs` cases are under
+    `pending/13-inputs/files/`. `cargo test --test conformance` passed all three tests; in a
+    `git archive` copy of `8460ba7` with the fourteen draft cases moved in, only those fourteen
+    failed besides the four expected failures (`src/` compiled, not read).
+    `git diff --check aa1b0df 8460ba7 -- docs tests`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team (release). Item: C14 questions #89 and #90, spec-v21.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed §§7.7,
+    9.2, 9.4 and 13.1 of the draft and the answers to #89 and #90, the independent reviewer
+    entries through `72e199f`, the spec index and the conformance case lists. No Claude Code
+    sessions or memory were read.
+  - Work: after independent approval, changed the answers to #89 and #90, the spec index and the
+    conformance and pending READMEs from draft wording to `spec-v21`. The rules are unchanged from
+    `8460ba7`. The fourteen `spec-v21` and eighteen `spec-v20` cases stay under
+    `tests/conformance/pending/` until the crate passes them.
+  - Checks: the latest previous spec tag was `spec-v20`; the worktree was clean before the release
+    edits; 1,693 active and 32 pending cases; all three tests in `cargo test --test conformance`
+    passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v21` commit on `c14/spec-q86`, tagged locally
+    as `spec-v21`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.

@@ -27,7 +27,8 @@ None of them is written by hand.
   not pass yet, with their golden files and a README; the runners do not read it, but
   `scripts/regen-golden.sh` regenerates its golden files like the others. Each case moves to
   `cases/spec/` when the crate passes it. Eighteen `spec-v20` cases for questions #86 to #88 (§9.4,
-  §12.5) are pending under `pending/09-macros/` (see `pending/README.md`).
+  §12.5) and fourteen `spec-v21` cases for question #89 (§9.2, §13.1) are pending under
+  `pending/09-macros/` and `pending/13-inputs/` (see `pending/README.md`).
 - `platform-dependent.txt` and `platform/<platform>/` hold the golden files that depend on the
   platform's C library; see *Golden files per platform* below.
 - `cases/migrated/` holds inputs taken from the crate's older test suites. Their expected results
@@ -62,7 +63,10 @@ None of them is written by hand.
   `CURDIR` from it); PRIORITY is a decimal number; STRATEGY is `append`, `merge`, `rewrite` or
   `error`; PATH is relative to the case's directory. The case's own `.flags` apply to the parser,
   and `priority:N` and `strategy:NAME` to the case's own file only. The golden files record the
-  result after the last input; it is an error if any input reported one. Further inputs are named
+  result after the last input; it is an error if any input reported one: libucl failed to add it
+  with an error message (a silent stop fails without one), or a message is still set after the
+  last input. A later input can clear an earlier input's message, but not that failure (§13.1).
+  Further inputs are named
   so that they are not cases themselves, under `files/` (for example `files/<case>.<n>.inc`).
 - Every case is parsed with the variable `ABI` registered as `unknown`, and with the file variables
   `FILENAME` and `CURDIR` set from the case path (unless `no-filevars`). The oracle runs each case

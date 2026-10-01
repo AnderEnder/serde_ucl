@@ -1,0 +1,4 @@
+.priority(x) 3
+a = 1
+.load(try=true, key="t") "missing.txt"
+.priority(y) 2

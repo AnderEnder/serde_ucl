@@ -65,7 +65,10 @@
  *       variables are left as they are) or "file" (the file is added by path,
  *       as a file: libucl sets FILENAME and CURDIR from it). Every input is
  *       added even after an earlier one failed; the result is an error if any
- *       input reported one.
+ *       input reported one: an add call that returned false with an error message
+ *       set, or a message still set after the last input. A later input can clear
+ *       the message of an earlier one (a skipped include or .load does), which does
+ *       not undo that earlier failure.
  *   -R  register the test macros, each with the parser as its user data:
  *       .emit     parses its value text in place of the macro (as a chunk
  *                 inserted at the macro's position) and returns what that
@@ -506,6 +509,19 @@ read_file(const char *path, size_t *out_len)
 	return buf;
 }
 
+/* Records the first input whose add call failed with an error message (a silent stop
+ * fails without one). */
+static char *
+note_failure(struct ucl_parser *parser, bool ok, char *failed)
+{
+	const char *err = ucl_parser_get_error(parser);
+
+	if (!ok && err != NULL && failed == NULL) {
+		failed = strdup(err);
+	}
+	return failed;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -661,11 +677,14 @@ main(int argc, char **argv)
 		ucl_parser_set_filevars(parser, argv[optind], true);
 	}
 
-	ucl_parser_add_chunk_full(parser, buf, len, priority, strat, UCL_PARSE_UCL);
+	char *failed = note_failure(
+		parser, ucl_parser_add_chunk_full(parser, buf, len, priority, strat, UCL_PARSE_UCL), NULL);
 	for (int i = 0; i < nextra; i++) {
 		if (extra[i].as_file) {
-			ucl_parser_add_file_full(parser, extra[i].path, extra[i].priority, extra[i].strat,
-									 UCL_PARSE_UCL);
+			failed = note_failure(parser,
+								  ucl_parser_add_file_full(parser, extra[i].path, extra[i].priority,
+														   extra[i].strat, UCL_PARSE_UCL),
+								  failed);
 		}
 		else {
 			size_t elen = 0;
@@ -676,13 +695,15 @@ main(int argc, char **argv)
 				return 2;
 			}
 			/* libucl keeps pointers into chunks it has read, so the buffer stays allocated. */
-			ucl_parser_add_chunk_full(parser, ebuf, elen, extra[i].priority, extra[i].strat,
-									  UCL_PARSE_UCL);
+			failed = note_failure(parser,
+								  ucl_parser_add_chunk_full(parser, ebuf, elen, extra[i].priority,
+															extra[i].strat, UCL_PARSE_UCL),
+								  failed);
 		}
 	}
 
-	if (ucl_parser_get_error(parser) != NULL) {
-		fprintf(stderr, "libucl: %s\n", ucl_parser_get_error(parser));
+	if (failed != NULL || ucl_parser_get_error(parser) != NULL) {
+		fprintf(stderr, "libucl: %s\n", failed != NULL ? failed : ucl_parser_get_error(parser));
 		fputs(emit >= 0 ? "error\n" : "{\"error\":true}\n", stdout);
 	}
 	else if (emit >= 0) {
@@ -726,6 +747,7 @@ main(int argc, char **argv)
 	}
 
 	ucl_parser_free(parser);
+	free(failed);
 	free(buf);
 	return 0;
 }
