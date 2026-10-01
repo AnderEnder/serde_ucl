@@ -73,6 +73,18 @@ expanded `.emit` and what depends on it, and for documents that include a file w
 the crate's result with `zerocopy` is compared with the oracle's without it, and the rules below
 apply as for that run; a report then names the flags the oracle ran with.
 
+Under `variable-handler`, the oracle also runs with each name the test handler would resolve in
+the document (a braced `${H_…}` that is not registered, in the input, a file the crate's parse
+read, or text it parsed in place) registered as a variable with the handler's value,
+`[handled]`. Spec §7.7 (spec-v21) leaves libucl's result undefined where such a reference shares
+its string, or a macro's VALUE, with other text, acceptance included, and gives the project the
+result of the text with the value substituted in place, as for registered variables; a
+registered variable gives that result where writing `[handled]` into the source would not
+(`a = [handled]y` starts an array). The handler then resolves nothing, so the rules below are
+applied without it. Where registering could change other text (an unbraced `$H_`, a `$$`, or a
+name of other bytes than letters, digits and `_`), the handler's own result stays the
+expectation, with the §7.7 rule below.
+
 ## Verdicts
 
 - **agree**: the same value, or both reject the input.
@@ -82,7 +94,7 @@ apply as for that run; a report then names the flags the oracle ran with.
   decided by the project*): non-UTF-8 text, an unsupported feature (signatures), the limit on
   nested argument documents, or the nesting limit; or the results differ only in behaviour the
   spec marks **Uncertain** (`src/uncertain.rs`): a handler result that shares its string with
-  other text (§7.7), a float outside the 64-bit range with `kb`, `mb` or `gb` (§5.4), the byte
+  other text, where the handler's names cannot be registered (§7.7, above), a float outside the 64-bit range with `kb`, `mb` or `gb` (§5.4), the byte
   saved after a block comment that ends its unit and the comments of a value §8 replaced
   (§12.5), which may come before a later value's own comments, also with the same text, when
   the crate read them before that value's own (a value with no comments of its own is not

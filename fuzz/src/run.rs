@@ -16,24 +16,96 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-/// The flags the oracle runs with to give the expected result of an input with `flags`: all of
-/// them but `zerocopy`. Spec §12.2 gives a document with `zerocopy` the result the spec gives it
-/// without `zerocopy`, all other settings unchanged, while libucl's own result with the flag is
-/// undefined in places (the text of an expanded `.emit` and what depends on it, and documents
-/// that include a file with entries). The crate still parses with every flag.
-pub fn expectation_flags(flags: &[String]) -> Vec<String> {
-    flags
+/// What the expected result of an input is: the oracle's result with `oracle_flags`, compared
+/// with the help of the recognisers of uncertain behaviour, which see `context_flags`.
+pub struct Expectation {
+    pub oracle_flags: Vec<String>,
+    pub context_flags: Vec<String>,
+}
+
+/// The expected result of `input` with `flags`, given `units`, the document's other units in the
+/// crate's parse (`CrateNotes::units`). The crate still parses with `flags`; the oracle runs with
+/// them but for two changes, each the result the spec gives the project:
+///
+/// - `zerocopy` is dropped. Spec §12.2 gives a document with `zerocopy` the result it gives it
+///   without, all other settings unchanged, while libucl's own result with the flag is undefined
+///   in places (the text of an expanded `.emit` and what depends on it, and documents that
+///   include a file with entries).
+/// - Under `variable-handler`, each name that the test handler would resolve in the document
+///   ([`handler_names`]) is registered as a variable with the handler's value, `[handled]`.
+///   Spec §7.7 leaves libucl's result undefined where such a reference shares its string, or a
+///   macro's VALUE, with other text, whether the document is accepted included, and gives the
+///   project the result of the text with the value substituted in place, as for registered
+///   variables. A registered variable gives exactly that, where writing `[handled]` into the
+///   source would not: `a = [handled]y` starts an array, while `a = ${H_X}y` is the string
+///   `[handled]y`. Registered names take precedence over the handler (§7.7), which then resolves
+///   nothing, so the recognisers do not see `variable-handler`: its uncertainty cannot arise.
+pub fn expectation(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Expectation {
+    let mut oracle_flags: Vec<String> = flags
         .iter()
         .filter(|flag| *flag != "zerocopy")
         .cloned()
-        .collect()
+        .collect();
+    let mut context_flags = oracle_flags.clone();
+    if let Some(names) = handler_names(&oracle_flags, input, units)
+        && !names.is_empty()
+    {
+        oracle_flags.extend(names.iter().map(|name| format!("var:{name}=[handled]")));
+        context_flags = oracle_flags
+            .iter()
+            .filter(|flag| *flag != "variable-handler")
+            .cloned()
+            .collect();
+    }
+    Expectation {
+        oracle_flags,
+        context_flags,
+    }
 }
 
-/// The options the oracle runs with for an input with `flags`: those of the
-/// [`expectation_flags`]. Running it ([`check`]) and telling how to run it again (the fuzzer's
-/// reports) both use this.
-pub fn expectation_options(flags: &[String]) -> Result<Vec<String>, String> {
-    oracle_options(&expectation_flags(flags))
+/// Under `variable-handler`, the names of the braced references `${H_…}` in the input and its
+/// other units that are not registered, which the test handler resolves (§7.7), in the order
+/// found; empty without the flag. `None` when registering them could change other text, and the
+/// handler's own result stays the expectation: a `$H_` that is not braced, which a registered
+/// name that is a prefix of the text after the `$` would replace (§7.4), a `$$` (§7.5), or a
+/// name of other bytes than letters, digits and `_`. Every `${` is looked at, also inside another
+/// reference's name, since references inside it are expanded (§7.3).
+pub fn handler_names(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Option<Vec<String>> {
+    if !flags.iter().any(|flag| flag == "variable-handler") {
+        return Some(Vec::new());
+    }
+    let registered: Vec<&str> = flags
+        .iter()
+        .filter_map(|flag| flag.strip_prefix("var:"))
+        .filter_map(|var| var.split_once('=').map(|(name, _)| name))
+        .collect();
+    let mut names: Vec<String> = Vec::new();
+    for text in std::iter::once(input).chain(units.iter().map(Vec::as_slice)) {
+        let has = |needle: &[u8]| text.windows(needle.len()).any(|w| w == needle);
+        if has(b"$H_") || has(b"$$") {
+            return None;
+        }
+        for at in 0..text.len() {
+            let Some(after) = text[at..].strip_prefix(b"${") else {
+                continue;
+            };
+            let Some(end) = after.iter().position(|&b| b == b'}') else {
+                continue;
+            };
+            let name = &after[..end];
+            if !name.starts_with(b"H_") {
+                continue;
+            }
+            if !name.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_') {
+                return None;
+            }
+            let name = std::str::from_utf8(name).expect("ASCII");
+            if !registered.contains(&name) && !names.iter().any(|known| known == name) {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    Some(names)
 }
 
 /// The oracle's options for the entries of a `.flags` file, mapped as `scripts/regen-golden.sh`
@@ -428,30 +500,50 @@ pub struct Target<'a> {
 /// The outcome of one input, with both results for a report.
 pub struct Checked {
     pub oracle: OracleResult,
+    /// The flags the oracle ran with ([`Expectation::oracle_flags`]), for a report to run it
+    /// again with.
+    pub oracle_flags: Vec<String>,
     pub krate: CrateResult,
     pub verdict: Verdict,
 }
 
-/// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both: the
-/// oracle with the [`expectation_options`], the crate with `flags`.
+/// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both: the crate
+/// with `flags`, then the oracle with the [`expectation`]'s flags, which depend on the units the
+/// crate's parse read.
 pub fn check(target: &Target<'_>, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
-    let options = expectation_options(flags).expect("the fuzzer's flags are known");
+    let setup = Setup::from_flags(flags).expect("the fuzzer's flags are known");
+    let (krate, notes) = run_crate(&setup, dir, bytes);
+    let expected = expectation(flags, bytes, &notes.units);
+    let options = oracle_options(&expected.oracle_flags).expect("the fuzzer's flags are known");
     fs::write(target.file, bytes).expect("the work file can be written");
     let oracle = run_oracle(target.oracle, &options, target.file, dir, target.timeout);
-    check_against(oracle, bytes, flags, dir)
+    judge(oracle, krate, &notes, bytes, expected)
 }
 
 /// Runs `bytes` through the crate with `flags` from the working directory `dir` and compares its
-/// result with `oracle`, the oracle's result with the [`expectation_flags`]. The recognisers of
-/// uncertain behaviour see those flags too: the result expected with `zerocopy` is uncertain
-/// where the result without it is (§12.2).
+/// result with `oracle`, given as the oracle's result with the [`expectation`]'s flags, as
+/// [`check`] does. The unit tests use it with the oracle's dumps written out.
+#[cfg(test)]
 pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
     let setup = Setup::from_flags(flags).expect("the fuzzer's flags are known");
     let (krate, notes) = run_crate(&setup, dir, bytes);
-    let expected_flags = expectation_flags(flags);
+    let expected = expectation(flags, bytes, &notes.units);
+    judge(oracle, krate, &notes, bytes, expected)
+}
+
+/// Compares the two results; the recognisers of uncertain behaviour see the expectation's
+/// context flags, so that the result expected with `zerocopy` is uncertain where the result
+/// without it is (§12.2).
+fn judge(
+    oracle: OracleResult,
+    krate: CrateResult,
+    notes: &CrateNotes,
+    bytes: &[u8],
+    expected: Expectation,
+) -> Checked {
     let ctx = Context {
         input: bytes,
-        flags: &expected_flags,
+        flags: &expected.context_flags,
         comments: &notes.comments,
         uncertain: &notes.uncertain,
         units: &notes.units,
@@ -459,6 +551,7 @@ pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: 
     let verdict = compare(&oracle, &krate, &ctx);
     Checked {
         oracle,
+        oracle_flags: expected.oracle_flags,
         krate,
         verdict,
     }
@@ -548,6 +641,8 @@ mod tests {
         ));
     }
 
+    /// The §7.7 recogniser, which applies where the handler's names cannot be registered
+    /// ([`expectation`]); this test gives it the handler's flags directly.
     #[test]
     fn mixed_handler_include_path_skips_only_the_undefined_empty_result() {
         let input = b".include(g=true,y=e)\"${H_}.*\"";
@@ -596,6 +691,8 @@ mod tests {
         ));
     }
 
+    /// The §7.7 recogniser, which applies where the handler's names cannot be registered
+    /// ([`expectation`]); this test gives it the handler's flags directly.
     #[test]
     fn mixed_handler_emit_text_rejection_skips_only_its_undefined_value() {
         let input = b".emit \"x=${H_}c\"";
@@ -732,16 +829,83 @@ mod tests {
             "string-input",
             "priority:3",
         ]);
-        let expected = expectation_flags(&with);
+        let expected = expectation(&with, b"a = 1", &[]);
         assert_eq!(
-            expected,
+            expected.oracle_flags,
             flags(&["registered-macros", "string-input", "priority:3"])
         );
-        let options = oracle_options(&expected).unwrap();
+        assert_eq!(expected.context_flags, expected.oracle_flags);
+        let options = oracle_options(&expected.oracle_flags).unwrap();
         assert!(!options.iter().any(|option| option == "-z"));
         assert_eq!(options, ["-R", "-S", "-p", "3"]);
         let without = flags(&["no-time", "string-input", "var:zerocopy=1"]);
-        assert_eq!(expectation_flags(&without), without);
+        assert_eq!(expectation(&without, b"", &[]).oracle_flags, without);
+    }
+
+    /// §7.7: the names the test handler would resolve, and when they cannot be registered.
+    #[test]
+    fn the_expectation_registers_the_handlers_names() {
+        let handler = flags(&["string-input", "variable-handler", "zerocopy"]);
+        let expected = expectation(&handler, b"a = \"x${H_X}y\"\nb = ${H_}\nc = ${Q}", &[]);
+        assert_eq!(
+            expected.oracle_flags,
+            flags(&[
+                "string-input",
+                "variable-handler",
+                "var:H_X=[handled]",
+                "var:H_=[handled]"
+            ])
+        );
+        assert_eq!(
+            expected.context_flags,
+            flags(&["string-input", "var:H_X=[handled]", "var:H_=[handled]"])
+        );
+        // Names in included files and texts parsed in place, names inside a name, each once.
+        let units = [b"k = \"${H_A}\"".to_vec(), b"${${H_B}}${H_A}".to_vec()];
+        assert_eq!(
+            handler_names(&handler, b"x = 1", &units),
+            Some(vec!["H_A".to_string(), "H_B".to_string()])
+        );
+        // A registered name takes precedence and is left alone.
+        let registered = flags(&["string-input", "variable-handler", "var:H_X=v"]);
+        assert_eq!(
+            handler_names(&registered, b"a = \"x${H_X}${H_Y}\"", &[]),
+            Some(vec!["H_Y".to_string()])
+        );
+        // Registering could change other text: an unbraced `$H_`, a `$$`, or another name.
+        for text in [
+            "a = \"x${H_X}\"\nb = $H_X",
+            "a = \"x${H_X}$$\"",
+            "a = \"x${H_X.y}\"",
+            "a = \"x${H_$ABI}\"",
+        ] {
+            assert_eq!(
+                handler_names(&handler, text.as_bytes(), &[]),
+                None,
+                "{text}"
+            );
+            let expected = expectation(&handler, text.as_bytes(), &[]);
+            assert_eq!(
+                expected.oracle_flags,
+                flags(&["string-input", "variable-handler"])
+            );
+            assert_eq!(expected.context_flags, expected.oracle_flags);
+        }
+        assert_eq!(
+            handler_names(&handler, b"x = 1", &[b"y = $H_Z".to_vec()]),
+            None
+        );
+        // Nothing to register, or no handler.
+        let none = expectation(&handler, b"a = \"${Q}x\"", &[]);
+        assert_eq!(
+            none.oracle_flags,
+            flags(&["string-input", "variable-handler"])
+        );
+        let no_handler = flags(&["string-input"]);
+        assert_eq!(
+            expectation(&no_handler, b"a = \"x${H_X}y\"", &[]).oracle_flags,
+            no_handler
+        );
     }
 
     /// The crate's verdict with `run_flags` in `cases/spec/12-flags` against the oracle's `dump`,
@@ -1008,6 +1172,110 @@ mod tests {
             &run_flags,
             &oracle("y\u{0}")
         )));
+    }
+
+    fn crate_accepts(verdict: &Verdict) -> bool {
+        matches!(
+            verdict,
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        )
+    }
+
+    /// C14 findings `crate-accepts-e04659ea272d36c7` and `crate-accepts-28d2d688c1a509e9`
+    /// (§7.7, QUESTIONS #90). libucl rejects both under its handler, an undefined result; the
+    /// expectation is its result with `H_` registered as `[handled]`, the dumps given here, and
+    /// every difference from it is reported, a rejection included.
+    #[test]
+    fn handler_results_in_a_macro_value_expect_the_substituted_text() {
+        let include = flags(&["string-input", "variable-handler"]);
+        let input = ".include(g=true)\"${H_}*/\"1";
+        let empty = serde_json::json!({"t": "object", "entries": []});
+        let verdict = |oracle: OracleResult, run_flags: &[String], dir: &str, input: &str| {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../tests/conformance/cases/spec")
+                .join(dir);
+            check_against(oracle, input.as_bytes(), run_flags, &dir)
+        };
+        let checked = verdict(
+            OracleResult::Dump(empty.clone()),
+            &include,
+            "09-macros",
+            input,
+        );
+        assert!(matches!(checked.verdict, Verdict::Agree));
+        assert_eq!(
+            checked.oracle_flags,
+            flags(&["string-input", "variable-handler", "var:H_=[handled]"])
+        );
+        let rejected = verdict(OracleResult::Error, &include, "09-macros", input);
+        assert!(crate_accepts(&rejected.verdict));
+        let entry = serde_json::json!({"t": "object", "entries": [
+            {"k": "x", "v": [{"t": "int", "v": "1"}]}
+        ]});
+        let other = verdict(OracleResult::Dump(entry), &include, "09-macros", input);
+        assert!(values_differ(&other.verdict));
+
+        let emit = flags(&["registered-macros", "string-input", "variable-handler"]);
+        let input = ".emit \"a ${H_}\"\"{\"[]";
+        let oracle = |handled: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "array", "v": [{"t": "string", "v": handled}]}]},
+                {"k": "{", "v": [{"t": "array", "v": []}]}
+            ]})
+        };
+        let checked = verdict(
+            OracleResult::Dump(oracle("handled")),
+            &emit,
+            "13-inputs",
+            input,
+        );
+        assert!(matches!(checked.verdict, Verdict::Agree));
+        let rejected = verdict(OracleResult::Error, &emit, "13-inputs", input);
+        assert!(crate_accepts(&rejected.verdict));
+        let changed = verdict(
+            OracleResult::Dump(oracle("handlex")),
+            &emit,
+            "13-inputs",
+            input,
+        );
+        assert!(values_differ(&changed.verdict));
+    }
+
+    /// A string that shares a handler result with other text: libucl's handler result
+    /// (`x[handled]`) is no expectation, the substituted text (`x[handled]y`) is, and no
+    /// recogniser excuses a difference from it. Where the names cannot be registered, the
+    /// handler's result stays the expectation and its recogniser still applies.
+    #[test]
+    fn handler_results_in_a_string_expect_the_substituted_text() {
+        let run_flags = flags(&["string-input", "variable-handler"]);
+        let input = "a = \"x${H_X}y\"";
+        let dump = |v: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "string", "v": v}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &dump("x[handled]y")),
+            Verdict::Agree
+        ));
+        for other in ["x[handled]", "x[handled]Y", "[handled]y"] {
+            assert!(
+                values_differ(&verdict_12_flags(input, &run_flags, &dump(other))),
+                "{other}"
+            );
+        }
+        let fallback = "a = \"x${H_X}y\"\nb = $H_X";
+        let handled = serde_json::json!({"t": "object", "entries": [
+            {"k": "a", "v": [{"t": "string", "v": "x[handled]"}]},
+            {"k": "b", "v": [{"t": "string", "v": "$H_X"}]}
+        ]});
+        assert!(matches!(
+            verdict_12_flags(fallback, &run_flags, &handled),
+            Verdict::Skipped(uncertain::HANDLER)
+        ));
     }
 
     /// C14 finding `values-differ-6dc7de42c47fd96a` (§12.5, QUESTIONS #81): the comment `# c` of

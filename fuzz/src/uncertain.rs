@@ -28,7 +28,10 @@
 //!
 //! What `zerocopy` leaves undefined in libucl (§12.2) needs no recogniser: the expected result of
 //! a document with `zerocopy` is the one without it, so the oracle runs without the flag
-//! ([`crate::run::expectation_flags`]) and the recognisers see the flags of that run.
+//! ([`crate::run::expectation`]) and the recognisers see the flags of that run. The same
+//! holds under `variable-handler` (§7.7): the oracle runs with the names the handler would
+//! resolve registered as variables with its value, and the handler recogniser below applies
+//! only where that cannot be done.
 
 use serde_json::Value as J;
 use serde_ucl::UclValue;
