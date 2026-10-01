@@ -34,7 +34,7 @@ Clean-room work item C14.
   document: `.include "…"⏎q = 1⏎}` is accepted and `.include "…"⏎q = 1` is an error, as before
   but at its end. As libucl does, the brace is not taken over again when only whitespace and `;`
   follow the macro to the end of the file, and the file's own `}` ends the takeover as its first
-  key does (QUESTIONS.md #89, #90). Accepted inputs that are now errors, and the reverse:
+  key does (QUESTIONS.md #91, #92). Accepted inputs that are now errors, and the reverse:
   - The file `{ .include "braced.inc"⏎# c`, or with `.priority 1` or any other text after the
     macro, now holds the brace taken over again at its end: `.include "…"⏎q = 1`, accepted by
     0.6.0, is now an error, and `.include "…"⏎q = 1⏎}`, an error in 0.6.0, is accepted.

@@ -2587,7 +2587,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                 if let Some(notes) = &mut self.notes {
                     notes.trailing();
                 }
-                // The unit's own `}` ends its takeover (oracle runs, QUESTIONS.md #90): later
+                // The unit's own `}` ends its takeover (oracle runs, QUESTIONS.md #92): later
                 // macros take no brace over, and a later first name gets none. Before its first
                 // key, a unit's `}` can only remove a brace taken over.
                 self.first_key_shares = false;
@@ -2953,9 +2953,9 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
     /// unit's later `}`s remove after it, the innermost first; an object that still holds a brace
     /// taken over keeps that one.
     ///
-    /// Oracle runs (QUESTIONS.md #89): nothing is taken over when only whitespace and `;` follow
+    /// Oracle runs (QUESTIONS.md #91): nothing is taken over when only whitespace and `;` follow
     /// the macro to the end of the unit (the caller checks that the unit goes on), and the
-    /// unit's own `}` ends the takeover as its first key does (QUESTIONS.md #90).
+    /// unit's own `}` ends the takeover as its first key does (QUESTIONS.md #92).
     fn take_brace_again(&mut self) {
         let Some(frame) = self.frames.last_mut() else {
             return;

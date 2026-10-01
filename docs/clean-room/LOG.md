@@ -5396,8 +5396,8 @@
     object's frame, so braces held below stay and close after it. #88: a first name in a section
     object whose brace was taken over gets `Close::NameBrace`, whose `}` closes the section object
     too unless text parsed in place keeps it open. Two rules the spec leaves open follow oracle
-    runs and are asked as #89 (nothing is taken over again when only whitespace and `;` follow the
-    macro to the end of the file) and #90 (the file's own `}` ends the takeover). Unit tests for
+    runs and are asked as #91 (nothing is taken over again when only whitespace and `;` follow the
+    macro to the end of the file) and #92 (the file's own `}` ends the takeover). Unit tests for
     each failed on the previous code. `CHANGELOG.md` lists the changes, including inputs accepted
     before that are now errors and the reverse.
   - Checks: the eighteen pending cases pass in a copy of the worktree with them moved into
@@ -5410,11 +5410,18 @@
     `crate-rejects` (FileNotFound, this #86 class) and two `values-differ`; after it, no
     `crate-rejects` and two `values-differ`, both `.emit` of `$ABI` under `zerocopy`
     (`.emit x $ABI;` with `strategy:rewrite`, `.emit l $ABI;I s` with `strategy:error`), the same
-    as before the change and outside these rules. All probe inputs of #89 and #90, and those in
+    as before the change and outside these rules. All probe inputs of #91 and #92, and those in
     the changelog, agree with the oracle.
   - Commits: the five commits before this entry (`fix(parse)` for #86, `docs(clean-room)` for
-    #89 and #90, `fix(parse)` for #87, `fix(parse)` for #88, `docs(parse)` for two comments
-    still describing the spec-v18 shared brace) and this entry, on `c14/spec20-impl`. Not
-    pushed.
+    #91 and #92, `fix(parse)` for #87, `fix(parse)` for #88, `docs(parse)` for two comments
+    still describing the spec-v18 shared brace), this entry, and
+    `docs(clean-room): renumber the brace-takeover questions to 91 and 92`, on
+    `c14/spec20-impl`. Not pushed.
+  - Renumbering: the two questions were first filed as #89 and #90, which the `spec-v21` release
+    (open PR #27) uses for its own questions; at the coordinator's request they are #91 and #92
+    in `QUESTIONS.md`, the code comments, `CHANGELOG.md` and this entry. The messages of the
+    commits `docs(clean-room): ask when a braced file takes its brace over again` and
+    `fix(parse): take the brace over again after macros before a braced file's first key` still
+    cite them as #89 and #90.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.

@@ -1816,8 +1816,8 @@ mod tests {
     #[test]
     fn brace_taken_over_again_only_when_the_file_goes_on() {
         // Oracle runs: the brace is taken over again only when the file holds more than
-        // whitespace and `;` after the macro (QUESTIONS.md #89), and the file's own `}` ends
-        // the takeover as its first key does (QUESTIONS.md #90).
+        // whitespace and `;` after the macro (QUESTIONS.md #91), and the file's own `}` ends
+        // the takeover as its first key does (QUESTIONS.md #92).
         let files = [
             ("/c/braced.inc", "{ a = 1 }\n"),
             ("/c/close_brace.inc", "a = 1 }\n"),
