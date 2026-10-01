@@ -86,7 +86,8 @@ pub(crate) struct Includes<'l> {
     /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
     /// ([`super::Parser::set_search_path`]).
     search: Option<Vec<String>>,
-    /// A first-directory miss that §9.4 allows a later skipped URL in this input to recover.
+    /// A first-directory miss that §9.4 allows a later skip in this input to recover: a skipped
+    /// URL include, or a `.load` with `try=true` that reads nothing.
     pub(crate) pending_search_miss: Option<(usize, Error)>,
     /// The parser's search path, which macro argument documents start with.
     default_search: Option<Vec<String>>,
@@ -291,14 +292,7 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
             // (spec §9.4, *Signatures, URLs and search paths*). Its `path` list still takes
             // effect for later includes (oracle runs, QUESTIONS.md #37).
             return if try_ {
-                if self
-                    .includes
-                    .pending_search_miss
-                    .as_ref()
-                    .is_some_and(|(unit, _)| Some(unit) == self.includes.open_units.last())
-                {
-                    self.includes.pending_search_miss = None;
-                }
+                self.skipped_after_search_miss();
                 Ok(())
             } else {
                 Err(self.error(ErrorKind::UrlNotSupported { path }, call.value_at))
@@ -325,6 +319,9 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         };
         let outcome = match self.includes.search.clone() {
             None => self.include_path(&path, request.wildcard_after_nul, &request)?,
+            // Only a miss in the document itself can be recovered by a later skip, and only by
+            // a skip in the document itself; the oracle also counts both in included files and
+            // in text parsed in place, which the spec does not settle (QUESTIONS.md #93).
             Some(dirs) if !soft && !try_ && !glob && self.includes.open_units.len() == 1 => {
                 self.include_searched_with_later_url(&dirs, &path, &request)?
             }
@@ -336,8 +333,27 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         }
     }
 
-    /// §9.4: a later skipped URL can recover a plain include's missing first directory when
-    /// another directory has the file. Keep the first error until the input reaches that URL.
+    /// A macro of this input skipped its file: a skipped URL include, or a `.load` with
+    /// `try=true` that reads nothing (spec §9.4, *Quirk: a later skipped URL include or
+    /// `.load`*; §9.6). The first-directory misses of the input before it pass; a later miss
+    /// needs a later skip of its own. A skip in an included file, in text parsed in place or in
+    /// a macro argument document is not one of the input's own and does not count; the oracle
+    /// counts the first two (QUESTIONS.md #93).
+    fn skipped_after_search_miss(&mut self) {
+        if self
+            .includes
+            .pending_search_miss
+            .as_ref()
+            .is_some_and(|(unit, _)| Some(unit) == self.includes.open_units.last())
+        {
+            self.includes.pending_search_miss = None;
+        }
+    }
+
+    /// §9.4, *Quirk: a later skipped URL include or `.load`*: a later skip can recover a plain
+    /// include's missing first directory when another directory has the file
+    /// ([`Core::skipped_after_search_miss`]). The first error is kept until the input reaches
+    /// such a skip, and is the input's error if it reaches none.
     fn include_searched_with_later_url(
         &mut self,
         dirs: &[String],
@@ -634,7 +650,13 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
                 let path = Some(path.clone());
                 return Err(self.error(ErrorKind::InputTooLarge { limit, path }, call.value_at));
             }
-            Err(_) if try_ => return Ok(()),
+            Err(_) if try_ => {
+                // A missing or unusable file read nothing: an earlier first-directory miss of
+                // `.include` passes (§9.4, *Quirk: a later skipped URL include or `.load`*). A
+                // file that is read, an empty one included, does not count (QUESTIONS.md #86).
+                self.skipped_after_search_miss();
+                return Ok(());
+            }
             Err(kind) => return Err(self.error(kind, call.value_at)),
         };
         let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
@@ -1466,7 +1488,7 @@ mod tests {
         assert_eq!(keys(&obj(&obj(&v)["a"])["x"]), ["a", "k"]);
         let v = ok(".include \"arr.inc\"\nm { n = 1 }\n}");
         assert_eq!(keys(&v), ["a"]);
-        // The first key after a file's leading `{`: its first name shares the brace.
+        // The first key after a file's leading `{`: its first name gets a brace of its own.
         for input in [
             ".include \"first.inc\"",
             ".include \"first.inc\"\nq = 1\n}",
@@ -1659,6 +1681,299 @@ mod tests {
         assert_eq!(keys(&obj(&v)["s"]), ["q", "m"]);
         assert_eq!(keys(&obj(&obj(&obj(&v)["s"])["q"])["x"]), ["y{"]);
         assert_eq!(reached, [Uncertain::ReopenedNotObject]);
+    }
+
+    /// A parser over `files` that has the test macro `.emit` of spec §13.2: its VALUE is parsed
+    /// in place.
+    fn emitting(files: &[(&str, &str)], flags: ParserFlags) -> Parser {
+        let mut p = parser(files, flags);
+        p.register_macro("emit", |call| {
+            let text = call.value().to_vec();
+            call.parse(text)
+        });
+        p
+    }
+
+    /// The path of the one comment group saved by parsing `input`, which must attach after its
+    /// value.
+    fn comment_after(p: &mut Parser, input: &str) -> Vec<String> {
+        p.parse(input.as_bytes()).unwrap();
+        let groups = p.attached_comments();
+        assert_eq!(groups.len(), 1, "{input:?}");
+        assert_eq!(groups[0].placement, CommentPlacement::After, "{input:?}");
+        groups[0]
+            .path
+            .iter()
+            .map(|segment| match segment {
+                PathSegment::Key { key, index: 0 } => key.clone(),
+                other => panic!("{input:?}: {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn macros_before_the_first_key_of_a_braced_file() {
+        // spec §9.4, *Quirk: macros before the first key* (QUESTIONS.md #87): until a braced
+        // file reads a key of its own, it takes the brace over again after each macro, so a
+        // nested `}` that removed it does not end the takeover, and the first name still gets
+        // its brace.
+        let files = [
+            ("/c/braced.inc", "{ a = 1 }\n"),
+            ("/c/close_brace.inc", "a = 1 }\n"),
+            ("/c/left_open.inc", "x \"y{\" z\n"),
+            ("/c/open_brace.inc", "{ a = 1\n"),
+            ("/c/nb_entry.inc", "{ .include \"braced.inc\"\na2 = 2\n}"),
+            (
+                "/c/nb_name.inc",
+                "{ .include \"braced.inc\"\nx \"y{\" z\n}\n}",
+            ),
+            (
+                "/c/nc_name.inc",
+                "{ .include \"close_brace.inc\"\nx \"y{\" z\n}\n}",
+            ),
+            (
+                "/c/np_name.inc",
+                "{ .include \"left_open.inc\"\np \"q{\" r\n}\n}",
+            ),
+            (
+                "/c/np_entry.inc",
+                "{ .include \"left_open.inc\"\nw = 1\n}\n}",
+            ),
+            ("/c/np_braces.inc", "{ .include \"left_open.inc\"\n}\n}"),
+            ("/c/np_one.inc", "{ .include \"left_open.inc\"\nw = 1\n}"),
+            ("/c/entry_nb.inc", "{ a0 = 0\n.include \"braced.inc\"\n}"),
+            (
+                "/c/twice_nb.inc",
+                "{ .include \"braced.inc\"\n.include \"braced.inc\"\na2 = 2\n}",
+            ),
+            (
+                "/c/inherit_nb.inc",
+                "{ .include \"braced.inc\"\n.inherit \"w\"\nx \"y{\" z\n}\n}",
+            ),
+            ("/c/nested_open.inc", "{ .include \"open_brace.inc\"\n}"),
+            ("/c/text_nb.inc", "{ .emit \"{ a = 1 }\"\nx \"y{\" z\n}\n}"),
+            ("/c/text_entry.inc", "{ .emit \"a = 1\"\nx \"y{\" z\n}\n}"),
+        ];
+        let p = || emitting(&files, ParserFlags::DEFAULT);
+        let ok = |input: &str| p().parse(input.as_bytes()).unwrap();
+        let err = |input: &str| p().parse(input.as_bytes()).unwrap_err().kind().clone();
+        assert_eq!(
+            keys(&ok(".include \"nb_entry.inc\"\nq = 1")),
+            ["a", "a2", "q"]
+        );
+        for file in [
+            "nb_name.inc",
+            "nc_name.inc",
+            "text_nb.inc",
+            "text_entry.inc",
+        ] {
+            let v = ok(&format!(".include \"{file}\"\nq = 1"));
+            assert_eq!(keys(&v), ["a", "x", "q"], "{file}");
+            assert_eq!(keys(&obj(&v)["x"]), ["y{"], "{file}");
+        }
+        let v = ok(".include(key=\"k\") \"nc_name.inc\"\nq = 1");
+        assert_eq!(keys(&v), ["k", "q"]);
+        assert_eq!(keys(&obj(&v)["k"]), ["a", "x"]);
+        // A nested file that leaves a section path open: the name goes inside it.
+        let v = ok(".include \"np_name.inc\"\nq = 1");
+        assert_eq!(keys(&v), ["x", "q"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "p"]);
+        // The brace taken over again is added to the one the file still holds.
+        let v = ok(".include \"np_entry.inc\"\nq = 1");
+        assert_eq!(keys(&v), ["x", "q"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "w"]);
+        assert_eq!(keys(&ok(".include \"np_braces.inc\"\nq = 1")), ["x", "q"]);
+        assert_eq!(
+            err(".include \"np_one.inc\"\nq = 1"),
+            ErrorKind::UnterminatedObject
+        );
+        let v = ok(".include \"np_one.inc\"\nq = 1\n}");
+        assert_eq!(keys(&v), ["x", "q"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "w"]);
+        // Not after a key of the file's own.
+        assert!(matches!(
+            err(".include \"entry_nb.inc\"\nq = 1"),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+        // After each macro; keys a macro adds are not the file's own.
+        let v = ok(".include \"twice_nb.inc\"\nq = 1");
+        assert_eq!(keys(&v), ["a", "a2", "q"]);
+        assert_eq!(obj(&v).entry("a").unwrap().len(), 2);
+        let v = ok("w { m = 1 }\n.include \"inherit_nb.inc\"\nq = 1");
+        assert_eq!(keys(&v), ["w", "a", "m", "x", "q"]);
+        // A brace the file still holds is not taken over a second time (oracle runs).
+        assert_eq!(keys(&ok(".include \"nested_open.inc\"\nq = 1")), ["a", "q"]);
+        assert!(matches!(
+            err(".include \"nested_open.inc\"\nq = 1\n}"),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+        // Text parsed in place takes the brace over in the same way.
+        let v = ok(".emit \"{ .include braced.inc;a2 = 2;}\"\nq = 1");
+        assert_eq!(keys(&v), ["a", "a2", "q"]);
+        // A comment after such a file goes to `z` (§12.5).
+        for file in ["nb_name.inc", "text_entry.inc"] {
+            let mut parser = emitting(&files, ParserFlags::SAVE_COMMENTS);
+            let input = format!(".include \"{file}\"\n# c");
+            assert_eq!(comment_after(&mut parser, &input), ["x", "y{"], "{file}");
+        }
+    }
+
+    #[test]
+    fn brace_taken_over_again_only_when_the_file_goes_on() {
+        // Oracle runs: the brace is taken over again only when the file holds more than
+        // whitespace and `;` after the macro (QUESTIONS.md #91), and the file's own `}` ends
+        // the takeover as its first key does (QUESTIONS.md #92).
+        let files = [
+            ("/c/braced.inc", "{ a = 1 }\n"),
+            ("/c/close_brace.inc", "a = 1 }\n"),
+            ("/c/left_open.inc", "x \"y{\" z\n"),
+            ("/c/end_nl.inc", "{ .include \"braced.inc\"\n"),
+            ("/c/end_eof.inc", "{ .include \"braced.inc\""),
+            ("/c/end_semi.inc", "{ .include \"braced.inc\"\n;\n"),
+            ("/c/end_comment.inc", "{ .include \"braced.inc\"\n# c\n"),
+            ("/c/end_block.inc", "{ .include \"braced.inc\"\n/* c */"),
+            (
+                "/c/end_macro.inc",
+                "{ .include \"braced.inc\"\n.priority 1\n",
+            ),
+            (
+                "/c/end_two.inc",
+                "{ .include \"braced.inc\"\n.include \"close_brace.inc\"\n",
+            ),
+            ("/c/end_open.inc", "{ .include \"left_open.inc\"\n"),
+            ("/c/end_open_c.inc", "{ .include \"left_open.inc\"\n# c\n"),
+            (
+                "/c/own_then_nb.inc",
+                "{ }\n.include \"braced.inc\"\na2 = 2\n}",
+            ),
+            ("/c/own_then_macro.inc", "{ }\n.priority 1\n}"),
+            (
+                "/c/own_close_then_nb.inc",
+                "{ .include \"left_open.inc\"\n}\n.include \"braced.inc\"\n}",
+            ),
+            (
+                "/c/own_close_then_name.inc",
+                "{ .include \"left_open.inc\"\n}\np \"q{\" r\n}\n}",
+            ),
+            (
+                "/c/nc_name.inc",
+                "{ .include \"close_brace.inc\"\nx \"y{\" z\n}\n}",
+            ),
+        ];
+        let p = || emitting(&files, ParserFlags::DEFAULT);
+        let ok = |input: &str| p().parse(input.as_bytes()).unwrap();
+        let err = |input: &str| p().parse(input.as_bytes()).unwrap_err().kind().clone();
+        let unmatched = |input: &str| {
+            assert!(
+                matches!(err(input), ErrorKind::UnmatchedClose { .. }),
+                "{input:?}"
+            );
+        };
+        // After the last macro, whitespace and `;` to the end of the file: no brace is held.
+        for file in ["end_nl.inc", "end_eof.inc", "end_semi.inc", "end_two.inc"] {
+            let v = ok(&format!(".include \"{file}\"\nq = 1"));
+            assert_eq!(keys(&v), ["a", "q"], "{file}");
+            unmatched(&format!(".include \"{file}\"\nq = 1\n}}"));
+        }
+        for file in ["end_comment.inc", "end_block.inc", "end_macro.inc"] {
+            assert_eq!(
+                err(&format!(".include \"{file}\"\nq = 1")),
+                ErrorKind::UnterminatedObject,
+                "{file}"
+            );
+            let v = ok(&format!(".include \"{file}\"\nq = 1\n}}"));
+            assert_eq!(keys(&v), ["a", "q"], "{file}");
+        }
+        // The same for text parsed in place.
+        assert_eq!(
+            keys(&ok(".emit \"{ .include braced.inc;\"\nq = 1")),
+            ["a", "q"]
+        );
+        assert_eq!(
+            err(".emit \"{ .include braced.inc; /* c */\"\nq = 1"),
+            ErrorKind::UnterminatedObject
+        );
+        // A section object the nested file left open keeps no brace at the end of the file,
+        // and takes one over when the file goes on.
+        unmatched(".include \"end_open.inc\"\nq = 1\n}\nr = 2");
+        let v = ok(".include \"end_open_c.inc\"\nq = 1\n}\nr = 2\n}");
+        assert_eq!(keys(&v), ["x", "r"]);
+        assert_eq!(keys(&obj(&v)["x"]), ["y{", "q"]);
+        assert_eq!(
+            err(".include \"end_open_c.inc\"\nq = 1\n}\nr = 2"),
+            ErrorKind::UnterminatedObject
+        );
+        for file in [
+            "own_then_nb.inc",
+            "own_then_macro.inc",
+            "own_close_then_nb.inc",
+            "own_close_then_name.inc",
+        ] {
+            unmatched(&format!(".include \"{file}\"\nq = 1"));
+        }
+        // The object the entries go into after the nested file: the root, when the nested
+        // file's `}` closed the section object whose brace was taken over, or an object
+        // written with braces, which then loses its brace.
+        let v = ok("s \"t{\" u\n.include \"nc_name.inc\"\nq = 1");
+        assert_eq!(keys(&v), ["s", "x", "q"]);
+        assert_eq!(keys(&obj(&v)["s"]), ["t{", "a"]);
+        unmatched("s \"t{\" u\n.include \"nc_name.inc\"\nq = 1\n}");
+        let v = ok("o { s \"t{\" u\n.include \"nc_name.inc\"\nq = 1");
+        assert_eq!(keys(&obj(&v)["o"]), ["s", "x", "q"]);
+        unmatched("o { s \"t{\" u\n.include \"nc_name.inc\"\nq = 1\n}");
+    }
+
+    #[test]
+    fn first_name_in_a_section_object_gets_a_brace() {
+        // spec §9.4 and §12.5 (QUESTIONS.md #88): the first name gets a brace of its own in a
+        // section object whose brace the file took over too; its `}` closes the section object
+        // with it, unless text parsed in place keeps that open (§13.2).
+        let files = [
+            ("/c/text_first.inc", "{ .emit \"\"\nx \"y{\" z\n}\n}"),
+            ("/c/text_first_once.inc", "{ .emit \"\"\nx \"y{\" z\n}"),
+            ("/c/text_in_name.inc", "{ x \"y{\" z\n.emit \"\"\n}\n}"),
+            ("/c/text_in_name_once.inc", "{ x \"y{\" z\n.emit \"\"\n}"),
+        ];
+        let p = |flags| emitting(&files, flags);
+        let v = p(ParserFlags::DEFAULT)
+            .parse(b"s \"t{\" u\n.include \"text_first.inc\"\nq = 1")
+            .unwrap();
+        assert_eq!(keys(&v), ["s"]);
+        assert_eq!(keys(&obj(&v)["s"]), ["t{", "x", "q"]);
+        assert_eq!(
+            p(ParserFlags::DEFAULT)
+                .parse(b"s \"t{\" u\n.include \"text_first_once.inc\"\nq = 1")
+                .unwrap_err()
+                .kind(),
+            &ErrorKind::UnterminatedObject
+        );
+        // Text parsed in the name's object does not keep the section object open.
+        assert!(matches!(
+            p(ParserFlags::DEFAULT)
+                .parse(b"s \"t{\" u\n.include \"text_in_name.inc\"\nq = 1")
+                .unwrap_err()
+                .kind(),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+        let v = p(ParserFlags::DEFAULT)
+            .parse(b"s \"t{\" u\n.include \"text_in_name_once.inc\"\nq = 1")
+            .unwrap();
+        assert_eq!(keys(&v), ["s", "q"]);
+        assert_eq!(keys(&obj(&v)["s"]), ["t{", "x"]);
+        // Which value a comment after the file attaches to (§12.5).
+        for (input, path) in [
+            (
+                "s \"t{\" u\n.include \"text_first.inc\"\n# c",
+                &["s", "x", "y{"][..],
+            ),
+            (
+                "s \"t{\" u\n.include \"text_in_name_once.inc\"\n# c",
+                &["s"],
+            ),
+        ] {
+            let mut parser = p(ParserFlags::SAVE_COMMENTS);
+            assert_eq!(comment_after(&mut parser, input), path, "{input:?}");
+        }
     }
 
     #[test]
@@ -2175,6 +2490,109 @@ mod tests {
             ".include(path=[\"p1\", \"p3\"]) \"pa.inc\"\n.include(try=true, url=true) ://",
         ] {
             assert!(run(&files, input).is_err(), "{input}");
+        }
+    }
+
+    /// spec §9.4, *Quirk: a later skipped URL include or `.load`*, and §9.6 (QUESTIONS.md #86):
+    /// a `.load` with `try=true` that reads nothing counts as a skip too.
+    #[cfg(feature = "load")]
+    #[test]
+    fn first_search_miss_is_recovered_by_a_later_skipped_load() {
+        let miss = ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"";
+        let skip = ".load(try=true, key=\"t\") \"missing.txt\"";
+        let url = ".include(try=true, url=true) ://";
+        let files = [
+            ("/c/p2/pa.inc", "pa = 1\n"),
+            ("/c/v.txt", "v"),
+            ("/c/empty.txt", ""),
+            (
+                "/c/document.ucl",
+                ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\nx = 1\n\
+                 .load(try=true, key=\"t\") \"missing.txt\"\nafter = 2\n",
+            ),
+        ];
+        let value = run(&files, &format!("{miss}\nx = 1\n{skip}\nafter = 2\n")).unwrap();
+        assert_eq!(keys(&value), ["pa", "x", "after"]);
+        assert_eq!(
+            obj(&value).get("pa").and_then(UclValue::as_integer),
+            Some(1)
+        );
+        // A directory is unusable, so nothing is read either.
+        let directory = format!("{miss}\n.load(try=true, key=\"t\") \"dir\"\nafter = 2\n");
+        assert_eq!(keys(&run(&files, &directory).unwrap()), ["pa", "after"]);
+        // A document given as a file.
+        let value = parser(&files, ParserFlags::DEFAULT)
+            .parse_file("document.ucl")
+            .unwrap();
+        assert_eq!(keys(&value), ["pa", "x", "after"]);
+        // A skip covers the misses before it, of either kind of skip.
+        let again = ".include \"pa.inc\"";
+        for input in [
+            format!("{miss}\n{skip}\n{again}\n{skip}"),
+            format!("{miss}\n{again}\n{skip}"),
+            format!("{miss}\n{url}\n{again}\n{skip}"),
+            format!("{miss}\n{skip}\n{again}\n{url}"),
+        ] {
+            let value = run(&files, &input).unwrap();
+            assert_eq!(keys(&value), ["pa"], "{input}");
+            assert_eq!(obj(&value).entry("pa").unwrap().len(), 2, "{input}");
+        }
+        for input in [
+            // The `.load` reads its file, an empty one included.
+            format!("{miss}\n.load(try=true, key=\"t\") \"v.txt\""),
+            format!("{miss}\n.load(try=true, key=\"t\") \"empty.txt\""),
+            // Without `try=true`, a missing file is an error of its own.
+            format!("{miss}\n.load(key=\"t\") \"missing.txt\""),
+            // The skip comes before the miss, or a later miss has no skip after it.
+            format!("{skip}\n{miss}"),
+            format!("{miss}\n{skip}\n{again}"),
+        ] {
+            assert!(run(&files, &input).is_err(), "{input}");
+        }
+    }
+
+    /// The crate's choice while QUESTIONS.md #93 is open: a later skip recovers a
+    /// first-directory miss only when both are in the document itself, not in an included
+    /// file, text parsed in place or a macro argument document (the oracle accepts the first
+    /// two).
+    #[cfg(feature = "load")]
+    #[test]
+    fn a_skip_recovers_a_miss_only_in_the_document_itself() {
+        let miss = ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"";
+        for skip in [
+            ".load(try=true, key=\"t\") \"missing.txt\"",
+            ".include(try=true, url=true) ://",
+        ] {
+            let both = format!("{miss}\n{skip}\n");
+            let files = [
+                ("/c/p2/pa.inc", "pa = 1\n"),
+                ("/c/both.inc", both.as_str()),
+                ("/c/miss.inc", miss),
+                ("/c/skip.inc", skip),
+            ];
+            let p = || emitting(&files, ParserFlags::DEFAULT);
+            assert_eq!(
+                keys(
+                    &p().parse(format!("{miss}\n{skip}\nq = 1").as_bytes())
+                        .unwrap()
+                ),
+                ["pa", "q"]
+            );
+            for input in [
+                ".include \"both.inc\"\nq = 1".to_owned(),
+                format!(".include \"miss.inc\"\n{skip}\nq = 1"),
+                format!("{miss}\n.emit {{{skip}}}\nq = 1"),
+                format!(".emit {{{miss}\n{skip}}}\nq = 1"),
+                format!(".emit {{{miss}}}\n{skip}\nq = 1"),
+                format!("{miss}\n.include(path=[\".\"]) \"skip.inc\"\nq = 1"),
+                format!("{miss}\n.priority({skip}) 1\nq = 1"),
+            ] {
+                let e = p().parse(input.as_bytes()).unwrap_err();
+                assert!(
+                    matches!(e.kind(), ErrorKind::FileNotFound { .. }),
+                    "{input}: {e}"
+                );
+            }
         }
     }
 

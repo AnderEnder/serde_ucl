@@ -187,8 +187,8 @@ impl<'t> Document<'t> {
             run_macro_end: None,
             outer_run: false,
             recent: None,
-            first_key_shares: false,
-            section_shares: false,
+            taking_over: false,
+            first_name_brace: false,
             bracket_scan: (usize::MAX, 0),
             pending: None,
             unseparated: false,
@@ -289,8 +289,8 @@ impl<'t> Document<'t> {
                 run_macro_end: None,
                 outer_run: false,
                 recent: None,
-                first_key_shares: false,
-                section_shares: false,
+                taking_over: false,
+                first_name_brace: false,
                 bracket_scan: (usize::MAX, 0),
                 pending: None,
                 unseparated: false,
@@ -367,17 +367,19 @@ enum Close {
     /// closes, together with every such object below it, or at the end of input.
     LeftOpen,
     /// An object whose opening brace an included file's leading `{` has taken over (§9.4,
-    /// *Quirk: braces around an included file*). A `}` removes the brace; what the object does
-    /// then is the [`Revert`].
+    /// *Quirk: braces around an included file*), or that such a file has taken over again after
+    /// a macro before its first key (§9.4, *Quirk: macros before the first key*;
+    /// [`Core::take_brace_again`]). A `}` removes the brace; what the object does then is the
+    /// [`Revert`].
     IncludedBrace(Revert),
-    /// The object of the first name of an included file's first key, when the file's leading
-    /// `{` took over the brace of the root, of an object written with braces, or of the object
-    /// that `key` or `prefix` creates for the file (a [`Revert::Open`] brace): §9.4 gives it a
-    /// brace of its own. A `}` closes it as [`Close::Brace`] does: as its own bracket, so it does
-    /// not become the value created most recently (§12.5), and the object below it keeps the
-    /// brace taken over. Like a left-open section object, it also closes when a container written
-    /// with brackets that was opened in it closes, and then it counts as the value created most
-    /// recently (§9.4, §12.5).
+    /// The object of the first name of an included file's first key, while the object below it
+    /// holds a brace the file took over (§9.4, *Quirk*): §9.4 gives it a brace of its own. A `}`
+    /// closes it as [`Close::Brace`] does: as its own bracket, so it does not become the value
+    /// created most recently (§12.5). The object below keeps the brace taken over, or, when that
+    /// is a section object ([`Revert::Section`]), closes with it, as with any bracketed container
+    /// opened in it, unless text parsed in place keeps it open (§13.2; QUESTIONS.md #88). Like a
+    /// left-open section object, it also closes when a container written with brackets that was
+    /// opened in it closes, and then it counts as the value created most recently (§9.4, §12.5).
     NameBrace,
 }
 
@@ -828,11 +830,14 @@ pub(super) struct Core<'s, 't, 'e, 'v, 'l> {
     /// The value created most recently (§12.5), kept while a name run is in effect in this unit
     /// or an including one: its path from the root, or `None` when it is not part of the result.
     recent: Option<PathRef>,
-    /// This included unit's leading `{` took over a brace (§9.4), and no key has been read yet.
-    first_key_shares: bool,
+    /// This included unit's leading `{` took over a brace (§9.4), and the unit has read neither a
+    /// key nor a `}` of its own since: after a macro it takes a brace over again
+    /// ([`Core::take_brace_again`]), and the first name of its first key gets a brace of its own
+    /// ([`Close::NameBrace`]).
+    taking_over: bool,
     /// The key being read is that first key: if it starts a section path, the object of its
-    /// first name gets a share of the taken-over brace.
-    section_shares: bool,
+    /// first name gets a brace of its own ([`Close::NameBrace`], §9.4).
+    first_name_brace: bool,
     /// The last scan of [`Core::line_has_bracket`]: from the first offset, the first LF, CR,
     /// `,`, `;`, `{` or `[` is at the second (the input's length if there is none).
     bracket_scan: (usize, usize),
@@ -2148,8 +2153,8 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
             run_macro_end: None,
             outer_run,
             recent: self.recent.take(),
-            first_key_shares: false,
-            section_shares: false,
+            taking_over: false,
+            first_name_brace: false,
             bracket_scan: (usize::MAX, 0),
             pending: None,
             unseparated: false,
@@ -2209,7 +2214,7 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                     Close::NameBrace => Revert::Section,
                     _ => Revert::Open,
                 });
-                self.first_key_shares = true;
+                self.taking_over = true;
             }
             _ => self.skip_space_checking_hash(after_space)?,
         }
@@ -2582,6 +2587,10 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                 if let Some(notes) = &mut self.notes {
                     notes.trailing();
                 }
+                // The unit's own `}` ends its takeover (oracle runs, QUESTIONS.md #92): later
+                // macros take no brace over, and a later first name gets none. Before its first
+                // key, a unit's `}` can only remove a brace taken over.
+                self.taking_over = false;
                 let frame = self.frames.last_mut().expect("a container is open");
                 if frame.close == Close::IncludedBrace(Revert::Section) {
                     frame.close = Close::Section;
@@ -2601,15 +2610,15 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
             Some(_) => {
                 let key = self.read_key()?;
                 // The unit's first key, while the brace its leading `{` took over is still held.
-                let first_shares = std::mem::take(&mut self.first_key_shares)
+                let first_name_brace = std::mem::take(&mut self.taking_over)
                     && matches!(self.top().close, Close::IncludedBrace(_));
                 if std::mem::take(&mut self.name_run) {
                     self.run_macro_end = None;
                     return self.key_after_name_run(key);
                 }
-                self.section_shares = first_shares;
+                self.first_name_brace = first_name_brace;
                 let result = self.after_key(key);
-                self.section_shares = false;
+                self.first_name_brace = false;
                 result
             }
         }
@@ -2930,7 +2939,40 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         if self.name_run {
             self.run_macro_end = Some(self.pos);
         }
+        if self.taking_over && self.pos < self.src.len() {
+            self.take_brace_again();
+        }
         Ok(())
+    }
+
+    /// A macro has run in an included unit whose leading `{` took over a brace, before the
+    /// unit's first key, and the unit goes on: it takes over again the brace of the object its
+    /// entries now go into (§9.4, *Quirk: macros before the first key*; QUESTIONS.md #87). So a
+    /// `}` of a nested file or of text parsed in place that removed the brace does not end the
+    /// takeover. The brace is added to those the unit still holds in objects below, which the
+    /// unit's later `}`s remove after it, the innermost first; an object that still holds a brace
+    /// taken over keeps that one.
+    ///
+    /// Oracle runs (QUESTIONS.md #91): nothing is taken over when only whitespace and `;` follow
+    /// the macro to the end of the unit (the caller checks that the unit goes on), and the
+    /// unit's own `}` ends the takeover as its first key does (QUESTIONS.md #92).
+    fn take_brace_again(&mut self) {
+        let Some(frame) = self.frames.last_mut() else {
+            return;
+        };
+        if frame.kind != Kind::Object {
+            return;
+        }
+        frame.close = match frame.close {
+            Close::Eof | Close::Brace => Close::IncludedBrace(Revert::Open),
+            Close::Section | Close::LeftOpen => Close::IncludedBrace(Revert::Section),
+            // A brace still held: the object keeps it, and does not get a second one.
+            close @ Close::IncludedBrace(_) => close,
+            // Neither occurs here: `Bracket` closes arrays only, and a first name gets its brace
+            // at this unit's first key, which ends the takeover, or in a nested unit, which must
+            // close it before it ends. Listed for exhaustiveness.
+            close @ (Close::NameBrace | Close::Bracket) => close,
+        };
     }
 
     /// A macro directly after a name (§9.1): it runs inside the name's object, which stays open
@@ -2976,21 +3018,19 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                 Some(b'{' | b'[') => return self.entry_value(name),
                 _ => {}
             }
-            // The first name of the unit's first key, while the brace that the unit's leading
-            // `{` took over is held (§9.4, *Quirk*; QUESTIONS.md #42, #83). When that is the
-            // brace of the root, of an object written with braces or of the object `key` or
-            // `prefix` creates, the name's object gets a brace of its own. When it is a section
-            // object's, the name gets no brace (§9.4): the object shares the brace taken over
-            // instead, so that the file's `}` closes the two together and the section object,
-            // the outermost, counts as the value created most recently (§12.5).
-            let close = if std::mem::take(&mut self.section_shares) {
-                match self.top().close {
-                    Close::IncludedBrace(Revert::Open) => Close::NameBrace,
-                    Close::IncludedBrace(Revert::Section) => Close::IncludedBrace(Revert::Section),
-                    // `section_shares` is set only while the top frame holds a brace taken over,
-                    // and no frame is pushed before the first name.
-                    close => unreachable!("a first name shares a brace taken over, not {close:?}"),
-                }
+            // The first name of the unit's first key, while the top frame holds a brace that the
+            // unit took over (§9.4, *Quirk*; QUESTIONS.md #42, #83, #88): the name's object gets
+            // a brace of its own. When the brace taken over is that of a section object, the
+            // name's `}`, as that of a bracketed container opened in the section object, closes
+            // the section object too ([`Core::close_sections`]), unless text parsed in place
+            // keeps it open (§13.2): then it closes only the name's object, and the value created
+            // most recently stays what it was (§12.5).
+            let close = if std::mem::take(&mut self.first_name_brace) {
+                debug_assert!(
+                    matches!(self.top().close, Close::IncludedBrace(_)),
+                    "set only while the top frame holds a brace taken over"
+                );
+                Close::NameBrace
             } else {
                 Close::Section
             };

@@ -228,13 +228,13 @@ Where they attach:
   has made that section object stop closing on its own (§13.2), the name's `}` closes only the
   name's object, and the value created most recently stays what it was: with the file
   `{ .emit ""⏎x "y{" z⏎}⏎}`, the value `z` gets it
-  (`pending/09-macros/comments_include_first_name_in_section_object_after_text`). A file included,
-  or text parsed in place, before the file's first key does not change which name is first (§9.4,
-  *Quirk: macros before the first key*): with the file
+  (`cases/spec/09-macros/comments_include_first_name_in_section_object_after_text`). A file
+  included, or text parsed in place, before the file's first key does not change which name is
+  first (§9.4, *Quirk: macros before the first key*): with the file
   `{ .include "files/v4/braced.inc"⏎x "y{" z⏎}⏎}` or `{ .emit "a = 1"⏎x "y{" z⏎}⏎}`,
   `.include "…"⏎# c` → the value `z` gets it
-  (`pending/09-macros/comments_include_nested_braced_before_first_name`,
-  `pending/09-macros/comments_include_nested_text_before_first_name`).
+  (`cases/spec/09-macros/comments_include_nested_braced_before_first_name`,
+  `cases/spec/09-macros/comments_include_nested_text_before_first_name`).
 - Comments after the closing bracket of a braced root are ignored like the rest of the input
   (§1.1; `comments_after_braced_root_ignored`).
 

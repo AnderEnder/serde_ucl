@@ -4,6 +4,58 @@ All notable changes to this crate are recorded here.
 
 ## Unreleased
 
+### Includes after a first-directory miss and before a braced file's first key (spec-v20)
+
+Clean-room work item C14.
+
+- A `.include` with a search path whose first directory lacks the file, while a later directory
+  has it, is an error unless a later macro of the document itself, not of an included file or
+  text parsed in place, skips its file (QUESTIONS.md #93). A `.load` with `try=true` that reads
+  nothing, because its file is missing or is a directory or another file it cannot read, now
+  counts as such a skip, as a skipped URL include already did (spec §9.4, §9.6). So
+  `.include(path=["", "p1"]) "pa.inc"⏎.load(try=true, key="t") "missing.txt"`, an error in
+  0.6.0, now gives `pa` from `p1`. A skip covers the misses before it and none after it. A
+  `.load` that reads its file, an empty one too, a `.load` without `try=true`, and a skip before
+  the `.include` still leave the document an error.
+- When an included file's leading `{` has taken over a brace, the file now takes a brace over
+  again after each macro it holds before its first key, that of the object its entries then go
+  into, so a `}` of a nested file or of text parsed in place that removed the brace no longer
+  ends the takeover (spec §9.4, *Quirk: macros before the first key*). With `braced.inc` =
+  `{ a = 1 }`, `close_brace.inc` = `a = 1 }` and `left_open.inc` = `x "y{" z`, these files,
+  errors in 0.6.0 at their `}`, are now accepted when included as `.include "…"⏎q = 1`:
+  - `{ .include "braced.inc"⏎a2 = 2⏎}`, giving `a`, `a2` and `q`;
+  - `{ .include "braced.inc"⏎x "y{" z⏎}⏎}`, where the first name `x` gets its brace, giving `a`,
+    `x` and `q`; the same with `close_brace.inc`, also under `key`, and with text `{ a = 1 }`
+    parsed in place by a registered macro;
+  - `{ .include "left_open.inc"⏎p "q{" r⏎}⏎}`, `{ .include "left_open.inc"⏎w = 1⏎}⏎}` and
+    `{ .include "left_open.inc"⏎}⏎}`, where the file's first `}` closes `x` and its second the
+    brace taken over first.
+
+  With only the first `}`, `{ .include "left_open.inc"⏎w = 1⏎}` now needs a `}` in the including
+  document: `.include "…"⏎q = 1⏎}` is accepted and `.include "…"⏎q = 1` is an error, as before
+  but at its end. As libucl does, the brace is not taken over again when only whitespace and `;`
+  follow the macro to the end of the file, and the file's own `}` ends the takeover as its first
+  key does (QUESTIONS.md #91, #92). Accepted inputs that are now errors, and the reverse:
+  - The file `{ .include "braced.inc"⏎# c`, or with `.priority 1` or any other text after the
+    macro, now holds the brace taken over again at its end: `.include "…"⏎q = 1`, accepted by
+    0.6.0, is now an error, and `.include "…"⏎q = 1⏎}`, an error in 0.6.0, is accepted.
+  - With the file `{ .include "left_open.inc"⏎# c`, the object `x` holds the brace taken over
+    again, so a `}` in the including document closes it: `.include "…"⏎q = 1⏎}⏎r = 2⏎}`, an
+    error in 0.6.0, gives `x` with `q`, and `r`.
+  - After a nested file whose `}` closed a section object whose brace was taken over, the brace
+    taken over again is that of the object below; one written with braces loses its own. With
+    the file `{ .include "close_brace.inc"⏎x "y{" z⏎}⏎}`, `o { s "t{" u⏎.include "…"⏎q = 1`, an
+    error in 0.6.0, is now accepted with `s`, `x` and `q` in `o`, and with a `}` after `q = 1`
+    it is still an error, now at that `}`.
+- The first name of a braced file's first key now gets a brace of its own also when the brace
+  taken over is a section object's. Its `}` closes the section object too, as before, unless
+  text parsed in place by a registered macro has kept the section object open (spec §9.4,
+  §13.2). Under `SAVE_COMMENTS`, with the file `{ .emit ""⏎x "y{" z⏎}⏎}`,
+  `s "t{" u⏎.include "…"⏎# c` now attaches the comment to the string `z`, where 0.6.0 attached
+  it to `x` (spec §12.5). And text parsed in place inside the name's object no longer keeps the
+  section object open: with the file `{ x "y{" z⏎.emit ""⏎}`, `s "t{" u⏎.include "…"⏎q = 1` now
+  puts `q` at the top level, where 0.6.0 put it into `x`.
+
 ### Comments after the first name of a braced included file (spec-v18)
 
 Clean-room work item C14. When an included file's leading `{` takes over the brace of the root,
