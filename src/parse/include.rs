@@ -1917,6 +1917,60 @@ mod tests {
         assert_eq!(keys(&obj(&v)["o"]), ["s", "x", "q"]);
         unmatched("o { s \"t{\" u\n.include \"nc_name.inc\"\nq = 1\n}");
     }
+
+    #[test]
+    fn first_name_in_a_section_object_gets_a_brace() {
+        // spec §9.4 and §12.5 (QUESTIONS.md #88): the first name gets a brace of its own in a
+        // section object whose brace the file took over too; its `}` closes the section object
+        // with it, unless text parsed in place keeps that open (§13.2).
+        let files = [
+            ("/c/text_first.inc", "{ .emit \"\"\nx \"y{\" z\n}\n}"),
+            ("/c/text_first_once.inc", "{ .emit \"\"\nx \"y{\" z\n}"),
+            ("/c/text_in_name.inc", "{ x \"y{\" z\n.emit \"\"\n}\n}"),
+            ("/c/text_in_name_once.inc", "{ x \"y{\" z\n.emit \"\"\n}"),
+        ];
+        let p = |flags| emitting(&files, flags);
+        let v = p(ParserFlags::DEFAULT)
+            .parse(b"s \"t{\" u\n.include \"text_first.inc\"\nq = 1")
+            .unwrap();
+        assert_eq!(keys(&v), ["s"]);
+        assert_eq!(keys(&obj(&v)["s"]), ["t{", "x", "q"]);
+        assert_eq!(
+            p(ParserFlags::DEFAULT)
+                .parse(b"s \"t{\" u\n.include \"text_first_once.inc\"\nq = 1")
+                .unwrap_err()
+                .kind(),
+            &ErrorKind::UnterminatedObject
+        );
+        // Text parsed in the name's object does not keep the section object open.
+        assert!(matches!(
+            p(ParserFlags::DEFAULT)
+                .parse(b"s \"t{\" u\n.include \"text_in_name.inc\"\nq = 1")
+                .unwrap_err()
+                .kind(),
+            ErrorKind::UnmatchedClose { .. }
+        ));
+        let v = p(ParserFlags::DEFAULT)
+            .parse(b"s \"t{\" u\n.include \"text_in_name_once.inc\"\nq = 1")
+            .unwrap();
+        assert_eq!(keys(&v), ["s", "q"]);
+        assert_eq!(keys(&obj(&v)["s"]), ["t{", "x"]);
+        // Which value a comment after the file attaches to (§12.5).
+        for (input, path) in [
+            (
+                "s \"t{\" u\n.include \"text_first.inc\"\n# c",
+                &["s", "x", "y{"][..],
+            ),
+            (
+                "s \"t{\" u\n.include \"text_in_name_once.inc\"\n# c",
+                &["s"],
+            ),
+        ] {
+            let mut parser = p(ParserFlags::SAVE_COMMENTS);
+            assert_eq!(comment_after(&mut parser, input), path, "{input:?}");
+        }
+    }
+
     #[test]
     fn empty_files_and_merged_nulls() {
         // Oracle runs (QUESTIONS.md #43, #44).

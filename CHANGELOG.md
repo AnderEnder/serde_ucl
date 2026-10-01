@@ -46,6 +46,14 @@ Clean-room work item C14.
     the file `{ .include "close_brace.inc"⏎x "y{" z⏎}⏎}`, `o { s "t{" u⏎.include "…"⏎q = 1`, an
     error in 0.6.0, is now accepted with `s`, `x` and `q` in `o`, and with a `}` after `q = 1`
     it is still an error, now at that `}`.
+- The first name of a braced file's first key now gets a brace of its own also when the brace
+  taken over is a section object's. Its `}` closes the section object too, as before, unless
+  text parsed in place by a registered macro has kept the section object open (spec §9.4,
+  §13.2). Under `SAVE_COMMENTS`, with the file `{ .emit ""⏎x "y{" z⏎}⏎}`,
+  `s "t{" u⏎.include "…"⏎# c` now attaches the comment to the string `z`, where 0.6.0 attached
+  it to `x` (spec §12.5). And text parsed in place inside the name's object no longer keeps the
+  section object open: with the file `{ x "y{" z⏎.emit ""⏎}`, `s "t{" u⏎.include "…"⏎q = 1` now
+  puts `q` at the top level, where 0.6.0 put it into `x`.
 
 ### Comments after the first name of a braced included file (spec-v18)
 
