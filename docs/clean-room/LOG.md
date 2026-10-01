@@ -6694,13 +6694,17 @@ publication. Work item:C15; final integration commit recorded in handover.
     differs only after its NUL, at the same length, is excused, copied or not, as before for the
     input. `.priority` under `registered-priority-override`, which runs `.seen`'s handler, is not
     covered: a possible follow-up.
-  - Gap 1 (`79f7d6c`): the crate's notes keep every saved comment in read order with the path of
-    the value it is attached to, and the dump walk tracks paths as `oracle::dump` builds them. A
-    value's list is excused when the oracle's is the crate's after one or more distinct comments
-    the crate attached to no value, with those texts, read before the value's first own comment;
-    same texts included. A value with no own comments is not ordered, as before, so one created
-    earlier that gets a dropped comment is still excused; only the crate's record of where values
-    were created could tell, and it is not public. A container with own `ca` comments is refused
+  - Gap 1 (`79f7d6c`, `08f6256`): the crate's notes keep every saved comment in read order with
+    the path of the value it is attached to, and the dump walk tracks paths as `oracle::dump`
+    builds them. A value's list is excused when the oracle's is the crate's after one or more
+    distinct comments the crate attached to no value, with those texts, read before the value's
+    first own comment; same texts included. Each dropped comment can be used once in the whole
+    document (`08f6256`): giving it to two values is reported. A value with no own comments is
+    not ordered, as before, so one created earlier that alone gets a dropped comment is still
+    excused, which falls short of "every other comment list must still agree"; only the crate's
+    record of where values were created could tell, and it is not public. Closing that needs a
+    doc-hidden note in `src/` of the read-order point at which each value was created, as
+    `Parser::uncertain_reached` is for the fuzzer: a decision for the coordinator. A container with own `ca` comments is refused
     (the outermost section object closed by its bracket). The exact-source recogniser of #81 is
     removed as covered; with it the last recogniser that needed an exact flag set, so
     `zerocopy_keeps_the_uncertain_rules_of_the_result_without_it` no longer fails if the
@@ -6708,12 +6712,15 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Checks: both findings and their generated inputs pass `ucl-differential --check` with their
     flags and this worktree's `cases/spec/12-flags` and `13-inputs` (skipped as §12.5 and §9.7).
     The other saved findings give the verdicts they gave before; `values-differ-b20d95e0` (#83)
-    now agrees with no excuse. New tests fail when only the input is scanned (3), without the
-    read-order bound (2) or without the container restriction (2). 26 fuzz unit tests pass;
-    `scripts/ci.sh` passed (702 tests); `scripts/ci.sh fuzz 180` (seed 1790864078555293000,
-    329,282 inputs) saved no finding, with 5 §12.5 replaced-comment skips. Copies of that run's
-    summary are in `target/c14-scratch/gaps-run1/`.
-  - Commits: `97f57fa`, `79f7d6c` (`fix(fuzz)`), and the following `docs(clean-room)` commit
-    with this entry. Not pushed.
+    now agrees with no excuse, from the rebase onto #24, not from this work. New tests fail when
+    only the input is scanned (3), without the read-order bound (2), without the container
+    restriction (2), or with a separate record of used comments per list (2). 26 fuzz unit tests
+    pass. `scripts/ci.sh` passed (702 tests) at `79f7d6c` and again at `08f6256`. Two runs of
+    `scripts/ci.sh fuzz 180` saved no finding: at `79f7d6c` (seed 1790864078555293000, 329,282
+    inputs; 5 §12.5 replaced-comment skips, 0 §9.7 NUL-in-copy skips) and on the final code at
+    `08f6256` (seed 1790864868607778000, 268,779 inputs; 3 and 2). Their summaries are in
+    `target/c14-scratch/gaps-run1/` and `gaps-run2/`.
+  - Commits: `97f57fa`, `79f7d6c`, `08f6256` (`fix(fuzz)`), `3129db8` with this entry, and the
+    following `docs(clean-room)` commit that brings it up to date. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
