@@ -1,0 +1,2 @@
+.include(x)"files/a.inc"
+.load(try=true, key="t") "missing.txt"

@@ -5172,3 +5172,58 @@
   to the rebased release commit; its `docs/spec/` also carries `main`'s path-only edits of the
   §12.5 citations of the six `spec-v18` cases. The rules are unchanged from the reviewed text.
   Golden files are as generated. Not pushed.
+
+- 2026-10-01 — Role: spec team (classification and draft). Item: C14, the seven open fuzzer
+  findings under `target/fuzz-differential/findings/`, questions #89 and #90, spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v20
+    §§7.7, 9.2, 9.4, 9.6, 9.7, 12.5 and 13.2, the seven findings (input, original, flags,
+    directory, report), the fuzzer's classifier (`fuzz/src/uncertain.rs`) to tell a classifier gap
+    from a crate bug, the pinned libucl source, and the pinned oracle and the differential checker
+    as black boxes, with controls in three or five identical runs each.
+  - `crate-rejects-0480fbc2420ab897`, `crate-rejects-986bc4bfe9f1b299`,
+    `crate-rejects-fc3ab208a2acd907`: not libucl's result under the released spec, which makes a
+    rejected argument document an error (§9.2); the crate follows it. Each document ends with a
+    later skip, and the oracle accepts it the way §9.4's first-directory quirk describes for a
+    miss: the macro has run without ARGUMENTS with its VALUE directly after the `)`, and the skip
+    discards the error. Controls: the same with `.priority(x) 3`, with an unknown macro or a silent
+    stop in the argument document, and with the rejection in an included file; one skip covers a
+    rejection and a first-directory miss before it; a rejection after the skip, a `.load` that
+    reads its file, a `.try_include` of a missing file, and a macro that fails without ARGUMENTS
+    stay errors. New rule, #89: drafted in §9.2 with a cross-reference in §9.4.
+  - `values-differ-6dc7de42c47fd96a`: decided by the released spec as uncertain. Under
+    `rewrite`, the oracle gives the last `a` value the comment of a replaced value before its own
+    (`"c": ["# c", "# c"]`), the crate only its own (`"ca": ["# c"]`); §12.5 (#81) allows exactly
+    this, "the earlier comment appears before `k`'s own trailing comment. The project may instead
+    give `k` only `"ca": ["# c"]`". With distinct texts (`# c`, `# e`) the classifier already
+    excuses it; it misses the case where the reappearing comment has the same text as the value's
+    own. Fuzzer classifier gap.
+  - `values-differ-244706530c4e7da6`: decided as uncertain. The difference is the bytes after the
+    first NUL of a string that `.ctx` copies (`"\u0000\u0000"` against `"\u0000\""`), which §9.7
+    and §13.2 leave undefined. The classifier knows the class, but looks for the copying macro
+    only in the input itself, and here `.ctx` stands in the included `files/macro_ctx.inc`.
+    Fuzzer classifier gap.
+  - `crate-accepts-e04659ea272d36c7`, `crate-accepts-28d2d688c1a509e9`: decided as uncertain by
+    §7.7, whose wording speaks of the value; drafted a clarification, #90. A handler-resolved
+    reference shares a macro VALUE with other text (`"${H_}*/"`, `"a ${H_}"`). The oracle rejects
+    both; with `[handled]` written in place of the reference it accepts both and gives the crate's
+    results (an empty object; `a: ["handled"]` and `"{": []`). The crate is right under the
+    project's decision. Fuzzer classifier gap.
+  - Cases for #89: pending, because the crate fails them,
+    `macro_args_rejected_then_load_try_accepts`, `macro_args_rejected_then_url_try_accepts`,
+    `macro_args_rejected_unknown_macro_then_load_try_accepts`,
+    `macro_args_rejected_in_included_file_then_load_try_accepts`,
+    `macro_args_rejected_include_runs_without_args`,
+    `macro_args_rejected_and_first_miss_then_one_skip_accepts` (under `pending/09-macros/`, with
+    copies of `files/a.inc` and `files/v12/args_bad.inc`) and
+    `macro_registered_args_rejected_then_load_try_accepts` (under the new `pending/13-inputs/`);
+    active, because the crate passes them, `macro_args_rejected_after_skip_error`,
+    `macro_args_rejected_then_load_existing_file_error` and
+    `macro_args_rejected_include_space_value_error`. No case for #90: the oracle's result is
+    undefined there. Golden files only from `scripts/regen-golden.sh`, which changed no existing
+    golden file. The index counts 1,689 active cases, plus eighteen pending `spec-v20` and seven
+    pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): draft C14 rejected-arguments and handler VALUE rules`
+    commit on `c14/spec-q86`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, questions and answers, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.

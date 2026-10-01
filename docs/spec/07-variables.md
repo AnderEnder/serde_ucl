@@ -120,9 +120,15 @@ An application may install a handler, a callback that resolves names that are no
 **Uncertain (undefined in libucl).** When a handler-resolved reference shares its string with
 other text, before or after it, libucl's result depends on memory contents: text after the
 reference is dropped, text before it can cut the result short or leave the reference unexpanded,
-and bytes that were never written can appear in the value. No case pins this, because the golden
-file would not be reproducible. The project substitutes the handler's value in place, as for
-registered variables (README, *Divergences decided by the project*).
+and bytes that were never written can appear in the value. This holds for a macro's VALUE too
+(§9.2), and then what the macro does with it is undefined as well, the document's acceptance
+included: the path an `.include` reads, or the text a registered macro has parsed in place
+(§13.2). With the handler of the oracle, `.include(glob=true) "${H_}*/"` and
+`.emit "a ${H_}"` were errors, while the same documents with `[handled]` written in place of the
+reference are accepted. No case pins this, because the golden file would not be reproducible.
+The project substitutes the handler's value in place, as for registered variables (README,
+*Divergences decided by the project*): the string, and what a macro does with it, are those of
+the text with the substitution made.
 
 ## 7.8 File variables
 

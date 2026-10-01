@@ -220,6 +220,9 @@ changed keys and strings, and to included files.
 `spec-v20` answers #86 to #88: it extends the §9.4 first-directory quirk to a later
 `.load(try=true)` that skips its file, and says how an included file's brace is taken over again
 before its first key and how the first name closes in a section object (§9.4, §12.5).
+A draft for #89 and #90 extends the same skips to a rejected argument document (§9.2) and
+applies the §7.7 handler uncertainty to macro VALUEs; it awaits independent review for
+`spec-v21`.
 
 The cases of `spec-v13`, `spec-v15` and `spec-v18` are all in `cases/spec/`; the three
 `spec-v15` cases moved there when the crate followed §9.4 in C14, and the six `spec-v18` cases
@@ -261,8 +264,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1686 cases in `cases/` and
-`libucl/`, plus eighteen pending `spec-v20` cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1689 cases in `cases/` and
+`libucl/`, plus eighteen pending `spec-v20` cases and seven pending cases of the `spec-v21` draft.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1494,6 +1497,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1686 case
 | `cases/spec/09-macros/macro_args_paren_in_quotes` | §9 |
 | `cases/spec/09-macros/macro_args_parse_error` | §9 |
 | `cases/spec/09-macros/macro_args_registered_variables_unavailable_error` | §9 |
+| `cases/spec/09-macros/macro_args_rejected_after_skip_error` | §9 |
+| `cases/spec/09-macros/macro_args_rejected_include_space_value_error` | §9 |
+| `cases/spec/09-macros/macro_args_rejected_then_load_existing_file_error` | §9 |
 | `cases/spec/09-macros/macro_args_repeated_first_wins` | §9 |
 | `cases/spec/09-macros/macro_args_single_quotes_do_not_protect_error` | §9 |
 | `cases/spec/09-macros/macro_args_space_then_last_byte_hash_empty_value` | §9 |
@@ -1626,6 +1632,12 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1686 case
 | `pending/09-macros/include_path_first_miss_then_load_try_directory_accepts_later` | §9 |
 | `pending/09-macros/include_path_first_miss_url_then_load_try_accepts` | §9 |
 | `pending/09-macros/include_path_two_first_misses_then_load_try_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_and_first_miss_then_one_skip_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_in_included_file_then_load_try_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_include_runs_without_args` | §9 |
+| `pending/09-macros/macro_args_rejected_then_load_try_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_then_url_try_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_unknown_macro_then_load_try_accepts` | §9 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
 | `cases/spec/10-output/comments_output_before_and_after` | §10, §12 |
@@ -1955,6 +1967,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1686 case
 | `cases/spec/13-inputs/macro_registered_value_nul_kept` | §9, §13 |
 | `cases/spec/13-inputs/macro_registered_value_on_next_line` | §13, §9 |
 | `cases/spec/13-inputs/macro_registered_value_variables` | §13, §9 |
+| `pending/13-inputs/macro_registered_args_rejected_then_load_try_accepts` | §13, §9 |
 | `libucl/basic/1` | §1, §4, §5, §6, §8, §10 |
 | `libucl/basic/10` | §3, §8 |
 | `libucl/basic/11` | §1, §10 |

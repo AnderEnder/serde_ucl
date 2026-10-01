@@ -1,8 +1,8 @@
 # Pending cases
 
 The conformance runners do not read this directory; `scripts/regen-golden.sh` regenerates its
-oracle goldens. Once the crate passes a case, move it and its golden files to
-`tests/conformance/cases/spec/09-macros/`.
+oracle goldens. Once the crate passes a case, move it and its golden files to the same directory
+under `tests/conformance/cases/spec/`.
 
 Eighteen `spec-v20` cases wait for implementation in the same way: questions #86
 (§9.4, first-directory miss), #87 (§9.4, macros before an included file's first key) and #88
@@ -37,3 +37,19 @@ be dropped on the move; `files/v4` also serves as the directory that one case lo
 - `09-macros/comments_include_first_name_in_section_object_after_text`: after text parsed in
   place in a section object, the first name's `}` leaves the value created most recently as it
   was.
+
+Seven cases of the `spec-v21` draft, for question #89 (§9.2, a rejected argument document and a
+later skip), wait in the same way, six under `09-macros/` and one under `13-inputs/`. The fixtures
+`files/a.inc` and `files/v12/args_bad.inc` under `09-macros/` are identical to the active ones.
+
+- `09-macros/macro_args_rejected_then_load_try_accepts`,
+  `09-macros/macro_args_rejected_then_url_try_accepts`: a later skip of either kind lets the
+  document pass, the macro having run without ARGUMENTS.
+- `09-macros/macro_args_rejected_unknown_macro_then_load_try_accepts`,
+  `09-macros/macro_args_rejected_in_included_file_then_load_try_accepts`: the same for an
+  unknown macro in the argument document and for a rejection in an included file.
+- `09-macros/macro_args_rejected_include_runs_without_args`: the `.include` reads its file.
+- `09-macros/macro_args_rejected_and_first_miss_then_one_skip_accepts`: one skip covers a
+  first-directory miss and a rejection before it.
+- `13-inputs/macro_registered_args_rejected_then_load_try_accepts`: a registered macro receives
+  no ARGUMENTS and the VALUE as it stands after the `)`.
