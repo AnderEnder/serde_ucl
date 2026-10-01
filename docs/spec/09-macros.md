@@ -545,11 +545,18 @@ create an object. The entries still go into the object where the macro stands
   `{ x: { "y{": "z", a: { b: int 1 } }, q: int 1 }`, and a further `}` in the including unit is
   an error (`include_braced_file_first_name_closed_by_object`,
   `include_braced_file_first_name_closed_by_object_then_brace_error`). When the brace taken over
-  is that of a section object without a bracket of its own (above), the first name gets no brace:
-  the file's first `}` removes the brace taken over and closes the section object together with
-  the name's object, by the rule for section objects above, so with the file
-  `files/v6/q42_closed_twice.inc`, `{ x "y{" z⏎}⏎}`, `s "t{" u⏎.include "…"⏎q = 1` is an error at
-  the file's second `}` (`include_braced_file_first_name_in_section_object_error`). Which value a
+  is that of a section object without a bracket of its own (above), the first name gets a brace
+  of its own too, and its `}`, as that of a container written with brackets that was opened in
+  the section object, also closes the section object, taken-over brace and all (above). So with
+  the file `files/v6/q42_closed_twice.inc`, `{ x "y{" z⏎}⏎}`, `s "t{" u⏎.include "…"⏎q = 1` is an
+  error at the file's second `}` (`include_braced_file_first_name_in_section_object_error`). When
+  text parsed in place has made that section object stop closing on its own (§13.2, *Quirk: text
+  in place and a section object left open*), the name's `}` closes only the name's object, and a
+  second `}` removes the brace taken over, leaving the section object open: with a file
+  `{ .emit ""⏎x "y{" z⏎}⏎}`, `s "t{" u⏎.include "…"⏎q = 1` →
+  `{ s: { "t{": "u", x: { "y{": "z" }, q: int 1 } }`, and with only the first `}` in the file it
+  is an error (`include_braced_file_first_name_in_section_object_after_text`,
+  `include_braced_file_first_name_in_section_object_after_text_unclosed_error`). Which value a
   comment after these closings attaches to is in §12.5. A `.priority` before the name makes no
   difference (`include_braced_file_priority_then_first_name`). Only that first name gets a brace:
   `{ a b "y{" z⏎}` is an error, because the `}` finds `b` without one, and so is a file whose
@@ -557,6 +564,42 @@ create an object. The entries still go into the object where the macro stands
   `include_braced_file_entry_first_then_path_error`). A main document's leading `{` does not do
   this, because it opens the root (§1.1): `{ x "y{" z⏎}⏎}` is an error
   (`main_braced_root_first_name_has_no_brace_error`).
+- **Quirk: macros before the first key.** The keys that a file included by such a file, or text
+  parsed in place in it (§13.2), reads are not the file's own: its first key is the first one it
+  reads itself. Until then, the file takes a brace over again after each macro, that of the
+  object its entries then go into, so a `}` of the nested file or text that removed the brace
+  taken over (above) does not end the takeover for the file. A brace taken over again is added to
+  any brace the file still holds, not put in its place, and the file's `}`s close the innermost
+  first:
+  - With a file `{ .include "files/v4/braced.inc"⏎a2 = 2⏎}`, `.include "…"⏎q = 1` →
+    `{ a: int 1, a2: int 2, q: int 1 }` (`include_braced_file_nested_braced_then_entry`).
+  - The first name still gets its brace, and the file's last `}` closes the brace taken over: with
+    a file `{ .include "files/v4/braced.inc"⏎x "y{" z⏎}⏎}`, `.include "…"⏎q = 1` →
+    `{ a: int 1, x: { "y{": "z" }, q: int 1 }`; the same with `files/v4/close_brace.inc`
+    (`a = 1 }`) as the nested file, also under `key="k"`, where the entries and `x` go into `k`,
+    and with text `{ a = 1 }` parsed in place
+    (`include_braced_file_nested_braced_before_first_name`,
+    `include_braced_file_nested_close_brace_before_first_name`,
+    `include_key_nested_close_brace_before_first_name`,
+    `include_braced_file_nested_text_before_first_name`).
+  - A nested file that leaves a section path open puts the first name inside it, and the name's
+    `}` closes both, as above: with a file `{ .include "files/v4/left_open.inc"⏎p "q{" r⏎}⏎}`,
+    `.include "…"⏎q = 1` → `{ x: { "y{": "z", p: { "q{": "r" } }, q: int 1 }`
+    (`include_braced_file_nested_path_before_first_name`).
+  - A nested file that leaves a section path open and removes no brace leaves the file holding
+    two: the section object's, taken over again, and the one it took over first, which stays with
+    the object where the macro stands. The file's first `}` closes the section object and its
+    second the other brace: with a file `{ .include "files/v4/left_open.inc"⏎w = 1⏎}⏎}`,
+    `.include "…"⏎q = 1` → `{ x: { "y{": "z", w: int 1 }, q: int 1 }`, and the same without
+    `w = 1`. With only the first `}` in the file, the root keeps the other brace, so
+    `.include "…"⏎q = 1` is an error and `.include "…"⏎q = 1⏎}` is accepted, with `w` in `x` and
+    `q` at the top level (`include_braced_file_nested_path_then_entry`,
+    `include_braced_file_nested_path_then_braces`,
+    `include_braced_file_nested_path_one_brace_error`,
+    `include_braced_file_nested_path_one_brace_closed_by_includer`).
+  - Once the file has read a key of its own, a nested file's `}` removes the brace for good: a
+    file `{ a0 = 0⏎.include "files/v4/braced.inc"⏎}` is an error, because its `}` has nothing
+    left to close (`include_braced_file_entry_then_nested_braced_error`).
 
 The same brace bookkeeping explains why a `}` in an included file may close an object that the
 including unit opened with `{`: `x { .include "files/v4/close_brace.inc"⏎q = 1` with
@@ -879,21 +922,44 @@ project*. libucl behaves as follows:
     that has the file is used (`try_include_path_searches_all_dirs`), and a file found in none of
     them is an error, not a silent stop (`try_include_path_missing_error`). An empty list makes
     every include an error (`include_path_empty_array_error`).
-  - **Quirk: a later skipped URL include.** If the first directory of a `.include` without
-    `try=true` or `glob=true` lacks the file but a later directory has it, and a subsequent
-    `.include(try=true, url=true)` or `.try_include(url=true)` has `://` in its path and is
-    skipped, the document is accepted with the later directory's file included. Entries between
-    the two macros and after the URL macro are read too
-    (`include_path_first_miss_then_url_try_accepts_later`,
-    `include_path_first_miss_then_try_include_url_accepts_later`). This holds whether the
+  - **Quirk: a later skipped URL include or `.load`.** If the first directory of a `.include`
+    without `try=true` or `glob=true` lacks the file but a later directory has it, and a
+    subsequent macro skips its file, the document is accepted with the later directory's file
+    included. Entries between the two macros and after the second are read too. The macros that
+    count are a `.include(try=true, url=true)` or `.try_include(url=true)` with `://` in its path
+    that is skipped (`include_path_first_miss_then_url_try_accepts_later`,
+    `include_path_first_miss_then_try_include_url_accepts_later`), and a `.load` with `try=true`
+    whose file is missing or unusable, so that it reads nothing (§9.6): after
+    `.include(path=["", "files/v4/p1"]) "pa.inc"`, the lines `x = 1`,
+    `.load(try=true, key="t") "missing.txt"` and `after = 2` give
+    `{ pa: int 1, x: int 1, after: int 2 }`, and so does the directory `"files/v4"` as the `.load`
+    path (`include_path_first_miss_then_load_try_accepts_later`,
+    `include_path_first_miss_then_load_try_directory_accepts_later`). This holds whether the
     document is given as a file or as text
-    (`include_path_first_miss_then_url_try_accepts_later_file_input`). Without a matching later
+    (`include_path_first_miss_then_url_try_accepts_later_file_input`,
+    `include_path_first_miss_then_load_try_accepts_later_file_input`). Without a matching later
     directory, or when the later URL include is not skippable, the document is an error
     (`include_path_first_miss_then_url_try_no_later_file`,
-    `include_path_first_miss_then_url_error`). A later optional ordinary file include does not
-    change the first-directory error (`include_path_first_miss_then_optional_file_error`). The
-    ordinary first-directory rule above applies otherwise. These cases do not establish an
-    exception for other later macros or other kinds of file failure.
+    `include_path_first_miss_then_url_error`). So it is when the `.load` reads its file, an empty
+    one included, although that inserts nothing (§9.6), or, without `try=true`, fails on a
+    missing one (`include_path_first_miss_then_load_try_existing_file_error`,
+    `include_path_first_miss_then_load_try_empty_file_error`,
+    `include_path_first_miss_then_load_missing_error`), and when the skip comes before the
+    `.include` (`include_path_first_miss_after_load_try_error`). A skip covers every such miss
+    before it, and none after it: a later miss needs a later skip of its own. The list stays in
+    effect, so a later `.include "pa.inc"` misses in `""` again; without a further skip the
+    document is an error (`include_path_first_miss_again_after_load_try_error`), and with one it
+    is accepted, both files included: `pa: ⟨int 1 | int 1⟩`, whether a skip follows each miss or
+    one skip follows two misses, and whether the skips are URL includes, `.load`s or one of each
+    (`include_path_first_miss_load_try_after_each_miss_accepts`,
+    `include_path_two_first_misses_then_load_try_accepts`,
+    `include_path_first_miss_url_try_after_each_miss_accepts`,
+    `include_path_two_first_misses_then_url_try_accepts`,
+    `include_path_first_miss_url_then_load_try_accepts`). A later optional ordinary file include
+    does not change the first-directory error
+    (`include_path_first_miss_then_optional_file_error`). The ordinary first-directory rule above
+    applies otherwise. These cases do not establish an exception for other later macros or other
+    kinds of file failure.
   - With `glob=true`, the pattern is expanded in every directory, and all matches are included
     (`include_path_glob_all_dirs`). Without `try=true`, `.include` then fails when the **last**
     directory has no match, whatever the others had (`include_path_glob_last_dir_must_match_error`).
@@ -966,6 +1032,9 @@ Parameters match as in §9.2, in the table's order within each type, so `t=true`
   `t = 1⏎.load(key="t", target="float") "files/num.txt"` and
   `t = 1⏎.load(key="t") "files/v4/empty.txt"` are errors (`load_try_missing_before_existing_key`,
   `load_existing_key_before_target`, `load_existing_key_before_empty_file`).
+- A `.load` with `try=true` that inserts nothing because its file is missing or unusable also
+  lets an earlier first-directory miss of a `.include` pass (§9.4, *Quirk: a later skipped URL
+  include or `.load`*).
 - The value's priority is the `priority` parameter only; `.priority` does not affect it
   (`load_ignores_priority_macro`).
 - If K already exists in the current object, it is an error (`load_existing_key_error`,
