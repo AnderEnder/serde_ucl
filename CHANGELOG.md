@@ -9,13 +9,14 @@ All notable changes to this crate are recorded here.
 Clean-room work item C14.
 
 - A `.include` with a search path whose first directory lacks the file, while a later directory
-  has it, is an error unless a later macro of the same input skips its file. A `.load` with
-  `try=true` that reads nothing, because its file is missing or is a directory or another file
-  it cannot read, now counts as such a skip, as a skipped URL include already did (spec §9.4,
-  §9.6). So `.include(path=["", "p1"]) "pa.inc"⏎.load(try=true, key="t") "missing.txt"`, an
-  error in 0.6.0, now gives `pa` from `p1`. A skip covers the misses before it and none after
-  it. A `.load` that reads its file, an empty one too, a `.load` without `try=true`, and a skip
-  before the `.include` still leave the document an error.
+  has it, is an error unless a later macro of the document itself, not of an included file or
+  text parsed in place, skips its file (QUESTIONS.md #93). A `.load` with `try=true` that reads
+  nothing, because its file is missing or is a directory or another file it cannot read, now
+  counts as such a skip, as a skipped URL include already did (spec §9.4, §9.6). So
+  `.include(path=["", "p1"]) "pa.inc"⏎.load(try=true, key="t") "missing.txt"`, an error in
+  0.6.0, now gives `pa` from `p1`. A skip covers the misses before it and none after it. A
+  `.load` that reads its file, an empty one too, a `.load` without `try=true`, and a skip before
+  the `.include` still leave the document an error.
 - When an included file's leading `{` has taken over a brace, the file now takes a brace over
   again after each macro it holds before its first key, that of the object its entries then go
   into, so a `}` of a nested file or of text parsed in place that removed the brace no longer
