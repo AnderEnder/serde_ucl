@@ -4717,6 +4717,7 @@
   `test(conformance): activate spec-v18 comment cases` commit on `c14/spec18-comments`. Not
   pushed. Attestation: the case move and documentation contain observable behavior only, with no
   libucl code, pseudo-code, internal names or source structure.
+
 - 2026-09-30 — Role: clean-room implementer. Item: C14 follow-up, the differential fuzzer's
   classification of expanded `.emit` text under `zerocopy` (§12.2).
   - Inputs consulted: the embedded current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`,
