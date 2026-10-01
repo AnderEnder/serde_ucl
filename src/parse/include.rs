@@ -86,7 +86,8 @@ pub(crate) struct Includes<'l> {
     /// (spec §9.4, *Signatures, URLs and search paths*). It starts as the parser's search path
     /// ([`super::Parser::set_search_path`]).
     search: Option<Vec<String>>,
-    /// A first-directory miss that §9.4 allows a later skipped URL in this input to recover.
+    /// A first-directory miss that §9.4 allows a later skip in this input to recover: a skipped
+    /// URL include, or a `.load` with `try=true` that reads nothing.
     pub(crate) pending_search_miss: Option<(usize, Error)>,
     /// The parser's search path, which macro argument documents start with.
     default_search: Option<Vec<String>>,
@@ -291,14 +292,7 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
             // (spec §9.4, *Signatures, URLs and search paths*). Its `path` list still takes
             // effect for later includes (oracle runs, QUESTIONS.md #37).
             return if try_ {
-                if self
-                    .includes
-                    .pending_search_miss
-                    .as_ref()
-                    .is_some_and(|(unit, _)| Some(unit) == self.includes.open_units.last())
-                {
-                    self.includes.pending_search_miss = None;
-                }
+                self.skipped_after_search_miss();
                 Ok(())
             } else {
                 Err(self.error(ErrorKind::UrlNotSupported { path }, call.value_at))
@@ -336,8 +330,25 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         }
     }
 
-    /// §9.4: a later skipped URL can recover a plain include's missing first directory when
-    /// another directory has the file. Keep the first error until the input reaches that URL.
+    /// A macro of this input skipped its file: a skipped URL include, or a `.load` with
+    /// `try=true` that reads nothing (spec §9.4, *Quirk: a later skipped URL include or
+    /// `.load`*; §9.6). The first-directory misses of the input before it pass; a later miss
+    /// needs a later skip of its own.
+    fn skipped_after_search_miss(&mut self) {
+        if self
+            .includes
+            .pending_search_miss
+            .as_ref()
+            .is_some_and(|(unit, _)| Some(unit) == self.includes.open_units.last())
+        {
+            self.includes.pending_search_miss = None;
+        }
+    }
+
+    /// §9.4, *Quirk: a later skipped URL include or `.load`*: a later skip can recover a plain
+    /// include's missing first directory when another directory has the file
+    /// ([`Core::skipped_after_search_miss`]). The first error is kept until the input reaches
+    /// such a skip, and is the input's error if it reaches none.
     fn include_searched_with_later_url(
         &mut self,
         dirs: &[String],
@@ -634,7 +645,13 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
                 let path = Some(path.clone());
                 return Err(self.error(ErrorKind::InputTooLarge { limit, path }, call.value_at));
             }
-            Err(_) if try_ => return Ok(()),
+            Err(_) if try_ => {
+                // A missing or unusable file read nothing: an earlier first-directory miss of
+                // `.include` passes (§9.4, *Quirk: a later skipped URL include or `.load`*). A
+                // file that is read, an empty one included, does not count (QUESTIONS.md #86).
+                self.skipped_after_search_miss();
+                return Ok(());
+            }
             Err(kind) => return Err(self.error(kind, call.value_at)),
         };
         let key_lowercase = self.settings.flags.contains(ParserFlags::KEY_LOWERCASE);
@@ -2175,6 +2192,64 @@ mod tests {
             ".include(path=[\"p1\", \"p3\"]) \"pa.inc\"\n.include(try=true, url=true) ://",
         ] {
             assert!(run(&files, input).is_err(), "{input}");
+        }
+    }
+
+    /// spec §9.4, *Quirk: a later skipped URL include or `.load`*, and §9.6 (QUESTIONS.md #86):
+    /// a `.load` with `try=true` that reads nothing counts as a skip too.
+    #[cfg(feature = "load")]
+    #[test]
+    fn first_search_miss_is_recovered_by_a_later_skipped_load() {
+        let miss = ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"";
+        let skip = ".load(try=true, key=\"t\") \"missing.txt\"";
+        let url = ".include(try=true, url=true) ://";
+        let files = [
+            ("/c/p2/pa.inc", "pa = 1\n"),
+            ("/c/v.txt", "v"),
+            ("/c/empty.txt", ""),
+            (
+                "/c/document.ucl",
+                ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"\nx = 1\n\
+                 .load(try=true, key=\"t\") \"missing.txt\"\nafter = 2\n",
+            ),
+        ];
+        let value = run(&files, &format!("{miss}\nx = 1\n{skip}\nafter = 2\n")).unwrap();
+        assert_eq!(keys(&value), ["pa", "x", "after"]);
+        assert_eq!(
+            obj(&value).get("pa").and_then(UclValue::as_integer),
+            Some(1)
+        );
+        // A directory is unusable, so nothing is read either.
+        let directory = format!("{miss}\n.load(try=true, key=\"t\") \"dir\"\nafter = 2\n");
+        assert_eq!(keys(&run(&files, &directory).unwrap()), ["pa", "after"]);
+        // A document given as a file.
+        let value = parser(&files, ParserFlags::DEFAULT)
+            .parse_file("document.ucl")
+            .unwrap();
+        assert_eq!(keys(&value), ["pa", "x", "after"]);
+        // A skip covers the misses before it, of either kind of skip.
+        let again = ".include \"pa.inc\"";
+        for input in [
+            format!("{miss}\n{skip}\n{again}\n{skip}"),
+            format!("{miss}\n{again}\n{skip}"),
+            format!("{miss}\n{url}\n{again}\n{skip}"),
+            format!("{miss}\n{skip}\n{again}\n{url}"),
+        ] {
+            let value = run(&files, &input).unwrap();
+            assert_eq!(keys(&value), ["pa"], "{input}");
+            assert_eq!(obj(&value).entry("pa").unwrap().len(), 2, "{input}");
+        }
+        for input in [
+            // The `.load` reads its file, an empty one included.
+            format!("{miss}\n.load(try=true, key=\"t\") \"v.txt\""),
+            format!("{miss}\n.load(try=true, key=\"t\") \"empty.txt\""),
+            // Without `try=true`, a missing file is an error of its own.
+            format!("{miss}\n.load(key=\"t\") \"missing.txt\""),
+            // The skip comes before the miss, or a later miss has no skip after it.
+            format!("{skip}\n{miss}"),
+            format!("{miss}\n{skip}\n{again}"),
+        ] {
+            assert!(run(&files, &input).is_err(), "{input}");
         }
     }
 
