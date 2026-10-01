@@ -5404,7 +5404,8 @@
     `cases/spec/09-macros/` (1,704 cases, the four expected failures only); `cargo test --test
     conformance` in the worktree (1,686 cases); `scripts/ci.sh` passed all 26 steps at the
     final commit; each intermediate commit builds, is formatted, and passes clippy over the
-    crate's feature sets of `scripts/ci.sh`, the unit tests and the conformance tests. `ucl-differential --check` of the saved finding, with
+    crate's feature sets of `scripts/ci.sh`, the unit tests and the conformance tests.
+    `ucl-differential --check` of the saved finding, with
     `tests/conformance/cases/spec/09-macros` of this worktree as its directory: `agree`.
     `scripts/ci.sh fuzz 180 2026100101`: before the change, on a pristine copy, nine
     `crate-rejects` (FileNotFound, this #86 class) and two `values-differ`; after it, no
@@ -5479,5 +5480,41 @@
     differences, three saved, all `.emit … $ABI` under `zerocopy` (the class #25 answers); the
     implementer's two earlier findings are kept in `target/review-v20/prev-fuzz-differential/`.
   - Commits: this LOG-only review commit on `c14/spec20-impl`. No change to `src/`; not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: implementation team (the same clean-room implementer). Item: C14 follow-up,
+  the four non-blocking findings of the review of the spec-v20 fix (`ebaa738`), on
+  `c14/spec20-impl`.
+  - Inputs consulted: the coordinator's message and the reviewer's entry above; `QUESTIONS.md` on
+    this branch, `origin/main` and `spec-v21` (for the next free number, #93); the crate's
+    `src/parse/core.rs` and `include.rs`; `CHANGELOG.md`; black-box runs of the oracle through
+    `ucl-differential --check`, from probe files in `target/c14-scratch/w/`. Two incidental
+    looks outside these: the session's working directory was moved to another worktree
+    (`agent-ae56e5508d126285c`, branch `c14/fuzz-gaps`), where I ran `git status` and
+    `git log -3` before returning here, and I listed the names of the files in the reviewer's
+    `target/review-v20/probe/`; no file was opened in either. No libucl source, `tools/`,
+    spec-team branch, or Claude Code session or memory files were read.
+  - Work: (1) Asked #93 with oracle runs: the oracle lets a skip recover a first-directory miss
+    when the miss and the skip are in the same included file, when the miss is in an included
+    file or in text parsed in place and the skip later in the document, and when the miss is in
+    the document and the skip in text parsed in place or in a file included after it, but not
+    when the skip is in a macro argument document. The crate keeps counting only a miss and a
+    skip in the document itself; a unit test pins that choice, the code comments cite #93, and
+    `CHANGELOG.md` says "of the document itself, not of an included file or text parsed in
+    place". The review reported that the oracle rejects a skip inside an included file after a
+    miss in the document; in my runs it accepted every such form I tried (plain, `key`, `try`,
+    `.try_include`, `glob`, inside braces, through a second file, and with the include itself a
+    second miss), and #93 records that. (2) Rewrapped the 140-column line of my earlier entry.
+    (3) `take_brace_again` keeps a brace still held in an arm of its own; the closes that cannot
+    occur there are in a separate arm, listed for exhaustiveness. (4) Renamed
+    `first_key_shares` to `taking_over` and `section_shares` to `first_name_brace`. No behaviour
+    change.
+  - Checks: `scripts/ci.sh` passed all 26 steps; the eighteen pending cases pass in the copy with
+    them moved into `cases/spec/09-macros/`.
+  - Commits: `docs(clean-room): ask whether a later skip counts across input units`,
+    `test(parse): pin that only the document's own skips recover a first-directory miss`,
+    `refactor(parse): name the brace-takeover flags for what they hold`, and this entry with the
+    rewrap. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
