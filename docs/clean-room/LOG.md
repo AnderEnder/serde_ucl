@@ -5425,3 +5425,59 @@
     cite them as #89 and #90.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: fresh clean-room implementation reviewer. Item: C14 follow-up, released
+  `spec-v20` (questions #86, #87, #88); reviewed `git diff 1cbbd48 HEAD` on `c14/spec20-impl` in
+  worktree `c14-spec20-impl`, commits `8490cc3` to `15a8862`.
+  - Inputs consulted: the coordinator's request; `docs/clean-room/PROTOCOL.md`; released
+    `spec-v20` §9.4, §9.6, §12.5 and §13.2 and the `spec-v19..spec-v20` diff of `docs/spec/`
+    (`docs/spec/` at HEAD equals the tag); the `spec-v20..spec-v21` diff of `docs/spec/`, to see
+    whether `spec-v21` answers #91 or #92 (it answers #89 and #90); the branch diff
+    (`src/parse/core.rs`, `include.rs`, `CHANGELOG.md`, `QUESTIONS.md` #86 to #92, the LOG);
+    `src/parse/macros.rs` (macro entry); `1cbbd48`'s `core.rs` and `include.rs` through `git
+    show`, for builds in scratch copies under `target/review-v20/`; the pending cases, their
+    README and fixtures; `fuzz/README.md`; the oracle as a black box through `ucl-differential
+    --check`, from probe files in `target/review-v20/probe/`. Nothing outside this worktree was
+    opened.
+  - Review result: approved. The three rules follow released §9.4, §9.6, §12.5 and §13.2, the
+    choices of #91 and #92 are tested and match the oracle, and no `unreachable!` is left (the
+    one in `names()` is now a `debug_assert!`, and `object_step` still sets `section_shares`
+    only while the top frame holds a brace taken over). Findings, none blocking:
+    1. A first-directory miss is recovered only when the miss and the skip are both in the
+       document itself (`src/parse/include.rs:322`, `open_units.len() == 1`, and the unit check
+       of `skipped_after_search_miss`, :337-345). The oracle also accepts a miss in an included
+       file followed by a skip in that file or later in the document (`.load(try=true)` or URL),
+       and a skip by text parsed in place (`.emit`) after a miss in the document; it rejects a
+       skip inside an included file after a miss in the document. §9.4 says only "a subsequent
+       macro"; a miss and a skip in the same included file match that text and the oracle.
+       `spec-v21` settles a skip in a later input and rejected argument documents in included
+       files, not this. The same holds for URL skips on `1cbbd48`, so it predates this change;
+       the new `.load` skip inherits it. Fix: ask a question with these runs, and say "of the
+       document itself, not of an included file or text parsed in place" in
+       `CHANGELOG.md:11-12`.
+    2. `docs/clean-room/LOG.md:5032` is 140 columns wide; rewrap at 100.
+    3. `src/parse/core.rs:2969-2970`: in `take_brace_again`, `Close::Bracket` is never an
+       object's close and `Close::NameBrace` cannot be the top frame before the first key, so the
+       comment "a bracket the unit's end check requires a nested unit to close" describes no
+       reachable case. Say that the arm keeps a brace still held, the rest for exhaustiveness.
+    4. `first_key_shares` and `section_shares` (`core.rs:837`, `:840`) no longer name a share;
+       a rename (for example `taking_over`, `first_name_brace`) would match their docs.
+  - Checks: `scripts/ci.sh` passed (711 tests; tree clean after). In a copy with the 18 pending
+    cases moved into `cases/spec/09-macros/` (fixtures identical): 1,704 cases, 1,700 pass, the 4
+    expected failures, emitters and readback clean; with `1cbbd48`'s `core.rs` and the `.load`
+    skip removed, 17 of the 18 fail (`comments_include_nested_text_before_first_name` passes on
+    the old code too) and the four new unit tests fail. Five mutations (the own `}` keeping the
+    takeover, a takeover at the end of the file, no takeover of a braced object or of a section
+    object, no own brace for the first name in a section object) each fail a unit test. Oracle
+    probes: 28 search-miss and skip forms (only the cross-unit ones of finding 1 differ); 81
+    brace files, from the CHANGELOG, #87, #88, #91, #92 and nearby forms (nested macros in
+    turn, `.priority`, `.inherit`, comments, `;`, VT, FF, CR LF, ignored names, `key`, text in
+    place), each in nine contexts: 725 agree and 4 are §12.5 block-comment skips that agree
+    without `dump-comments`; 197 of them differed with the old code; 69 comment contexts in
+    section objects and after text in place, and the 8 CHANGELOG forms, agree.
+    `scripts/ci.sh fuzz 180` (seed 1790866650510056000, 500,337 inputs) exited 1 with five
+    differences, three saved, all `.emit … $ABI` under `zerocopy` (the class #25 answers); the
+    implementer's two earlier findings are kept in `target/review-v20/prev-fuzz-differential/`.
+  - Commits: this LOG-only review commit on `c14/spec20-impl`. No change to `src/`; not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
