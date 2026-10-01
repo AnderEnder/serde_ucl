@@ -1031,12 +1031,15 @@ mod tests {
             Verdict::Skipped(uncertain::REPLACED_COMMENTS)
         ));
         for changed in [
-            // A value changed, or another value's comments. (A value without comments of its
-            // own in the crate that gets a dropped comment is excused whenever it was created:
-            // nothing orders it, see `uncertain::replaced_comments_first`.)
+            // A value changed, or another value's comments: another text, or the one dropped
+            // comment given to it as well, which can reappear only once.
             dump(c.clone(), a("c", &["# c", "# c"], "w")),
             dump(
                 serde_json::json!({"t":"string","v":"p","c":["# z"]}),
+                a("c", &["# c", "# c"], "v"),
+            ),
+            dump(
+                serde_json::json!({"t":"string","v":"p","c":["# c"]}),
                 a("c", &["# c", "# c"], "v"),
             ),
             // More comments than the crate dropped, or one after the value's own.

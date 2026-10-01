@@ -243,18 +243,30 @@ fn holds(bytes: &[u8], needle: &[u8]) -> bool {
 /// Everything else is left for the comparison that follows. The dumps are walked in parallel,
 /// entries and elements by position.
 pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSet<&'static str>) {
-    excuse_at(golden, actual, ctx, reasons, &mut Vec::new());
+    let mut walk = Walk {
+        path: Vec::new(),
+        used: vec![false; ctx.comments.len()],
+    };
+    excuse_at(golden, actual, ctx, reasons, &mut walk);
 }
 
-/// `path` is that of the value `actual`, as `oracle::dump` builds it.
+/// Where the walk over the two dumps is.
+struct Walk {
+    /// The path of the value at hand, as `oracle::dump` builds it.
+    path: Vec<PathSegment>,
+    /// The saved comments ([`Context::comments`]) already taken for another value's list by
+    /// [`replaced_comments_first`]: each can reappear only once.
+    used: Vec<bool>,
+}
+
 fn excuse_at(
     golden: &mut J,
     actual: &J,
     ctx: &Context<'_>,
     reasons: &mut BTreeSet<&'static str>,
-    path: &mut Vec<PathSegment>,
+    walk: &mut Walk,
 ) {
-    comments(golden, actual, path, ctx, reasons);
+    comments(golden, actual, walk, ctx, reasons);
     let Some(kind) = golden.get("t").and_then(J::as_str).map(str::to_owned) else {
         return;
     };
@@ -286,12 +298,12 @@ fn excuse_at(
                     a_entry.get("k").and_then(J::as_str),
                 ) {
                     for (index, (g, a)) in g_values.iter_mut().zip(a_values).enumerate() {
-                        path.push(PathSegment::Key {
+                        walk.path.push(PathSegment::Key {
                             key: key.to_owned(),
                             index,
                         });
-                        excuse_at(g, a, ctx, reasons, path);
-                        path.pop();
+                        excuse_at(g, a, ctx, reasons, walk);
+                        walk.path.pop();
                     }
                 }
             }
@@ -302,9 +314,9 @@ fn excuse_at(
                 actual.get("v").and_then(J::as_array),
             ) {
                 for (index, (g, a)) in g_items.iter_mut().zip(a_items).enumerate() {
-                    path.push(PathSegment::Index(index));
-                    excuse_at(g, a, ctx, reasons, path);
-                    path.pop();
+                    walk.path.push(PathSegment::Index(index));
+                    excuse_at(g, a, ctx, reasons, walk);
+                    walk.path.pop();
                 }
             }
         }
@@ -443,7 +455,7 @@ fn comment_list(node: &J) -> Option<(&'static str, Vec<String>)> {
 fn comments(
     golden: &mut J,
     actual: &J,
-    path: &[PathSegment],
+    walk: &mut Walk,
     ctx: &Context<'_>,
     reasons: &mut BTreeSet<&'static str>,
 ) {
@@ -469,7 +481,7 @@ fn comments(
             changed = true;
         }
     }
-    if g_texts != a_texts && replaced_comments_first(&g_texts, &a_texts, a_key, actual, path, ctx) {
+    if g_texts != a_texts && replaced_comments_first(&g_texts, &a_texts, a_key, actual, walk, ctx) {
         g_texts = a_texts;
         g_key = a_key;
         reasons.insert(REPLACED_COMMENTS);
@@ -486,9 +498,10 @@ fn comments(
 
 /// §12.5: libucl can attach the comments of a value that §8 replaced to a value created later,
 /// before that value's own. True when the oracle's list `golden` is the crate's list `own` (with
-/// the dump key `own_key`) of the value at `path` after one or more comments, each of which is a
-/// distinct comment the crate saved but attached to no value, with that text, and read before
-/// the first of the value's own comments: so the value was created after the replaced one, even
+/// the dump key `own_key`) of the value at the walk's path after one or more comments, each of
+/// which is a distinct comment the crate saved but attached to no value, with that text, not
+/// taken for another value's list already, and read before the first of the value's own
+/// comments: so the value was created after the replaced one, even
 /// when the texts are the same. With no own comments there is nothing to order by, and the
 /// comments only have to be ones the crate dropped, so such a value is excused even when it was
 /// created before the replaced one; only the crate's own record of where values were created
@@ -500,9 +513,10 @@ fn replaced_comments_first(
     own: &[String],
     own_key: &str,
     actual: &J,
-    path: &[PathSegment],
+    walk: &mut Walk,
     ctx: &Context<'_>,
 ) -> bool {
+    let path = walk.path.as_slice();
     let Some(extra) = golden.len().checked_sub(own.len()).filter(|&n| n > 0) else {
         return false;
     };
@@ -527,13 +541,17 @@ fn replaced_comments_first(
         return false;
     }
     let before = own_places.first().copied().unwrap_or(ctx.comments.len());
-    let mut used = vec![false; before];
-    golden[..extra].iter().all(|text| {
+    let mut taken = walk.used.clone();
+    let all_found = golden[..extra].iter().all(|text| {
         let found = (0..before).find(|&i| {
-            !used[i] && ctx.comments[i].value.is_none() && ctx.comments[i].text == *text
+            !taken[i] && ctx.comments[i].value.is_none() && ctx.comments[i].text == *text
         });
-        found.inspect(|&i| used[i] = true).is_some()
-    })
+        found.inspect(|&i| taken[i] = true).is_some()
+    });
+    if all_found {
+        walk.used = taken;
+    }
+    all_found
 }
 
 /// Whether a block comment saved as `text` can end its unit: the input ends with it, or it is
@@ -682,6 +700,17 @@ mod tests {
         }];
         let notes = vec![saved("# x", Some(&other)), saved("# c", Some(&path))];
         assert!(!excused(value("c", &["# x", "# c"]), &own, &context("", &[], &notes)).0);
+        // One dropped comment given to two values: it can reappear once, on the first reached.
+        let notes = vec![saved("# c", None), saved("# c", Some(&path))];
+        let ctx = context("", &[], &notes);
+        let two = |a: J, b: J| json!({"t": "object", "entries": [{"k": "a", "v": [a]}, {"k": "b", "v": [b]}]});
+        let a_own = json!({"t": "string", "v": "v", "ca": ["# c"]});
+        let a_both = json!({"t": "string", "v": "v", "c": ["# c", "# c"]});
+        let b = json!({"t": "int", "v": "1"});
+        let b_dropped = json!({"t": "int", "v": "1", "c": ["# c"]});
+        let actual = two(a_own, b.clone());
+        assert!(excused(two(a_both.clone(), b), &actual, &ctx).0);
+        assert!(!excused(two(a_both, b_dropped), &actual, &ctx).0);
         // A container whose own comments come after it: the outermost object of a section path
         // closed by its bracket counts as the most recent value, though created first.
         let object = |key: &str, texts: &[&str]| json!({"t": "object", "entries": [{"k": "a", "v": [{"t": "object", "entries": [], key: texts}]}]});
