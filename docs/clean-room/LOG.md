@@ -5518,3 +5518,18 @@
     rewrap. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team. Item: C14 spec-v20 case activation. Moved the eighteen `spec-v20`
+  cases and their golden files unchanged from `tests/conformance/pending/09-macros/` into
+  `cases/spec/09-macros/`, now that the crate follows §9.4 and §12.5 there; dropped the fixture
+  copies they alone used (`files/v20/`, and `braced.inc`, `close_brace.inc` and `left_open.inc`
+  under `files/v4/`), byte-identical to the active ones, and kept the copies the `spec-v21`
+  cases still read. Updated the spec index (1,711 active cases, fourteen pending `spec-v21` cases),
+  its eighteen rows, the three §12.5 citations of these cases (paths only), and the conformance
+  and pending READMEs. In a copy with every pending case moved in, the crate passed all eighteen
+  and failed all fourteen `spec-v21` cases. A fresh `scripts/regen-golden.sh` run changed no golden
+  file. Checks: `cargo test --test conformance` (1,711 cases, the four expected failures
+  unchanged), `scripts/ci.sh`, `git diff --check`. Commit: the following
+  `test(conformance): activate spec-v20 cases` commit on `c14/spec20-impl`. Not pushed.
+  Attestation: the case move and documentation contain observable behavior only, with no libucl
+  code, pseudo-code, internal names or source structure.
