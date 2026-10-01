@@ -103,6 +103,21 @@ apply as for that run; a report then names the flags the oracle ran with.
 - **differ**: `crate-accepts` (libucl rejects the input), `crate-rejects` (libucl accepts it),
   `values-differ`, or `crate-panics`.
 
+### Known limits
+
+Where a recogniser cannot tell an uncertain difference from a nearby specified one, it excuses
+more than the rule allows:
+
+- §12.5, comments of a replaced value: a value that has no comments of its own in the crate's
+  parse, and alone gets a comment the crate dropped, is excused whenever it was created, also
+  before the replaced value. The crate's public notes do not say where a value was created, and
+  no hidden note in `src/` is kept for it.
+- §9.7 and §13.2, bytes after a NUL in a copy: once a copying macro stands in some unit of the
+  document, any string of that document that differs only after its first NUL, at the same
+  length, is excused, copied or not. A file that `.load` reads counts as a unit, since the
+  loader is not told why it reads, and `.priority` under `registered-priority-override`, which
+  runs `.seen`'s handler, is not looked for.
+
 A difference is reduced to a smaller input with the same verdict, by deleting pieces and pairs
 of brackets, and saved under `findings/<verdict>-<hash>/`:
 
