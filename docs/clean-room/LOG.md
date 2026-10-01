@@ -6724,3 +6724,48 @@ publication. Work item:C15; final integration commit recorded in handover.
     following `docs(clean-room)` commit that brings it up to date. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: clean-room implementer. Item: C14, the fuzzer's third classifier gap under
+  released spec-v21 §7.7 (handler results that share a string or a macro VALUE), and the known
+  limits of the first two.
+  - Inputs consulted: released spec-v21 §7.7 (`07-variables.md`), the handler and ARGUMENTS
+    rules of §9.2 (`09-macros.md`) and the handler notes of `README.md`, and question #90's answer,
+    all through `git show spec-v21:`; own `fuzz/src/`, `fuzz/README.md`; the saved black-box
+    findings `crate-accepts-e04659ea272d36c7` and `crate-accepts-28d2d688c1a509e9` and the others
+    in the main checkout's `target/fuzz-differential/findings/`; the `handler_*` and
+    `registered_wins_over_handler` conformance cases; the oracle as a black box. No libucl source,
+    `tools/`, or other forbidden input was read.
+  - Known limits (`167e437`): `fuzz/README.md` had no such list. It now has one: gap 1's value
+    without own comments, left as it is by the coordinator's decision (no hidden note in
+    `src/`), and gap 2's bounds (any NUL string of such a document, `.load` reads,
+    `.priority` under the override).
+  - Gap 3 (`5bd263d`): under `variable-handler`, the oracle runs with each name the test handler
+    would resolve (a braced `${H_…}` that is not registered, in the input or the crate's recorded
+    units) registered as `var:NAME=[handled]`, `-H` kept; the recognisers see the flags without
+    `variable-handler`, since the handler then resolves nothing, so no §7.7 excuse applies and a
+    rejection is reported as `crate-accepts`. Where registering could change other text (an
+    unbraced `$H_`, a `$$`, a name of other bytes than letters, digits and `_`) the handler's
+    result stays the expectation with the old recogniser. `check` runs the crate first, keeps the
+    oracle's flags in `Checked` for reports and `--check`, and quotes the reproduce line.
+  - Decision, against the brief's wording: the handler's value is given as a registered
+    variable, not written into the source text with all flags unchanged. §7.7 gives the project
+    the text "substituted in place, as for registered variables", and a literal rewrite changes
+    the document. Oracle evidence: `a = ${H_X}y` with `-S -H -v H_X=[handled]` gives
+    `"[handled]y"` (the crate's result), while `a = [handled]y` with `-S -H` is an error;
+    `.include(g=true)"${H_}*/"1` with `-v H_=[handled]`, with or without `-H`, gives `{}`, as
+    `.include(g=true)"[handled]*/"1` does; `.emit "a ${H_}""{"[]` with `-v H_=[handled]` gives
+    the crate's result, as `.emit "a [handled]""{"[]` does. §9.2 says the application's variables
+    and handler are both unavailable in ARGUMENTS, so registering does not reach further than the
+    handler. One consequence: in documents with such names, libucl's own handler path is no
+    longer what the crate is compared with; its defined results equal those of the registered
+    variables.
+  - Checks: both findings and their generated inputs agree with `--check`; the other saved
+    findings keep their verdicts; the four conformance cases with `variable-handler` agree. New
+    tests fail when the names are not registered (4) or when the recognisers keep
+    `variable-handler` (2). 30 fuzz unit tests pass; `scripts/ci.sh` passed (706 tests);
+    `scripts/ci.sh fuzz 180` (seed 1790866397886705000, 464,008 inputs) saved no finding, with 2
+    §7.7 skips (15 to 44 in earlier runs). Its summary is in `target/c14-scratch/gap3-run1/`.
+  - Commits: `167e437` (`docs(fuzz)`), `5bd263d` (`fix(fuzz)`), and the following
+    `docs(clean-room)` commit with this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
