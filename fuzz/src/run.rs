@@ -2,7 +2,7 @@
 //! the conformance runner compares a case with its golden file (`tests/common/oracle.rs`).
 
 use crate::oracle::{self, Setup};
-use crate::uncertain::{self, Context};
+use crate::uncertain::{self, Context, SavedComment};
 use serde_json::Value as J;
 use serde_ucl::parse::{ErrorKind, FileKind, FsLoader, Loader, Parser, Uncertain};
 use std::cell::RefCell;
@@ -151,8 +151,8 @@ pub enum CrateResult {
 
 /// Parses `bytes` as a document given as text, set up as the oracle runs with `setup` from the
 /// working directory `base_dir`. With `dump-comments`, the dump has the saved comments, as the
-/// oracle's does. Also returns what [`uncertain`] needs from the parse: the texts of the comments
-/// the crate saved but attached to no value (spec §12.5), the uncertain rules the parse reached
+/// oracle's does. Also returns what [`uncertain`] needs from the parse: the comments the crate
+/// saved and the values they are attached to (spec §12.5), the uncertain rules the parse reached
 /// that its result does not show ([`Parser::uncertain_reached`]), and the document's other units.
 pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, CrateNotes) {
     let result = oracle::quietly(|| {
@@ -174,7 +174,7 @@ pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, 
             Err(e) => Err(e),
         };
         let mut notes = CrateNotes {
-            dropped_comments: Vec::new(),
+            comments: Vec::new(),
             uncertain: parser.uncertain_reached(),
             units: units.take(),
         };
@@ -183,7 +183,7 @@ pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, 
             Err(e) => return (Err(e), notes),
         };
         let comments = setup.dump_comments.then(|| oracle::comment_map(&parser));
-        notes.dropped_comments = dropped_comments(&parser);
+        notes.comments = saved_comments(&parser);
         (Ok(oracle::dump(&value, comments.as_ref())), notes)
     });
     match result {
@@ -211,7 +211,8 @@ pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, 
 /// What the crate's parse tells [`uncertain`] besides its result.
 #[derive(Default)]
 pub struct CrateNotes {
-    pub dropped_comments: Vec<String>,
+    /// The comments the crate saved, in the order it read them ([`Parser::comments`]).
+    pub comments: Vec<SavedComment>,
     pub uncertain: Vec<Uncertain>,
     /// The bytes of the document's units other than the input: every file the loader read, and
     /// every text the test macro `.emit` had parsed in place (spec §9.4, §13.2). A file that
@@ -264,19 +265,23 @@ impl Loader for RecordingLoader {
     }
 }
 
-/// The texts of the saved comments that are attached to no value of the result.
-fn dropped_comments(parser: &Parser) -> Vec<String> {
-    let attached: BTreeSet<usize> = parser
-        .attached_comments()
-        .iter()
-        .flat_map(|group| group.comments.iter().copied())
-        .collect();
+/// The saved comments of the last parse, in the order read, each with the path of the value it
+/// is attached to, or none when §8 replaced or discarded that value (spec §12.5).
+fn saved_comments(parser: &Parser) -> Vec<SavedComment> {
+    let mut values = vec![None; parser.comments().len()];
+    for group in parser.attached_comments() {
+        for &index in &group.comments {
+            values[index] = Some(group.path.clone());
+        }
+    }
     parser
         .comments()
         .iter()
-        .enumerate()
-        .filter(|(i, _)| !attached.contains(i))
-        .map(|(_, comment)| comment.text.clone())
+        .zip(values)
+        .map(|(comment, value)| SavedComment {
+            text: comment.text.clone(),
+            value,
+        })
         .collect()
 }
 
@@ -447,7 +452,7 @@ pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: 
     let ctx = Context {
         input: bytes,
         flags: &expected_flags,
-        dropped_comments: &notes.dropped_comments,
+        comments: &notes.comments,
         uncertain: &notes.uncertain,
         units: &notes.units,
     };
@@ -462,6 +467,15 @@ pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The texts of the comments the crate attached to no value.
+    fn dropped(comments: &[SavedComment]) -> Vec<&str> {
+        comments
+            .iter()
+            .filter(|comment| comment.value.is_none())
+            .map(|comment| comment.text.as_str())
+            .collect()
+    }
 
     fn flags(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
@@ -490,7 +504,7 @@ mod tests {
         let ctx = Context {
             input: b"",
             flags: &[],
-            dropped_comments: &[],
+            comments: &[],
             uncertain: &[],
             units: &[],
         };
@@ -545,7 +559,7 @@ mod tests {
             let ctx = Context {
                 input,
                 flags,
-                dropped_comments: &notes.dropped_comments,
+                comments: &notes.comments,
                 uncertain: &notes.uncertain,
                 units: &notes.units,
             };
@@ -605,7 +619,7 @@ mod tests {
         let ctx = Context {
             input,
             flags: &flags,
-            dropped_comments: &notes.dropped_comments,
+            comments: &notes.comments,
             uncertain: &notes.uncertain,
             units: &notes.units,
         };
@@ -630,7 +644,7 @@ mod tests {
         let extra_ctx = Context {
             input: extra,
             flags: ctx.flags,
-            dropped_comments: ctx.dropped_comments,
+            comments: ctx.comments,
             uncertain: ctx.uncertain,
             units: ctx.units,
         };
@@ -668,11 +682,11 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
         let (krate, notes) = run_crate(&setup, &dir, input);
         assert!(matches!(&krate, CrateResult::Dump(_)));
-        assert_eq!(notes.dropped_comments, ["# c"]);
+        assert_eq!(dropped(&notes.comments), ["# c"]);
         let ctx = Context {
             input,
             flags: &run_flags,
-            dropped_comments: &notes.dropped_comments,
+            comments: &notes.comments,
             uncertain: &notes.uncertain,
             units: &notes.units,
         };
@@ -996,6 +1010,111 @@ mod tests {
         )));
     }
 
+    /// C14 finding `values-differ-6dc7de42c47fd96a` (§12.5, QUESTIONS #81): the comment `# c` of
+    /// the value `d` that `rewrite` replaced appears before the last value's own `# c`. The
+    /// oracle's dumps here are its results, or nearby differences built on them.
+    #[test]
+    fn replaced_comment_of_the_same_text_before_a_later_values_own() {
+        let rewrite = flags(&["dump-comments", "strategy:rewrite", "string-input"]);
+        let input = "c p\na=\n# c\nv\na d\na p\na=\n# c\nv";
+        let dump = |c: J, a: J| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"c","v":[c]},
+                {"k":"a","v":[a]}
+            ]})
+        };
+        let c = serde_json::json!({"t":"string","v":"p"});
+        let a = |key: &str, texts: &[&str], v: &str| serde_json::json!({"t":"string","v":v, key: texts});
+        let oracle = dump(c.clone(), a("c", &["# c", "# c"], "v"));
+        assert!(matches!(
+            verdict_12_flags(input, &rewrite, &oracle),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+        ));
+        for changed in [
+            // A value changed, or another value's comments. (A value without comments of its
+            // own in the crate that gets a dropped comment is excused whenever it was created:
+            // nothing orders it, see `uncertain::replaced_comments_first`.)
+            dump(c.clone(), a("c", &["# c", "# c"], "w")),
+            dump(
+                serde_json::json!({"t":"string","v":"p","c":["# z"]}),
+                a("c", &["# c", "# c"], "v"),
+            ),
+            // More comments than the crate dropped, or one after the value's own.
+            dump(c.clone(), a("c", &["# c", "# c", "# c"], "v")),
+            dump(c.clone(), a("ca", &["# c", "# d"], "v")),
+            dump(c.clone(), a("c", &["# d", "# c"], "v")),
+        ] {
+            assert!(
+                values_differ(&verdict_12_flags(input, &rewrite, &changed)),
+                "{changed}"
+            );
+        }
+        // Under `append` nothing is replaced, so nothing is dropped.
+        let append = flags(&["dump-comments", "strategy:append", "string-input"]);
+        let appended = |last: J| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"c","v":[{"t":"string","v":"p"}]},
+                {"k":"a","v":[
+                    {"t":"string","v":"v"},
+                    {"t":"string","v":"d","c":["# c"]},
+                    {"t":"string","v":"p"},
+                    last
+                ]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &append, &appended(a("ca", &["# c"], "v"))),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &append,
+            &appended(a("c", &["# c", "# c"], "v"))
+        )));
+        // With a distinct first comment: before the own one it is excused, after it not.
+        let distinct = "c p\na=\n# x\nv\na d\na p\na=\n# c\nv";
+        assert!(matches!(
+            verdict_12_flags(
+                distinct,
+                &rewrite,
+                &dump(c.clone(), a("c", &["# x", "# c"], "v"))
+            ),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            distinct,
+            &rewrite,
+            &dump(c, a("ca", &["# c", "# x"], "v"))
+        )));
+    }
+
+    /// The outermost object of a section path counts as the most recent value when its bracket
+    /// closes (§12.5), though it was created before the replaced value: a dropped comment before
+    /// its own `# z` is not excused there.
+    #[test]
+    fn replaced_comment_not_excused_on_an_earlier_section_object() {
+        let rewrite = flags(&["dump-comments", "strategy:rewrite", "string-input"]);
+        let input = "a b {\n# c\nk 1\nk 2\n} # z";
+        let dump = |key: &str, texts: &[&str]| {
+            serde_json::json!({"t":"object","entries":[{"k":"a","v":[{
+                "t":"object",
+                key: texts,
+                "entries":[{"k":"b","v":[{"t":"object","entries":[
+                    {"k":"k","v":[{"t":"int","v":"2"}]}
+                ]}]}]
+            }]}]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &rewrite, &dump("ca", &["# z"])),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &rewrite,
+            &dump("c", &["# c", "# z"])
+        )));
+    }
+
     #[test]
     fn dropped_comment_cannot_reappear_on_an_earlier_value() {
         let input = b"p { v 1 # c\n}\n# c\na 1\na 2\n";
@@ -1005,11 +1124,11 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
         let (krate, notes) = run_crate(&setup, &dir, input);
         assert!(matches!(&krate, CrateResult::Dump(_)));
-        assert_eq!(notes.dropped_comments, ["# c"]);
+        assert_eq!(dropped(&notes.comments), ["# c"]);
         let ctx = Context {
             input,
             flags: &run_flags,
-            dropped_comments: &notes.dropped_comments,
+            comments: &notes.comments,
             uncertain: &notes.uncertain,
             units: &notes.units,
         };

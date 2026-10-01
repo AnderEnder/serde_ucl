@@ -32,7 +32,7 @@
 
 use serde_json::Value as J;
 use serde_ucl::UclValue;
-use serde_ucl::parse::Uncertain;
+use serde_ucl::parse::{PathSegment, Uncertain};
 use std::collections::BTreeSet;
 
 pub const HANDLER: &str = "uncertain: a handler result with other text (§7.7)";
@@ -194,14 +194,21 @@ pub struct Context<'a> {
     /// The input, as both parsed it.
     pub input: &'a [u8],
     pub flags: &'a [String],
-    /// The texts of the comments the crate saved but attached to no value: those of values that
-    /// §8 replaced or discarded (spec §12.5).
-    pub dropped_comments: &'a [String],
+    /// The comments the crate saved, in the order it read them (spec §12.5).
+    pub comments: &'a [SavedComment],
     /// The rules the crate's parse reached that its result does not show.
     pub uncertain: &'a [Uncertain],
     /// The bytes of the document's other units in the crate's parse: the files it read and the
     /// texts it parsed in place (`run::CrateNotes::units`).
     pub units: &'a [Vec<u8>],
+}
+
+/// A comment the crate saved, with the path of the value it is attached to (as in
+/// `oracle::dump`), or `None` when §8 replaced or discarded that value (spec §12.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedComment {
+    pub text: String,
+    pub value: Option<Vec<PathSegment>>,
 }
 
 impl Context<'_> {
@@ -236,118 +243,18 @@ fn holds(bytes: &[u8], needle: &[u8]) -> bool {
 /// Everything else is left for the comparison that follows. The dumps are walked in parallel,
 /// entries and elements by position.
 pub fn excuse(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSet<&'static str>) {
-    if excuse_simple_later_rewrite_comment(golden, actual, ctx) {
-        reasons.insert(REPLACED_COMMENTS);
-        return;
-    }
-    excuse_at(golden, actual, ctx, reasons);
+    excuse_at(golden, actual, ctx, reasons, &mut Vec::new());
 }
 
-/// §12.5 permits a replaced comment to reappear only on a value created later. This source
-/// form proves the order without guessing from equal comment text: one initial comment, two
-/// simple values of the same key under `rewrite`, then a distinct key and its own trailing
-/// comment. Every other source form remains reportable.
-fn simple_rewrite_pair(line: &str) -> Option<(&str, &str)> {
-    let (key, value) = line.split_once(' ')?;
-    (!key.is_empty()
-        && key.bytes().all(|b| b.is_ascii_lowercase())
-        && !value.is_empty()
-        && value.bytes().all(|b| b.is_ascii_alphanumeric()))
-    .then_some((key, value))
-}
-
-fn simple_later_rewrite_source(input: &[u8]) -> Option<(&str, &str, &str)> {
-    let input = std::str::from_utf8(input).ok()?;
-    let input = input.strip_suffix('\n').unwrap_or(input);
-    let lines: Vec<_> = input.split('\n').collect();
-    if lines.len() != 4 {
-        return None;
-    }
-    let comment = lines[0];
-    let comment_body = comment.strip_prefix("# ")?;
-    if comment_body.is_empty() || !comment_body.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        return None;
-    }
-    let (replaced_key, _) = simple_rewrite_pair(lines[1])?;
-    let (repeat_key, _) = simple_rewrite_pair(lines[2])?;
-    let (last_value, last_comment) = lines[3].split_once('#')?;
-    let (later_key, _) = simple_rewrite_pair(last_value)?;
-    if replaced_key != repeat_key
-        || replaced_key == later_key
-        || last_comment != comment.strip_prefix('#')?
-    {
-        return None;
-    }
-    Some((replaced_key, later_key, comment))
-}
-
-/// For that proven source order, normalize the one comment difference only when the whole
-/// value tree otherwise agrees. This keeps changed values, other comments and entries visible.
-fn excuse_simple_later_rewrite_comment(golden: &mut J, actual: &J, ctx: &Context<'_>) -> bool {
-    const FLAGS: [&str; 4] = [
-        "dump-comments",
-        "strategy:rewrite",
-        "string-input",
-        "no-filevars",
-    ];
-    if ctx.flags.len() != FLAGS.len() || !FLAGS.iter().all(|flag| ctx.has_flag(flag)) {
-        return false;
-    }
-    let Some((replaced_key, later_key, comment)) = simple_later_rewrite_source(ctx.input) else {
-        return false;
-    };
-    if ctx.dropped_comments.len() != 1 || ctx.dropped_comments[0] != comment {
-        return false;
-    }
-    let (Some(g_entries), Some(a_entries)) = (
-        golden.get("entries").and_then(J::as_array),
-        actual.get("entries").and_then(J::as_array),
-    ) else {
-        return false;
-    };
-    if golden.get("t").and_then(J::as_str) != Some("object")
-        || actual.get("t").and_then(J::as_str) != Some("object")
-        || g_entries.len() != 2
-        || a_entries.len() != 2
-        || g_entries[0].get("k").and_then(J::as_str) != Some(replaced_key)
-        || a_entries[0].get("k").and_then(J::as_str) != Some(replaced_key)
-        || g_entries[1].get("k").and_then(J::as_str) != Some(later_key)
-        || a_entries[1].get("k").and_then(J::as_str) != Some(later_key)
-    {
-        return false;
-    }
-    let Some(g_target) = g_entries[1]
-        .get("v")
-        .and_then(J::as_array)
-        .filter(|values| values.len() == 1)
-        .and_then(|values| values[0].as_object())
-    else {
-        return false;
-    };
-    let Some(g_comments) = g_target.get("c").and_then(J::as_array) else {
-        return false;
-    };
-    if g_target.contains_key("ca")
-        || g_comments.len() != 2
-        || !g_comments.iter().all(|text| text.as_str() == Some(comment))
-    {
-        return false;
-    }
-    let mut normalized = golden.clone();
-    let Some(target) = normalized["entries"][1]["v"][0].as_object_mut() else {
-        return false;
-    };
-    target.remove("c");
-    target.insert("ca".to_owned(), J::from(vec![comment]));
-    if &normalized != actual {
-        return false;
-    }
-    *golden = normalized;
-    true
-}
-
-fn excuse_at(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSet<&'static str>) {
-    comments(golden, actual, ctx, reasons);
+/// `path` is that of the value `actual`, as `oracle::dump` builds it.
+fn excuse_at(
+    golden: &mut J,
+    actual: &J,
+    ctx: &Context<'_>,
+    reasons: &mut BTreeSet<&'static str>,
+    path: &mut Vec<PathSegment>,
+) {
+    comments(golden, actual, path, ctx, reasons);
     let Some(kind) = golden.get("t").and_then(J::as_str).map(str::to_owned) else {
         return;
     };
@@ -373,12 +280,18 @@ fn excuse_at(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeS
                     entry.insert("k".to_owned(), J::from(a_key));
                     reasons.insert(SEEN_COLLECTED_KEY);
                 }
-                if let (Some(g_values), Some(a_values)) = (
+                if let (Some(g_values), Some(a_values), Some(key)) = (
                     g_entry.get_mut("v").and_then(J::as_array_mut),
                     a_entry.get("v").and_then(J::as_array),
+                    a_entry.get("k").and_then(J::as_str),
                 ) {
-                    for (g, a) in g_values.iter_mut().zip(a_values) {
-                        excuse_at(g, a, ctx, reasons);
+                    for (index, (g, a)) in g_values.iter_mut().zip(a_values).enumerate() {
+                        path.push(PathSegment::Key {
+                            key: key.to_owned(),
+                            index,
+                        });
+                        excuse_at(g, a, ctx, reasons, path);
+                        path.pop();
                     }
                 }
             }
@@ -388,8 +301,10 @@ fn excuse_at(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeS
                 golden.get_mut("v").and_then(J::as_array_mut),
                 actual.get("v").and_then(J::as_array),
             ) {
-                for (g, a) in g_items.iter_mut().zip(a_items) {
-                    excuse_at(g, a, ctx, reasons);
+                for (index, (g, a)) in g_items.iter_mut().zip(a_items).enumerate() {
+                    path.push(PathSegment::Index(index));
+                    excuse_at(g, a, ctx, reasons, path);
+                    path.pop();
                 }
             }
         }
@@ -524,8 +439,14 @@ fn comment_list(node: &J) -> Option<(&'static str, Vec<String>)> {
 
 /// The comments of one value (§12.5): the byte after a block comment that ends its unit, which
 /// lies outside the unit in libucl, and comments that libucl attached to this value from a value
-/// that §8 replaced, which the crate drops.
-fn comments(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSet<&'static str>) {
+/// that §8 replaced, which the crate drops ([`replaced_comments_first`]).
+fn comments(
+    golden: &mut J,
+    actual: &J,
+    path: &[PathSegment],
+    ctx: &Context<'_>,
+    reasons: &mut BTreeSet<&'static str>,
+) {
     let (g, a) = (comment_list(golden), comment_list(actual));
     if g == a {
         return;
@@ -548,22 +469,11 @@ fn comments(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSe
             changed = true;
         }
     }
-    if g_texts != a_texts {
-        // A matching text on the actual value cannot be identified as a dropped
-        // comment: these notes have no source positions or value creation order.
-        let dropped =
-            |text: &String| ctx.dropped_comments.contains(text) && !a_texts.contains(text);
-        let kept: Vec<String> = g_texts.iter().filter(|t| !dropped(t)).cloned().collect();
-        let first_dropped = g_texts.first().is_some_and(dropped);
-        if kept.len() < g_texts.len()
-            && kept == a_texts
-            && (g_key == a_key || first_dropped || a_texts.is_empty())
-        {
-            g_texts = kept;
-            g_key = a_key;
-            reasons.insert(REPLACED_COMMENTS);
-            changed = true;
-        }
+    if g_texts != a_texts && replaced_comments_first(&g_texts, &a_texts, a_key, actual, path, ctx) {
+        g_texts = a_texts;
+        g_key = a_key;
+        reasons.insert(REPLACED_COMMENTS);
+        changed = true;
     }
     if changed && let Some(node) = golden.as_object_mut() {
         node.remove("c");
@@ -572,6 +482,58 @@ fn comments(golden: &mut J, actual: &J, ctx: &Context<'_>, reasons: &mut BTreeSe
             node.insert(g_key.to_owned(), J::from(g_texts));
         }
     }
+}
+
+/// §12.5: libucl can attach the comments of a value that §8 replaced to a value created later,
+/// before that value's own. True when the oracle's list `golden` is the crate's list `own` (with
+/// the dump key `own_key`) of the value at `path` after one or more comments, each of which is a
+/// distinct comment the crate saved but attached to no value, with that text, and read before
+/// the first of the value's own comments: so the value was created after the replaced one, even
+/// when the texts are the same. With no own comments there is nothing to order by, and the
+/// comments only have to be ones the crate dropped, so such a value is excused even when it was
+/// created before the replaced one; only the crate's own record of where values were created
+/// could tell, which it does not give. A container whose own comments come after
+/// it is left out: the outermost object of a section path counts as the value created most
+/// recently when its bracket closes, though it was created first.
+fn replaced_comments_first(
+    golden: &[String],
+    own: &[String],
+    own_key: &str,
+    actual: &J,
+    path: &[PathSegment],
+    ctx: &Context<'_>,
+) -> bool {
+    let Some(extra) = golden.len().checked_sub(own.len()).filter(|&n| n > 0) else {
+        return false;
+    };
+    if golden[extra..] != *own {
+        return false;
+    }
+    let own_places: Vec<usize> = (0..ctx.comments.len())
+        .filter(|&i| ctx.comments[i].value.as_deref() == Some(path))
+        .collect();
+    if !own_places
+        .iter()
+        .map(|&i| &ctx.comments[i].text)
+        .eq(own.iter())
+    {
+        return false;
+    }
+    let container = matches!(
+        actual.get("t").and_then(J::as_str),
+        Some("object" | "array")
+    );
+    if own_key == "ca" && container {
+        return false;
+    }
+    let before = own_places.first().copied().unwrap_or(ctx.comments.len());
+    let mut used = vec![false; before];
+    golden[..extra].iter().all(|text| {
+        let found = (0..before).find(|&i| {
+            !used[i] && ctx.comments[i].value.is_none() && ctx.comments[i].text == *text
+        });
+        found.inspect(|&i| used[i] = true).is_some()
+    })
 }
 
 /// Whether a block comment saved as `text` can end its unit: the input ends with it, or it is
@@ -585,13 +547,25 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn context<'a>(input: &'a str, flags: &'a [String], dropped: &'a [String]) -> Context<'a> {
+    fn context<'a>(
+        input: &'a str,
+        flags: &'a [String],
+        comments: &'a [SavedComment],
+    ) -> Context<'a> {
         Context {
             input: input.as_bytes(),
             flags,
-            dropped_comments: dropped,
+            comments,
             uncertain: &[],
             units: &[],
+        }
+    }
+
+    /// A saved comment attached to the value at `path`, or to none.
+    fn saved(text: &str, path: Option<&[PathSegment]>) -> SavedComment {
+        SavedComment {
+            text: text.to_owned(),
+            value: path.map(<[PathSegment]>::to_vec),
         }
     }
 
@@ -657,6 +631,66 @@ mod tests {
         assert!(!excused(string("\0\0"), &string("\0x"), &no_text).0);
     }
 
+    /// §12.5: comments of replaced values before a later value's own comments, the same text
+    /// included (C14 finding `values-differ-6dc7de42c47fd96a`, QUESTIONS #81), identified by the
+    /// crate's notes: which comments it dropped, and the order it read them in.
+    #[test]
+    fn comments_of_replaced_values_before_a_later_values_own() {
+        let path = [PathSegment::Key {
+            key: "a".to_owned(),
+            index: 0,
+        }];
+        let value = |key: &str, texts: &[&str]| json!({"t": "object", "entries": [{"k": "a", "v": [{"t": "string", "v": "v", key: texts}]}]});
+        let own = value("ca", &["# c"]);
+        // Dropped `# c` read first, then the value's own `# c`.
+        let notes = vec![saved("# c", None), saved("# c", Some(&path))];
+        let ctx = context("", &[], &notes);
+        let (same, reasons) = excused(value("c", &["# c", "# c"]), &own, &ctx);
+        assert!(same);
+        assert_eq!(reasons, BTreeSet::from([REPLACED_COMMENTS]));
+        // A distinct text the same way.
+        let notes = vec![saved("# x", None), saved("# c", Some(&path))];
+        assert!(excused(value("c", &["# x", "# c"]), &own, &context("", &[], &notes)).0);
+        // The value's own comment read first: an earlier value, not excused.
+        let notes = vec![saved("# c", Some(&path)), saved("# c", None)];
+        assert!(!excused(value("c", &["# c", "# c"]), &own, &context("", &[], &notes)).0);
+        // Two extra comments with one dropped.
+        let notes = vec![saved("# c", None), saved("# c", Some(&path))];
+        let ctx = context("", &[], &notes);
+        assert!(!excused(value("c", &["# c", "# c", "# c"]), &own, &ctx).0);
+        // Nothing dropped, the extra one after the own one, or the own list changed.
+        let notes = vec![saved("# c", Some(&path))];
+        assert!(!excused(value("c", &["# c", "# c"]), &own, &context("", &[], &notes)).0);
+        let notes = vec![saved("# c", Some(&path)), saved("# x", None)];
+        assert!(
+            !excused(
+                value("ca", &["# c", "# x"]),
+                &own,
+                &context("", &[], &notes)
+            )
+            .0
+        );
+        let notes = vec![saved("# x", None), saved("# c", Some(&path))];
+        let ctx = context("", &[], &notes);
+        assert!(!excused(value("c", &["# x", "# d"]), &own, &ctx).0);
+        // A dropped comment with another text.
+        assert!(!excused(value("c", &["# y", "# c"]), &own, &ctx).0);
+        // The comment is that of another value.
+        let other = [PathSegment::Key {
+            key: "b".to_owned(),
+            index: 0,
+        }];
+        let notes = vec![saved("# x", Some(&other)), saved("# c", Some(&path))];
+        assert!(!excused(value("c", &["# x", "# c"]), &own, &context("", &[], &notes)).0);
+        // A container whose own comments come after it: the outermost object of a section path
+        // closed by its bracket counts as the most recent value, though created first.
+        let object = |key: &str, texts: &[&str]| json!({"t": "object", "entries": [{"k": "a", "v": [{"t": "object", "entries": [], key: texts}]}]});
+        let notes = vec![saved("# c", None), saved("# z", Some(&path))];
+        let ctx = context("", &[], &notes);
+        assert!(!excused(object("c", &["# c", "# z"]), &object("ca", &["# z"]), &ctx).0);
+        assert!(excused(object("c", &["# c", "# z"]), &object("c", &["# z"]), &ctx).0);
+    }
+
     #[test]
     fn handler_results_with_other_text() {
         let flags = strings(&["variable-handler"]);
@@ -720,10 +754,12 @@ mod tests {
     fn comments_of_replaced_values_and_block_comment_ends() {
         let with = |key: &str, texts: &[&str]| json!({"t": "int", "v": "4", key: texts});
         let none = json!({"t": "int", "v": "4"});
-        let dropped = strings(&["# c"]);
-        let ctx = context("# c\nk = 2\nk = 3\nq = 4", &[], &dropped);
+        // The comment `# c` of a replaced value, then the value's own `# d`.
+        let notes = [saved("# c", None), saved("# d", Some(&[]))];
+        let ctx = context("# c\nk = 2\nk = 3\nq = 4", &[], &notes[..1]);
         let (same, reasons) = excused(with("c", &["# c"]), &none, &ctx);
         assert!(same && reasons.contains(REPLACED_COMMENTS));
+        let ctx = context("# c\nk = 2\nk = 3\nq = 4 # d", &[], &notes);
         assert!(excused(with("c", &["# c", "# d"]), &with("ca", &["# d"]), &ctx).0);
         // Only dropped comments are excused.
         assert!(!excused(with("c", &["# e"]), &none, &ctx).0);
