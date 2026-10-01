@@ -142,7 +142,7 @@ impl Setup {
 // ----- the test macros (spec §13.2, *The test macros*) ------------------------------------
 
 /// `.emit`: has its VALUE text parsed in place, and fails if that fails or stops.
-fn emit_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
+pub fn emit_macro(call: &mut MacroCall<'_>) -> Result<(), MacroError> {
     let text = call.value().to_vec();
     call.parse(text).map_err(|_| MacroError::stop())
 }

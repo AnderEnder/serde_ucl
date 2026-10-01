@@ -84,7 +84,9 @@ apply as for that run; a report then names the flags the oracle ran with.
   spec marks **Uncertain** (`src/uncertain.rs`): a handler result that shares its string with
   other text (§7.7), a float outside the 64-bit range with `kb`, `mb` or `gb` (§5.4), the byte
   saved after a block comment that ends its unit and the comments of a value §8 replaced
-  (§12.5), the bytes after a NUL in a string that `.inherit` or a test macro copies (§9.7), the
+  (§12.5), the bytes after a NUL in a string, at the same length, when `.inherit` or a test
+  macro that copies stands in some unit of the document: the input, a file it reads, or text
+  parsed in place (§9.7, §13.2; any such string of that document is excused, copied or not), the
   key of a collection in `.seen`'s copy of ARGUMENTS (§13.2), and an included file or text in
   place that starts with `[` (§9.4, §13.2), which the crate rejects there. Four uncertain
   rules that the dumps cannot show are reported by the crate's parse

@@ -199,6 +199,9 @@ pub struct Context<'a> {
     pub dropped_comments: &'a [String],
     /// The rules the crate's parse reached that its result does not show.
     pub uncertain: &'a [Uncertain],
+    /// The bytes of the document's other units in the crate's parse: the files it read and the
+    /// texts it parsed in place (`run::CrateNotes::units`).
+    pub units: &'a [Vec<u8>],
 }
 
 impl Context<'_> {
@@ -207,16 +210,25 @@ impl Context<'_> {
     }
 
     fn input_has(&self, needle: &[u8]) -> bool {
-        self.input.windows(needle.len()).any(|w| w == needle)
+        holds(self.input, needle)
     }
 
-    /// The input has a macro that copies values: `.inherit`, or the test macros `.seen` and
-    /// `.ctx` (spec §9.7, §13.2).
-    fn copies(&self) -> bool {
-        self.input_has(b".inherit")
-            || (self.has_flag("registered-macros")
-                && (self.input_has(b".seen") || self.input_has(b".ctx")))
+    /// The input or another unit of the document holds `needle`.
+    fn some_unit_has(&self, needle: &[u8]) -> bool {
+        self.input_has(needle) || self.units.iter().any(|unit| holds(unit, needle))
     }
+
+    /// A unit of the document, the input, an included file or text parsed in place, has a macro
+    /// that copies values: `.inherit`, or the test macros `.seen` and `.ctx` (spec §9.7, §13.2).
+    fn copies(&self) -> bool {
+        self.some_unit_has(b".inherit")
+            || (self.has_flag("registered-macros")
+                && (self.some_unit_has(b".seen") || self.some_unit_has(b".ctx")))
+    }
+}
+
+fn holds(bytes: &[u8], needle: &[u8]) -> bool {
+    bytes.windows(needle.len()).any(|w| w == needle)
 }
 
 /// Where the oracle's dump `golden` differs from the crate's `actual` only in behaviour the spec
@@ -579,6 +591,7 @@ mod tests {
             flags,
             dropped_comments: dropped,
             uncertain: &[],
+            units: &[],
         }
     }
 
@@ -609,6 +622,39 @@ mod tests {
         assert!(excused(string("\0 "), &string("\0x"), &copy).0);
         assert!(!excused(string("y\0\0"), &string("x\0x"), &copy).0);
         assert!(!excused(string("\0\0\0"), &string("\0x"), &copy).0);
+        // A string without a NUL is compared as it is, copied or not.
+        assert!(!excused(string("ab"), &string("ax"), &copy).0);
+    }
+
+    /// The copying macro may stand in another unit of the document: an included file, or text
+    /// parsed in place (C14 finding `values-differ-244706530c4e7da6`).
+    #[test]
+    fn nul_bytes_in_copies_made_in_other_units() {
+        fn with_units<'a>(ctx: Context<'a>, units: &'a [Vec<u8>]) -> Context<'a> {
+            Context { units, ..ctx }
+        }
+        let flags = strings(&["registered-macros", "string-input"]);
+        let input = "a \\u000x\"\no {.include \"files/macro_ctx.inc\"}";
+        let ctx_file = [b"a = 1;\n.ctx \"x\"\n".to_vec()];
+        let plain_file = [b"x = 1;\n".to_vec()];
+        let ctx = |units| with_units(context(input, &flags, &[]), units);
+        let (same, reasons) = excused(string("\0\0"), &string("\0\""), &ctx(&ctx_file));
+        assert!(same);
+        assert_eq!(reasons, BTreeSet::from([NUL_IN_COPY]));
+        assert!(!excused(string("\0\0"), &string("\0\""), &ctx(&[])).0);
+        assert!(!excused(string("\0\0"), &string("\0\""), &ctx(&plain_file)).0);
+        assert!(!excused(string("x\0"), &string("\0\""), &ctx(&ctx_file)).0);
+        assert!(!excused(string("\0\0\0"), &string("\0\""), &ctx(&ctx_file)).0);
+        // `.seen` and `.ctx` copy only as test macros, which `registered-macros` registers.
+        let unregistered = with_units(context(input, &[], &[]), &ctx_file);
+        assert!(!excused(string("\0\0"), &string("\0\""), &unregistered).0);
+        // Text parsed in place, here made by a variable, so that the input holds no macro.
+        let input = "d { a = \"\\u0000x\" }\ne { .emit \"$I d\" }";
+        let text = [b".inherit d".to_vec()];
+        let in_place = with_units(context(input, &flags, &[]), &text);
+        assert!(excused(string("\0\0"), &string("\0x"), &in_place).0);
+        let no_text = with_units(context(input, &flags, &[]), &[]);
+        assert!(!excused(string("\0\0"), &string("\0x"), &no_text).0);
     }
 
     #[test]

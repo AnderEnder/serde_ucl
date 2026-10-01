@@ -4,12 +4,14 @@
 use crate::oracle::{self, Setup};
 use crate::uncertain::{self, Context};
 use serde_json::Value as J;
-use serde_ucl::parse::{ErrorKind, Parser, Uncertain};
+use serde_ucl::parse::{ErrorKind, FileKind, FsLoader, Loader, Parser, Uncertain};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Read;
-use std::path::Path;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -150,11 +152,22 @@ pub enum CrateResult {
 /// Parses `bytes` as a document given as text, set up as the oracle runs with `setup` from the
 /// working directory `base_dir`. With `dump-comments`, the dump has the saved comments, as the
 /// oracle's does. Also returns what [`uncertain`] needs from the parse: the texts of the comments
-/// the crate saved but attached to no value (spec §12.5), and the uncertain rules the parse
-/// reached that its result does not show ([`Parser::uncertain_reached`]).
+/// the crate saved but attached to no value (spec §12.5), the uncertain rules the parse reached
+/// that its result does not show ([`Parser::uncertain_reached`]), and the document's other units.
 pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, CrateNotes) {
     let result = oracle::quietly(|| {
+        let units = Rc::new(RefCell::new(Vec::new()));
         let mut parser = oracle::configure(setup, base_dir);
+        parser.set_loader(RecordingLoader {
+            units: Rc::clone(&units),
+        });
+        if setup.registered_macros {
+            let units = Rc::clone(&units);
+            parser.register_macro("emit", move |call| {
+                units.borrow_mut().push(call.value().to_vec());
+                oracle::emit_macro(call)
+            });
+        }
         let parsed = match parser.parse(bytes) {
             Ok(value) => Ok(value),
             Err(e) if e.is_stopped() => Ok(e.into_partial().expect("a stop keeps its result")),
@@ -163,6 +176,7 @@ pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, 
         let mut notes = CrateNotes {
             dropped_comments: Vec::new(),
             uncertain: parser.uncertain_reached(),
+            units: units.take(),
         };
         let value = match parsed {
             Ok(value) => value,
@@ -199,6 +213,55 @@ pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, 
 pub struct CrateNotes {
     pub dropped_comments: Vec<String>,
     pub uncertain: Vec<Uncertain>,
+    /// The bytes of the document's units other than the input: every file the loader read, and
+    /// every text the test macro `.emit` had parsed in place (spec §9.4, §13.2). A file that
+    /// `.load` reads is among them, since the loader is not told why it reads (§9.6).
+    pub units: Vec<Vec<u8>>,
+}
+
+/// The filesystem loader of `oracle::configure`, which also keeps the bytes of every file it
+/// reads. Each method is the filesystem loader's own.
+struct RecordingLoader {
+    units: Rc<RefCell<Vec<Vec<u8>>>>,
+}
+
+impl RecordingLoader {
+    fn keep(&self, read: io::Result<Vec<u8>>) -> io::Result<Vec<u8>> {
+        if let Ok(bytes) = &read {
+            self.units.borrow_mut().push(bytes.clone());
+        }
+        read
+    }
+}
+
+impl Loader for RecordingLoader {
+    fn current_dir(&self) -> io::Result<PathBuf> {
+        FsLoader.current_dir()
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        FsLoader.canonicalize(path)
+    }
+
+    fn canonicalize_optional(&self, path: &Path) -> io::Result<PathBuf> {
+        FsLoader.canonicalize_optional(path)
+    }
+
+    fn kind(&self, path: &Path) -> Option<FileKind> {
+        FsLoader.kind(path)
+    }
+
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.keep(FsLoader.read(path))
+    }
+
+    fn read_limited(&self, path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+        self.keep(FsLoader.read_limited(path, limit))
+    }
+
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
+        FsLoader.read_dir(path)
+    }
 }
 
 /// The texts of the saved comments that are attached to no value of the result.
@@ -386,6 +449,7 @@ pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: 
         flags: &expected_flags,
         dropped_comments: &notes.dropped_comments,
         uncertain: &notes.uncertain,
+        units: &notes.units,
     };
     let verdict = compare(&oracle, &krate, &ctx);
     Checked {
@@ -428,6 +492,7 @@ mod tests {
             flags: &[],
             dropped_comments: &[],
             uncertain: &[],
+            units: &[],
         };
         let compare = |oracle: &OracleResult, krate: &CrateResult| compare(oracle, krate, &ctx);
         let value = |text: &str| match dump(text) {
@@ -482,6 +547,7 @@ mod tests {
                 flags,
                 dropped_comments: &notes.dropped_comments,
                 uncertain: &notes.uncertain,
+                units: &notes.units,
             };
             compare(&OracleResult::Error, &krate, &ctx)
         };
@@ -541,6 +607,7 @@ mod tests {
             flags: &flags,
             dropped_comments: &notes.dropped_comments,
             uncertain: &notes.uncertain,
+            units: &notes.units,
         };
         let oracle = |key: &str| {
             OracleResult::Dump(serde_json::json!({
@@ -565,6 +632,7 @@ mod tests {
             flags: ctx.flags,
             dropped_comments: ctx.dropped_comments,
             uncertain: ctx.uncertain,
+            units: ctx.units,
         };
         assert!(matches!(
             compare(&oracle("x"), &krate, &extra_ctx),
@@ -606,6 +674,7 @@ mod tests {
             flags: &run_flags,
             dropped_comments: &notes.dropped_comments,
             uncertain: &notes.uncertain,
+            units: &notes.units,
         };
         let golden = serde_json::json!({"t":"object","entries":[
             {"k":"a","v":[{"t":"int","v":"2"}]},
@@ -664,8 +733,14 @@ mod tests {
     /// The crate's verdict with `run_flags` in `cases/spec/12-flags` against the oracle's `dump`,
     /// through [`check_against`], as the fuzzer compares.
     fn verdict_12_flags(input: &str, run_flags: &[String], dump: &J) -> Verdict {
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
+        verdict_in("12-flags", input, run_flags, dump)
+    }
+
+    /// The same in `cases/spec/<case_dir>`.
+    fn verdict_in(case_dir: &str, input: &str, run_flags: &[String], dump: &J) -> Verdict {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/conformance/cases/spec")
+            .join(case_dir);
         let checked = check_against(
             OracleResult::Dump(dump.clone()),
             input.as_bytes(),
@@ -832,6 +907,95 @@ mod tests {
         }
     }
 
+    /// C14 finding `values-differ-244706530c4e7da6`: `.ctx` copies a string with a NUL byte in an
+    /// included file, whose bytes after the NUL libucl leaves undefined (§9.7, §13.2). The crate
+    /// parse records the file, so the copy counts; the oracle's dump is that of the finding.
+    #[test]
+    fn nul_bytes_in_a_copy_made_in_an_included_file() {
+        let run_flags = flags(&["registered-macros", "string-input"]);
+        let with = |file: &str| format!("a \\u000x\"\no {{.include \"files/{file}\"}}");
+        let input = with("macro_ctx.inc");
+        let oracle = |copied: &str| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"a","v":[{"t":"string","v":"\u{0}\""}]},
+                {"k":"o","v":[{"t":"object","entries":[
+                    {"k":"a","v":[{"t":"int","v":"1"}]},
+                    {"k":"ctx","v":[{"t":"object","entries":[
+                        {"k":"a","v":[{"t":"string","v":copied}]},
+                        {"k":"o","v":[{"t":"object","entries":[
+                            {"k":"a","v":[{"t":"int","v":"1"}]}
+                        ]}]}
+                    ]}]}
+                ]}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_in("13-inputs", &input, &run_flags, &oracle("\u{0}\u{0}")),
+            Verdict::Skipped(uncertain::NUL_IN_COPY)
+        ));
+        for copied in ["x\u{0}", "\u{0}\u{0}\u{0}", "\u{0}"] {
+            assert!(
+                values_differ(&verdict_in(
+                    "13-inputs",
+                    &input,
+                    &run_flags,
+                    &oracle(copied)
+                )),
+                "{copied:?}"
+            );
+        }
+        let mut changed = oracle("\u{0}\u{0}");
+        changed["entries"][1]["v"][0]["entries"][0]["v"][0]["v"] = serde_json::json!("2");
+        assert!(values_differ(&verdict_in(
+            "13-inputs",
+            &input,
+            &run_flags,
+            &changed
+        )));
+        // An included file without a copying macro: the NUL string is compared as it is.
+        let plain = with("macro_x1.inc");
+        let dump = |a: &str| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"a","v":[{"t":"string","v":a}]},
+                {"k":"o","v":[{"t":"object","entries":[{"k":"x","v":[{"t":"int","v":"1"}]}]}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_in("13-inputs", &plain, &run_flags, &dump("\u{0}\"")),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_in(
+            "13-inputs",
+            &plain,
+            &run_flags,
+            &dump("\u{0}\u{0}")
+        )));
+    }
+
+    /// Text that `.emit` parses in place counts as a unit: the macro name comes only from a
+    /// variable here, and the oracle's dump is its result for this document.
+    #[test]
+    fn nul_bytes_in_a_copy_made_in_text_parsed_in_place() {
+        let run_flags = flags(&["registered-macros", "string-input", "var:I=.inherit"]);
+        let input = "d { a = \"\\u0000x\" }\ne { .emit \"$I d\" }";
+        assert!(!input.contains(".inherit"));
+        let oracle = |copied: &str| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"d","v":[{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":"\u{0}x"}]}]}]},
+                {"k":"e","v":[{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":copied}]}]}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &oracle("\u{0}\u{0}")),
+            Verdict::Skipped(uncertain::NUL_IN_COPY)
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &run_flags,
+            &oracle("y\u{0}")
+        )));
+    }
+
     #[test]
     fn dropped_comment_cannot_reappear_on_an_earlier_value() {
         let input = b"p { v 1 # c\n}\n# c\na 1\na 2\n";
@@ -847,6 +1011,7 @@ mod tests {
             flags: &run_flags,
             dropped_comments: &notes.dropped_comments,
             uncertain: &notes.uncertain,
+            units: &notes.units,
         };
         let wrong_earlier_comment = serde_json::json!({"t":"object","entries":[
             {"k":"p","v":[{"t":"object","entries":[
