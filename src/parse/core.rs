@@ -367,8 +367,10 @@ enum Close {
     /// closes, together with every such object below it, or at the end of input.
     LeftOpen,
     /// An object whose opening brace an included file's leading `{` has taken over (§9.4,
-    /// *Quirk: braces around an included file*). A `}` removes the brace; what the object does
-    /// then is the [`Revert`].
+    /// *Quirk: braces around an included file*), or that such a file has taken over again after
+    /// a macro before its first key (§9.4, *Quirk: macros before the first key*;
+    /// [`Core::take_brace_again`]). A `}` removes the brace; what the object does then is the
+    /// [`Revert`].
     IncludedBrace(Revert),
     /// The object of the first name of an included file's first key, when the file's leading
     /// `{` took over the brace of the root, of an object written with braces, or of the object
@@ -828,7 +830,10 @@ pub(super) struct Core<'s, 't, 'e, 'v, 'l> {
     /// The value created most recently (§12.5), kept while a name run is in effect in this unit
     /// or an including one: its path from the root, or `None` when it is not part of the result.
     recent: Option<PathRef>,
-    /// This included unit's leading `{` took over a brace (§9.4), and no key has been read yet.
+    /// This included unit's leading `{` took over a brace (§9.4), and the unit has read neither a
+    /// key nor a `}` of its own since: after a macro it takes a brace over again
+    /// ([`Core::take_brace_again`]), and the first name of its first key gets a brace of its own
+    /// ([`Close::NameBrace`]).
     first_key_shares: bool,
     /// The key being read is that first key: if it starts a section path, the object of its
     /// first name gets a share of the taken-over brace.
@@ -2582,6 +2587,10 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
                 if let Some(notes) = &mut self.notes {
                     notes.trailing();
                 }
+                // The unit's own `}` ends its takeover (oracle runs, QUESTIONS.md #90): later
+                // macros take no brace over, and a later first name gets none. Before its first
+                // key, a unit's `}` can only remove a brace taken over.
+                self.first_key_shares = false;
                 let frame = self.frames.last_mut().expect("a container is open");
                 if frame.close == Close::IncludedBrace(Revert::Section) {
                     frame.close = Close::Section;
@@ -2930,7 +2939,36 @@ impl<'s, 't> Core<'s, 't, '_, '_, '_> {
         if self.name_run {
             self.run_macro_end = Some(self.pos);
         }
+        if self.first_key_shares && self.pos < self.src.len() {
+            self.take_brace_again();
+        }
         Ok(())
+    }
+
+    /// A macro has run in an included unit whose leading `{` took over a brace, before the
+    /// unit's first key, and the unit goes on: it takes over again the brace of the object its
+    /// entries now go into (§9.4, *Quirk: macros before the first key*; QUESTIONS.md #87). So a
+    /// `}` of a nested file or of text parsed in place that removed the brace does not end the
+    /// takeover. The brace is added to those the unit still holds in objects below, which the
+    /// unit's later `}`s remove after it, the innermost first; an object that still holds a brace
+    /// taken over keeps that one.
+    ///
+    /// Oracle runs (QUESTIONS.md #89): nothing is taken over when only whitespace and `;` follow
+    /// the macro to the end of the unit (the caller checks that the unit goes on), and the
+    /// unit's own `}` ends the takeover as its first key does (QUESTIONS.md #90).
+    fn take_brace_again(&mut self) {
+        let Some(frame) = self.frames.last_mut() else {
+            return;
+        };
+        if frame.kind != Kind::Object {
+            return;
+        }
+        frame.close = match frame.close {
+            Close::Eof | Close::Brace => Close::IncludedBrace(Revert::Open),
+            Close::Section | Close::LeftOpen => Close::IncludedBrace(Revert::Section),
+            // Still held, or a bracket the unit's end check requires a nested unit to close.
+            close @ (Close::IncludedBrace(_) | Close::NameBrace | Close::Bracket) => close,
+        };
     }
 
     /// A macro directly after a name (§9.1): it runs inside the name's object, which stays open
