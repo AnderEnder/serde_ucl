@@ -5374,3 +5374,47 @@
     as `spec-v21`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
+
+- 2026-10-01 — Role: implementation team (clean-room implementer). Item: C14 follow-up, released
+  `spec-v20` (questions #86, #87, #88), on `c14/spec20-impl` at the `spec-v20` release commit.
+  - Inputs consulted: `CLAUDE.md` as embedded in the task; `docs/clean-room/PROTOCOL.md`,
+    `WORKLIST.md` (C14), `QUESTIONS.md` (#84 to #88, and the highest number on `origin/main`) and
+    this log; the released `spec-v20` §9.4, §9.6, §12.5 and §13.2 (`git diff spec-v19 spec-v20 --
+    docs/spec`, and the sections at the tag, with no edits after it); the conformance cases,
+    fixtures and golden files of `cases/spec/09-macros/` and `pending/09-macros/`, with
+    `pending/README.md`; the crate's `src/parse/`, `tests/conformance.rs`, `tests/common/`,
+    `fuzz/README.md`, `fuzz/src/run.rs` and `scripts/ci.sh`; the saved finding
+    `crate-rejects-6097f6b0b5dffecd` (input, flags, report) of the main checkout. Black-box runs
+    of the oracle that `scripts/regen-golden.sh` built in this worktree (it changed no golden
+    file), from `target/c14-scratch/`. No libucl source, `tools/`, spec-team branch, other
+    worktree, or Claude Code session or memory files were read. The guard refused one grep whose
+    file list named a spec-team document; nothing was read.
+  - Work: #86: a `.load` with `try=true` that reads nothing, because its file is missing or
+    unusable, clears a pending first-directory miss of its input, as a skipped URL include does.
+    #87: until a braced file reads a key or a `}` of its own, it takes over again after each
+    macro the brace of the object its entries then go into (`Core::take_brace_again`), on that
+    object's frame, so braces held below stay and close after it. #88: a first name in a section
+    object whose brace was taken over gets `Close::NameBrace`, whose `}` closes the section object
+    too unless text parsed in place keeps it open. Two rules the spec leaves open follow oracle
+    runs and are asked as #89 (nothing is taken over again when only whitespace and `;` follow the
+    macro to the end of the file) and #90 (the file's own `}` ends the takeover). Unit tests for
+    each failed on the previous code. `CHANGELOG.md` lists the changes, including inputs accepted
+    before that are now errors and the reverse.
+  - Checks: the eighteen pending cases pass in a copy of the worktree with them moved into
+    `cases/spec/09-macros/` (1,704 cases, the four expected failures only); `cargo test --test
+    conformance` in the worktree (1,686 cases); `scripts/ci.sh` passed all 26 steps at the
+    final commit; each intermediate commit builds, is formatted, and passes clippy over the
+    crate's feature sets of `scripts/ci.sh`, the unit tests and the conformance tests. `ucl-differential --check` of the saved finding, with
+    `tests/conformance/cases/spec/09-macros` of this worktree as its directory: `agree`.
+    `scripts/ci.sh fuzz 180 2026100101`: before the change, on a pristine copy, nine
+    `crate-rejects` (FileNotFound, this #86 class) and two `values-differ`; after it, no
+    `crate-rejects` and two `values-differ`, both `.emit` of `$ABI` under `zerocopy`
+    (`.emit x $ABI;` with `strategy:rewrite`, `.emit l $ABI;I s` with `strategy:error`), the same
+    as before the change and outside these rules. All probe inputs of #89 and #90, and those in
+    the changelog, agree with the oracle.
+  - Commits: the five commits before this entry (`fix(parse)` for #86, `docs(clean-room)` for
+    #89 and #90, `fix(parse)` for #87, `fix(parse)` for #88, `docs(parse)` for two comments
+    still describing the spec-v18 shared brace) and this entry, on `c14/spec20-impl`. Not
+    pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
