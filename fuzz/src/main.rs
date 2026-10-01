@@ -631,9 +631,12 @@ fn report(options: &Options, input: &Input, dir: &Path, checked: &Checked) -> St
     let _ = writeln!(text, "input: {}", input.origin);
     let _ = writeln!(text, "flags: {}", input.flags.join(" "));
     let _ = writeln!(text, "working directory: {}", input.dir.display());
+    if let Some(line) = oracle_flags_line(&input.flags) {
+        let _ = writeln!(text, "{line}");
+    }
     let _ = writeln!(text, "oracle: {}", oracle_text(&checked.oracle));
     let _ = writeln!(text, "crate:  {}", crate_text(&checked.krate));
-    let options_text = run::oracle_options(&input.flags)
+    let options_text = run::expectation_options(&input.flags)
         .unwrap_or_default()
         .join(" ");
     let _ = writeln!(
@@ -649,6 +652,18 @@ fn report(options: &Options, input: &Input, dir: &Path, checked: &Checked) -> St
         String::from_utf8_lossy(&fs::read(dir.join("input.ucl")).unwrap_or_default())
     );
     text
+}
+
+/// For flags the oracle does not run with all of ([`run::expectation_flags`]), a line that says
+/// which it runs with.
+fn oracle_flags_line(flags: &[String]) -> Option<String> {
+    let expected = run::expectation_flags(flags);
+    (expected.len() < flags.len()).then(|| {
+        format!(
+            "oracle flags: {} (the expected result is the one without zerocopy, spec §12.2)",
+            expected.join(" ")
+        )
+    })
 }
 
 fn oracle_text(result: &OracleResult) -> String {
@@ -692,6 +707,9 @@ fn check_one(options: &Options, file: &Path) -> ExitCode {
     };
     let dir = options.check_dir.clone().expect("set by parse_options");
     let checked = run::check(&target, &bytes, &flags, &dir);
+    if let Some(line) = oracle_flags_line(&flags) {
+        println!("{line}");
+    }
     println!("oracle: {}", oracle_text(&checked.oracle));
     println!("crate:  {}", crate_text(&checked.krate));
     match &checked.verdict {
@@ -750,5 +768,83 @@ fn replay(options: &Options) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// `check` runs the oracle, and a report tells how to run it again, with the options of the
+    /// flags without `zerocopy` (spec §12.2, `run::expectation_options`). A stand-in oracle
+    /// writes the options it was given as its dump.
+    #[test]
+    fn the_oracle_runs_and_is_reproduced_without_zerocopy() {
+        let dir = repository().join("target/fuzz-unit-tests/oracle-options");
+        fs::create_dir_all(&dir).unwrap();
+        let oracle = dir.join("oracle.sh");
+        let dump = r#"{"t":"object","entries":[{"k":"options","v":[{"t":"string","v":"%s"}]}]}"#;
+        fs::write(&oracle, format!("#!/bin/sh\nprintf '{dump}' \"$*\"\n")).unwrap();
+        fs::set_permissions(&oracle, fs::Permissions::from_mode(0o755)).unwrap();
+        let file = dir.join("input.ucl");
+        let target = Target {
+            oracle: &oracle,
+            timeout: Duration::from_secs(10),
+            file: &file,
+        };
+        let flags: Vec<String> = [
+            "zerocopy",
+            "registered-macros",
+            "string-input",
+            "priority:3",
+        ]
+        .map(String::from)
+        .into();
+        let checked = run::check(&target, b"a = 1", &flags, &dir);
+        let OracleResult::Dump(dump) = &checked.oracle else {
+            panic!(
+                "no dump from the stand-in: {}",
+                oracle_text(&checked.oracle)
+            );
+        };
+        assert_eq!(
+            dump["entries"][0]["v"][0]["v"],
+            format!("-R -S -p 3 {}", file.display())
+        );
+
+        let options = Options {
+            seconds: 0,
+            runs: None,
+            seed: 0,
+            jobs: 1,
+            max_len: 0,
+            timeout: target.timeout,
+            oracle: oracle.clone(),
+            out: dir.clone(),
+            replay: Vec::new(),
+            check: None,
+            check_flags: Vec::new(),
+            check_dir: None,
+        };
+        let input = Input {
+            bytes: b"a = 1".to_vec(),
+            flags,
+            dir: dir.clone(),
+            origin: "a test".to_string(),
+        };
+        let text = report(&options, &input, &dir, &checked);
+        let reproduce = text
+            .lines()
+            .find(|line| line.starts_with("reproduce:"))
+            .expect("a reproduce line");
+        assert!(
+            reproduce.contains(" -R -S -p 3 ") && !reproduce.contains("-z"),
+            "{reproduce}"
+        );
+        assert!(
+            text.contains("oracle flags: registered-macros string-input priority:3 "),
+            "{text}"
+        );
     }
 }

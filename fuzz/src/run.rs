@@ -14,6 +14,26 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+/// The flags the oracle runs with to give the expected result of an input with `flags`: all of
+/// them but `zerocopy`. Spec §12.2 gives a document with `zerocopy` the result the spec gives it
+/// without `zerocopy`, all other settings unchanged, while libucl's own result with the flag is
+/// undefined in places (the text of an expanded `.emit` and what depends on it, and documents
+/// that include a file with entries). The crate still parses with every flag.
+pub fn expectation_flags(flags: &[String]) -> Vec<String> {
+    flags
+        .iter()
+        .filter(|flag| *flag != "zerocopy")
+        .cloned()
+        .collect()
+}
+
+/// The options the oracle runs with for an input with `flags`: those of the
+/// [`expectation_flags`]. Running it ([`check`]) and telling how to run it again (the fuzzer's
+/// reports) both use this.
+pub fn expectation_options(flags: &[String]) -> Result<Vec<String>, String> {
+    oracle_options(&expectation_flags(flags))
+}
+
 /// The oracle's options for the entries of a `.flags` file, mapped as `scripts/regen-golden.sh`
 /// maps them.
 pub fn oracle_options(flags: &[String]) -> Result<Vec<String>, String> {
@@ -344,16 +364,26 @@ pub struct Checked {
     pub verdict: Verdict,
 }
 
-/// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both.
+/// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both: the
+/// oracle with the [`expectation_options`], the crate with `flags`.
 pub fn check(target: &Target<'_>, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
-    let setup = Setup::from_flags(flags).expect("the fuzzer's flags are known");
-    let options = oracle_options(flags).expect("the fuzzer's flags are known");
+    let options = expectation_options(flags).expect("the fuzzer's flags are known");
     fs::write(target.file, bytes).expect("the work file can be written");
     let oracle = run_oracle(target.oracle, &options, target.file, dir, target.timeout);
+    check_against(oracle, bytes, flags, dir)
+}
+
+/// Runs `bytes` through the crate with `flags` from the working directory `dir` and compares its
+/// result with `oracle`, the oracle's result with the [`expectation_flags`]. The recognisers of
+/// uncertain behaviour see those flags too: the result expected with `zerocopy` is uncertain
+/// where the result without it is (§12.2).
+pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
+    let setup = Setup::from_flags(flags).expect("the fuzzer's flags are known");
     let (krate, notes) = run_crate(&setup, dir, bytes);
+    let expected_flags = expectation_flags(flags);
     let ctx = Context {
         input: bytes,
-        flags,
+        flags: &expected_flags,
         dropped_comments: &notes.dropped_comments,
         uncertain: &notes.uncertain,
     };
@@ -609,6 +639,197 @@ mod tests {
             verdict(changed_first_value),
             Verdict::Differs { .. }
         ));
+    }
+
+    #[test]
+    fn the_expectation_drops_only_zerocopy() {
+        let with = flags(&[
+            "zerocopy",
+            "registered-macros",
+            "string-input",
+            "priority:3",
+        ]);
+        let expected = expectation_flags(&with);
+        assert_eq!(
+            expected,
+            flags(&["registered-macros", "string-input", "priority:3"])
+        );
+        let options = oracle_options(&expected).unwrap();
+        assert!(!options.iter().any(|option| option == "-z"));
+        assert_eq!(options, ["-R", "-S", "-p", "3"]);
+        let without = flags(&["no-time", "string-input", "var:zerocopy=1"]);
+        assert_eq!(expectation_flags(&without), without);
+    }
+
+    /// The crate's verdict with `run_flags` in `cases/spec/12-flags` against the oracle's `dump`,
+    /// through [`check_against`], as the fuzzer compares.
+    fn verdict_12_flags(input: &str, run_flags: &[String], dump: &J) -> Verdict {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
+        let checked = check_against(
+            OracleResult::Dump(dump.clone()),
+            input.as_bytes(),
+            run_flags,
+            &dir,
+        );
+        assert!(matches!(&checked.krate, CrateResult::Dump(_)), "{input:?}");
+        checked.verdict
+    }
+
+    fn values_differ(verdict: &Verdict) -> bool {
+        matches!(
+            verdict,
+            Verdict::Differs {
+                kind: Kind::ValuesDiffer,
+                ..
+            }
+        )
+    }
+
+    /// C14 finding `values-differ-79ff7be944c9f2ba`. Under `zerocopy` the expected result is the
+    /// oracle's without it (§12.2), which defines the emitted text's bytes, so every difference
+    /// from it is reported, the bytes libucl changes with `zerocopy` included.
+    #[test]
+    fn zerocopy_is_compared_with_the_result_without_it() {
+        let run_flags = flags(&["zerocopy", "registered-macros", "string-input"]);
+        let input = "t I\n.emit n $ABI\nl=t";
+        let entry = |k: &str, v: &str| serde_json::json!({"k": k, "v": [{"t": "string", "v": v}]});
+        let dump = |entries: Vec<J>| serde_json::json!({"t": "object", "entries": entries});
+        let expected = dump(vec![
+            entry("t", "I"),
+            entry("n", "unknown"),
+            entry("l", "t"),
+        ]);
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &expected),
+            Verdict::Agree
+        ));
+        for changed in [
+            dump(vec![
+                entry("t", "I"),
+                entry("m", "unknown"),
+                entry("l", "t"),
+            ]),
+            dump(vec![
+                entry("t", "I"),
+                entry("n", "unknowx"),
+                entry("l", "t"),
+            ]),
+            dump(vec![
+                entry("t", "J"),
+                entry("n", "unknown"),
+                entry("l", "t"),
+            ]),
+            dump(vec![
+                entry("t", "I"),
+                entry("n", "unknown"),
+                entry("l", "u"),
+            ]),
+            dump(vec![
+                entry("t", "I"),
+                entry("n", "unknown"),
+                entry("l", "t"),
+                entry("x", "1"),
+            ]),
+            dump(vec![entry("t", "I"), entry("n", "unknown")]),
+            // The oracle's result with `zerocopy`: nothing excuses these bytes any more.
+            dump(vec![
+                entry("t", "I"),
+                entry("\u{0}", "\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}"),
+                entry("l", "t"),
+            ]),
+        ] {
+            assert!(
+                values_differ(&verdict_12_flags(input, &run_flags, &changed)),
+                "{changed}"
+            );
+        }
+    }
+
+    /// QUESTIONS #84: with `zerocopy`, libucl gives a separate entry to a later key; §12.2 makes
+    /// that undefined, and the expected result is the one entry without `zerocopy`.
+    #[test]
+    fn zerocopy_later_key_expects_the_entry_without_zerocopy() {
+        let run_flags = flags(&["zerocopy", "registered-macros", "string-input"]);
+        let input = ".emit l $ABI\nl = s";
+        let one_entry = serde_json::json!({"t": "object", "entries": [
+            {"k": "l", "v": [{"t": "string", "v": "unknown"}, {"t": "string", "v": "s"}]}
+        ]});
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &one_entry),
+            Verdict::Agree
+        ));
+        let two_entries = serde_json::json!({"t": "object", "entries": [
+            {"k": "\u{0}", "v": [{"t": "string", "v": "\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}"}]},
+            {"k": "l", "v": [{"t": "string", "v": "s"}]}
+        ]});
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &run_flags,
+            &two_entries
+        )));
+    }
+
+    /// C14 finding `values-differ-0bdbfbd65e9562d3`, with the oracle's result without
+    /// `zerocopy`: the root's priority has no effect (§8.7) and is not compared, the entries'
+    /// priorities are.
+    #[test]
+    fn zerocopy_under_priority_compares_the_entries_priorities() {
+        let run_flags = flags(&[
+            "zerocopy",
+            "registered-macros",
+            "string-input",
+            "priority:3",
+        ]);
+        let input = "n I\n.emit l=$ABI\n.s";
+        let expected = serde_json::json!({"t": "object", "pri": 3, "entries": [
+            {"k": "n", "v": [{"t": "string", "v": "I", "pri": 3}]},
+            {"k": "l", "v": [{"t": "string", "v": "unknown", "pri": 3}]}
+        ]});
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &expected),
+            Verdict::Agree
+        ));
+        for (index, priority) in [(0, 0), (1, 0), (1, 5)] {
+            let mut changed = expected.clone();
+            changed["entries"][index]["v"][0]["pri"] = serde_json::json!(priority);
+            assert!(
+                values_differ(&verdict_12_flags(input, &run_flags, &changed)),
+                "{index} {priority}"
+            );
+        }
+    }
+
+    /// The uncertain rules apply to the expected result with `zerocopy` as without it (§12.2):
+    /// the §12.5 recogniser, which needs its exact flags, still sees them.
+    #[test]
+    fn zerocopy_keeps_the_uncertain_rules_of_the_result_without_it() {
+        let input = "# c\na d\na 2\nk d# c";
+        let golden = serde_json::json!({"t":"object","entries":[
+            {"k":"a","v":[{"t":"int","v":"2"}]},
+            {"k":"k","v":[{"t":"string","v":"d","c":["# c","# c"]}]}
+        ]});
+        let mut changed = golden.clone();
+        changed["entries"][1]["v"][0]["v"] = serde_json::json!("q");
+        for extra in [None, Some("zerocopy")] {
+            let mut run_flags = flags(&[
+                "dump-comments",
+                "strategy:rewrite",
+                "string-input",
+                "no-filevars",
+            ]);
+            run_flags.extend(extra.map(str::to_string));
+            assert!(
+                matches!(
+                    verdict_12_flags(input, &run_flags, &golden),
+                    Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+                ),
+                "{run_flags:?}"
+            );
+            assert!(values_differ(&verdict_12_flags(
+                input, &run_flags, &changed
+            )));
+        }
     }
 
     #[test]
