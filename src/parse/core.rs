@@ -836,7 +836,7 @@ pub(super) struct Core<'s, 't, 'e, 'v, 'l> {
     /// ([`Close::NameBrace`]).
     first_key_shares: bool,
     /// The key being read is that first key: if it starts a section path, the object of its
-    /// first name gets a share of the taken-over brace.
+    /// first name gets a brace of its own ([`Close::NameBrace`], §9.4).
     section_shares: bool,
     /// The last scan of [`Core::line_has_bracket`]: from the first offset, the first LF, CR,
     /// `,`, `;`, `{` or `[` is at the second (the input's length if there is none).

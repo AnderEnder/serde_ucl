@@ -1483,7 +1483,7 @@ mod tests {
         assert_eq!(keys(&obj(&obj(&v)["a"])["x"]), ["a", "k"]);
         let v = ok(".include \"arr.inc\"\nm { n = 1 }\n}");
         assert_eq!(keys(&v), ["a"]);
-        // The first key after a file's leading `{`: its first name shares the brace.
+        // The first key after a file's leading `{`: its first name gets a brace of its own.
         for input in [
             ".include \"first.inc\"",
             ".include \"first.inc\"\nq = 1\n}",
