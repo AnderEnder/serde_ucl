@@ -6669,3 +6669,51 @@ authored by coordinator. Spec contains observable behavior only and remains unch
 Owner's PR32 authorization persists: push rename/provenance and update description.
 Plans stay local; unrelated original changes preserved. No merge/tag/package
 publication. Work item:C15; final integration commit recorded in handover.
+
+- 2026-10-01 — Role: clean-room implementer. Item: C14, two fuzzer classifier gaps under
+  released spec-v20 (§12.5 comments of replaced values; §9.7 and §13.2 bytes after a NUL in a
+  copy).
+  - Inputs consulted: the embedded current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`; released
+    spec-v20 §12.5, §9.7 and §13.2 through `git show spec-v20:` (the branch's `docs/spec/` is at
+    v19; I also read the `HEAD..spec-v20` diff of `docs/spec/12-flags.md` and
+    `13-inputs-and-macros.md`, which is released); own `fuzz/src/`, `fuzz/README.md`,
+    `tests/common/oracle.rs`, and the public `Parser`, `Loader` and comment types of
+    `src/parse/` (`mod.rs`, `loader.rs`, and a look at `comments.rs` and `facts.rs` to see what
+    the crate records); the saved black-box findings `values-differ-6dc7de42c47fd96a` and
+    `values-differ-244706530c4e7da6` and the other findings in the main checkout's
+    `target/fuzz-differential/findings/`; the conformance file
+    `cases/spec/13-inputs/files/macro_ctx.inc` and its neighbours; the oracle as a black box. No
+    libucl source, `tools/`, or other forbidden input was read.
+  - Branch: `c14/fuzz-gaps` in worktree `agent-ae56e5508d126285c`, from `c14/fuzz-zerocopy-work`
+    at `73ae658`.
+  - Gap 2 (`97f57fa`): the crate's parse in the fuzzer records the document's other units, every
+    file its loader reads (a wrapper whose methods all forward to `FsLoader`'s) and every text the
+    `.emit` test macro parses in place (`oracle::emit_macro` made public and wrapped), and the
+    copy class applies when `.inherit`, `.seen` or `.ctx` stands in any unit. A file `.load` reads
+    counts too, as the loader is not told why it reads. In such a document any NUL string that
+    differs only after its NUL, at the same length, is excused, copied or not, as before for the
+    input. `.priority` under `registered-priority-override`, which runs `.seen`'s handler, is not
+    covered: a possible follow-up.
+  - Gap 1 (`79f7d6c`): the crate's notes keep every saved comment in read order with the path of
+    the value it is attached to, and the dump walk tracks paths as `oracle::dump` builds them. A
+    value's list is excused when the oracle's is the crate's after one or more distinct comments
+    the crate attached to no value, with those texts, read before the value's first own comment;
+    same texts included. A value with no own comments is not ordered, as before, so one created
+    earlier that gets a dropped comment is still excused; only the crate's record of where values
+    were created could tell, and it is not public. A container with own `ca` comments is refused
+    (the outermost section object closed by its bracket). The exact-source recogniser of #81 is
+    removed as covered; with it the last recogniser that needed an exact flag set, so
+    `zerocopy_keeps_the_uncertain_rules_of_the_result_without_it` no longer fails if the
+    recognisers get the flags with `zerocopy`.
+  - Checks: both findings and their generated inputs pass `ucl-differential --check` with their
+    flags and this worktree's `cases/spec/12-flags` and `13-inputs` (skipped as §12.5 and §9.7).
+    The other saved findings give the verdicts they gave before; `values-differ-b20d95e0` (#83)
+    now agrees with no excuse. New tests fail when only the input is scanned (3), without the
+    read-order bound (2) or without the container restriction (2). 26 fuzz unit tests pass;
+    `scripts/ci.sh` passed (702 tests); `scripts/ci.sh fuzz 180` (seed 1790864078555293000,
+    329,282 inputs) saved no finding, with 5 §12.5 replaced-comment skips. Copies of that run's
+    summary are in `target/c14-scratch/gaps-run1/`.
+  - Commits: `97f57fa`, `79f7d6c` (`fix(fuzz)`), and the following `docs(clean-room)` commit
+    with this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
