@@ -319,6 +319,9 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
         };
         let outcome = match self.includes.search.clone() {
             None => self.include_path(&path, request.wildcard_after_nul, &request)?,
+            // Only a miss in the document itself can be recovered by a later skip, and only by
+            // a skip in the document itself; the oracle also counts both in included files and
+            // in text parsed in place, which the spec does not settle (QUESTIONS.md #93).
             Some(dirs) if !soft && !try_ && !glob && self.includes.open_units.len() == 1 => {
                 self.include_searched_with_later_url(&dirs, &path, &request)?
             }
@@ -333,7 +336,9 @@ impl<'t> Core<'_, 't, '_, '_, '_> {
     /// A macro of this input skipped its file: a skipped URL include, or a `.load` with
     /// `try=true` that reads nothing (spec §9.4, *Quirk: a later skipped URL include or
     /// `.load`*; §9.6). The first-directory misses of the input before it pass; a later miss
-    /// needs a later skip of its own.
+    /// needs a later skip of its own. A skip in an included file, in text parsed in place or in
+    /// a macro argument document is not one of the input's own and does not count; the oracle
+    /// counts the first two (QUESTIONS.md #93).
     fn skipped_after_search_miss(&mut self) {
         if self
             .includes
@@ -2543,6 +2548,51 @@ mod tests {
             format!("{miss}\n{skip}\n{again}"),
         ] {
             assert!(run(&files, &input).is_err(), "{input}");
+        }
+    }
+
+    /// The crate's choice while QUESTIONS.md #93 is open: a later skip recovers a
+    /// first-directory miss only when both are in the document itself, not in an included
+    /// file, text parsed in place or a macro argument document (the oracle accepts the first
+    /// two).
+    #[cfg(feature = "load")]
+    #[test]
+    fn a_skip_recovers_a_miss_only_in_the_document_itself() {
+        let miss = ".include(path=[\"p1\", \"p2\"]) \"pa.inc\"";
+        for skip in [
+            ".load(try=true, key=\"t\") \"missing.txt\"",
+            ".include(try=true, url=true) ://",
+        ] {
+            let both = format!("{miss}\n{skip}\n");
+            let files = [
+                ("/c/p2/pa.inc", "pa = 1\n"),
+                ("/c/both.inc", both.as_str()),
+                ("/c/miss.inc", miss),
+                ("/c/skip.inc", skip),
+            ];
+            let p = || emitting(&files, ParserFlags::DEFAULT);
+            assert_eq!(
+                keys(
+                    &p().parse(format!("{miss}\n{skip}\nq = 1").as_bytes())
+                        .unwrap()
+                ),
+                ["pa", "q"]
+            );
+            for input in [
+                ".include \"both.inc\"\nq = 1".to_owned(),
+                format!(".include \"miss.inc\"\n{skip}\nq = 1"),
+                format!("{miss}\n.emit {{{skip}}}\nq = 1"),
+                format!(".emit {{{miss}\n{skip}}}\nq = 1"),
+                format!(".emit {{{miss}}}\n{skip}\nq = 1"),
+                format!("{miss}\n.include(path=[\".\"]) \"skip.inc\"\nq = 1"),
+                format!("{miss}\n.priority({skip}) 1\nq = 1"),
+            ] {
+                let e = p().parse(input.as_bytes()).unwrap_err();
+                assert!(
+                    matches!(e.kind(), ErrorKind::FileNotFound { .. }),
+                    "{input}: {e}"
+                );
+            }
         }
     }
 
