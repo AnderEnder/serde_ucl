@@ -38,8 +38,9 @@ be dropped on the move; `files/v4` also serves as the directory that one case lo
   place in a section object, the first name's `}` leaves the value created most recently as it
   was.
 
-Seven cases of the `spec-v21` draft, for question #89 (§9.2, a rejected argument document and a
-later skip), wait in the same way, six under `09-macros/` and one under `13-inputs/`. The fixtures
+Fourteen cases of the `spec-v21` draft, for question #89 (§9.2 and §13.1, a rejected argument
+document or a first-directory miss and a later skip), wait in the same way, seven under
+`09-macros/` and seven under `13-inputs/`. The fixtures
 `files/a.inc` and `files/v12/args_bad.inc` under `09-macros/` are identical to the active ones.
 
 - `09-macros/macro_args_rejected_then_load_try_accepts`,
@@ -53,3 +54,13 @@ later skip), wait in the same way, six under `09-macros/` and one under `13-inpu
   first-directory miss and a rejection before it.
 - `13-inputs/macro_registered_args_rejected_then_load_try_accepts`: a registered macro receives
   no ARGUMENTS and the VALUE as it stands after the `)`.
+- `09-macros/macro_args_stopped_then_load_try_accepts`: the same for a silent stop in the
+  argument document.
+- `13-inputs/macro_registered_text_args_rejected_then_load_try_accepts`: the same for a rejection
+  in text parsed in place.
+- `13-inputs/inputs_args_rejected_then_skip_in_later_input`,
+  `13-inputs/inputs_args_rejected_skip_two_inputs_later`,
+  `13-inputs/inputs_args_rejected_skip_in_later_file_input`,
+  `13-inputs/inputs_first_miss_then_url_skip_in_later_input`,
+  `13-inputs/inputs_first_miss_then_load_skip_in_later_input`: a skip in a later input discards
+  both errors; their further inputs are under `13-inputs/files/`.

@@ -5277,3 +5277,47 @@
   - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team. Item: C14 question #89, spec-v21 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`aa1b0df`), the draft `fa75a0b`, released §13.1, `tools/ucl-dump/ucl_dump.c`, the
+    pinned libucl source, and a probe program linked against the pinned libucl (in the session
+    scratchpad) that reports each add call's result and the parser's error after it.
+  - Finding, whether libucl's or the tool's: both, by kind of error. For the rejected argument
+    document and the first-directory miss, libucl's add call returns success with an error
+    message set, and a later skip clears the message, in the same input or a later one; every
+    call then returned success and no message is left, so accepting is libucl's own result. For
+    an error that ends its input (`.include "nonexistent.inc"`), the add call returns failure with
+    a message; libucl still reads later inputs, and a skip there clears the message. The tool
+    checked only the message after the last input, contrary to its own description ("an error if
+    any input reported one"), so it accepted these. Fixed in `tools/ucl-dump/ucl_dump.c`: an
+    input whose add call fails with a message makes the result an error, whatever later inputs
+    clear; a silent stop, which fails without one, does not. A full `scripts/regen-golden.sh` run
+    with the fixed tool changed no golden file. `tests/conformance/README.md` describes the
+    criterion.
+  - Spec: §13.1 now says that an error ends its input and a skip in a later input does not
+    discard it, and, as a quirk, that a skip in a later input discards the two errors that do not
+    end the parse; §9.2 and §9.4 say "in the same input or a later one". Cases: pending
+    `inputs_args_rejected_then_skip_in_later_input`, `inputs_args_rejected_skip_two_inputs_later`,
+    `inputs_args_rejected_skip_in_later_file_input`,
+    `inputs_first_miss_then_url_skip_in_later_input` and
+    `inputs_first_miss_then_load_skip_in_later_input`; active
+    `inputs_args_rejected_later_input_without_skip_error`,
+    `inputs_skip_in_earlier_input_covers_nothing_error` and
+    `inputs_missing_include_then_skip_in_later_input_error`, all in five of five identical runs.
+  - Non-blocking notes taken: pending `macro_args_stopped_then_load_try_accepts` (a silent stop in
+    the argument document) and
+    `pending/13-inputs/macro_registered_text_args_rejected_then_load_try_accepts` (a rejection in
+    text parsed in place); "fails or stops silently", with the active
+    `macro_args_rejected_try_include_stops_error`.
+  - Observation: in a copy with every pending case moved in, the crate fails all of them except
+    the `spec-v20` case `comments_include_nested_text_before_first_name`, which it now passes on
+    this base; it can be activated with the other `spec-v20` cases.
+  - Cases: golden files only from `scripts/regen-golden.sh`. The index counts 1,693 active cases,
+    plus eighteen pending `spec-v20` and fourteen pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following commit on `c14/spec-q86`. Not tagged or pushed; independent re-review
+    pending.
+  - Attestation: the draft spec, question answer, cases, tool change and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names or source
+    structure.

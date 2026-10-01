@@ -1,0 +1,2 @@
+.try_include(x)"missing.inc"
+.load(try=true, key="t") "missing.txt"

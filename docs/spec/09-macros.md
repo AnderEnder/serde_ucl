@@ -235,17 +235,22 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   `.priority(x) 1⏎b = 1`, is an error (`include_file_with_rejected_args_error`).
   **Quirk.** Such a rejection does not stop the parse. The macro runs without ARGUMENTS, with its
   VALUE beginning directly after the `)`, as in the next quirk, and parsing goes on; the document
-  is then an error unless a later macro skips its file, as after a first-directory miss of
+  is then an error unless a later macro, in the same input or a later one (§13.1), skips its file,
+  as after a first-directory miss of
   `.include` (§9.4, *Quirk: a later skipped URL include or `.load`*): a skipped
   `.include(try=true, url=true)` or `.try_include(url=true)` with `://` in its path, or a
   `.load(try=true)` that reads nothing.
   `.priority(x) 3⏎a = 1⏎.load(try=true, key="t") "missing.txt"` and the same with
   `.include(try=true, url=true) ://` as the last line give `a: int 1 @3`; so do
-  an unknown macro in the argument document, `.priority(.foo 1) 3`, and a rejection in an included
-  file, `files/v12/args_bad.inc`, which gives `b: int 1 @1`; `.include(x)"files/a.inc"` includes
+  an unknown macro in the argument document, `.priority(.foo 1) 3`, a silent stop there,
+  `.priority(.try_include "missing") 3`, a rejection in text parsed in place,
+  `.emit ".priority(x) 3"` (§13.2), and a rejection in an included file, `files/v12/args_bad.inc`,
+  which gives `b: int 1 @1`; `.include(x)"files/a.inc"` includes
   the file; a registered macro receives no ARGUMENTS and the VALUE as it stands after the `)`
   (`macro_args_rejected_then_load_try_accepts`, `macro_args_rejected_then_url_try_accepts`,
   `macro_args_rejected_unknown_macro_then_load_try_accepts`,
+  `macro_args_stopped_then_load_try_accepts`,
+  `pending/13-inputs/macro_registered_text_args_rejected_then_load_try_accepts`,
   `macro_args_rejected_in_included_file_then_load_try_accepts`,
   `macro_args_rejected_include_runs_without_args`,
   `pending/13-inputs/macro_registered_args_rejected_then_load_try_accepts`). One skip covers
@@ -253,9 +258,11 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   (`macro_args_rejected_and_first_miss_then_one_skip_accepts`,
   `macro_args_rejected_after_skip_error`);
   a `.load(try=true)` that reads its file does not count
-  (`macro_args_rejected_then_load_existing_file_error`). A macro that fails when it runs without
-  ARGUMENTS still stops the parse with an error: `.include(x) "files/a.inc"` names the missing file
-  ` "files/a.inc"` (`macro_args_rejected_include_space_value_error`).
+  (`macro_args_rejected_then_load_existing_file_error`). A macro that fails or stops silently when
+  it runs without ARGUMENTS ends the parse there, with the error: `.include(x) "files/a.inc"` names
+  the missing file ` "files/a.inc"`, and `.try_include(x)"missing.inc"` stops at its missing file,
+  so a skip after either is never read (`macro_args_rejected_include_space_value_error`,
+  `macro_args_rejected_try_include_stops_error`).
 - **Quirk: a rejected argument document inside an argument document.** When the macro stands
   inside an argument document, or in a file that an argument document includes, the rejection of
   its own ARGUMENTS is not an error. The macro runs without ARGUMENTS, and its VALUE begins at the
@@ -950,7 +957,7 @@ project*. libucl behaves as follows:
     subsequent macro skips its file, the document is accepted with the later directory's file
     included. Entries between the two macros and after the second are read too. The same skips
     discard a rejected argument document of an earlier macro (§9.2, *ARGUMENTS*), and a skip
-    covers errors of both kinds before it. The macros that
+    covers errors of both kinds before it, also from a later input (§13.1). The macros that
     count are a `.include(try=true, url=true)` or `.try_include(url=true)` with `://` in its path
     that is skipped (`include_path_first_miss_then_url_try_accepts_later`,
     `include_path_first_miss_then_try_include_url_accepts_later`), and a `.load` with `try=true`
