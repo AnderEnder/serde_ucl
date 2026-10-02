@@ -5559,3 +5559,16 @@ Commit: docs(capi): make SDK contract and validation references portable (Work i
 Final archives are rebuilt and validated from the resulting clean commit.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+### C15 offline contract documentation followup
+
+Coordinator noted spec-v22 is currently local, so the SDK README now gives an
+explicit offline route to the exact complete released contract and declaration
+artifact in the matching source archive. Removed reliance on an unpublished online
+tag. Documented the released tag prerequisite for future release CI; no tag was
+pushed. Inputs: current README, released-spec archive layout and owner/coordinator
+publication status. No implementation/header changes.
+Commit: docs(capi): point SDK users to bundled released contract (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

@@ -2,7 +2,13 @@
 
 This separate package builds `libucl.a` and `libucl.dylib` (Darwin), or `libucl.so`
 (on Unix platforms using that suffix), with an installable `ucl.h`. It provides
-exactly the 43 read-only functions and aliases in [released spec-v22](https://github.com/AnderEnder/serde_ucl/blob/spec-v22/docs/spec/c-api/stage-a/README.md).
+exactly the 43 read-only functions and aliases in released spec-v22.
+The exact released contract is bundled in the matching
+`serde-ucl-c-VERSION-source.tar.gz` archive at `docs/spec/c-api/stage-a/README.md`,
+with the declaration artifact at `docs/spec/c-api/stage-a/include/ucl.h` and its
+function/case inventories alongside them. Extract that archive to read the contract
+offline; the SDK does not depend on an online spec tag for its documentation.
+
 The verified compatibility target is Darwin arm64, LP64. Other targets require
 reference ABI and behavior validation before compatibility is claimed.
 
@@ -122,6 +128,9 @@ python3 capi/tests/check.py
 ```
 
 Artifacts go to `target/c15-dist` (`--output DIR` changes the destination).
+The archive builder reads released documentation from the `spec-v22` Git tag.
+That tag must exist in the checkout; before a normal GitHub release, the spec owner
+must make it available to release CI on the remote. This tool never pushes tags.
 `--verify` extracts both archives, moves the SDK to a path containing a space,
 checks contents/checksums/header/ABI/deployment metadata and all 43 symbols and
 C11/C++11 signatures, runs all ten released snapshots plus boundary/lifetime/depth
