@@ -5545,3 +5545,17 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
     c15/initial-c-api. No merge, push, release tag or publication performed.
   - Attestation: released specification remains behavior-only and unchanged.
     Coordinator authored no src/ or capi/ implementation.
+
+
+### C15 distribution documentation followup
+
+After packaging commit `3a7e4d4`, coordinator artifact review identified that the
+README copied to SDK root needed a portable released-spec link and explicit source-only
+validation-program context. Updated capi/README.md to the immutable public spec-v22
+URL and identified the matching source archive/repository as the destination for
+conformance/build commands. No implementation or header changes. Inputs: current
+implementation-owned README, coordinator artifact-documentation observation.
+Commit: docs(capi): make SDK contract and validation references portable (Work item: C15).
+Final archives are rebuilt and validated from the resulting clean commit.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

@@ -2,7 +2,7 @@
 
 This separate package builds `libucl.a` and `libucl.dylib` (Darwin), or `libucl.so`
 (on Unix platforms using that suffix), with an installable `ucl.h`. It provides
-exactly the 43 read-only functions and aliases in [released spec-v22](../docs/spec/c-api/stage-a/README.md).
+exactly the 43 read-only functions and aliases in [released spec-v22](https://github.com/AnderEnder/serde_ucl/blob/spec-v22/docs/spec/c-api/stage-a/README.md).
 The verified compatibility target is Darwin arm64, LP64. Other targets require
 reference ABI and behavior validation before compatibility is claimed.
 
@@ -143,6 +143,9 @@ python3 capi/tests/check.py --rust-asan
 
 The prebuilt Rust standard library remains uninstrumented. The conformance program
 in `tests/conformance/capi/stage-a/probe.c` is also a complete C link example.
+That program and the validation scripts are in the matching source archive/repository,
+not in the binary SDK. Use the source archive for the build and validation commands
+above; SDK consumption needs only the compiler and pkg-config commands.
 
 ## Ownership and caller domain
 
