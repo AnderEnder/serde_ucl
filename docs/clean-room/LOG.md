@@ -5596,3 +5596,54 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
     Work item C15. No merge, push, release tag or publication performed.
   - Attestation: released specification remains behavior-only and unchanged;
     coordinator changed spec-owned tooling/provenance only, no src/ or capi/ code.
+
+
+## 2026-10-03 — Implementation team — C15 native matrix — forbidden-input exposure
+
+Participant reread current CLAUDE.md and full PROTOCOL, then implemented native
+Linux amd64/arm64 and Darwin arm64 packaging/workflow changes from owner goals,
+released spec-v22, existing implementation-owned packaging/tests/workflows,
+writing-plans skill, official GitHub runner and GNU readelf documentation, and
+coordinator-provided black-box comparator CLI/evidence schema. It did not open
+oracle tool source or upstream files. All implementation edits remain uncommitted
+and predate the exposure described below.
+
+Exposure: after running the authorized black-box comparator, participant read
+`target/c15-matrix-reference.log`. The comparator forwarded upstream compiler
+output containing a source excerpt from
+`target/c15-matrix-oracle/upstream/src/mum.h:129` in an unused-expression warning.
+The log also contained upstream compiler include-file diagnostics. Although the
+black-box comparison passed, viewing this diagnostic excerpt is forbidden source
+exposure. Participant stopped immediately, notified coordinator and handed over.
+No implementation code was edited after exposure, so there is no post-exposure
+implementation code to quarantine. Task-specific background archive/check processes
+are stopped; any generated verification artifacts are provisional and not accepted.
+
+Before exposure: native assertions and eight synthetic packaging/ELF/collection
+fixtures passed; actionlint passed; Darwin staged candidate built and black-box
+reference gate passed. Full archive/source/CI verification had been launched but
+is not reported as accepted by this participant. Native Linux was not executed.
+
+Commits: none from this work session. A fresh clean-room participant must review
+and complete the pre-exposure changes. Spec owner should suppress upstream compiler
+source diagnostics in implementer-facing black-box output before further use.
+
+The implementer attestation cannot be made: this session accidentally received the
+forbidden upstream source diagnostic identified above.
+
+- 2026-10-03 — Role: spec coordinator. Item: C15 diagnostic boundary repair.
+  - Fresh distribution participant stopped after a forwarded upstream compiler
+    warning exposed source text. Its preceding entry records the exposure and
+    confirms no implementation edits occurred afterwards; there is no post-exposure
+    code to quarantine. Existing implementation edits remain pre-exposure work.
+  - Fixed spec-owned gate to capture and suppress upstream build/compiler streams
+    and internal tracebacks on success/failure. Only sanitized observable comparison
+    output is forwarded. Moved known unsafe reference logs outside clean worktree
+    into spec-side diagnostic storage, not an implementation input.
+  - Validation: synthetic failing compiler streams are suppressed by both gate
+    layers; fresh native Darwin reference comparison rerun follows this commit.
+  - Fresh replacement receives rules word for word, no inherited context, allowed
+    released spec/code/goals only, and must independently review/finish the
+    pre-exposure edits. No spec-side plan or unsafe diagnostic log is passed.
+  - Commit: fix(capi): suppress source diagnostics across reference gate boundary,
+    Work item C15. Coordinator changed no src/ or capi/ implementation.

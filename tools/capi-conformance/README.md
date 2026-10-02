@@ -40,3 +40,9 @@ underlying `run.py --golden-dir PATH` can compare prebuilt reference libraries;
 No source files from the upstream checkout enter SDK/source archives. Only clean
 public cases, generated snapshots and observable validation evidence are passed
 across the clean-room boundary. The released contract and header are unchanged.
+
+Clean-room log boundary: upstream compiler/build output and internal Python
+tracebacks are captured and suppressed, including on failure. They are never
+written to implementer-facing logs. Only sanitized public-interface comparison
+results are forwarded. Infrastructure failures require spec-team investigation;
+an implementer must not open upstream build diagnostics or source to debug them.

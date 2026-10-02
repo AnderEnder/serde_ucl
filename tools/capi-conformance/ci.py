@@ -15,9 +15,22 @@ CONTRACT = ROOT / 'docs/spec/c-api/stage-a'
 REPOSITORY = 'https://github.com/vstakhov/libucl.git'
 
 
-def run(command, **kwargs):
+def run(command, *, public_output=False, **kwargs):
     print('+ ' + shlex.join(map(str, command)), flush=True)
-    return subprocess.run(command, check=True, timeout=600, **kwargs)
+    kwargs.setdefault('stdout', subprocess.PIPE)
+    kwargs.setdefault('stderr', subprocess.PIPE)
+    result = subprocess.run(command, check=False, timeout=600, **kwargs)
+    # Only the sanitized comparator's observable results may cross the boundary.
+    # Upstream build/compiler streams are never printed or written to public logs.
+    if public_output:
+        for output in (result.stdout, result.stderr):
+            if output:
+                print(output if isinstance(output, str) else output.decode(errors='replace'),
+                      end='', flush=True)
+    if result.returncode:
+        raise SystemExit('Reference gate subprocess failed (exit ' + str(result.returncode)
+                         + '); upstream/internal diagnostics suppressed. Notify the spec coordinator.')
+    return result
 
 
 def sha256(path):
@@ -72,7 +85,7 @@ def main():
     common = [sys.executable, str(comparator), '--oracle-include', str(source / 'include'),
               '--oracle-library', str(oracle_library), '--golden-dir', str(snapshots)]
     # Only oracle-only executions can write expected outputs. Comparisons cannot update them.
-    run(common + ['--update-golden'])
+    run(common + ['--update-golden'], public_output=True)
     config = json.loads((CONTRACT / 'cases.json').read_text())
     platform_id = platform.system().lower() + '-' + platform.machine().lower()
     released = ROOT / config['golden'] / platform_id
@@ -83,7 +96,7 @@ def main():
                 raise SystemExit('released oracle snapshot drift: ' + case)
     for library in args.candidate_library:
         run(common + ['--candidate-include', str(args.candidate_include.resolve()),
-                      '--candidate-library', str(library.resolve())])
+                      '--candidate-library', str(library.resolve())], public_output=True)
     evidence = {
         'reference_commit': commit,
         'reference_header_sha256': sha256(source / 'include/ucl.h'),
@@ -103,4 +116,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        raise SystemExit('Reference gate infrastructure failed; internal diagnostics suppressed '
+                         'for clean-room separation. Notify the spec coordinator.') from None

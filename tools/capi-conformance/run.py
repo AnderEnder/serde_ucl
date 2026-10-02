@@ -18,7 +18,14 @@ CONTRACT = ROOT / 'docs/spec/c-api/stage-a'
 
 
 def run(command, **kwargs):
-    return subprocess.run(command, check=True, timeout=60, **kwargs)
+    kwargs.setdefault('stdout', subprocess.PIPE)
+    kwargs.setdefault('stderr', subprocess.PIPE)
+    try:
+        return subprocess.run(command, check=True, timeout=60, **kwargs)
+    except subprocess.CalledProcessError as error:
+        raise SystemExit('Signature/link/header or public-interface probe failed '
+                         '(exit ' + str(error.returncode) + '); compiler/runtime diagnostics '
+                         'suppressed for clean-room separation. Notify the spec coordinator.') from None
 
 
 def main():
@@ -123,4 +130,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        raise SystemExit('Reference comparison infrastructure failed; internal diagnostics '
+                         'suppressed for clean-room separation. Notify the spec coordinator.') from None
