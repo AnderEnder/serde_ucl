@@ -409,7 +409,7 @@ documents):
    without the feature, and the gain is measured against the latest release (0.6.0) with the
    crate's benchmarks. The README's feature list and `CHANGELOG.md` name the feature.
 
-## C15 — libucl-compatible C API (owner request of 2026-09-28; not started)
+## C15 — libucl-compatible C API (Stage A complete; later stages deferred)
 
 A C API compatible with libucl's, so that C programs written for libucl can use the crate. Owner
 decisions of 2026-09-28:
@@ -431,7 +431,7 @@ types, constants, ownership and reference counting, error reporting. It also wri
 that runs the same C programs against libucl and the crate. The implementation team works from
 the released spec, as for the format.
 
-### C15 Stage A authorized milestone (2026-10-02)
+### C15 Stage A authorized milestone (2026-10-02; completed)
 
 The owner authorized 43 initial functions, supported aliases, one complete input,
 read-only results, lookup, conversions, iteration and four text emitters on branch
@@ -450,3 +450,13 @@ required Rust checks. Update public documentation, changelog and clean-room
 provenance; commit on the separate branch. No merge, push or package publication
 is authorized. Broad research notes, oracle-tooling source and the spec-team
 temporary implementation plan are not implementation inputs.
+
+Stage A delivery: `capi/` provides the 43-function read-only ABI, exact released
+header, installation and direct/installed static/shared linkage. Its independent
+implementation-side validation derives typed signatures from released `api.json`,
+compares all ten Darwin arm64 snapshots and exercises the single-submission
+boundary, retained lifetimes, iterators and deepest accepted trees on a 2 MiB
+stack. `scripts/ci.sh checks` includes the C package checks and preserves the
+existing Rust validation matrix. Public build/link documentation is in
+`capi/README.md`; sanitizer validation and provenance are recorded in `LOG.md`.
+Constructors, mutations, callbacks and multiple submissions remain deferred.

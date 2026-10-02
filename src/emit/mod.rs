@@ -76,6 +76,7 @@ pub struct Emitter<'a> {
     facts: Option<&'a OutputFacts>,
     comments: Option<(&'a [Comment], &'a [AttachedComments])>,
     mode: Mode,
+    fact_root: Option<usize>,
 }
 
 impl<'a> Emitter<'a> {
@@ -86,6 +87,7 @@ impl<'a> Emitter<'a> {
             facts: None,
             comments: None,
             mode: Mode::Libucl,
+            fact_root: None,
         }
     }
 
@@ -113,6 +115,14 @@ impl<'a> Emitter<'a> {
     /// it had no facts; values at their own positions keep theirs.
     pub fn with_facts(mut self, facts: &'a OutputFacts) -> Self {
         self.facts = Some(facts);
+        self
+    }
+
+    /// Uses facts rooted at a borrowed subtree, for the C ABI adapter (C15 §7).
+    #[doc(hidden)]
+    pub fn with_facts_path(mut self, facts: &'a OutputFacts, path: &[PathSegment]) -> Self {
+        self.fact_root = facts.node_by_keys(path);
+        self.facts = self.fact_root.map(|_| facts);
         self
     }
 
@@ -159,7 +169,7 @@ impl<'a> Emitter<'a> {
             out: String::new(),
             track,
             cursor: vec![(
-                facts.map(|_| facts::ROOT),
+                facts.and(self.fact_root.or(Some(facts::ROOT))),
                 (!comments.is_empty()).then_some(0),
             )],
             facts,

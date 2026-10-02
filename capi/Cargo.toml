@@ -1,0 +1,22 @@
+[package]
+name = "serde_ucl_capi"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT OR Apache-2.0"
+description = "Stage A read-only C ABI for serde_ucl"
+publish = false
+
+[workspace]
+
+[lib]
+name = "ucl"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+serde_ucl = { path = "..", features = ["load"] }
+libc = "0.2"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

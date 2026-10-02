@@ -28,6 +28,7 @@ Release 0.3.0 renamed the package, the library and the repository to `serde_ucl`
 ## Contents
 
 - [Installation](#installation)
+- [C API](#c-api)
 - [Quick start](#quick-start)
 - [UCL syntax pitfalls](#ucl-syntax-pitfalls)
 - [Compatibility with libucl](#compatibility-with-libucl)
@@ -59,6 +60,15 @@ serde = { version = "1", features = ["derive"] }
 
 It targets the latest stable Rust (1.98 at this release). See [Cargo features](#cargo-features)
 for `fs` and `load`.
+
+## C API
+
+The separate [C API package](capi/README.md) builds static/shared libraries named
+`ucl` and installs `ucl.h`. Stage A provides 43 read-only functions and aliases,
+with one complete submission per parser; mutation and multiple submissions are
+deferred. The initial verified ABI is Darwin arm64, LP64. Build/install and C/C++
+link examples are in the package documentation. Rust entry points keep their
+existing behavior.
 
 ## Quick start
 

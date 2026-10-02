@@ -5398,3 +5398,83 @@
   - Attestation: released specification contains observable behavior and public
     interface declarations only, without executable upstream code or control-flow
     pseudocode; no src/ or capi/ implementation authored by this participant.
+
+- 2026-10-02 — Role: fresh implementation participant. Item: C15 Stage A (spec-v22).
+  - Inputs consulted: current `CLAUDE.md` and `docs/clean-room/PROTOCOL.md` first;
+    released `docs/spec/` at spec-v22, notably the Stage A contract, declarations,
+    API inventory and case selection; clean `tests/conformance/capi/stage-a/probe.c`
+    and ten Darwin arm64 snapshots; work goals and provenance in `docs/clean-room/`;
+    current crate sources, public README/changelog, Cargo metadata, `scripts/ci.sh`
+    and `.github/workflows/ci.yml`;
+    the writing-plans skill. No upstream source, oracle tools, forbidden history,
+    research notes, spec-side temporary plans or session memory were read.
+  - Work: independently planned and implemented the separate `capi/` package, all
+    43 released functions and aliases, public object ABI, owned/borrowed references,
+    parser observations and one-submission boundary, conversions/lookup/iteration,
+    C-free-compatible text emission and exact-header installation. Core adapters
+    are additive and cursor recording is opt-in; existing Rust entry points remain
+    unchanged. A fresh implementation-side participant independently authored
+    signature/snapshot, boundary/lifetime, stack and sanitizer tests. Its own plan
+    was moved from the skill's default directory to `capi/tests/`; this participant
+    did not read it before provenance was confirmed.
+  - Checks: `scripts/ci.sh checks` passed twice, including the final integrated
+    C package fmt/clippy and Python driver. The final driver passes direct and
+    installed static/shared links, all 43 independently generated C11/C++11 typed
+    signatures and symbols, exact header and all ten snapshots for each linkage;
+    inaccessible second-input tests, retained children/conversion strings,
+    iterator reset/cleanup and 1023 nested child containers (arrays and objects)
+    on a 2 MiB pthread stack. The added C boundary/lifetime/depth program also
+    passed against an unoptimized debug static library. All Rust feature/test/stack/fuzzer/example/bench/doc
+    checks passed. Final spec-side black-box reference comparison is separately
+    attributed below. `git diff --check` passed.
+  - Commit: the following `feat(capi): implement released Stage A C ABI` commit on
+    `c15/initial-c-api`, with `Work item: C15`. No merge, push or publication.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-02 — Role: spec coordinator. Item: C15 independent candidate acceptance.
+  - Inputs: released spec-v22 Stage A contract/header/inventory/case selection;
+    spec-owned runner, public-interface probes and pinned compiled reference
+    libraries; candidate library/header artifacts and implementation-team test
+    reports. No forbidden notes/history/session memory consulted.
+  - Independently compared final release libucl.a and libucl.dylib against pinned
+    libucl on Darwin arm64: all ten cases, all 43 typed signatures/link checks,
+    four reference/released/shipping header-library combinations, C11/C++11
+    checks and unchanged oracle snapshots passed for each candidate library.
+  - Initial mixed-chain iterator exhaustion mismatch was reported as observable
+    output only; implementation participant resolved it from released evidence.
+    Final external comparison was rerun after the candidate correction/build.
+  - ASan-enabled C probe comparisons also passed for both candidate libraries,
+    including lifetime cases. These runs used ordinary release Rust libraries;
+    fully instrumented Rust+C sanitizer evidence is recorded separately by the
+    clean implementation validation participant.
+  - Commits: acceptance provenance included with the final C15 implementation
+    commit on c15/initial-c-api; no merge, push or publication performed.
+  - Attestation: specification remains behavior-only. Coordinator authored no
+    src/ or capi/ implementation and supplied no upstream code/design hints.
+
+## 2026-10-02 — Implementation team — C15 Stage A independent C validation
+
+Fresh implementation-side validation participant. Worktree: `ucl-rust-lexer-c15`, branch
+`c15/initial-c-api`. Inputs consulted: current `CLAUDE.md` and
+`docs/clean-room/PROTOCOL.md`; released `spec-v22` Stage A contract, API inventory,
+public declaration-only header and case list; released format depth rule; spec-owned
+Stage A public probe and Darwin arm64 snapshots; implementation-owned `capi/Cargo.toml`
+and `capi/Makefile`; the local writing-plans skill; Rust compiler/toolchain command help.
+No libucl checkout, oracle tooling, prohibited history, or oracle-side planning documents
+were read. The validation plan was independently authored by this participant and resides
+in `capi/tests/VALIDATION-PLAN.md`.
+
+Created `capi/tests/check.py` and `capi/tests/extra.c`. Normal and C ASan/UBSan runs
+passed for direct and make-installed static/shared libraries: exact shipping/installed
+header, 43 exported symbols, all 43 typed function pointers compiled/linked as C11 and
+C++11, ten exact Darwin arm64 snapshots, single-submission ESTATE with inaccessible
+second input storage, retained child and borrowed string lifetimes, restricted iterator
+cleanup/reset, and accepted maximum 1023 arrays/objects on a 2 MiB thread stack.
+Nightly Rust ASan plus C ASan/UBSan passed the same direct static/shared checks using
+Homebrew LLVM21 clang/clang++ with a shared external sanitizer runtime. Prebuilt Rust
+standard library was not instrumented; Darwin LeakSanitizer is unavailable. Targets
+without released snapshots explicitly skip comparisons and make no compatibility claim.
+
+Commits: none; changes handed to the parent implementation participant for review and commit.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

@@ -698,7 +698,7 @@ impl OutputFacts {
     }
 
     /// The node of the value at the key path `path`, if there is one.
-    fn node_by_keys(&self, path: &[PathSegment]) -> Option<NodeId> {
+    pub(crate) fn node_by_keys(&self, path: &[PathSegment]) -> Option<NodeId> {
         path.iter().try_fold(ROOT, |node, segment| {
             self.node(node)?.children.by_key(segment)
         })

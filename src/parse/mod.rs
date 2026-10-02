@@ -270,6 +270,15 @@ impl fmt::Debug for Parser {
     }
 }
 
+/// Observations needed by the separate C adapter. Existing Rust parse APIs are unchanged.
+#[doc(hidden)]
+pub struct CObservation {
+    pub root: Option<UclValue>,
+    pub error: Option<Error>,
+    pub cursor: Position,
+    pub facts: OutputFacts,
+}
+
 impl Parser {
     /// A parser with no flags, priority 0, the `append` strategy, no registered variables, no
     /// variable handler, no base directory, no input limit, the `.inherit` depth limit
@@ -710,6 +719,15 @@ impl Parser {
             .into_iter()
             .filter(|rule| bits & rule.bit() != 0)
             .collect()
+    }
+
+    /// Single-input observations for the C ABI adapter (C15 Stage A §4).
+    #[doc(hidden)]
+    pub fn observe_c_input(&mut self, input: Input<'_>) -> CObservation {
+        let mut reader = self.reader();
+        reader.observe();
+        let error = reader.read(input, None).err();
+        reader.finish_observed(error)
     }
 
     /// Parses a document given as bytes rather than read from a file.
