@@ -5647,3 +5647,78 @@ forbidden upstream source diagnostic identified above.
     pre-exposure edits. No spec-side plan or unsafe diagnostic log is passed.
   - Commit: fix(capi): suppress source diagnostics across reference gate boundary,
     Work item C15. Coordinator changed no src/ or capi/ implementation.
+
+## 2026-10-03 — Implementation team — C15 fresh native release completion
+
+Fresh replacement participant read current CLAUDE.md and the complete PROTOCOL
+before any other repository inputs. Independently reviewed all pre-exposure native
+release implementation changes from latest released spec-v22, owner C15 goals,
+allowed crate/package code, clean public-interface cases, and current clean-room
+worklist/log. Predecessor/spec-side plans, tools source, upstream source/build logs,
+forbidden history and session memory were not consulted. An independent completion
+plan is `docs/superpowers/plans/2026-10-03-c15-clean-completion.md`.
+Additional inputs: writing-plans skill and official GitHub hosted runner reference
+(https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+confirming native Ubuntu amd64/arm64 and macOS 15 arm64 runner labels.
+
+Reviewed/completed native OS/architecture assertions, Linux ELF64 machine/SONAME
+and measured GLIBC metadata, per-target native snapshot evidence and staged
+candidate hashes, relocatable static/shared pkg-config consumption, clean source
+builds, one source archive, unique input artifacts/manifests, and four-archive
+same-version/commit collection before existing publishing jobs. Strengthened
+collection to reject wrong native system/machine evidence and Darwin format/machine
+metadata. Rust/C implementation and exact spec-v22 header are unchanged.
+
+Accepted validation in this fresh session:
+
+- `scripts/ci.sh checks`: full Rust formatting/clippy/feature tests, optimized and
+  unoptimized depth checks, conformance, fuzzer unit tests, examples/benches/docs,
+  and C direct/installed static/shared signatures/snapshots/lifetime/depth passed.
+- Nine synthetic native identity, ELF metadata and artifact collection tests passed.
+  These fixture bytes are explicitly synthetic, never Linux runtime evidence.
+- `actionlint .github/workflows/release.yml` and `git diff --check` passed.
+- Fresh authorized black-box CLI in `target/c15-clean-oracle` generated native
+  Darwin snapshots and validated both newly staged candidate libraries: ten cases,
+  43 signatures/symbols and four header/library combinations per candidate passed.
+  Only sanitized observable output was received; upstream sources/tools were not read.
+- `distribution.py --kind all --target macos-arm64 --verify` using those fresh
+  snapshots/candidate passed exact header/ABI/deployment checks, all ten snapshots,
+  C/C++ static/shared pkg-config consumers and boundary/lifetime/depth checks before
+  and after extraction into a path with spaces, plus clean extracted-source install.
+- Release gates: matching `v0.6.0` and changelog passed; malformed/mismatched tags,
+  missing changelog section and C package version mismatch fixtures rejected.
+
+No native Linux runtime, GitHub workflow execution, macOS 11 runtime, merge, push,
+release-tag, publish or upload was performed. Linux runtime/full target reference
+checks are configured for future native GitHub execution and cannot be claimed
+as local passes. Original checkout was not modified. Clean-commit split archive
+modes are verified after this implementation commit and recorded in a follow-up
+provenance entry.
+
+Commit: `ci(capi): verify native SDK release matrix` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-03 — Role: spec coordinator. Item: C15 three-platform CI acceptance.
+  - Final workflow review confirms Linux amd64 (ubuntu-24.04), Linux arm64
+    (ubuntu-24.04-arm), and macOS arm64 (macos-15) native jobs. Each asserts its
+    platform, stages candidate libraries, runs sanitized pinned-reference gate,
+    and verifies packaged SDK/clean source against actual-host evidence.
+  - Source is emitted once; unique input artifact/checksum names and overwrite
+    handling protect reruns. Collection requires all four consistent archives
+    before Trusted Publishing and consolidated GitHub release attachment.
+    FreeBSD is not included; only runner availability was asked.
+  - Independent extracted new Darwin SDK static/shared comparisons pass ten
+    oracle cases, 43 signature/link checks, four header/library combinations and
+    C/C++ headers each. Exact released header and behavior/spec paths unchanged.
+    Fresh implementer reports full Rust/C CI, nine platform/collector fixtures,
+    actionlint, release gates and source/SDK relocation/depth/lifetime tests pass.
+  - Protocol handover completed: exposed participant stopped before further code
+    edits; fresh participant independently reviewed pre-exposure code and derived
+    its own plan. Unsafe predecessor logs/plan are not implementation inputs.
+    Spec-owned diagnostics suppression tested on successful and failing commands.
+  - Native Linux and remote GitHub Actions execution are pending future workflow
+    use; no local Linux runtime result or completed publication is claimed.
+  - Commit: included with final build(capi) native matrix implementation; local
+    clean split artifact verification will be recorded by fresh implementer.
+    Coordinator authored no src/ or capi/ implementation. No merge/push/tag/upload.

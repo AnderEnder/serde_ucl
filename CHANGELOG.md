@@ -10,8 +10,14 @@ C15 adds cargo-c installation using the unchanged reviewed header, distinct
 `serde-ucl-c` package and `serde-ucl` pkg-config identities, and independent shared
 ABI 1.0.0. Locally verified source and relocatable macOS arm64 SDK archives include
 licenses, provenance and checksums. Release CI validates them before Rust Trusted
-Publishing and attaches them to the same GitHub release; other binary targets remain
-deferred. Source builds and static/shared C consumption are documented.
+Publishing and attaches them to the same GitHub release. Native Linux amd64, Linux
+arm64 and macOS arm64 release jobs now gate SDK attachment on actual target reference
+comparisons, relocated C/C++ consumer checks and clean source builds. ELF SDKs record
+SONAME, architecture, actual host glibc and measured symbol requirements; Darwin
+deployment metadata remains unchanged. One source archive and three SDKs are collected
+with unique job manifests and consolidated checksums, rejecting mixed or missing inputs.
+Linux native execution is delegated to CI, not claimed from the local macOS checks.
+Other binary targets remain deferred. Source builds and static/shared C consumption are documented.
 
 ### Initial C API (spec-v22)
 

@@ -64,7 +64,9 @@ for `fs` and `load`.
 ## C API
 
 The opt-in [serde-ucl-c package](capi/README.md) supports cargo-c installation,
-source archives and a macOS arm64 SDK for C/C++ consumption without Rust. Its
+source archives and native SDK release automation for Linux amd64/arm64 and
+macOS arm64, with target-specific reference gates before binary attachment. C/C++
+consumers need no Rust toolchain. Its
 pkg-config name is `serde-ucl`, with an independently versioned shared ABI. It
 builds static/shared libraries named
 `ucl` and installs `ucl.h`. Stage A provides 43 read-only functions and aliases,

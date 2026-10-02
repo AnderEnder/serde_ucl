@@ -77,6 +77,8 @@ checks() {
 		--no-default-features
 	run cargo test --manifest-path "$FUZZ_MANIFEST" --target-dir "$FUZZ_TARGET"
 
+	# Packaging metadata/collection fixtures run on both hosts; no simulated conformance.
+	run python3 capi/tests/distribution_test.py
 	# Released C ABI signatures, linkage, installation, snapshots and caller lifetimes.
 	run python3 capi/tests/check.py
 	run cargo build --examples --benches

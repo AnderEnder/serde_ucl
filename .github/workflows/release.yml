@@ -4,7 +4,9 @@
 #   version         scripts/ci.sh release: the tag is vX.Y.Z for the version in Cargo.toml, and
 #                   CHANGELOG.md has a section for it
 #   checks          ci.yml, that is scripts/ci.sh, on Linux and macOS
-#   c-distribution  clean-build and verify source + macOS arm64 SDK archives from that commit
+#   c-source        build one source archive and test a clean extracted-source install
+#   c-distribution  native Linux amd64/arm64 + macOS arm64 reference gates and verified SDKs
+#   c-artifacts     require all four archives from the same tested commit; combine checksums
 #   publish         cargo publish, with a short-lived crates.io token from Trusted Publishing;
 #                   skipped with a notice when crates.io has the version already, so that the
 #                   workflow can be run again
@@ -51,8 +53,8 @@ jobs:
     needs: version
     uses: ./.github/workflows/ci.yml
 
-  c-distribution:
-    name: verified macOS arm64 C distribution
+  c-source:
+    name: verified C source archive
     needs: checks
     runs-on: macos-15
     timeout-minutes: 30
@@ -66,20 +68,109 @@ jobs:
           components: llvm-tools, rust-docs
       - name: scripts/ci.sh release
         run: scripts/ci.sh release "$GITHUB_REF_NAME"
-      - name: Verify native arm64 runner
-        run: test "$(uname -m)" = arm64
+      - name: Verify native source-test runner
+        run: python3 capi/distribution.py --assert-native --target macos-arm64
       - name: Install pinned cargo-c
         run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
-      - name: Build and verify source and SDK archives
-        run: python3 capi/distribution.py --verify --require-clean
+      - name: Build source archive once and verify clean source installation
+        run: python3 capi/distribution.py --kind source --target macos-arm64 --verify --require-clean --output target/c15-source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: serde-ucl-c-input-source
+          path: target/c15-source/*
+          if-no-files-found: error
+          overwrite: true
+
+  c-distribution:
+    name: verified C SDK (${{ matrix.target }})
+    needs: checks
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            shared: libucl.so
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            shared: libucl.so
+          - target: macos-arm64
+            runner: macos-15
+            shared: libucl.dylib
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rust-docs
+      - name: scripts/ci.sh release
+        run: scripts/ci.sh release "$GITHUB_REF_NAME"
+      - name: Verify native OS and architecture
+        env:
+          SDK_TARGET: ${{ matrix.target }}
+        run: python3 capi/distribution.py --assert-native --target "$SDK_TARGET"
+      - name: Install native Linux build and reference dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils pkg-config cmake libssl-dev
+      - name: Install pinned cargo-c
+        run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
+      - name: Stage native candidate for reference verification
+        env:
+          SDK_TARGET: ${{ matrix.target }}
+        run: python3 capi/distribution.py --build-only --target "$SDK_TARGET" --candidate-prefix "$PWD/target/c15-candidate" --require-clean
+      - name: Native black-box reference compatibility gate
+        env:
+          SDK_SHARED: ${{ matrix.shared }}
+        run: |
+          python3 tools/capi-conformance/ci.py \
+            --candidate-include target/c15-candidate/include \
+            --candidate-library target/c15-candidate/lib/libucl.a \
+            --candidate-library "target/c15-candidate/lib/$SDK_SHARED" \
+            --work-dir target/c15-oracle \
+            --golden-dir target/c15-oracle/golden
+      - name: Package and verify extracted relocated native SDK and source build
+        env:
+          SDK_TARGET: ${{ matrix.target }}
+        run: |
+          python3 capi/distribution.py --kind sdk --target "$SDK_TARGET" \
+            --candidate-prefix target/c15-candidate \
+            --golden-dir target/c15-oracle/golden \
+            --verify --require-clean --output target/c15-sdk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: serde-ucl-c-input-sdk-${{ matrix.target }}
+          path: target/c15-sdk/*
+          if-no-files-found: error
+          overwrite: true
+
+  c-artifacts:
+    name: validate and consolidate C release artifacts
+    needs: [c-source, c-distribution]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: serde-ucl-c-input-*
+          merge-multiple: true
+          path: target/c15-incoming
+      - name: Require source and all SDKs from this version and commit
+        run: python3 capi/collect_distribution.py --input target/c15-incoming --output target/c15-dist --commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: serde-ucl-c-distribution
           path: target/c15-dist/*
           if-no-files-found: error
+          overwrite: true
 
   publish:
-    needs: [checks, c-distribution]
+    needs: [checks, c-artifacts]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
