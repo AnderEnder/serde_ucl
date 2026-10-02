@@ -33,6 +33,13 @@ implementation may choose, and should record its choice.
 | 12 | [12-flags.md](12-flags.md) | Parser flags |
 | 13 | [13-inputs-and-macros.md](13-inputs-and-macros.md) | Several inputs into one parser; macros registered by the application |
 
+## Initial C API
+
+[C15 Stage A](c-api/stage-a/README.md) defines the released 43-function,
+one-input, read-only C API, public ABI/header, ownership, diagnostics, lookup,
+conversions, iteration and four text emitters. Format rules in §§1–13 continue
+to apply. The broader C15 research proposal is not part of this release.
+
 ## Conventions
 
 ### Case citations

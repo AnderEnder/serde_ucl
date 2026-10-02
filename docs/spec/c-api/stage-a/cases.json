@@ -1,0 +1,16 @@
+{
+  "source": "tests/conformance/capi/stage-a/probe.c",
+  "golden": "tests/conformance/capi/stage-a/golden",
+  "cases": [
+    "abi",
+    "parser",
+    "metadata",
+    "conversions",
+    "strings",
+    "iteration",
+    "lifetime",
+    "emitters",
+    "flags",
+    "filesystem"
+  ]
+}

@@ -5375,161 +5375,26 @@
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
 
-- 2026-10-01 — Role: implementation team (clean-room implementer). Item: C14 follow-up, released
-  `spec-v20` (questions #86, #87, #88), on `c14/spec20-impl` at the `spec-v20` release commit.
-  - Inputs consulted: `CLAUDE.md` as embedded in the task; `docs/clean-room/PROTOCOL.md`,
-    `WORKLIST.md` (C14), `QUESTIONS.md` (#84 to #88, and the highest number on `origin/main`) and
-    this log; the released `spec-v20` §9.4, §9.6, §12.5 and §13.2 (`git diff spec-v19 spec-v20 --
-    docs/spec`, and the sections at the tag, with no edits after it); the conformance cases,
-    fixtures and golden files of `cases/spec/09-macros/` and `pending/09-macros/`, with
-    `pending/README.md`; the crate's `src/parse/`, `tests/conformance.rs`, `tests/common/`,
-    `fuzz/README.md`, `fuzz/src/run.rs` and `scripts/ci.sh`; the saved finding
-    `crate-rejects-6097f6b0b5dffecd` (input, flags, report) of the main checkout. Black-box runs
-    of the oracle that `scripts/regen-golden.sh` built in this worktree (it changed no golden
-    file), from `target/c14-scratch/`. No libucl source, `tools/`, spec-team branch, other
-    worktree, or Claude Code session or memory files were read. The guard refused one grep whose
-    file list named a spec-team document; nothing was read.
-  - Work: #86: a `.load` with `try=true` that reads nothing, because its file is missing or
-    unusable, clears a pending first-directory miss of its input, as a skipped URL include does.
-    #87: until a braced file reads a key or a `}` of its own, it takes over again after each
-    macro the brace of the object its entries then go into (`Core::take_brace_again`), on that
-    object's frame, so braces held below stay and close after it. #88: a first name in a section
-    object whose brace was taken over gets `Close::NameBrace`, whose `}` closes the section object
-    too unless text parsed in place keeps it open. Two rules the spec leaves open follow oracle
-    runs and are asked as #91 (nothing is taken over again when only whitespace and `;` follow the
-    macro to the end of the file) and #92 (the file's own `}` ends the takeover). Unit tests for
-    each failed on the previous code. `CHANGELOG.md` lists the changes, including inputs accepted
-    before that are now errors and the reverse.
-  - Checks: the eighteen pending cases pass in a copy of the worktree with them moved into
-    `cases/spec/09-macros/` (1,704 cases, the four expected failures only); `cargo test --test
-    conformance` in the worktree (1,686 cases); `scripts/ci.sh` passed all 26 steps at the
-    final commit; each intermediate commit builds, is formatted, and passes clippy over the
-    crate's feature sets of `scripts/ci.sh`, the unit tests and the conformance tests.
-    `ucl-differential --check` of the saved finding, with
-    `tests/conformance/cases/spec/09-macros` of this worktree as its directory: `agree`.
-    `scripts/ci.sh fuzz 180 2026100101`: before the change, on a pristine copy, nine
-    `crate-rejects` (FileNotFound, this #86 class) and two `values-differ`; after it, no
-    `crate-rejects` and two `values-differ`, both `.emit` of `$ABI` under `zerocopy`
-    (`.emit x $ABI;` with `strategy:rewrite`, `.emit l $ABI;I s` with `strategy:error`), the same
-    as before the change and outside these rules. All probe inputs of #91 and #92, and those in
-    the changelog, agree with the oracle.
-  - Commits: the five commits before this entry (`fix(parse)` for #86, `docs(clean-room)` for
-    #91 and #92, `fix(parse)` for #87, `fix(parse)` for #88, `docs(parse)` for two comments
-    still describing the spec-v18 shared brace), this entry, and
-    `docs(clean-room): renumber the brace-takeover questions to 91 and 92`, on
-    `c14/spec20-impl`. Not pushed.
-  - Renumbering: the two questions were first filed as #89 and #90, which the `spec-v21` release
-    (open PR #27) uses for its own questions; at the coordinator's request they are #91 and #92
-    in `QUESTIONS.md`, the code comments, `CHANGELOG.md` and this entry. The messages of the
-    commits `docs(clean-room): ask when a braced file takes its brace over again` and
-    `fix(parse): take the brace over again after macros before a braced file's first key` still
-    cite them as #89 and #90.
-  - Attestation: I did not read libucl source code or any forbidden input listed in
-    docs/clean-room/PROTOCOL.md.
-
-- 2026-10-01 — Role: fresh clean-room implementation reviewer. Item: C14 follow-up, released
-  `spec-v20` (questions #86, #87, #88); reviewed `git diff 1cbbd48 HEAD` on `c14/spec20-impl` in
-  worktree `c14-spec20-impl`, commits `8490cc3` to `15a8862`.
-  - Inputs consulted: the coordinator's request; `docs/clean-room/PROTOCOL.md`; released
-    `spec-v20` §9.4, §9.6, §12.5 and §13.2 and the `spec-v19..spec-v20` diff of `docs/spec/`
-    (`docs/spec/` at HEAD equals the tag); the `spec-v20..spec-v21` diff of `docs/spec/`, to see
-    whether `spec-v21` answers #91 or #92 (it answers #89 and #90); the branch diff
-    (`src/parse/core.rs`, `include.rs`, `CHANGELOG.md`, `QUESTIONS.md` #86 to #92, the LOG);
-    `src/parse/macros.rs` (macro entry); `1cbbd48`'s `core.rs` and `include.rs` through `git
-    show`, for builds in scratch copies under `target/review-v20/`; the pending cases, their
-    README and fixtures; `fuzz/README.md`; the oracle as a black box through `ucl-differential
-    --check`, from probe files in `target/review-v20/probe/`. Nothing outside this worktree was
-    opened.
-  - Review result: approved. The three rules follow released §9.4, §9.6, §12.5 and §13.2, the
-    choices of #91 and #92 are tested and match the oracle, and no `unreachable!` is left (the
-    one in `names()` is now a `debug_assert!`, and `object_step` still sets `section_shares`
-    only while the top frame holds a brace taken over). Findings, none blocking:
-    1. A first-directory miss is recovered only when the miss and the skip are both in the
-       document itself (`src/parse/include.rs:322`, `open_units.len() == 1`, and the unit check
-       of `skipped_after_search_miss`, :337-345). The oracle also accepts a miss in an included
-       file followed by a skip in that file or later in the document (`.load(try=true)` or URL),
-       and a skip by text parsed in place (`.emit`) after a miss in the document; it rejects a
-       skip inside an included file after a miss in the document. §9.4 says only "a subsequent
-       macro"; a miss and a skip in the same included file match that text and the oracle.
-       `spec-v21` settles a skip in a later input and rejected argument documents in included
-       files, not this. The same holds for URL skips on `1cbbd48`, so it predates this change;
-       the new `.load` skip inherits it. Fix: ask a question with these runs, and say "of the
-       document itself, not of an included file or text parsed in place" in
-       `CHANGELOG.md:11-12`.
-    2. `docs/clean-room/LOG.md:5032` is 140 columns wide; rewrap at 100.
-    3. `src/parse/core.rs:2969-2970`: in `take_brace_again`, `Close::Bracket` is never an
-       object's close and `Close::NameBrace` cannot be the top frame before the first key, so the
-       comment "a bracket the unit's end check requires a nested unit to close" describes no
-       reachable case. Say that the arm keeps a brace still held, the rest for exhaustiveness.
-    4. `first_key_shares` and `section_shares` (`core.rs:837`, `:840`) no longer name a share;
-       a rename (for example `taking_over`, `first_name_brace`) would match their docs.
-  - Checks: `scripts/ci.sh` passed (711 tests; tree clean after). In a copy with the 18 pending
-    cases moved into `cases/spec/09-macros/` (fixtures identical): 1,704 cases, 1,700 pass, the 4
-    expected failures, emitters and readback clean; with `1cbbd48`'s `core.rs` and the `.load`
-    skip removed, 17 of the 18 fail (`comments_include_nested_text_before_first_name` passes on
-    the old code too) and the four new unit tests fail. Five mutations (the own `}` keeping the
-    takeover, a takeover at the end of the file, no takeover of a braced object or of a section
-    object, no own brace for the first name in a section object) each fail a unit test. Oracle
-    probes: 28 search-miss and skip forms (only the cross-unit ones of finding 1 differ); 81
-    brace files, from the CHANGELOG, #87, #88, #91, #92 and nearby forms (nested macros in
-    turn, `.priority`, `.inherit`, comments, `;`, VT, FF, CR LF, ignored names, `key`, text in
-    place), each in nine contexts: 725 agree and 4 are §12.5 block-comment skips that agree
-    without `dump-comments`; 197 of them differed with the old code; 69 comment contexts in
-    section objects and after text in place, and the 8 CHANGELOG forms, agree.
-    `scripts/ci.sh fuzz 180` (seed 1790866650510056000, 500,337 inputs) exited 1 with five
-    differences, three saved, all `.emit … $ABI` under `zerocopy` (the class #25 answers); the
-    implementer's two earlier findings are kept in `target/review-v20/prev-fuzz-differential/`.
-  - Commits: this LOG-only review commit on `c14/spec20-impl`. No change to `src/`; not pushed.
-  - Attestation: I did not read libucl source code or any forbidden input listed in
-    docs/clean-room/PROTOCOL.md.
-
-- 2026-10-01 — Role: implementation team (the same clean-room implementer). Item: C14 follow-up,
-  the four non-blocking findings of the review of the spec-v20 fix (`ebaa738`), on
-  `c14/spec20-impl`.
-  - Inputs consulted: the coordinator's message and the reviewer's entry above; `QUESTIONS.md` on
-    this branch, `origin/main` and `spec-v21` (for the next free number, #93); the crate's
-    `src/parse/core.rs` and `include.rs`; `CHANGELOG.md`; black-box runs of the oracle through
-    `ucl-differential --check`, from probe files in `target/c14-scratch/w/`. Two incidental
-    looks outside these: the session's working directory was moved to another worktree
-    (`agent-ae56e5508d126285c`, branch `c14/fuzz-gaps`), where I ran `git status` and
-    `git log -3` before returning here, and I listed the names of the files in the reviewer's
-    `target/review-v20/probe/`; no file was opened in either. No libucl source, `tools/`,
-    spec-team branch, or Claude Code session or memory files were read.
-  - Work: (1) Asked #93 with oracle runs: the oracle lets a skip recover a first-directory miss
-    when the miss and the skip are in the same included file, when the miss is in an included
-    file or in text parsed in place and the skip later in the document, and when the miss is in
-    the document and the skip in text parsed in place or in a file included after it, but not
-    when the skip is in a macro argument document. The crate keeps counting only a miss and a
-    skip in the document itself; a unit test pins that choice, the code comments cite #93, and
-    `CHANGELOG.md` says "of the document itself, not of an included file or text parsed in
-    place". The review reported that the oracle rejects a skip inside an included file after a
-    miss in the document; in my runs it accepted every such form I tried (plain, `key`, `try`,
-    `.try_include`, `glob`, inside braces, through a second file, and with the include itself a
-    second miss), and #93 records that. (2) Rewrapped the 140-column line of my earlier entry.
-    (3) `take_brace_again` keeps a brace still held in an arm of its own; the closes that cannot
-    occur there are in a separate arm, listed for exhaustiveness. (4) Renamed
-    `first_key_shares` to `taking_over` and `section_shares` to `first_name_brace`. No behaviour
-    change.
-  - Checks: `scripts/ci.sh` passed all 26 steps; the eighteen pending cases pass in the copy with
-    them moved into `cases/spec/09-macros/`.
-  - Commits: `docs(clean-room): ask whether a later skip counts across input units`,
-    `test(parse): pin that only the document's own skips recover a first-directory miss`,
-    `refactor(parse): name the brace-takeover flags for what they hold`, and this entry with the
-    rewrap. Not pushed.
-  - Attestation: I did not read libucl source code or any forbidden input listed in
-    docs/clean-room/PROTOCOL.md.
-
-- 2026-10-01 — Role: spec team. Item: C14 spec-v20 case activation. Moved the eighteen `spec-v20`
-  cases and their golden files unchanged from `tests/conformance/pending/09-macros/` into
-  `cases/spec/09-macros/`, now that the crate follows §9.4 and §12.5 there; dropped the fixture
-  copies they alone used (`files/v20/`, and `braced.inc`, `close_brace.inc` and `left_open.inc`
-  under `files/v4/`), byte-identical to the active ones, and kept the copies the `spec-v21`
-  cases still read. Updated the spec index (1,711 active cases, fourteen pending `spec-v21` cases),
-  its eighteen rows, the three §12.5 citations of these cases (paths only), and the conformance
-  and pending READMEs. In a copy with every pending case moved in, the crate passed all eighteen
-  and failed all fourteen `spec-v21` cases. A fresh `scripts/regen-golden.sh` run changed no golden
-  file. Checks: `cargo test --test conformance` (1,711 cases, the four expected failures
-  unchanged), `scripts/ci.sh`, `git diff --check`. Commit: the following
-  `test(conformance): activate spec-v20 cases` commit on `c14/spec20-impl`. Not pushed.
-  Attestation: the case move and documentation contain observable behavior only, with no libucl
-  code, pseudo-code, internal names or source structure.
+- 2026-10-02 — Role: spec coordinator. Item: C15 Stage A release, spec-v22.
+  - Inputs: current CLAUDE.md/PROTOCOL.md first; reviewed Stage A contract,
+    declaration header/inventory/case selection, independent review report, clean
+    public-interface cases/snapshots, current work goals/provenance and spec-owned
+    comparison runner. No forbidden notes/history or session memory consulted.
+  - Verified write access to .git and the separate implementation worktree.
+    Latest released spec-v21 (7a2319c) is not an ancestor of main (c497f7e);
+    release base is spec-v21, preserving all latest released format rules.
+  - Release includes only reviewed Stage A material and clean evidence, review
+    provenance and work goals. Draft status/relative links updated; no broader
+    research proposal, oracle tools or temporary owner implementation plan included.
+    Original checkout and its unrelated changes are preserved.
+  - Independent review: reviews/c15-stage-a.md approves behavior/declarations;
+    runtime/ASan evidence there is explicitly attributed to prior spec-side runs.
+  - Validation: reran the spec-owned comparison runner against the pinned reference:
+    all ten clean cases, 43 typed signature/link checks, two header/library
+    combinations and C++11 header checks passed on Darwin arm64; no golden drift.
+    Reviewed release links and git diff --check passed.
+  - Commit: docs(spec): release spec v22; annotated tag spec-v22 points to it.
+    Fresh implementation handoff follows release on c15/initial-c-api.
+  - Attestation: released specification contains observable behavior and public
+    interface declarations only, without executable upstream code or control-flow
+    pseudocode; no src/ or capi/ implementation authored by this participant.

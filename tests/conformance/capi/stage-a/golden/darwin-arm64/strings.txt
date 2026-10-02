@@ -1,0 +1,7 @@
+nul-value[3]=610062
+nul-zstring[1]=61
+nul-key-value=7,cstr-miss=1
+nul-key[3]=6b0078
+nul-key-z[1]=6b
+unicode[2]=c3a9
+bounded-key=1,zero-keylen-miss=1,wrong-type-lookup=1,wrong-type-array-size=0,missing-index=1

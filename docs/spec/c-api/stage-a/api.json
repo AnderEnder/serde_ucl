@@ -1,0 +1,739 @@
+{
+  "status": "Released in spec-v22 after independent Stage A review",
+  "reference_commit": "24c8b399062ae4691168c243e3b7345ef7f31956",
+  "reference_header_sha256": "6b751df6673825d7289e887700dc0505d45a271c54bb299e573a479e1b6a46d9",
+  "functions": [
+    {
+      "name": "ucl_copy_key_trash",
+      "declaration": "char *ucl_copy_key_trash(const ucl_object_t *obj);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_copy_value_trash",
+      "declaration": "char *ucl_copy_value_trash(const ucl_object_t *obj);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_new",
+      "declaration": "ucl_object_t *ucl_object_new(void) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_typed_new",
+      "declaration": "ucl_object_t *ucl_object_typed_new(ucl_type_t type) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_new_full",
+      "declaration": "ucl_object_t *ucl_object_new_full(ucl_type_t type, unsigned priority) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_new_userdata",
+      "declaration": "ucl_object_t *ucl_object_new_userdata(ucl_userdata_dtor dtor, ucl_userdata_emitter emitter, void *ptr) ;",
+      "provided": false,
+      "reason": "Opaque userdata is absent from the Rust value model."
+    },
+    {
+      "name": "ucl_object_copy",
+      "declaration": "ucl_object_t *ucl_object_copy(const ucl_object_t *other) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_type",
+      "declaration": "ucl_type_t ucl_object_type(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_type_to_string",
+      "declaration": "const char *ucl_object_type_to_string(ucl_type_t type);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_string_to_type",
+      "declaration": "bool ucl_object_string_to_type(const char *input, ucl_type_t *res);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_fromstring_common",
+      "declaration": "ucl_object_t *ucl_object_fromstring_common(const char *str, size_t len, enum ucl_string_flags flags) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_fromstring",
+      "declaration": "ucl_object_t *ucl_object_fromstring(const char *str) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_fromlstring",
+      "declaration": "ucl_object_t *ucl_object_fromlstring(const char *str, size_t len) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_fromint",
+      "declaration": "ucl_object_t *ucl_object_fromint(int64_t iv) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_fromdouble",
+      "declaration": "ucl_object_t *ucl_object_fromdouble(double dv) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_frombool",
+      "declaration": "ucl_object_t *ucl_object_frombool(bool bv) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_insert_key",
+      "declaration": "bool ucl_object_insert_key(ucl_object_t *top, ucl_object_t *elt, const char *key, size_t keylen, bool copy_key);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_replace_key",
+      "declaration": "bool ucl_object_replace_key(ucl_object_t *top, ucl_object_t *elt, const char *key, size_t keylen, bool copy_key);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_merge",
+      "declaration": "bool ucl_object_merge(ucl_object_t *top, ucl_object_t *elt, bool copy);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_delete_keyl",
+      "declaration": "bool ucl_object_delete_keyl(ucl_object_t *top, const char *key, size_t keylen);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_delete_key",
+      "declaration": "bool ucl_object_delete_key(ucl_object_t *top, const char *key);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_pop_keyl",
+      "declaration": "ucl_object_t *ucl_object_pop_keyl(ucl_object_t *top, const char *key, size_t keylen) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_pop_key",
+      "declaration": "ucl_object_t *ucl_object_pop_key(ucl_object_t *top, const char *key) ;",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_insert_key_merged",
+      "declaration": "bool ucl_object_insert_key_merged(ucl_object_t *top, ucl_object_t *elt, const char *key, size_t keylen, bool copy_key);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_reserve",
+      "declaration": "bool ucl_object_reserve(ucl_object_t *obj, size_t reserved);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_append",
+      "declaration": "bool ucl_array_append(ucl_object_t *top, ucl_object_t *elt);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_prepend",
+      "declaration": "bool ucl_array_prepend(ucl_object_t *top, ucl_object_t *elt);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_merge",
+      "declaration": "bool ucl_array_merge(ucl_object_t *top, ucl_object_t *elt, bool copy);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_delete",
+      "declaration": "ucl_object_t *ucl_array_delete(ucl_object_t *top, ucl_object_t *elt);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_head",
+      "declaration": "const ucl_object_t *ucl_array_head(const ucl_object_t *top);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_tail",
+      "declaration": "const ucl_object_t *ucl_array_tail(const ucl_object_t *top);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_pop_last",
+      "declaration": "ucl_object_t *ucl_array_pop_last(ucl_object_t *top);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_pop_first",
+      "declaration": "ucl_object_t *ucl_array_pop_first(ucl_object_t *top);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_size",
+      "declaration": "unsigned int ucl_array_size(const ucl_object_t *top);",
+      "provided": true
+    },
+    {
+      "name": "ucl_array_find_index",
+      "declaration": "const ucl_object_t *ucl_array_find_index(const ucl_object_t *top, unsigned int index);",
+      "provided": true
+    },
+    {
+      "name": "ucl_array_index_of",
+      "declaration": "unsigned int ucl_array_index_of(ucl_object_t *top, ucl_object_t *elt);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_array_replace_index",
+      "declaration": "ucl_object_t * ucl_array_replace_index(ucl_object_t *top, ucl_object_t *elt, unsigned int index);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_elt_append",
+      "declaration": "ucl_object_t *ucl_elt_append(ucl_object_t *head, ucl_object_t *elt);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_todouble_safe",
+      "declaration": "bool ucl_object_todouble_safe(const ucl_object_t *obj, double *target);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_todouble",
+      "declaration": "double ucl_object_todouble(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_toint_safe",
+      "declaration": "bool ucl_object_toint_safe(const ucl_object_t *obj, int64_t *target);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_toint",
+      "declaration": "int64_t ucl_object_toint(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_toboolean_safe",
+      "declaration": "bool ucl_object_toboolean_safe(const ucl_object_t *obj, bool *target);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_toboolean",
+      "declaration": "bool ucl_object_toboolean(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_tostring_safe",
+      "declaration": "bool ucl_object_tostring_safe(const ucl_object_t *obj, const char **target);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_tostring",
+      "declaration": "const char *ucl_object_tostring(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_tostring_forced",
+      "declaration": "const char *ucl_object_tostring_forced(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_tolstring_safe",
+      "declaration": "bool ucl_object_tolstring_safe(const ucl_object_t *obj, const char **target, size_t *tlen);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_tolstring",
+      "declaration": "const char *ucl_object_tolstring(const ucl_object_t *obj, size_t *tlen);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_lookup",
+      "declaration": "const ucl_object_t *ucl_object_lookup(const ucl_object_t *obj, const char *key);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_lookup_any",
+      "declaration": "const ucl_object_t *ucl_object_lookup_any(const ucl_object_t *obj, const char *key, ...);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_lookup_len",
+      "declaration": "const ucl_object_t *ucl_object_lookup_len(const ucl_object_t *obj, const char *key, size_t klen);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_lookup_path",
+      "declaration": "const ucl_object_t *ucl_object_lookup_path(const ucl_object_t *obj, const char *path);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_lookup_path_char",
+      "declaration": "const ucl_object_t *ucl_object_lookup_path_char(const ucl_object_t *obj, const char *path, char sep);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_key",
+      "declaration": "const char *ucl_object_key(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_keyl",
+      "declaration": "const char *ucl_object_keyl(const ucl_object_t *obj, size_t *len);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_ref",
+      "declaration": "ucl_object_t *ucl_object_ref(const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_unref",
+      "declaration": "void ucl_object_unref(ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_compare",
+      "declaration": "int ucl_object_compare(const ucl_object_t *o1, const ucl_object_t *o2);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_compare_qsort",
+      "declaration": "int ucl_object_compare_qsort(const ucl_object_t **o1, const ucl_object_t **o2);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_array_sort",
+      "declaration": "void ucl_object_array_sort(ucl_object_t *ar, int (*cmp)(const ucl_object_t **o1, const ucl_object_t **o2));",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_sort_keys",
+      "declaration": "void ucl_object_sort_keys(ucl_object_t *obj, enum ucl_object_keys_sort_flags how);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_get_priority",
+      "declaration": "unsigned int ucl_object_get_priority(const ucl_object_t *obj);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_set_priority",
+      "declaration": "void ucl_object_set_priority(ucl_object_t *obj, unsigned int priority);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_iterate_with_error",
+      "declaration": "const ucl_object_t *ucl_object_iterate_with_error(const ucl_object_t *obj, ucl_object_iter_t *iter, bool expand_values, int *ep);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iterate_end",
+      "declaration": "void ucl_object_iterate_end(const ucl_object_t *obj, ucl_object_iter_t *iter);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iterate_new",
+      "declaration": "ucl_object_iter_t ucl_object_iterate_new(const ucl_object_t *obj) ;",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iter_chk_excpn",
+      "declaration": "bool ucl_object_iter_chk_excpn(ucl_object_iter_t *it);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iterate_reset",
+      "declaration": "ucl_object_iter_t ucl_object_iterate_reset(ucl_object_iter_t it, const ucl_object_t *obj);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iterate_safe",
+      "declaration": "const ucl_object_t *ucl_object_iterate_safe(ucl_object_iter_t iter, bool expand_values);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iterate_full",
+      "declaration": "const ucl_object_t *ucl_object_iterate_full(ucl_object_iter_t iter, enum ucl_iterate_type type);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_iterate_free",
+      "declaration": "void ucl_object_iterate_free(ucl_object_iter_t it);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_new",
+      "declaration": "struct ucl_parser *ucl_parser_new(int flags);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_set_default_priority",
+      "declaration": "bool ucl_parser_set_default_priority(struct ucl_parser *parser, unsigned prio);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_get_default_priority",
+      "declaration": "int ucl_parser_get_default_priority(struct ucl_parser *parser);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_set_limits",
+      "declaration": "void ucl_parser_set_limits(struct ucl_parser *parser, const struct ucl_parser_limits *limits);",
+      "provided": false,
+      "reason": "Structural/allocation budgets are absent from the current Rust parser API."
+    },
+    {
+      "name": "ucl_parser_get_limits",
+      "declaration": "void ucl_parser_get_limits(struct ucl_parser *parser, struct ucl_parser_limits *limits);",
+      "provided": false,
+      "reason": "Structural/allocation budgets are absent from the current Rust parser API."
+    },
+    {
+      "name": "ucl_parser_register_macro",
+      "declaration": "bool ucl_parser_register_macro(struct ucl_parser *parser, const char *macro, ucl_macro_handler handler, void *ud);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_register_context_macro",
+      "declaration": "bool ucl_parser_register_context_macro(struct ucl_parser *parser, const char *macro, ucl_context_macro_handler handler, void *ud);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_register_variable",
+      "declaration": "void ucl_parser_register_variable(struct ucl_parser *parser, const char *var, const char *value);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_set_variables_handler",
+      "declaration": "void ucl_parser_set_variables_handler(struct ucl_parser *parser, ucl_variable_handler handler, void *ud);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_chunk",
+      "declaration": "bool ucl_parser_add_chunk(struct ucl_parser *parser, const unsigned char *data, size_t len);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_add_chunk_priority",
+      "declaration": "bool ucl_parser_add_chunk_priority(struct ucl_parser *parser, const unsigned char *data, size_t len, unsigned priority);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_insert_chunk",
+      "declaration": "bool ucl_parser_insert_chunk(struct ucl_parser *parser, const unsigned char *data, size_t len);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_chunk_full",
+      "declaration": "bool ucl_parser_add_chunk_full(struct ucl_parser *parser, const unsigned char *data, size_t len, unsigned priority, enum ucl_duplicate_strategy strat, enum ucl_parse_type parse_type);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_string",
+      "declaration": "bool ucl_parser_add_string(struct ucl_parser *parser, const char *data, size_t len);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_add_string_priority",
+      "declaration": "bool ucl_parser_add_string_priority(struct ucl_parser *parser, const char *data, size_t len, unsigned priority);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_file",
+      "declaration": "bool ucl_parser_add_file(struct ucl_parser *parser, const char *filename);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_add_file_priority",
+      "declaration": "bool ucl_parser_add_file_priority(struct ucl_parser *parser, const char *filename, unsigned priority);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_file_full",
+      "declaration": "bool ucl_parser_add_file_full(struct ucl_parser *parser, const char *filename, unsigned priority, enum ucl_duplicate_strategy strat, enum ucl_parse_type parse_type);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_fd",
+      "declaration": "bool ucl_parser_add_fd(struct ucl_parser *parser, int fd);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_fd_priority",
+      "declaration": "bool ucl_parser_add_fd_priority(struct ucl_parser *parser, int fd, unsigned priority);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_fd_full",
+      "declaration": "bool ucl_parser_add_fd_full(struct ucl_parser *parser, int fd, unsigned priority, enum ucl_duplicate_strategy strat, enum ucl_parse_type parse_type);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_set_include_path",
+      "declaration": "bool ucl_set_include_path(struct ucl_parser *parser, ucl_object_t *paths);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_get_object",
+      "declaration": "ucl_object_t *ucl_parser_get_object(struct ucl_parser *parser);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_get_current_stack_object",
+      "declaration": "ucl_object_t *ucl_parser_get_current_stack_object(struct ucl_parser *parser, unsigned int depth);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_chunk_peek",
+      "declaration": "unsigned char ucl_parser_chunk_peek(struct ucl_parser *parser);",
+      "provided": false,
+      "reason": "Raw parser cursor access is absent from the Rust macro API."
+    },
+    {
+      "name": "ucl_parser_chunk_skip",
+      "declaration": "bool ucl_parser_chunk_skip(struct ucl_parser *parser);",
+      "provided": false,
+      "reason": "Raw parser cursor access is absent from the Rust macro API."
+    },
+    {
+      "name": "ucl_parser_get_error",
+      "declaration": "const char *ucl_parser_get_error(struct ucl_parser *parser);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_get_error_code",
+      "declaration": "int ucl_parser_get_error_code(struct ucl_parser *parser);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_get_column",
+      "declaration": "unsigned ucl_parser_get_column(struct ucl_parser *parser);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_get_linenum",
+      "declaration": "unsigned ucl_parser_get_linenum(struct ucl_parser *parser);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_clear_error",
+      "declaration": "void ucl_parser_clear_error(struct ucl_parser *parser);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_free",
+      "declaration": "void ucl_parser_free(struct ucl_parser *parser);",
+      "provided": true
+    },
+    {
+      "name": "ucl_parser_get_comments",
+      "declaration": "const ucl_object_t *ucl_parser_get_comments(struct ucl_parser *parser);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_comments_find",
+      "declaration": "const ucl_object_t *ucl_comments_find(const ucl_object_t *comments, const ucl_object_t *srch);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_comments_move",
+      "declaration": "bool ucl_comments_move(ucl_object_t *comments, const ucl_object_t *from, const ucl_object_t *to);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_comments_add",
+      "declaration": "void ucl_comments_add(ucl_object_t *comments, const ucl_object_t *obj, const char *comment);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_pubkey_add",
+      "declaration": "bool ucl_parser_pubkey_add(struct ucl_parser *parser, const unsigned char *key, size_t len);",
+      "provided": false,
+      "reason": "Signature verification is deliberately unsupported."
+    },
+    {
+      "name": "ucl_parser_set_filevars",
+      "declaration": "bool ucl_parser_set_filevars(struct ucl_parser *parser, const char *filename, bool need_expand);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_get_cur_file",
+      "declaration": "const char *ucl_parser_get_cur_file(struct ucl_parser *parser);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_parser_add_special_handler",
+      "declaration": "void ucl_parser_add_special_handler(struct ucl_parser *parser, struct ucl_parser_special_handler *handler);",
+      "provided": false,
+      "reason": "Input preprocessor callbacks are absent from the Rust API."
+    },
+    {
+      "name": "ucl_parser_set_include_tracer",
+      "declaration": "void ucl_parser_set_include_tracer(struct ucl_parser *parser, ucl_include_trace_func_t func, void *user_data);",
+      "provided": false,
+      "reason": "Include tracing callbacks are absent from the Rust API."
+    },
+    {
+      "name": "ucl_object_emit",
+      "declaration": "unsigned char *ucl_object_emit(const ucl_object_t *obj, enum ucl_emitter emit_type);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_emit_len",
+      "declaration": "unsigned char *ucl_object_emit_len(const ucl_object_t *obj, enum ucl_emitter emit_type, size_t *len);",
+      "provided": true
+    },
+    {
+      "name": "ucl_object_emit_full",
+      "declaration": "bool ucl_object_emit_full(const ucl_object_t *obj, enum ucl_emitter emit_type, struct ucl_emitter_functions *emitter, const ucl_object_t *comments);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_emit_streamline_new",
+      "declaration": "struct ucl_emitter_context *ucl_object_emit_streamline_new( const ucl_object_t *obj, enum ucl_emitter emit_type, struct ucl_emitter_functions *emitter);",
+      "provided": false,
+      "reason": "Incremental emitter contexts are absent from the Rust API."
+    },
+    {
+      "name": "ucl_object_emit_streamline_start_container",
+      "declaration": "bool ucl_object_emit_streamline_start_container( struct ucl_emitter_context *ctx, const ucl_object_t *obj);",
+      "provided": false,
+      "reason": "Incremental emitter contexts are absent from the Rust API."
+    },
+    {
+      "name": "ucl_object_emit_streamline_add_object",
+      "declaration": "void ucl_object_emit_streamline_add_object( struct ucl_emitter_context *ctx, const ucl_object_t *obj);",
+      "provided": false,
+      "reason": "Incremental emitter contexts are absent from the Rust API."
+    },
+    {
+      "name": "ucl_object_emit_streamline_end_container",
+      "declaration": "void ucl_object_emit_streamline_end_container( struct ucl_emitter_context *ctx);",
+      "provided": false,
+      "reason": "Incremental emitter contexts are absent from the Rust API."
+    },
+    {
+      "name": "ucl_object_emit_streamline_finish",
+      "declaration": "void ucl_object_emit_streamline_finish( struct ucl_emitter_context *ctx);",
+      "provided": false,
+      "reason": "Incremental emitter contexts are absent from the Rust API."
+    },
+    {
+      "name": "ucl_object_emit_memory_funcs",
+      "declaration": "struct ucl_emitter_functions *ucl_object_emit_memory_funcs( void **pmem);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_emit_file_funcs",
+      "declaration": "struct ucl_emitter_functions *ucl_object_emit_file_funcs( FILE *fp);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_emit_fd_funcs",
+      "declaration": "struct ucl_emitter_functions *ucl_object_emit_fd_funcs( int fd);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_emit_funcs_free",
+      "declaration": "void ucl_object_emit_funcs_free(struct ucl_emitter_functions *f);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    },
+    {
+      "name": "ucl_object_validate",
+      "declaration": "bool ucl_object_validate(const ucl_object_t *schema, const ucl_object_t *obj, struct ucl_schema_error *err);",
+      "provided": false,
+      "reason": "JSON Schema validation is absent from the Rust crate."
+    },
+    {
+      "name": "ucl_object_validate_root",
+      "declaration": "bool ucl_object_validate_root(const ucl_object_t *schema, const ucl_object_t *obj, const ucl_object_t *root, struct ucl_schema_error *err);",
+      "provided": false,
+      "reason": "JSON Schema validation is absent from the Rust crate."
+    },
+    {
+      "name": "ucl_object_validate_root_ext",
+      "declaration": "bool ucl_object_validate_root_ext(const ucl_object_t *schema, const ucl_object_t *obj, const ucl_object_t *root, ucl_object_t *ext_refs, struct ucl_schema_error *err);",
+      "provided": false,
+      "reason": "JSON Schema validation is absent from the Rust crate."
+    },
+    {
+      "name": "ucl_object_free",
+      "declaration": "void ucl_object_free(ucl_object_t *obj);",
+      "provided": false,
+      "reason": "Deferred beyond the initial one-input/read-only C15 milestone."
+    }
+  ],
+  "scope": "single submitted input; read-only values; 43 functions"
+}

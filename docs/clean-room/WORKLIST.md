@@ -430,3 +430,23 @@ The spec team writes the C API's spec from libucl's public header and documentat
 types, constants, ownership and reference counting, error reporting. It also writes a test harness
 that runs the same C programs against libucl and the crate. The implementation team works from
 the released spec, as for the format.
+
+### C15 Stage A authorized milestone (2026-10-02)
+
+The owner authorized 43 initial functions, supported aliases, one complete input,
+read-only results, lookup, conversions, iteration and four text emitters on branch
+`c15/initial-c-api`. The behavior/ABI contract and declaration-only header are
+released in `spec-v22` at `docs/spec/c-api/stage-a/`; clean public-interface cases
+and ten Darwin arm64 snapshots are in `tests/conformance/capi/stage-a/`.
+Independent review approved the contract (`reviews/c15-stage-a.md`).
+
+A fresh implementation participant derives its own plan from the released contract.
+Deliver a separate `capi/` package with static/shared libraries named `ucl`, an
+installable header, all 43 functions/aliases and their observable ABI, ownership,
+diagnostics, iteration and emission behavior. Core changes must be necessary and
+additive; existing Rust behavior must be preserved. Validate C/C++ headers, every
+symbol, static/shared linkage, conformance, lifetimes, deep-stack behavior and the
+required Rust checks. Update public documentation, changelog and clean-room
+provenance; commit on the separate branch. No merge, push or package publication
+is authorized. Broad research notes, oracle-tooling source and the spec-team
+temporary implementation plan are not implementation inputs.
