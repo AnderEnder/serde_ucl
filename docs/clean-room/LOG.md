@@ -5745,3 +5745,10 @@ No merge, push, tag, publish or upload occurred.
 Commit: `docs(capi): record clean native archive validation` (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 pull request
+
+- Owner requested a GitHub PR following existing repository PRs; this authorizes pushing the implementation branch for review. No merge, tag push, or release publication.
+- Inputs: current CLAUDE.md and PROTOCOL.md, branch/worktree metadata, existing GitHub PR descriptions, workflow configuration, and diff file statistics. No implementation source was read or edited. The released specification remains behaviour only.
+- Fetched origin/main at e4dd295. A non-mutating merge preview reports conflicts in CHANGELOG.md, LOG.md, QUESTIONS.md, the spec index, and conformance README files. Existing validation applies to the implementation branch before integration with current main; these conflicts are disclosed in the PR.
+- This session produces a provenance-only commit and pushes c15/initial-c-api to open the PR. Original-worktree changes remain untouched.
