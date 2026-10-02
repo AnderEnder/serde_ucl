@@ -5572,3 +5572,27 @@ publication status. No implementation/header changes.
 Commit: docs(capi): point SDK users to bundled released contract (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-03 — Role: spec coordinator. Item: C15 native CI release reference gate.
+  - Owner requested GitHub CI release SDKs for Linux amd64, Linux arm64 and
+    macOS arm64; FreeBSD was a runner-availability question, not added scope.
+  - Inputs: current CLAUDE.md/PROTOCOL.md first; released spec-v22 Stage A
+    contract/header/case selection; existing spec-owned comparator; pinned
+    reference build metadata and current package/workflow metadata; official
+    GitHub runner documentation. No forbidden history/session memory consulted.
+  - Added spec-owned tools/capi-conformance black-box gate, isolated ignored
+    reference checkout/build, verified commit/header hash, oracle-only native
+    snapshots, then candidate static/shared comparisons; CI evidence records
+    platform and input/output hashes. Ten cases and 43 signatures only; broad
+    research proposal is excluded. Implementation participant receives public
+    CLI/evidence schema only and cannot read tools/ or upstream source.
+  - Validation on Darwin arm64: rebuilt pinned reference, verified unchanged
+    released snapshots, ten cases and 43 signature/link checks across both
+    candidates/four header-library combinations each; C11/C++11 checks pass.
+    Candidate-derived golden updates and corrupted oracle evidence are rejected.
+    Python syntax and git diff --check pass. Linux executes in future native
+    matrix jobs; no local Linux runtime result is claimed.
+  - Commit: test(capi): gate native release SDKs against pinned reference,
+    Work item C15. No merge, push, release tag or publication performed.
+  - Attestation: released specification remains behavior-only and unchanged;
+    coordinator changed spec-owned tooling/provenance only, no src/ or capi/ code.
