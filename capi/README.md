@@ -12,57 +12,128 @@ false, records ESTATE and preserves the first result. Constructors, mutation,
 callbacks, comment access, binary emission and multiple-input parsing are deferred.
 The public Rust crate retains its existing defaults and APIs.
 
-## Build, install and link
+## Distribution identity and isolation
 
-Rust 1.98 or newer, C/C++ compilers, make, Python 3 and matching LLVM symbol tools are needed for the complete check.
-From the repository root:
+The opt-in C package/distribution is **serde-ucl-c**; its pkg-config module is
+**serde-ucl**. It exports library `ucl` and header `ucl.h` to preserve the released
+C interface. The Rust crate `serde_ucl` does not build/install this library by
+default, and its crates.io package contents remain unchanged.
 
-```sh
-cargo build --release --manifest-path capi/Cargo.toml
-make -C capi install PREFIX="$PWD/capi/target/install"
-rustup component add llvm-tools
-python3 capi/tests/check.py
-```
+This is a 43-function read-only subset, not a full upstream libucl replacement.
+Use a dedicated installation prefix and explicit `PKG_CONFIG_PATH` to select it
+alongside upstream libucl. Do not install both libraries/headers into the same
+prefix, link both into one process, or exchange their handles. Symbol and header
+names overlap; distinct package identity does not provide symbol namespaces.
+Linux and other binary targets are deferred until reference ABI/behavior validation.
 
-The installed header is an exact copy of the released declaration artifact,
-including its license notice. `DESTDIR` supports staged installation; `PREFIX`
-defaults to `/usr/local`. Installation of the Darwin shared library sets its
-install name to `@rpath/libucl.dylib`.
+## Build and install from source
 
-On Darwin, compile a C application against the installed static library with:
-
-```sh
-cc -std=c11 -Icapi/target/install/include app.c \
-  capi/target/install/lib/libucl.a -framework Security -framework CoreFoundation \
-  -liconv -lSystem -lc -lm -o app
-```
-
-For the shared library:
+Source builds require Rust 1.98 or newer, a native C linker/toolchain, and pinned
+[cargo-c 0.10.25](https://github.com/lu-zero/cargo-c/blob/v0.10.25/docs/configuration.md).
+The source archive includes both `capi/` and its Rust path dependency; keep them
+together. Its root manifest omits benchmark targets because those development
+harnesses are excluded; Rust/C implementation sources are unchanged. Registry dependencies are fetched by Cargo (the archive is not vendored
+or an offline build). From the extracted source directory or repository root:
 
 ```sh
-cc -std=c11 -Icapi/target/install/include app.c -Lcapi/target/install/lib -lucl \
-  -Wl,-rpath,"$PWD/capi/target/install/lib" -o app
+cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
+cargo cinstall --locked --release --manifest-path capi/Cargo.toml \
+  --prefix "$HOME/.local/serde-ucl-c"
 ```
 
-Linux static links use `-ldl -lpthread -lm`; shared links similarly use `-L` and
-an installation-directory rpath. To obtain the actual native static dependencies
-for your Rust toolchain and target:
+`make -C capi install PREFIX=... DESTDIR=...` wraps cargo-c; `DESTDIR` stages the
+installation while retaining the final prefix in the library/pkg-config metadata.
+The default prefix is `/usr/local`; choose an isolated prefix explicitly. cargo-c
+copies the exact reviewed `include/ucl.h`; declaration generation and version
+constants are disabled. Package version follows the Rust release version; update
+`capi/Cargo.toml` and `capi/Cargo.lock` together with the root release manifests.
+The release check rejects a C/Rust version mismatch.
+
+The shared ABI version is independently set to **1.0.0** in
+`package.metadata.capi.library`. Its Darwin install identity is
+`<prefix>/lib/libucl.1.dylib` for an ordinary source installation, with compatibility
+version 1.0.0 and current version 1.0.0. The SDK instead uses
+`@rpath/libucl.1.dylib`. `libucl.dylib` is the development symlink. ABI-breaking
+changes require a new ABI major and reviewed contract; compatible additions may
+raise the ABI minor, and compatible fixes may raise the patch. Rust semver alone
+does not change the C ABI major. Rebuild static consumers when upgrading.
+
+## macOS arm64 SDK: no Rust needed
+
+Future normal GitHub releases attach `serde-ucl-c-VERSION-source.tar.gz`,
+`serde-ucl-c-VERSION-macos-arm64.tar.gz`, and outer `SHA256SUMS`. Each archive
+also contains file checksums, project/dependency/Rust runtime license notices and `BUILD-INFO.json` recording its source
+commit, released spec, toolchain and ABI. The SDK contains `include/ucl.h`, static
+and shared libraries, `lib/pkgconfig/serde-ucl.pc`, and this README. Extract it
+wherever desired; its pkg-config prefix and shared-library identity are relocatable.
+A C/C++ compiler and pkg-config suffice for consumption; Rust and cargo-c are
+build tools only.
+
+The binary deployment minimum is **macOS 11.0 on arm64 (LP64)**. Local runtime
+validation used macOS 15.8.1; release CI validates on its macOS arm64 runner.
+The deployment minimum is checked in Mach-O metadata; older OS runtime testing
+is not claimed. No Intel/universal, Linux or other SDK is released in this stage.
+
+Verify the downloaded archive checksums before extracting, then the extracted files:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+tar -xzf serde-ucl-c-VERSION-macos-arm64.tar.gz
+cd serde-ucl-c-VERSION-macos-arm64
+shasum -a 256 -c SHA256SUMS
+export SDK="$PWD"
+export PKG_CONFIG_PATH="$SDK/lib/pkgconfig"
+pkg-config --modversion serde-ucl
+cc app.c $(pkg-config --cflags --libs serde-ucl) \
+  -Wl,-rpath,"$SDK/lib" -o app
+```
+
+For static linkage, select the archive explicitly because macOS otherwise prefers
+the shared library when both are present. Retain the native dependencies reported
+by `--static`:
+
+```sh
+cc app.c $(pkg-config --cflags serde-ucl) "$SDK/lib/libucl.a" \
+  $(pkg-config --static --libs-only-other serde-ucl) \
+  $(pkg-config --static --libs-only-l serde-ucl | sed 's/-lucl//g') -o app
+```
+
+For this macOS build, native static dependencies are `iconv`, `System`, `c` and
+`m`; cargo-c records them in `Libs.private`.
+For source builds on other targets the actual toolchain dependencies are authoritative:
 
 ```sh
 cargo rustc --release --manifest-path capi/Cargo.toml --lib -- --print native-static-libs
 ```
 
-The public conformance program is a working link example: replace `app.c` above
-with `tests/conformance/capi/stage-a/probe.c`, then run `./app lifetime`. The check
-script builds and executes that program with static and shared linkage, checks
-all ten snapshots and compiles typed function pointers independently generated
-from the released function inventory. It also checks the C11 and C++11 header,
-installed artifacts, caller lifetime/boundary tests and deep trees. Its sanitizer
-modes are `--sanitize` (C ASan/UBSan) and `--rust-asan` (nightly Rust ASan plus C ASan/UBSan). Darwin does not support LeakSanitizer; the scope of each run is printed. These modes require sanitizer runtimes, and the Rust mode requires nightly with LLVM tools installed.
+Ship `libucl.1.0.0.dylib` and its `libucl.1.dylib` alias with a shared application and set an appropriate rpath
+(for example `@executable_path/../lib`); keep its install identity intact. The SDK
+is unsigned and not notarized; application signing/distribution belongs to its owner.
 
-On Darwin, full Rust instrumentation needs a non-Apple LLVM clang with a
-compatible upstream ASan runtime; the system Apple clang runtime does not
-satisfy Rust nightly's runtime version check. The validated command was:
+## Local archives and validation
+
+In a repository checkout, Python 3.12+, pkg-config, C/C++ compilers, Xcode command-line Mach-O tools and
+Rust LLVM tools are required for archive validation on macOS arm64:
+
+```sh
+rustup component add llvm-tools rust-docs
+python3 capi/distribution.py --verify
+python3 capi/tests/check.py
+```
+
+Artifacts go to `target/c15-dist` (`--output DIR` changes the destination).
+`--verify` extracts both archives, moves the SDK to a path containing a space,
+checks contents/checksums/header/ABI/deployment metadata and all 43 symbols and
+C11/C++11 signatures, runs all ten released snapshots plus boundary/lifetime/depth
+checks using static/shared pkg-config linkage, and builds/installs the extracted
+source with its locked dependencies before repeating the checks. `BUILD-INFO.json`
+marks local dirty-tree builds; release CI builds from the tested tagged commit.
+
+The existing conformance driver also validates direct and installed libraries.
+Its `--sanitize` mode instruments C callers with ASan/UBSan; `--rust-asan`
+instruments Rust with nightly ASan plus C ASan/UBSan. Darwin has no LeakSanitizer.
+Full Rust instrumentation requires a compatible non-Apple LLVM compiler/runtime;
+the validated command is:
 
 ```sh
 CC=/opt/homebrew/opt/llvm@21/bin/clang \
@@ -70,12 +141,8 @@ CXX=/opt/homebrew/opt/llvm@21/bin/clang++ \
 python3 capi/tests/check.py --rust-asan
 ```
 
-The driver uses nightly `llvm-nm` to inspect nightly archives, external clang
-runtime linkage and, on Darwin, preloads that compiler's ASan runtime for shared
-library interception. Install the `llvm-tools` component for the selected
-Rust toolchain if its `llvm-nm` is unavailable. `--sanitize` also checks direct
-and installed libraries with C ASan/UBSan; `--rust-asan` checks fully instrumented
-direct static/shared libraries. Both passed on Darwin arm64. The Rust library and its dependencies are instrumented in the nightly run; the prebuilt Rust standard library is uninstrumented. LeakSanitizer is unavailable on Darwin.
+The prebuilt Rust standard library remains uninstrumented. The conformance program
+in `tests/conformance/capi/stage-a/probe.c` is also a complete C link example.
 
 ## Ownership and caller domain
 

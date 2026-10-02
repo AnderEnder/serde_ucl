@@ -4,6 +4,15 @@ All notable changes to this crate are recorded here.
 
 ## Unreleased
 
+### C distribution
+
+C15 adds cargo-c installation using the unchanged reviewed header, distinct
+`serde-ucl-c` package and `serde-ucl` pkg-config identities, and independent shared
+ABI 1.0.0. Locally verified source and relocatable macOS arm64 SDK archives include
+licenses, provenance and checksums. Release CI validates them before Rust Trusted
+Publishing and attaches them to the same GitHub release; other binary targets remain
+deferred. Source builds and static/shared C consumption are documented.
+
 ### Initial C API (spec-v22)
 
 Clean-room work item C15. The separate `capi/` package builds static/shared

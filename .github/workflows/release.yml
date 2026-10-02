@@ -4,11 +4,12 @@
 #   version         scripts/ci.sh release: the tag is vX.Y.Z for the version in Cargo.toml, and
 #                   CHANGELOG.md has a section for it
 #   checks          ci.yml, that is scripts/ci.sh, on Linux and macOS
+#   c-distribution  clean-build and verify source + macOS arm64 SDK archives from that commit
 #   publish         cargo publish, with a short-lived crates.io token from Trusted Publishing;
 #                   skipped with a notice when crates.io has the version already, so that the
 #                   workflow can be run again
 #   github-release  the GitHub release for the tag, with the version's CHANGELOG.md section as
-#                   its notes; a release that exists already is left as it is
+#                   its notes; existing notes are preserved and C attachments are refreshed
 #
 # Publishing uses crates.io Trusted Publishing: no crates.io token is stored in the repository.
 # The publish job runs in the GitHub environment `release` and asks GitHub for an OIDC token
@@ -50,8 +51,35 @@ jobs:
     needs: version
     uses: ./.github/workflows/ci.yml
 
-  publish:
+  c-distribution:
+    name: verified macOS arm64 C distribution
     needs: checks
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rust-docs
+      - name: scripts/ci.sh release
+        run: scripts/ci.sh release "$GITHUB_REF_NAME"
+      - name: Verify native arm64 runner
+        run: test "$(uname -m)" = arm64
+      - name: Install pinned cargo-c
+        run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
+      - name: Build and verify source and SDK archives
+        run: python3 capi/distribution.py --verify --require-clean
+      - uses: actions/upload-artifact@v4
+        with:
+          name: serde-ucl-c-distribution
+          path: target/c15-dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [checks, c-distribution]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
@@ -108,14 +136,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: scripts/ci.sh release
         run: scripts/ci.sh release "$GITHUB_REF_NAME"
-      - name: Create the GitHub release
+      - uses: actions/download-artifact@v4
+        with:
+          name: serde-ucl-c-distribution
+          path: target/c15-dist
+      - name: Create the GitHub release and attach C artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "::notice title=GitHub release::A release for $GITHUB_REF_NAME exists already; it was left as it is."
-            exit 0
+            echo "::notice title=GitHub release::A release for $GITHUB_REF_NAME exists already; preserving its notes."
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
+              --notes-file target/release-notes.md
           fi
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file target/release-notes.md
+          (cd target/c15-dist && shasum -a 256 -c SHA256SUMS)
+          gh release upload "$GITHUB_REF_NAME" target/c15-dist/* --clobber

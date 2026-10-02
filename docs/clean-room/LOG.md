@@ -5478,3 +5478,70 @@ without released snapshots explicitly skip comparisons and make no compatibility
 Commits: none; changes handed to the parent implementation participant for review and commit.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+## 2026-10-02 — Implementation team — C15 C distribution
+
+Fresh implementation participant implemented opt-in cargo-c packaging and distribution
+on `c15/initial-c-api`, without modifying the original working checkout. Inputs:
+current CLAUDE.md and this protocol; released spec-v22 C contract/header/inventory;
+clean Stage A probe and Darwin arm64 snapshots; work-item distribution goals;
+existing crate/C package, Makefile, checks, manifests and release/CI workflow;
+writing-plans skill; official cargo-c v0.10.25 README, headers/configuration references
+and installed cargo-c source; official GitHub runner documentation; Cargo metadata,
+Rust toolchain/runtime notices and dependency license files. No oracle tooling,
+upstream libucl code, prohibited history or spec-side implementation plans were read.
+
+Changes: serde-ucl-c package, serde-ucl pkg-config identity, copied exact header with
+no generation, independently versioned ABI 1.0.0; source archive with released specs,
+clean cases, Rust path dependency and benchmark-free distribution manifest; relocatable
+macOS arm64 SDK with macOS 11.0 deployment metadata, static/shared libraries, README,
+project/dependency/Rust-runtime licenses, commit/spec/toolchain provenance and checksums.
+Release CI validates clean tagged-commit artifacts before unchanged crates.io Trusted
+Publishing and attaches those artifacts to its GitHub release. Binary targets beyond
+macOS arm64 remain deferred. No merge, push, tag, package publication or upload performed.
+
+Validation on macOS arm64 15.8.1: archive extraction/checksums/content, exact header,
+ABI/install-name/version/deployment/architecture metadata, relocation into a path with
+spaces, all 43 exports and C11/C++11 signatures, all ten golden snapshots and extra
+boundary/lifetime/depth tests via pkg-config static/shared linkage; clean extracted-source
+locked installation and repeated packaged checks passed. Existing capi/tests/check.py
+passed all four direct/installed variants. Full scripts/ci.sh passed; actionlint passed.
+Release-gate fixtures accepted matching versions/notes and rejected wrong tag, C/Rust
+version mismatch and missing changelog notes. macOS 11 runtime execution is not claimed;
+the checked deployment floor is 11.0. Current native static dependencies are iconv,
+System, c and m. Preparation artifacts record dirty=true; final release-ready local
+archives are regenerated from the completed clean commit with --require-clean.
+
+Commit: build(capi): package verified C source and macOS arm64 SDK (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-02 — Role: spec coordinator. Item: C15 distribution acceptance.
+  - Owner authorized implementing the proposed cargo-c/source/macOS arm64 SDK
+    distribution on the isolated C15 branch. Fresh implementation participant
+    received no inherited context, released-spec-only behavior inputs and
+    clean-room rules word for word; derived its own packaging plan.
+  - Inputs: current CLAUDE.md/PROTOCOL.md, release/tag metadata, current package
+    configuration/workflows, official cargo-c/GitHub runner documentation;
+    generated archives, released Stage A public-interface cases and spec-owned
+    comparison runner/pinned compiled reference. No forbidden notes/history or
+    Claude session memory consulted.
+  - Independently extracted SDK into a fresh temporary prefix and compared its
+    static/shared libraries against reference: ten cases, 43 typed signature/link
+    checks, four reference/released/shipping header-library combinations and
+    C/C++ header checks pass for each packaged library. Archive path audit excludes
+    oracle tools, drafts/research, local build output and session files.
+  - Reviewed workflow dependencies: existing version/changelog checks and Rust
+    CI precede verified C artifacts; crates.io Trusted Publishing preserved;
+    release upload checks digests and attaches archives only after prior success.
+    Native arm64 assertion prevents mislabeled SDK; no other binary target claimed.
+  - Implementation participant reports clean extracted-source/relocated-SDK
+    pkg-config static/shared linkage, all cases/boundary/lifetime/depth checks,
+    required integrated Rust/C CI, actionlint and release-gate fixtures passed.
+    Final archives will be regenerated and verified from the clean packaging
+    commit. macOS 11 is deployment floor; execution verified on macOS 15.8.1.
+  - Commits: acceptance provenance included in C15 packaging commit on
+    c15/initial-c-api. No merge, push, release tag or publication performed.
+  - Attestation: released specification remains behavior-only and unchanged.
+    Coordinator authored no src/ or capi/ implementation.

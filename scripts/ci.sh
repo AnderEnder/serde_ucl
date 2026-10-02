@@ -346,6 +346,12 @@ release() {
 		echo "error: tag $tag does not match the version in Cargo.toml, $manifest" >&2
 		exit 1
 	fi
+	capi_pkgid=$(cargo pkgid --manifest-path "$CAPI_MANIFEST")
+	capi_version=${capi_pkgid##*[#@]}
+	if [ "$version" != "$capi_version" ]; then
+		echo "error: C distribution version $capi_version does not match release $tag" >&2
+		exit 1
+	fi
 	mkdir -p "$(dirname "$RELEASE_NOTES")"
 	# The lines after the version's heading up to the next `## ` heading, without the blank lines
 	# at either end.

@@ -1,5 +1,5 @@
 [package]
-name = "serde_ucl_capi"
+name = "serde-ucl-c"
 version = "0.6.0"
 edition = "2024"
 rust-version = "1.98"
@@ -20,3 +20,28 @@ libc = "0.2"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# Opt-in C distribution; Rust package version and shared ABI evolve independently.
+[features]
+capi = []
+
+[package.metadata.capi]
+min_version = "0.10.25"
+
+[package.metadata.capi.header]
+enabled = true
+generation = false
+emit_version_constants = false
+subdirectory = ""
+
+[package.metadata.capi.install.include]
+asset = [{ from = "include/ucl.h", to = "" }]
+
+[package.metadata.capi.pkg_config]
+name = "serde-ucl"
+filename = "serde-ucl"
+
+[package.metadata.capi.library]
+name = "ucl"
+version = "1.0.0"
+version_suffix_components = 1

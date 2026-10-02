@@ -61,6 +61,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-ucl-c"
+version = "0.6.0"
+dependencies = [
+ "libc",
+ "serde_ucl",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -88,14 +96,6 @@ dependencies = [
  "serde",
  "smallvec",
  "thiserror",
-]
-
-[[package]]
-name = "serde_ucl_capi"
-version = "0.6.0"
-dependencies = [
- "libc",
- "serde_ucl",
 ]
 
 [[package]]

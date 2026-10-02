@@ -63,7 +63,10 @@ for `fs` and `load`.
 
 ## C API
 
-The separate [C API package](capi/README.md) builds static/shared libraries named
+The opt-in [serde-ucl-c package](capi/README.md) supports cargo-c installation,
+source archives and a macOS arm64 SDK for C/C++ consumption without Rust. Its
+pkg-config name is `serde-ucl`, with an independently versioned shared ABI. It
+builds static/shared libraries named
 `ucl` and installs `ucl.h`. Stage A provides 43 read-only functions and aliases,
 with one complete submission per parser; mutation and multiple submissions are
 deferred. The initial verified ABI is Darwin arm64, LP64. Build/install and C/C++

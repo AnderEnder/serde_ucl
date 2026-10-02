@@ -140,11 +140,13 @@ scripts/ci.sh                                # run before pushing
   `Work item: <ID>`; spec releases use `docs(spec): release spec vN` and tag `spec-vN`.
 - `CHANGELOG.md`: newest first. Changes since the last release go under `## Unreleased` at the
   top; a release renames it `## X.Y.Z - YYYY-MM-DD`.
-- Release: set the version in `Cargo.toml` (and the lock files, including `fuzz/` and
+- Release: set the version in `Cargo.toml` (and the lock files, including `capi/`, `fuzz/` and
   `tests/features/`), rename the changelog section, run `scripts/ci.sh release vX.Y.Z`, commit
   `chore(release): X.Y.Z`, push `main`, wait for CI, then push an annotated tag `vX.Y.Z`.
   `release.yml` checks the tag, runs CI on Linux and macOS, publishes through crates.io Trusted
   Publishing (environment `release`) and creates the GitHub release from the changelog section.
+  C distribution versions match the root release; update `capi/Cargo.toml` and its lockfile
+  too. C shared-library ABI metadata changes independently under its ABI policy.
   Never run `cargo publish` locally.
 
 ## Local agent definition
