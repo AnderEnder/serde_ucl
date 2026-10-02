@@ -43,4 +43,4 @@ Files: `capi/README.md`, `CHANGELOG.md`, `docs/clean-room/LOG.md` and reviewed i
 
 - [x] Record actual checks and limitations; native Linux runtime execution remains future GitHub work.
 - [x] Commit reviewed implementation using `ci(capi): verify native SDK release matrix` and footer `Work item: C15`.
-- [ ] Validate source-only and SDK-only `--require-clean` archive modes after implementation commit. No merge, push, release tag, publishing, or uploading.
+- [x] Validate source-only and SDK-only `--require-clean` archive modes after implementation commit. No merge, push, release tag, publishing, or uploading.

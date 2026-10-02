@@ -5722,3 +5722,26 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
   - Commit: included with final build(capi) native matrix implementation; local
     clean split artifact verification will be recorded by fresh implementer.
     Coordinator authored no src/ or capi/ implementation. No merge/push/tag/upload.
+
+## 2026-10-03 — Implementation team — C15 clean-commit archive verification
+
+Continuation of the fresh native completion session above, with the same allowed
+inputs and no new forbidden inputs. Implementation commit: `c91391e`.
+
+After that commit the worktree was clean. Restaged the Darwin candidate with
+`--build-only --require-clean`; its static/shared bytes still matched the successful
+fresh native reference evidence. Separately ran source-only and SDK-only archive
+modes with `--verify --require-clean` at `c91391e`. Both passed clean extracted-source
+installation; SDK-only also passed staged and extracted/relocated static/shared
+C/C++ signatures, ten native snapshots, ABI/deployment and lifetime/depth checks.
+Outputs each contain exactly one archive plus their distinct `SHA256SUMS-source`
+or `SHA256SUMS-macos-arm64`; outer digest and BUILD-INFO clean/verified/commit fields
+were checked explicitly. Source emitted once; SDK mode emitted no source archive.
+
+This follow-up changes only provenance and the independent completion checklist.
+Native Linux/GitHub execution and older deployment runtime remain untested locally.
+No merge, push, tag, publish or upload occurred.
+
+Commit: `docs(capi): record clean native archive validation` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
