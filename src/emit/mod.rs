@@ -126,6 +126,18 @@ impl<'a> Emitter<'a> {
         self
     }
 
+    /// Uses an opaque facts position for the read-only C adapter.
+    #[doc(hidden)]
+    pub fn with_facts_cursor(
+        mut self,
+        facts: &'a OutputFacts,
+        cursor: crate::parse::FactsCursor,
+    ) -> Self {
+        self.fact_root = cursor.node();
+        self.facts = self.fact_root.map(|_| facts);
+        self
+    }
+
     /// Writes the saved comments `attached` to each value, as libucl's config format does when
     /// the application passes them in (spec §10.10). `comments` and `attached` are
     /// [`Parser::comments`](crate::parse::Parser::comments) and

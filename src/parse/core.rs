@@ -224,12 +224,17 @@ impl<'t> Document<'t> {
                 _ => {}
             }
             cursor = cursor.min(src.len());
-            self.cursor = position_at(src, cursor);
-            self.cursor.column = cursor
-                - src[..cursor.min(src.len())]
-                    .iter()
-                    .rposition(|&b| b == b'\n')
-                    .map_or(0, |i| i + 1);
+            let before = &src[..cursor];
+            let line_start = before
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(0, |i| i + 1);
+            // C observes byte columns, unlike Rust diagnostics' character columns.
+            self.cursor = Position {
+                line: 1 + before.iter().filter(|&&b| b == b'\n').count(),
+                column: cursor - line_start,
+                offset: cursor,
+            };
         }
         self.boundary = match &result {
             Ok(()) => core.boundary_at_end(),
@@ -276,6 +281,10 @@ impl<'t> Document<'t> {
             }
         }
         root
+    }
+
+    pub(crate) fn observation_needs_snapshot(&self) -> bool {
+        matches!(self.boundary, Boundary::Value(_))
     }
 
     pub(crate) fn observation_facts(&self) -> OutputFacts {

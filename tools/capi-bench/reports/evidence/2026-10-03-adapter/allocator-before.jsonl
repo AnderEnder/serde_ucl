@@ -1,0 +1,8 @@
+{"mode":"Rust","input_bytes":0,"warmup":3,"rounds":30,"setup_ns":27,"submit_ns":224,"destroy_ns":50,"alloc_requests":0,"requested_bytes":0,"peak_extra_live_bytes":0,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":0,"warmup":3,"rounds":30,"setup_ns":9130,"submit_ns":734,"destroy_ns":233,"alloc_requests":14,"requested_bytes":1880,"peak_extra_live_bytes":872,"remaining_live_bytes":0}
+{"mode":"Rust","input_bytes":67670,"warmup":3,"rounds":30,"setup_ns":35,"submit_ns":495872,"destroy_ns":109251,"alloc_requests":7027,"requested_bytes":654444,"peak_extra_live_bytes":474084,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":67670,"warmup":3,"rounds":30,"setup_ns":12094,"submit_ns":2707993,"destroy_ns":671219,"alloc_requests":82159,"requested_bytes":7221552,"peak_extra_live_bytes":3010416,"remaining_live_bytes":0}
+{"mode":"Rust","input_bytes":706670,"warmup":3,"rounds":30,"setup_ns":161,"submit_ns":4947840,"destroy_ns":1350793,"alloc_requests":70037,"requested_bytes":6365892,"peak_extra_live_bytes":4661796,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":706670,"warmup":3,"rounds":30,"setup_ns":37315,"submit_ns":29719630,"destroy_ns":7661655,"alloc_requests":820212,"requested_bytes":74637312,"peak_extra_live_bytes":30189168,"remaining_live_bytes":0}
+{"mode":"Rust","input_bytes":13404,"warmup":3,"rounds":30,"setup_ns":29,"submit_ns":45163,"destroy_ns":9118,"alloc_requests":643,"requested_bytes":54553,"peak_extra_live_bytes":39554,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":13404,"warmup":3,"rounds":30,"setup_ns":8845,"submit_ns":226913,"destroy_ns":57613,"alloc_requests":6644,"requested_bytes":565355,"peak_extra_live_bytes":243620,"remaining_live_bytes":0}

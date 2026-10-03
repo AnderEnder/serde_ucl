@@ -6216,3 +6216,239 @@ participant did not run native Linux or push. Repair plan stays local/untracked.
 Commit: `fix(capi): select consistent installed library directory` (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 optimization kickoff
+
+- Owner requested C adapter optimization following same-input public API measurements. Created perf/c-api-adapter worktree from merged main 36da56c. Work-item goals contain observable baseline timings and invariant behavior, not implementation design. Fresh implementation delegation receives current instructions and protocol rules, released spec-v22 and allowed cases. Root remains spec-side and authors no src/ or capi/ implementation.
+- Inputs: current repository instructions/protocol, Git metadata, released Stage A artifacts, prior spec-owned measurements. Preserve unrelated original work and keep all plans local. The specification remains behaviour only. Coordinator benchmark/report work stays in its separate benchmark worktree.
+
+
+## 2026-10-03 — Implementation team — C15 adapter optimization
+
+Inputs: current CLAUDE.md and docs/clean-room/PROTOCOL.md, released spec-v22 Stage A
+contract and format sections 7, 8, 10 and 12, allowed C conformance cases/snapshots,
+current own Rust/C implementation and tests, approved rbl_group.conf corpus document,
+work-item performance goals, writing-plans skill, and coordinator-provided observable
+public checkpoint timings and black-box creation-time cwd observation. The local
+plan was derived independently, remains excluded, and no other session plans were
+consulted. An isolated baseline under target/adapter-profile/baseline-tree contains
+only allowed own HEAD implementation/manifest/document/benchmark files and the same
+independent profiling harness; no forbidden source/tooling was consulted.
+
+Removed unused successful snapshots and owned-tree rebuilds. Implemented compact
+stable public-node/terminated-byte/child-link arenas, shared singleton child/head
+ranges, reuse of the Rust key index and opaque positional output facts. Arena external
+ownership permits direct final destruction; releases with retained children preserve
+exact observable public refcounts. Lazy forced strings live in arena-owned storage.
+Creation-time cwd capture remains unchanged. Added regressions for independently
+retained children, retained single-quote/heredoc/escaped-key facts, escaped CURDIR,
+and chdir between parser creation and submission.
+
+Independent release counting profile: three warmups, 30 measured lifecycles, setup,
+submission and destruction separately, allocations/reallocations counted as Rust
+allocator requests, requested bytes and peak extra live bytes, input/caller buffers
+and libc allocations excluded. 10k own records: C 37.42ms ->7.47ms total, Rust6.13ms;
+820212 ->70059 requests (Rust70037); 74.64MB ->11.89MB requested bytes; 30.19MB ->9.92MB
+peak extra live storage; all measured lifecycles returned to original live baseline.
+Native C-only sample before/after and machine-readable profiles are local under
+target/adapter-profile/evidence/. Tiny fixed C environment cost remains, and zero
+total overhead is not claimed. No timed regression thresholds were introduced.
+
+Validation: full scripts/ci.sh passed; exact 43 exports, released header, C11/C++11
+signatures and linkage, ten golden snapshots, single-submission, retained lifetimes,
+iteration, emission facts and 1023-container/2MiB-stack checks passed for direct and
+installed static/shared libraries. C callers passed ASan/UBSan; nightly Rust ASan
+plus instrumented C callers passed static/shared checks. Darwin leak sanitizer is
+unavailable; independent Rust allocator live counts returned to zero excess instead.
+No native Linux execution, push, publication or merge was performed.
+
+Commit: perf(capi): minimize public adapter allocation and lifetime overhead
+(Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+## 2026-10-03 — Implementation team — C15 provenance and streaming follow-up
+
+Inputs: same allowed own implementation, released spec-v22 iteration matrix and
+public snapshots; independent clean reviewer observations and Miri reproduction of
+our own arena pointer tags. No forbidden inputs were consulted.
+
+Independent review concretely found that model pointers derived from successive
+exclusive construction borrows could retain invalid Rust provenance. Fixed this
+by publishing only the final Box::into_raw model pointer after all construction
+borrows end, using raw arena node accesses for construction updates. Added a
+maintained public ownership regression covering retained descendants, duplicate
+headers, cache growth, safe/reset/full traversal, and retained emission; ordinary
+CI now runs the C package's Rust tests. The regression passes Miri; the independent
+reviewer also checked expanded public lifetimes under Stacked and Tree Borrows.
+
+Safe/full iterators now stream directly over borrowed container/chain pointers,
+with first-call mode freezing and the released scalar-prefix, object restart,
+empty-container and exhaustion behavior preserved. Own before/after read profile
+(10k generator, already parsed tree, three warmups, 30 samples, arithmetic means):
+first child 4257ns/3 requests/160064bytes ->43ns/1 request/32bytes; all immediate
+children 23783ns ->15761ns with the same allocation reduction; zero excess live
+bytes afterwards. Profile source and JSON files are under the same local evidence
+folder; parse/input allocation is excluded from these read regions.
+
+The default Rust benchmark remains distinct from the labeled RustObserved
+creation-cwd/filesystem/facts/cursor diagnostic. One matched own10k profile measured
+defaultRust6.144ms, RustObserved6.202ms and C7.396ms. Remaining submission adaptation
+was about1.17ms here: eager immutable-tree counting/traversal, public headers,
+terminated bytes/links, and owner-pointer publication. Reads/emission perform no
+deferred adapter construction. Linear physical header storage remains required by
+the released ABI; a parser backend that writes C storage directly would be a
+separate core architecture change, not a hidden omission of observable fields.
+DefaultCvsdefaultRust does not meet zero overhead, especially on tiny inputs whose
+creation-cwd service dominates. Possible small private-layout reductions were
+assessed but not introduced without evidence of material improvement.
+
+Full scripts/ci.sh including maintained Rust ownership test passed. C direct and
+installed static/shared signatures, 43 exports/header, ten snapshots, boundary,
+lifetimes/retained facts and 1023-container stack checks passed. Nightly Rust ASan
+and C ASan/UBSan passed; the maintained regression passed Miri. No publication,
+merge, push or native Linux execution occurred.
+
+Commit: perf(capi): stream iteration and preserve arena pointer provenance
+(Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+## 2026-10-03 — C15 adapter optimization independent implementation review
+
+Role: fresh clean-room implementation reviewer. Work item: C15.
+Reviewed implementation: dfefd2cff0c11a3f4710c9fce1720b2d5b2d273d, following
+initial checkpoint 5c8df1a2e4a3f5b66610fd1fcacb39d3fd42d3d5. Final review:
+[reviews/c15-adapter-optimization.md](reviews/c15-adapter-optimization.md).
+
+Inputs: current CLAUDE.md and PROTOCOL.md; released spec-v22 Stage A contract;
+clean-room work-item goals/provenance; current own C adapter, parser/value/emitter
+implementation and permitted recent own-code diffs; own C/Rust tests, profiling
+example and distribution code; released conformance snapshots through the public
+validation gate. No reference source, coordinator benchmark tooling or forbidden
+input was read. No implementation code was edited by this reviewer.
+
+Confirmed an unsafe Model-pointer provenance defect at the initial checkpoint
+with both a minimal own Rust reproduction and an actual public-API Miri case
+(parser creation, child/duplicate parsing, then get_object). The subsequent
+exclusive Model borrow invalidated a pointer saved inside allocate(&mut self).
+The final checkpoint installs the Model pointer from Box::into_raw after arena
+construction; the same case and expanded ownership checks pass. No open
+correctness finding remains. Independently assessed exact arena counts, public
+address/string stability, refcounts and retained descendants, intrusive release,
+lazy forced buffers, iterator anchoring and contract matrix, partial/error
+results, and iterative deepest-tree behavior.
+
+Independent commands: python3 capi/tests/check.py (all four direct/installed
+static/shared variants, exact 43 exports/header, C11/C++11, ten golden snapshots,
+parser/lifetimes/facts/iteration and 1023-container/2MiB depth); python3
+capi/tests/distribution_test.py (13 passed); MIRIFLAGS=-Zmiri-disable-isolation
+cargo +nightly miri test --manifest-path capi/Cargo.toml --test arena_lifetimes
+(passed); MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri run
+--manifest-path target/capi-review-miri/Cargo.toml (passed on repaired source),
+and the same scratch command with -Zmiri-tree-borrows (passed). Scratch cases
+cover retained child/grandchild, cached/borrowed strings, iteration after parent
+release, reset/full traversal, emission/free, partial errors, empty input and
+duplicates. Final adapter/test file SHA-256 values were compared with dfefd2c
+blobs and recorded in the review. Existing tests were not rerun during final
+coordinator timing because the reviewed implementation content was unchanged.
+
+Lookup and final streaming iteration do not defer tree conversion into reads.
+Near-zero total adapter overhead is not achieved: the recorded own-input profile
+is about 20% above default Rust and 19% above equivalent observed Rust. The
+coordinator reported final original-input 10k records at C 8.868ms/Rust 6.169ms/
+libucl 10.958ms, about 44% above Rust; no coordinator tooling/artifact was read.
+The zero/near-zero goal remains unmet. Additional linear header/link/terminated-
+byte construction remains material. A modest flat-object full-iteration timing
+regression was also reported, alongside improved array traversal/first reads
+and lookup. The review
+identifies safe local opportunities without claiming the residual irreducible.
+The repository-only profiling example claim matches source archive exclusions;
+new automatic example discovery does not break source packaging.
+
+Commit produced: docs(clean-room): record independent C15 adapter optimization
+review (Work item: C15). No push, merge or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 final optimization measurements
+
+Inputs: current repository instructions/protocol, released spec-v22 header and
+contract, allowed benchmark documents/conformance artifacts, independent clean
+implementation review, public black-box C/Rust measurements and allocation/CPU
+evidence. The fresh implementer authored all implementation changes; coordinator
+authored no src/ or capi/ implementation. Baseline merged36da56c versus final
+dfefd2c passed the spec-owned 43-function/four-linkage/10-case native gate and
+eight byte-identical benchmark outputs. Five-round/nine-sample original-input
+comparison measures records10k C42.589->8.868ms, Rust6.169ms and libucl10.958ms.
+Separate original-input CPU traces record 47.73->16.02% allocator/release leaves.
+Exact allocation and iterator instrumentation uses a different documented own
+fixture. Stable implementation independently reviewed in af90a29; no open
+correctness findings. Near-zero target remains unmet and is recorded explicitly
+in WORKLIST, review and spec-owned report/evidence on perf/c-api-vs-libucl.
+Plans remain local/excluded, unrelated work preserved, no push/merge/publication.
+This entry and measured-checkpoint wording constitute provenance/goals only;
+no implementation design or new format behavior is supplied.
+
+### 2026-10-03 — spec team — C15 C-library performance comparison
+
+- Owner requested performance comparison of the merged C API versus libucl. Created isolated perf/c-api-vs-libucl worktree at merged main 36da56c, preserving unrelated original-worktree changes. Inputs: current CLAUDE.md/PROTOCOL.md, released Stage A contract/header, spec-owned conformance/benchmark tooling and benchmark corpus documents, Cargo build metadata. No src/ or capi/ implementation edits. The specification remains behaviour only.
+- Added tools/capi-bench: one unchanged C11 caller/header links against both static libraries. Cargo release (fat LTO/one codegen unit), pinned libucl CMake Release, caller -O3. Eight inputs pass byte-identical compact JSON and the 43-function/ten-case reference gate. Parsing includes complete lifetimes; emitter measurements exclude parsing. Five rounds, nine alternating samples per tool/mode/input, calibrated >=25ms: 1,440 raw samples with provenance/hashes and round spreads. Separate public-call phase measurements cover record inputs.
+- Apple M4 Max/macOS 15.8.1 arm64 results: C API parse is 1.29x libucl time on tiny inputs, 2.80–3.94x on larger ones. Compact JSON emits in 0.60–1.58x libucl time across these cases. Submission and destruction dominate measured record parsing; this does not isolate the underlying Rust parse from ABI-object construction. Recorded report tools/capi-bench/reports/2026-10-03-macos-arm64.md; raw evidence retained at target/c-bench/results.json. Native compile, correctness gate, sample/hash integrity, Python syntax and invalid-argument checks passed.
+- Local plan is ignored and retained on disk. No merge, push or publication. This session commits spec-owned benchmark tooling, measured report and provenance only.
+
+### 2026-10-03 — spec coordinator — C15 performance explanation
+
+- Owner asked why the C ABI is slower while the implementation's Rust API was faster. Inputs: current instructions/protocol, existing public benchmark caller and README, Cargo profiles/lockfile, own spec-owned benchmark output, and clean implementation participant's diagnosis of current own implementation. No implementation edits by coordinator. Specification remains behaviour only.
+- Added same-input public Rust API caller, matching release profile/dependency versions and parse/drop semantics of the existing README. All three callers emit byte-identical output on eight cases; five rotated rounds/nine samples yield 1,080 raw parse timings. For 10,000 records: Rust 6.30ms, libucl 11.07ms, our C ABI 42.59ms. For 1,000 records: Rust 0.619ms, libucl 1.087ms, C ABI 4.039ms. Rust is still faster; the C path adds substantial overhead.
+- Clean implementation review identified an unconditional fallback snapshot discarded on successful observed input; additional allocated ABI graph/keys/strings/paths; duplicated facts/path queries; and destruction of both C nodes and retained Rust representations. These are code facts; timings do not yet quantify each internal hotspot. Reviewer's separate required provenance is in the implementation worktree. No optimization scope or code changes.
+- Raw evidence target/c-bench/rust-baseline.json; recorded report tools/capi-bench/reports/2026-10-03-rust-versus-c.md. Full benchmark/output checks, 1,080-sample integrity, Rust fmt/clippy and Python syntax/whitespace checks passed. Local plan remains ignored; no push or publication.
+
+### 2026-10-03 — spec coordinator — C15 optimization profiling/benchmark isolation
+
+- Owner requested C adapter optimization, CPU/allocation profiling and zero or near-zero overhead relative to Rust. Fresh implementation participant works in isolated perf/c-api-adapter from merged main; coordinator authors only benchmark/profiling tools and work-item goals. Plans remain local. Inputs: current instructions/protocol, released Stage A contract, own benchmark output, own clean implementation participant's counters, native profiler output and black-box CWD lifecycle probe. Specification remains behaviour only.
+- Extended spec-owned benchmark to build a separate candidate root and record its commit/status/hashes. Native comparator uses the candidate core with matching dependency versions. Added macOS Time Profiler recording/export/summarization with explicit non-overlapping leaf versus overlapping inclusive stack scope. Baseline8s CPU recording has7,972 submission/unref samples:47.7% allocator/release leaves,8.8% copying/zeroing. Instruments Allocations recording stalled and was terminated; no allocation result is claimed from it. Clean implementer counting allocator is the before/after allocation evidence.
+- Independent first arena checkpoint reference gate passed all43 signatures/ten cases; original-record10k parse around10.25ms vs11.16ms libucl, compared prior42.59ms. Goal persists toward Rust6.3ms. Oracle and current merged C API both capture CURDIR at parser creation even if process changes directory before submission; reported as observable lifecycle regression goal, and implementer reverted delayed-cwd shortcut. No source or implementation hints from upstream were supplied.
+- Benchmark Python syntax/CLI/whitespace checks and actual candidate-root timing/gate passed. Final validation/report still pending optimized implementation. No merge, push or publication.
+
+### 2026-10-03 — spec coordinator — C15 public-read performance tooling
+
+Added matched released-interface C callers for safe iterator first/full immediate-child reads and indexed lookup, separate from parsing. Inputs: released Stage A header, allowed corpus documents, existing public benchmark evidence and current repository instructions/protocol. No implementation source authored. Archive/input hashes and traversal counts gate timings; profiling and allocation instrumentation remain separate. Tooling contains public observable operations only, not implementation guidance. Commit records work item C15; no push, merge or publication.
+
+### 2026-10-03 — spec coordinator — C15 final benchmark and profiling evidence
+
+Measured stable `dfefd2c` against merged `36da56c` with identical released
+headers, C caller and original inputs. All outputs match both libraries and
+the same candidate Rust core. The native oracle gate passed 43 functions,
+ten cases and four linkage combinations. Implementation and independent
+review checks are recorded on `perf/c-api-adapter` (review `af90a29`, measured
+checkpoint `f22dc04`). Original 10k-record C parsing improved from 42.589 to
+8.868 ms, versus Rust 6.169 ms and libucl 10.958 ms: 4.80x faster, with a 44%
+Rust gap. Native CPU allocator/release leaves fell from 47.73% to 16.02%.
+Separate own-fixture counting shows C requests fell from 820,212 to 70,059,
+versus Rust's 70,037. Public read measurements show a 142x first-child
+improvement and a 12% flat full-iteration regression.
+
+Raw timings, hashes, CPU summaries and scoped allocator evidence are committed
+under `tools/capi-bench/reports/evidence`. The report explicitly leaves the
+near-zero target open. Gzip hashes and CPU input/binary provenance were checked.
+No implementation source was authored; no new behavioral contract, research
+proposal, plan, upstream source or reference build was released. Inputs were
+current repository instructions/protocol, released spec/header, allowed corpus
+and conformance, public benchmark results and clean independent review.
+No push, merge, PR or publication; unrelated original work was preserved.
+
+### 2026-10-03 — spec coordinator — C15 optimization PR preparation
+
+The owner explicitly requested opening a PR after receiving the final optimization
+report. Assembled clean implementation branch perf/c-api-adapter with spec-owned
+benchmark/profile branch perf/c-api-vs-libucl on current origin/main (36da56c).
+Only the append-only provenance conflict was resolved, preserving both branches'
+entries. Implementation and reviewed source remain unchanged. Inputs consulted:
+current repository instructions/protocol, branch metadata, released behavioral
+contract, clean independent review and benchmark evidence. No src/ or capi/
+implementation authored. Plans remain local and excluded. The PR branch alone
+will be pushed under this explicit authorization; no main update, spec/release
+tag, merge or package publication is authorized.

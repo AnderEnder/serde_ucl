@@ -1,9 +1,8 @@
 use crate::boundary;
 use serde_ucl::emit::{Emitter, Format, key_needs_quoting};
-use serde_ucl::parse::{OutputFacts, PathSegment};
+use serde_ucl::parse::{FactsCursor, OutputFacts};
 use serde_ucl::value::{UclValue, Value};
-use std::cell::OnceCell;
-use std::collections::HashMap;
+use std::cell::{OnceCell, RefCell};
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::ptr;
 use std::rc::Rc;
@@ -34,25 +33,53 @@ pub struct UclObject {
     pub trash_stack: [*mut u8; 2],
 }
 
+// The model and all public addresses remain stable until the last owned node is released.
+// Keeping the original immutable Rust value also preserves retained-subtree emission facts.
 struct Model {
-    root: UclValue,
+    root: Rc<UclValue>,
     facts: OutputFacts,
+    nodes: Vec<Node>,
+    links: Vec<*mut UclObject>,
+    bytes: Vec<u8>,
+    external: usize,
+    forced: RefCell<Vec<Vec<u8>>>,
 }
 
-// The public header is the first field, so every library object can be recovered as a Node.
-// Children are owning edges; next/prev and lookup/iterator pointers are borrowed edges.
 #[repr(C)]
 pub(crate) struct Node {
     pub public: UclObject,
-    model: Rc<Model>,
-    value: *const UclValue,
-    path: Vec<PathSegment>,
-    key: Vec<u8>,
-    string: Vec<u8>,
-    forced: OnceCell<Vec<u8>>,
-    pub children: Vec<*mut UclObject>,
-    pub heads: Vec<*mut UclObject>,
-    lookup: HashMap<String, *mut UclObject>,
+    facts: FactsCursor,
+    forced: OnceCell<std::ptr::NonNull<c_char>>,
+    links: *const *mut UclObject,
+}
+
+impl Node {
+    pub fn children(&self) -> &[*mut UclObject] {
+        let count = if self.public.r#type < 2 {
+            self.public.len as usize
+        } else {
+            0
+        };
+        // The private immutable link buffer outlives every node and includes this exact range.
+        unsafe { std::slice::from_raw_parts(self.links, count) }
+    }
+    pub fn heads(&self) -> &[*mut UclObject] {
+        let count = unsafe { &*self.value() }
+            .as_object()
+            .map_or(0, |object| object.len());
+        let heads = if self.public.r#type == 0 {
+            unsafe { self.public.value.ov.cast::<*mut UclObject>() }
+        } else {
+            self.links.cast_mut()
+        };
+        unsafe { std::slice::from_raw_parts(heads, count) }
+    }
+    fn model(&self) -> *mut Model {
+        self.public.trash_stack[0].cast()
+    }
+    fn value(&self) -> *const UclValue {
+        self.public.trash_stack[1].cast()
+    }
 }
 
 pub(crate) unsafe fn node<'a>(p: *const UclObject) -> &'a Node {
@@ -60,70 +87,65 @@ pub(crate) unsafe fn node<'a>(p: *const UclObject) -> &'a Node {
 }
 
 fn terminated(s: &[u8]) -> Vec<u8> {
-    let mut v = s.to_vec();
+    let mut v = Vec::with_capacity(s.len() + 1);
+    v.extend_from_slice(s);
     v.push(0);
     v
 }
 
-fn allocate(
-    model: &Rc<Model>,
-    value: &UclValue,
-    path: Vec<PathSegment>,
-    key: Option<&str>,
-    flags: u16,
-) -> *mut UclObject {
-    let string = value
-        .as_str()
-        .map_or_else(Vec::new, |s| terminated(s.as_bytes()));
-    let key_bytes = key.map_or_else(Vec::new, |k| terminated(k.as_bytes()));
-    let (kind, len, union) = match value {
-        Value::Object(o) => (
-            0,
-            o.entries().map(|e| e.len()).sum(),
-            UclUnion {
-                ov: ptr::null_mut(),
-            },
-        ),
-        Value::Array(a) => (
-            1,
-            a.len(),
-            UclUnion {
-                av: ptr::null_mut(),
-            },
-        ),
-        Value::Integer(i) => (2, 0, UclUnion { iv: *i }),
-        Value::Float(f) => (3, 0, UclUnion { dv: *f }),
-        Value::String(s) => (
-            4,
-            s.len(),
-            UclUnion {
-                sv: string.as_ptr().cast(),
-            },
-        ),
-        Value::Boolean(b) => (5, 0, UclUnion { iv: i64::from(*b) }),
-        Value::Time(t) => (6, 0, UclUnion { dv: *t }),
-        Value::Null => (8, 0, UclUnion { iv: 0 }),
-    };
-    let facts = model.facts.get(&path);
-    let spelling = facts.and_then(|f| f.key_spelling.as_deref()).or(key);
-    let key_escape = spelling.is_some_and(|k| {
-        facts
-            .and_then(|f| f.key_quoted)
-            .unwrap_or_else(|| key_needs_quoting(k))
-    });
-    let mut flags = flags | if key_escape { 4 } else { 0 };
-    if let Some(f) = facts {
-        flags |= if f.single_quoted { 256 } else { 0 };
-        flags |= if f.multiline { 16 } else { 0 };
+impl Model {
+    fn text(&mut self, s: &str) -> *const c_char {
+        let start = self.bytes.len();
+        self.bytes.extend_from_slice(s.as_bytes());
+        self.bytes.push(0);
+        unsafe { self.bytes.as_ptr().add(start).cast() }
     }
-    let mut n = Box::new(Node {
-        public: UclObject {
+
+    fn allocate(
+        &mut self,
+        value: &UclValue,
+        facts: FactsCursor,
+        key: Option<&str>,
+        flags: u16,
+    ) -> *mut UclObject {
+        let (kind, len, union) = match value {
+            Value::Object(o) => (
+                0,
+                o.entries().map(|e| e.len()).sum(),
+                UclUnion {
+                    ov: ptr::null_mut(),
+                },
+            ),
+            Value::Array(a) => (
+                1,
+                a.len(),
+                UclUnion {
+                    av: ptr::null_mut(),
+                },
+            ),
+            Value::Integer(i) => (2, 0, UclUnion { iv: *i }),
+            Value::Float(f) => (3, 0, UclUnion { dv: *f }),
+            Value::String(s) => (4, s.len(), UclUnion { sv: self.text(s) }),
+            Value::Boolean(b) => (5, 0, UclUnion { iv: i64::from(*b) }),
+            Value::Time(t) => (6, 0, UclUnion { dv: *t }),
+            Value::Null => (8, 0, UclUnion { iv: 0 }),
+        };
+        let observed = facts.get(&self.facts);
+        let spelling = observed.and_then(|f| f.key_spelling.as_deref()).or(key);
+        let key_escape = spelling.is_some_and(|k| {
+            observed
+                .and_then(|f| f.key_quoted)
+                .unwrap_or_else(|| key_needs_quoting(k))
+        });
+        let mut flags = flags | if key_escape { 4 } else { 0 };
+        if let Some(f) = observed {
+            flags |= if f.single_quoted { 256 } else { 0 };
+            flags |= if f.multiline { 16 } else { 0 };
+        }
+        let key_ptr = key.map_or(ptr::null(), |key| self.text(key));
+        let mut public = UclObject {
             value: union,
-            key: if key.is_some() {
-                key_bytes.as_ptr().cast()
-            } else {
-                ptr::null()
-            },
+            key: key_ptr,
             next: ptr::null_mut(),
             prev: ptr::null_mut(),
             keylen: key.map_or(0, |s| s.len() as u32),
@@ -131,74 +153,145 @@ fn allocate(
             r#ref: 1,
             flags,
             r#type: kind,
-            trash_stack: [ptr::null_mut(); 2],
-        },
-        model: model.clone(),
-        value,
-        path,
-        key: key_bytes,
-        string,
-        forced: OnceCell::new(),
-        children: Vec::new(),
-        heads: Vec::new(),
-        lookup: HashMap::new(),
-    });
-    let p = &mut n.public as *mut UclObject;
-    n.public.prev = p;
-    Box::into_raw(n).cast()
+            trash_stack: [
+                ptr::null_mut(),
+                (value as *const UclValue).cast_mut().cast(),
+            ],
+        };
+        let p = unsafe { self.nodes.as_mut_ptr().add(self.nodes.len()) }.cast::<UclObject>();
+        public.prev = p;
+        self.nodes.push(Node {
+            public,
+            facts,
+            forced: OnceCell::new(),
+            links: self.links.as_ptr(),
+        });
+        p
+    }
+
+    fn links(&self, start: usize) -> *const *mut UclObject {
+        // Exact pre-counting ensures links and nodes never reallocate during construction.
+        unsafe { self.links.as_ptr().add(start) }
+    }
 }
 
 pub(crate) fn tree(root: UclValue, facts: OutputFacts) -> *mut UclObject {
-    let model = Rc::new(Model { root, facts });
-    let top = allocate(&model, &model.root, Vec::new(), None, 0);
-    let mut work = vec![top];
-    while let Some(p) = work.pop() {
-        // The Rc model remains alive in every node; its values never move after construction.
-        let n = unsafe { &mut *p.cast::<Node>() };
-        match unsafe { &*n.value } {
+    let mut count = 0;
+    let mut link_count = 0;
+    let mut byte_count = 0;
+    let mut work = vec![&root];
+    while let Some(value) = work.pop() {
+        count += 1;
+        match value {
             Value::Object(o) => {
+                let values = o.entries().map(|entry| entry.len()).sum::<usize>();
+                link_count += values + if values == o.len() { 0 } else { o.len() };
                 for (key, entry) in o.iter() {
-                    let mut chain = Vec::new();
-                    for (index, slot) in entry.slots().iter().enumerate() {
-                        let mut path = n.path.clone();
-                        path.push(PathSegment::Key {
-                            key: key.to_string(),
-                            index,
-                        });
+                    byte_count += (key.len() + 1) * entry.len();
+                    work.extend(entry.slots().iter().map(|slot| slot.value()));
+                }
+            }
+            Value::Array(a) => {
+                link_count += a.len();
+                work.extend(a.iter());
+            }
+            Value::String(s) => byte_count += s.len() + 1,
+            _ => {}
+        }
+    }
+    let mut model = Box::new(Model {
+        root: Rc::new(root),
+        facts,
+        nodes: Vec::with_capacity(count),
+        links: Vec::with_capacity(link_count),
+        bytes: Vec::with_capacity(byte_count),
+        external: 1,
+        forced: RefCell::new(Vec::new()),
+    });
+    let value = &*model.root as *const UclValue;
+    let top = model.allocate(unsafe { &*value }, FactsCursor::root(), None, 0);
+    let mut index = 0;
+    // Appended children are visited in order. No recursive calls or per-container work lists.
+    while index < model.nodes.len() {
+        // Use raw node access throughout construction, preserving previously stored
+        // arena pointer provenance rather than materializing a mutable node slice.
+        let current = unsafe { model.nodes.as_mut_ptr().add(index) };
+        let value = unsafe { (*current).value() };
+        let facts = unsafe { (*current).facts };
+        let start = model.links.len();
+        match unsafe { &*value } {
+            Value::Object(o) => {
+                for (entry_index, (key, entry)) in o.iter().enumerate() {
+                    let mut head: *mut UclObject = ptr::null_mut();
+                    let mut previous: *mut UclObject = ptr::null_mut();
+                    for (slot_index, slot) in entry.slots().iter().enumerate() {
+                        let cursor = facts.entry(&model.facts, entry_index, key, slot_index);
                         let flags = (u16::from(slot.priority()) << 12)
                             | if slot.is_inherited() { 64 } else { 0 };
-                        let child = allocate(&model, slot.value(), path, Some(key), flags);
-                        n.children.push(child);
-                        chain.push(child);
-                        work.push(child);
-                    }
-                    let head = chain[0];
-                    for i in 0..chain.len() {
-                        unsafe {
-                            (*chain[i]).prev = chain[if i == 0 { chain.len() - 1 } else { i - 1 }];
-                            (*chain[i]).next = chain.get(i + 1).copied().unwrap_or(ptr::null_mut());
+                        let child = model.allocate(slot.value(), cursor, Some(key), flags);
+                        model.links.push(child);
+                        if head.is_null() {
+                            head = child;
+                        } else {
+                            unsafe {
+                                (*previous).next = child;
+                                (*child).prev = previous;
+                            }
                         }
+                        previous = child;
                     }
-                    // Stage A's multivalue observation applies to scalar heads.
-                    if chain.len() > 1 && unsafe { (*head).r#type > 1 } {
+                    unsafe {
+                        (*head).prev = previous;
+                    }
+                    if entry.len() > 1 && unsafe { (*head).r#type > 1 } {
                         unsafe {
                             (*head).flags |= 32;
                         }
                     }
-                    n.heads.push(head);
-                    n.lookup.insert(key.to_string(), head);
+                }
+                let end = model.links.len();
+                // A singleton entry's child is also its head; share the complete range.
+                let heads = if end - start == o.len() {
+                    start
+                } else {
+                    for child in start..end {
+                        let p = model.links[child];
+                        if child == start || unsafe { (*model.links[child - 1]).next != p } {
+                            model.links.push(p);
+                        }
+                    }
+                    end
+                };
+                unsafe {
+                    (*current).links = model.links(start);
+                    (*current).public.value.ov = model.links(heads).cast_mut().cast();
                 }
             }
             Value::Array(a) => {
-                for (index, value) in a.iter().enumerate() {
-                    let mut path = n.path.clone();
-                    path.push(PathSegment::Index(index));
-                    let child = allocate(&model, value, path, None, 0);
-                    n.children.push(child);
-                    work.push(child);
+                for (i, value) in a.iter().enumerate() {
+                    let cursor = facts.element(&model.facts, i);
+                    let child = model.allocate(value, cursor, None, 0);
+                    model.links.push(child);
+                }
+                unsafe {
+                    (*current).links = model.links(start);
                 }
             }
             _ => {}
+        }
+        index += 1;
+    }
+    debug_assert_eq!(model.nodes.len(), count);
+    debug_assert_eq!(model.links.len(), link_count);
+    debug_assert_eq!(model.bytes.len(), byte_count);
+    // A pointer derived from allocate(&mut self) would be invalidated by the next
+    // exclusive borrow of Model. Publish only the final Box::into_raw provenance,
+    // after construction; Model is subsequently accessed through raw field pointers.
+    let model = Box::into_raw(model);
+    let nodes = unsafe { (*model).nodes.as_mut_ptr() };
+    for index in 0..count {
+        unsafe {
+            (*nodes.add(index)).public.trash_stack[0] = model.cast();
         }
     }
     top
@@ -209,25 +302,52 @@ pub(crate) unsafe fn retain(p: *const UclObject) -> *mut UclObject {
     if !p.is_null() {
         unsafe {
             (*p).r#ref += 1;
+            (*node(p).model()).external += 1;
         }
     }
     p
 }
 
 pub(crate) unsafe fn release(p: *mut UclObject) {
-    let mut work = vec![p];
-    while let Some(p) = work.pop() {
-        if p.is_null() {
-            continue;
+    if p.is_null() {
+        return;
+    }
+    let model = unsafe { node(p).model() };
+    unsafe {
+        (*model).external -= 1;
+    }
+    // With no parser or separately granted reference left, no caller can observe the
+    // headers again. Drop the complete arena without visiting its owning child edges.
+    if unsafe { (*model).external == 0 } {
+        drop(unsafe { Box::from_raw(model) });
+        return;
+    }
+    unsafe {
+        (*p).r#ref -= 1;
+    }
+    if unsafe { (*p).r#ref != 0 } {
+        return;
+    }
+    let mut pending = p;
+    // Reserved opaque storage is an intrusive stack for dead nodes. Public sibling links
+    // and all retained nodes remain untouched; destruction requires no allocations.
+    unsafe {
+        (*pending).trash_stack[0] = ptr::null_mut();
+    }
+    while !pending.is_null() {
+        let current = pending;
+        pending = unsafe { (*current).trash_stack[0].cast() };
+        for &child in unsafe { node(current) }.children() {
+            unsafe {
+                (*child).r#ref -= 1;
+            }
+            if unsafe { (*child).r#ref == 0 } {
+                unsafe {
+                    (*child).trash_stack[0] = pending.cast();
+                }
+                pending = child;
+            }
         }
-        unsafe {
-            (*p).r#ref -= 1;
-        }
-        if unsafe { (*p).r#ref != 0 } {
-            continue;
-        }
-        let mut n = unsafe { Box::from_raw(p.cast::<Node>()) };
-        work.append(&mut n.children);
     }
 }
 
@@ -298,7 +418,7 @@ pub unsafe extern "C" fn ucl_array_find_index(p: *const UclObject, index: u32) -
     boundary(|| {
         if !p.is_null() && unsafe { (*p).r#type == 1 } {
             unsafe { node(p) }
-                .children
+                .children()
                 .get(index as usize)
                 .copied()
                 .unwrap_or(ptr::null_mut())
@@ -446,7 +566,7 @@ pub unsafe extern "C" fn ucl_object_tostring_forced(p: *const UclObject) -> *con
         }
         n.forced
             .get_or_init(|| {
-                let text = match unsafe { &*n.value } {
+                let text = match unsafe { &*n.value() } {
                     Value::Integer(i) => i.to_string(),
                     Value::Float(f) | Value::Time(f) => {
                         if f.fract() == 0.0 {
@@ -461,10 +581,13 @@ pub unsafe extern "C" fn ucl_object_tostring_forced(p: *const UclObject) -> *con
                     Value::Object(_) => "object".into(),
                     Value::String(_) => unreachable!(),
                 };
-                terminated(text.as_bytes())
+                let bytes = terminated(text.as_bytes());
+                let pointer = std::ptr::NonNull::new(bytes.as_ptr().cast_mut().cast())
+                    .expect("terminated storage");
+                unsafe { &(*n.model()).forced }.borrow_mut().push(bytes);
+                pointer
             })
             .as_ptr()
-            .cast()
     })
 }
 impl UclObject {
@@ -503,10 +626,10 @@ pub unsafe extern "C" fn ucl_object_lookup_len(
         let Ok(s) = std::str::from_utf8(bytes) else {
             return ptr::null();
         };
-        unsafe { node(p) }
-            .lookup
-            .get(s)
-            .copied()
+        unsafe { &*node(p).value() }
+            .as_object()
+            .and_then(|object| object.index_of(s))
+            .and_then(|index| unsafe { node(p) }.heads().get(index).copied())
             .unwrap_or(ptr::null_mut())
             .cast_const()
     })
@@ -562,8 +685,8 @@ pub unsafe extern "C" fn ucl_object_emit_len(
         };
         let n = unsafe { node(p) };
         let output = Emitter::new(format)
-            .with_facts_path(&n.model.facts, &n.path)
-            .emit(unsafe { &*n.value });
+            .with_facts_cursor(unsafe { &(*n.model()).facts }, n.facts)
+            .emit(unsafe { &*n.value() });
         let out = unsafe { libc::malloc(output.len() + 1) }.cast::<u8>();
         if out.is_null() {
             return out;

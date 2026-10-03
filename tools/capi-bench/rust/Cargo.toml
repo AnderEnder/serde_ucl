@@ -1,0 +1,18 @@
+[package]
+name = "capi-bench-rust-baseline"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "rust-api-baseline"
+path = "main.rs"
+
+[dependencies]
+serde_ucl = { path = "../../..", features = ["load"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

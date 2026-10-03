@@ -122,6 +122,61 @@ static void lifetime(void) {
     }
 }
 
+static void retained_facts(void) {
+    ucl_object_t *root = parse("other={n=42}; child { quoted='yes'; \"a:b\"=<<EOD\none\ntwo\nEOD\n}");
+    ucl_object_t *child = ucl_object_ref(ucl_object_lookup(root, "child"));
+    ucl_object_t *other = ucl_object_ref(ucl_object_lookup(root, "other"));
+    const ucl_object_t *quoted = ucl_object_lookup(child, "quoted");
+    const ucl_object_t *multiline = ucl_object_lookup(child, "a:b");
+    assert(quoted && (quoted->flags & UCL_OBJECT_SQUOTED));
+    assert(multiline && (multiline->flags & UCL_OBJECT_MULTILINE));
+    assert(multiline->flags & UCL_OBJECT_NEED_KEY_ESCAPE);
+    unsigned char *saved[4];
+    for (int format = 0; format < 4; ++format) {
+        saved[format] = ucl_object_emit(child, (ucl_emitter_t)format);
+        assert(saved[format]);
+    }
+    assert(strstr((const char *)saved[UCL_EMIT_CONFIG], "'yes'"));
+    assert(strstr((const char *)saved[UCL_EMIT_CONFIG], "<<EOD"));
+    ucl_object_unref(root);
+    assert(child->ref == 1 && other->ref == 1);
+    ucl_object_unref(other);
+    assert(strcmp(ucl_object_key(multiline), "a:b") == 0);
+    for (int format = 0; format < 4; ++format) {
+        unsigned char *actual = ucl_object_emit(child, (ucl_emitter_t)format);
+        assert(actual && strcmp((const char *)actual, (const char *)saved[format]) == 0);
+        free(actual);
+        free(saved[format]);
+    }
+    ucl_object_unref(child);
+}
+
+static void memory_directory(void) {
+    char *cwd = getcwd(NULL, 0);
+    assert(cwd);
+    ucl_object_t *root = parse("plain=1; directory=\"$CURDIR\"; escaped=\"\\u0024CURDIR\"");
+    assert(strcmp(ucl_object_tostring(ucl_object_lookup(root, "directory")), cwd) == 0);
+    assert(strcmp(ucl_object_tostring(ucl_object_lookup(root, "escaped")), cwd) == 0);
+    ucl_object_unref(root);
+    /* No literal dollar sign: the escape still makes the directory observable. */
+    root = parse("escaped=\"\\u0024CURDIR\"");
+    assert(strcmp(ucl_object_tostring(ucl_object_lookup(root, "escaped")), cwd) == 0);
+    ucl_object_unref(root);
+    /* The C environment is captured when the parser is created. */
+    struct ucl_parser *parser = ucl_parser_new(0);
+    char temporary[] = "c15-directory-XXXXXX";
+    assert(mkdtemp(temporary));
+    assert(chdir(temporary) == 0);
+    assert(ucl_parser_add_string(parser, "directory=\"$CURDIR\"", 0));
+    root = ucl_parser_get_object(parser);
+    assert(strcmp(ucl_object_tostring(ucl_object_lookup(root, "directory")), cwd) == 0);
+    ucl_parser_free(parser);
+    ucl_object_unref(root);
+    assert(chdir(cwd) == 0);
+    assert(rmdir(temporary) == 0);
+    free(cwd);
+}
+
 static void *deep(void *argument) {
     (void)argument;
     const size_t depth = 1023;
@@ -164,6 +219,8 @@ static void *deep(void *argument) {
 int main(void) {
     boundary();
     lifetime();
+    retained_facts();
+    memory_directory();
     pthread_attr_t attributes;
     assert(pthread_attr_init(&attributes) == 0);
     assert(pthread_attr_setstacksize(&attributes, 2 * 1024 * 1024) == 0);

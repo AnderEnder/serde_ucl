@@ -404,18 +404,22 @@ impl<'p, 't> Reader<'p, 't> {
         }
     }
 
-    pub(crate) fn finish_observed(mut self, error: Option<Error>) -> super::CObservation {
+    pub(crate) fn finish_observed(mut self, error: Option<Error>) -> super::CObservation
+    where
+        't: 'static,
+    {
         if let Some(mut observation) = self.observation.take() {
             observation.error = error;
             return observation;
         }
         let document = self.document.as_ref().expect("observed document");
         let cursor = document.cursor;
-        let snapshot = document.snapshot().into_owned();
+        let snapshot = (error.is_some() || document.observation_needs_snapshot())
+            .then(|| document.snapshot().into_owned());
         let facts = document.observation_facts();
         let root = match self.finish() {
-            Ok(root) => Some(root.into_owned()),
-            Err(_) => Some(snapshot),
+            Ok(root) => Some(root),
+            Err(_) => snapshot,
         };
         super::CObservation {
             root,
