@@ -460,3 +460,27 @@ stack. `scripts/ci.sh checks` includes the C package checks and preserves the
 existing Rust validation matrix. Public build/link documentation is in
 `capi/README.md`; sanitizer validation and provenance are recorded in `LOG.md`.
 Constructors, mutations, callbacks and multiple submissions remain deferred.
+
+### C15 optimization follow-up (owner request, 2026-10-03)
+
+Optimize the merged read-only C adapter on a separate implementation branch.
+The released spec-v22 Stage A behavior/ABI, exact header, ownership, partial
+results, diagnostics, stable iteration and all emitter behavior must remain
+compatible. Preserve current Rust behavior and keep core changes necessary.
+
+Observed baseline on Apple M4 Max/macOS arm64, identical release-build inputs,
+parse plus cleanup: 10,000 records (691,127 bytes), C API 42.59ms versus Rust
+value API 6.30ms and libucl 11.07ms; 1,000 records (67,127 bytes), C API 4.039ms
+versus Rust 0.619ms and libucl 1.087ms; Rspamd rbl config (13,404 bytes), C API
+309us versus Rust 55us and libucl 87us. Public-call measurements attribute
+roughly 75% of record parsing to input submission and 25% to object destruction.
+These observations are goals/evidence, not an implementation design.
+
+A clean implementer derives its own local plan/profile from the released
+contract and current own implementation. Reduce avoidable work substantially,
+validate error/partial-output behavior, retained subtree/string/iterator
+lifetimes, deep-stack behavior, exact ABI/signatures, static/shared installed
+linkage, sanitizer checks and required Rust checks. Coordinator benchmarks the
+same inputs against pinned libucl and the pre-optimization result. Keep plans
+local and excluded from commits. Update changelog/docs/provenance and commit
+the completed optimization. No merge, push, tag or package publication.

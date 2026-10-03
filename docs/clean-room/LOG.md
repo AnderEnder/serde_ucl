@@ -6216,3 +6216,8 @@ participant did not run native Linux or push. Repair plan stays local/untracked.
 Commit: `fix(capi): select consistent installed library directory` (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 optimization kickoff
+
+- Owner requested C adapter optimization following same-input public API measurements. Created perf/c-api-adapter worktree from merged main 36da56c. Work-item goals contain observable baseline timings and invariant behavior, not implementation design. Fresh implementation delegation receives current instructions and protocol rules, released spec-v22 and allowed cases. Root remains spec-side and authors no src/ or capi/ implementation.
+- Inputs: current repository instructions/protocol, Git metadata, released Stage A artifacts, prior spec-owned measurements. Preserve unrelated original work and keep all plans local. The specification remains behaviour only. Coordinator benchmark/report work stays in its separate benchmark worktree.
