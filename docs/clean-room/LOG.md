@@ -6118,3 +6118,5 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
 
 - Owner requested rebase and CI repair for PR #29. Rebased C15-only commits onto origin/main e4dd295, skipping spec-v21 commits already squash-merged there. Preserved current main documentation and appended the C15 changelog/provenance; released spec-v22 remains unchanged at its original tag.
 - Inputs: current repository instructions/protocol, GitHub CI failure output, Git metadata, changelog and clean-room documents. Both native jobs fail because ANSI terminal color resets pollute native linker flags. Implementation repair is delegated to a clean participant. No src/ or capi/ implementation authored by the coordinator. Specification remains behaviour only.
+
+- Owner steering: exclude implementation plan files from the PR, while preserving all local copies. Removed added docs/superpowers/plans files from tracking and excluded that directory locally; implementation participants keep new repair plans local.
