@@ -17,7 +17,11 @@ An independent counting/CPU profile measured about 5× faster C lifecycles for
 (compared with Rust's 70,037), requested bytes from 74.64 MB to 11.89 MB, and peak
 extra live storage from 30.19 MB to 9.92 MB. Remaining adaptation and creation-time
 cwd costs are documented; zero total overhead is not claimed. The released header,
-43 functions/aliases and Rust parser behavior remain unchanged.
+43 functions/aliases and Rust parser behavior remain unchanged. Safe/full iterators
+now stream borrowed children with a single handle allocation; next and reset no
+longer copy or allocate complete traversal sequences. Arena owner pointers are
+published from final owner provenance, with a maintained ownership regression
+checked in ordinary CI and with Miri.
 
 ### C distribution
 

@@ -308,7 +308,7 @@ cargo run --release --manifest-path capi/Cargo.toml --example adapter_profile --
 ```
 
 The numeric argument generates deterministic records; a filename selects a
-standalone input document. JSON lines report three warmups, 30 measured lifecycles,
+standalone input document. JSON lines report arithmetic means after three warmups and 30 measured lifecycles,
 setup/submission/destruction times, Rust allocator requests (reallocations count
 as requests), cumulative requested bytes, peak extra live bytes and remaining live
 bytes. Input generation and caller buffers are outside the counted scope; libc
@@ -317,14 +317,31 @@ asserted. The counting allocator adds measurement overhead; use ordinary public
 C/Rust benchmarks for precise timings. `PROFILE_ROUNDS` changes the sample count
 and `PROFILE_MODE=C` selects C-only runs for native CPU sampling.
 
+`Rust` remains the default public memory-parser comparison. The separately labeled
+`RustObserved` diagnostic uses a Rust parser with creation-time cwd, filesystem
+loader and the C observation API (facts, partial results and byte cursor), without
+constructing C headers. It separates differing services from ABI marshalling;
+it does not replace the default Rust baseline. One 10,000-record profile measured
+6.14 ms for default Rust, 6.20 ms for RustObserved and 7.40 ms for C, with about
+1.17 ms of the remaining difference in submission/arena construction.
+
+`PROFILE_READS=1` measures safe-iterator creation, first child or all immediate
+children, and iterator cleanup against an already parsed live tree. Parse/input
+allocation is excluded from these read measurements. Iterators now stream borrowed
+children directly, with one 32-byte handle allocation and no allocation in next or
+reset. For the same 10,000-record input, first-child traversal fell from 4.26 µs
+and three allocations requesting 160,064 bytes to 43 ns and one allocation requesting
+32 bytes; full immediate-child traversal fell from 23.8 µs to 15.8 µs in this Rust
+calling harness. Ordinary separately compiled C callers may have different timings.
+
 On local Apple M4 Max Darwin arm64, Rust 1.98 release with fat LTO and one codegen
 unit, the same counting harness compared the merged adapter with this change:
 
 | Input | C before, total | C after, total | Rust after, total | C allocation requests, before → after |
 | --- | ---: | ---: | ---: | ---: |
-| 1,000 generated records, 67,670 bytes | 3.39 ms | 0.711 ms | 0.610 ms | 82,159 → 7,045 |
-| 10,000 generated records, 706,670 bytes | 37.42 ms | 7.47 ms | 6.13 ms | 820,212 → 70,059 |
-| rbl_group.conf, 13,404 bytes | 293 µs | 81.8 µs | 57.4 µs | 6,644 → 658 |
+| 1,000 generated records, 67,670 bytes | 3.39 ms | 0.713 ms | 0.604 ms | 82,159 → 7,045 |
+| 10,000 generated records, 706,670 bytes | 37.42 ms | 7.395 ms | 6.071 ms | 820,212 → 70,059 |
+| rbl_group.conf, 13,404 bytes | 293 µs | 75.3 µs | 55.6 µs | 6,644 → 658 |
 
 For 10,000 records, requested allocation bytes fell from 74.64 MB to 11.89 MB;
 peak extra live storage fell from 30.19 MB to 9.92 MB. Rust used 70,037 allocation
@@ -337,6 +354,19 @@ These measurements do **not** establish zero total overhead. The remaining large
 input cost includes building immediately observable C headers, terminated bytes,
 child links, and retaining the immutable Rust emission model. Very small default
 C parses are dominated by creation-time cwd capture, which the default Rust memory
-parser does not perform. An empty-input lifecycle measured about 9.56 µs through
-C and 0.298 µs through Rust here. Retaining the reviewed C environment preserves
+parser does not perform. An empty-input lifecycle measured about 11.31 µs through
+C and 0.250 µs through Rust here. Retaining the reviewed C environment preserves
 that fixed cost; timing and ratios depend on shape, machine and measurement method.
+
+
+The arena owner pointer is published only after construction from its final
+`Box::into_raw` provenance. A maintained Rust ownership regression covers retained
+nodes, duplicate headers, forced-string cache growth and emission; ordinary CI
+runs it. To also check Rust aliasing/provenance rules in a repository checkout:
+
+```sh
+MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test \
+  --manifest-path capi/Cargo.toml --test arena_lifetimes
+```
+
+Filesystem isolation is disabled for the existing creation-time cwd service.

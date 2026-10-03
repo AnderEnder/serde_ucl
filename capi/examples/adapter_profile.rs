@@ -47,7 +47,23 @@ static ALLOCATOR: Count = Count;
 
 fn lifecycle(mode: &str, data: &[u8]) -> [u128; 3] {
     let start = Instant::now();
-    if mode == "Rust" {
+    if mode == "RustObserved" {
+        let mut parser =
+            serde_ucl::parse::Parser::with_flags(serde_ucl::value::ParserFlags::empty());
+        parser.set_loader(serde_ucl::parse::FsLoader::new());
+        if let Ok(cwd) = std::env::current_dir() {
+            parser.set_base_dir(cwd);
+        }
+        let setup = start.elapsed().as_nanos();
+        let start = Instant::now();
+        let observation = parser.observe_c_input(serde_ucl::parse::Input::bytes(data));
+        assert!(observation.error.is_none());
+        let submit = start.elapsed().as_nanos();
+        let start = Instant::now();
+        drop(observation);
+        drop(parser);
+        [setup, submit, start.elapsed().as_nanos()]
+    } else if mode == "Rust" {
         let mut parser = serde_ucl::parse::Parser::new();
         let setup = start.elapsed().as_nanos();
         let start = Instant::now();
@@ -89,7 +105,11 @@ fn main() {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(30);
     let selected = std::env::var("PROFILE_MODE").ok();
-    for mode in ["Rust", "C"] {
+    if std::env::var_os("PROFILE_READS").is_some() {
+        profile_reads(data.as_bytes(), rounds);
+        return;
+    }
+    for mode in ["Rust", "RustObserved", "C"] {
         if selected.as_ref().is_some_and(|selected| selected != mode) {
             continue;
         }
@@ -126,5 +146,50 @@ fn main() {
             bytes / rounds,
             peak / rounds
         );
+    }
+}
+
+fn profile_reads(data: &[u8], rounds: usize) {
+    unsafe {
+        let parser = ucl::ucl_parser_new(0);
+        assert!(ucl::ucl_parser_add_chunk(parser, data.as_ptr(), data.len()));
+        let root = ucl::ucl_parser_get_object(parser);
+        ucl::ucl_parser_free(parser);
+        for full in [false, true] {
+            let mut elapsed = 0;
+            let (mut allocations, mut bytes, mut peak) = (0, 0, 0);
+            for round in 0..rounds + 3 {
+                let base = LIVE.load(Relaxed);
+                ALLOCS.store(0, Relaxed);
+                BYTES.store(0, Relaxed);
+                PEAK.store(base, Relaxed);
+                let start = Instant::now();
+                let iterator = ucl::ucl_object_iterate_new(root);
+                if full {
+                    while !ucl::ucl_object_iterate_safe(iterator, true).is_null() {}
+                } else {
+                    std::hint::black_box(ucl::ucl_object_iterate_safe(iterator, true));
+                }
+                ucl::ucl_object_iterate_free(iterator);
+                let duration = start.elapsed().as_nanos();
+                if round >= 3 {
+                    elapsed += duration;
+                    allocations += ALLOCS.load(Relaxed);
+                    bytes += BYTES.load(Relaxed);
+                    peak += PEAK.load(Relaxed) - base;
+                }
+                assert_eq!(LIVE.load(Relaxed), base);
+            }
+            let traversal = if full { "all_children" } else { "first_child" };
+            println!(
+                "{{\"mode\":\"CRead\",\"traversal\":\"{traversal}\",\"input_bytes\":{},\"warmup\":3,\"rounds\":{rounds},\"elapsed_ns\":{},\"alloc_requests\":{},\"requested_bytes\":{},\"peak_extra_live_bytes\":{},\"remaining_live_bytes\":0}}",
+                data.len(),
+                elapsed / rounds as u128,
+                allocations / rounds,
+                bytes / rounds,
+                peak / rounds
+            );
+        }
+        ucl::ucl_object_unref(root);
     }
 }

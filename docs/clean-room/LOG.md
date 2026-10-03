@@ -6266,3 +6266,51 @@ Commit: perf(capi): minimize public adapter allocation and lifetime overhead
 (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+## 2026-10-03 — Implementation team — C15 provenance and streaming follow-up
+
+Inputs: same allowed own implementation, released spec-v22 iteration matrix and
+public snapshots; independent clean reviewer observations and Miri reproduction of
+our own arena pointer tags. No forbidden inputs were consulted.
+
+Independent review concretely found that model pointers derived from successive
+exclusive construction borrows could retain invalid Rust provenance. Fixed this
+by publishing only the final Box::into_raw model pointer after all construction
+borrows end, using raw arena node accesses for construction updates. Added a
+maintained public ownership regression covering retained descendants, duplicate
+headers, cache growth, safe/reset/full traversal, and retained emission; ordinary
+CI now runs the C package's Rust tests. The regression passes Miri; the independent
+reviewer also checked expanded public lifetimes under Stacked and Tree Borrows.
+
+Safe/full iterators now stream directly over borrowed container/chain pointers,
+with first-call mode freezing and the released scalar-prefix, object restart,
+empty-container and exhaustion behavior preserved. Own before/after read profile
+(10k generator, already parsed tree, three warmups, 30 samples, arithmetic means):
+first child 4257ns/3 requests/160064bytes ->43ns/1 request/32bytes; all immediate
+children 23783ns ->15761ns with the same allocation reduction; zero excess live
+bytes afterwards. Profile source and JSON files are under the same local evidence
+folder; parse/input allocation is excluded from these read regions.
+
+The default Rust benchmark remains distinct from the labeled RustObserved
+creation-cwd/filesystem/facts/cursor diagnostic. One matched own10k profile measured
+defaultRust6.144ms, RustObserved6.202ms and C7.396ms. Remaining submission adaptation
+was about1.17ms here: eager immutable-tree counting/traversal, public headers,
+terminated bytes/links, and owner-pointer publication. Reads/emission perform no
+deferred adapter construction. Linear physical header storage remains required by
+the released ABI; a parser backend that writes C storage directly would be a
+separate core architecture change, not a hidden omission of observable fields.
+DefaultCvsdefaultRust does not meet zero overhead, especially on tiny inputs whose
+creation-cwd service dominates. Possible small private-layout reductions were
+assessed but not introduced without evidence of material improvement.
+
+Full scripts/ci.sh including maintained Rust ownership test passed. C direct and
+installed static/shared signatures, 43 exports/header, ten snapshots, boundary,
+lifetimes/retained facts and 1023-container stack checks passed. Nightly Rust ASan
+and C ASan/UBSan passed; the maintained regression passed Miri. No publication,
+merge, push or native Linux execution occurred.
+
+Commit: perf(capi): stream iteration and preserve arena pointer provenance
+(Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

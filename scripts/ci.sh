@@ -67,6 +67,7 @@ checks() {
 		--all-targets -- -D warnings
 
 	run cargo test
+	run cargo test --manifest-path "$CAPI_MANIFEST"
 	# The tests of stack depth again, with the crate unoptimised as a debug build of an
 	# application builds it: the test profile optimises it (Cargo.toml).
 	run cargo test --lib --test stack_depth \

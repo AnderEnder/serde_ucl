@@ -154,7 +154,7 @@ impl Model {
             flags,
             r#type: kind,
             trash_stack: [
-                (self as *mut Model).cast(),
+                ptr::null_mut(),
                 (value as *const UclValue).cast_mut().cast(),
             ],
         };
@@ -213,8 +213,11 @@ pub(crate) fn tree(root: UclValue, facts: OutputFacts) -> *mut UclObject {
     let mut index = 0;
     // Appended children are visited in order. No recursive calls or per-container work lists.
     while index < model.nodes.len() {
-        let value = model.nodes[index].value();
-        let facts = model.nodes[index].facts;
+        // Use raw node access throughout construction, preserving previously stored
+        // arena pointer provenance rather than materializing a mutable node slice.
+        let current = unsafe { model.nodes.as_mut_ptr().add(index) };
+        let value = unsafe { (*current).value() };
+        let facts = unsafe { (*current).facts };
         let start = model.links.len();
         match unsafe { &*value } {
             Value::Object(o) => {
@@ -259,8 +262,10 @@ pub(crate) fn tree(root: UclValue, facts: OutputFacts) -> *mut UclObject {
                     }
                     end
                 };
-                model.nodes[index].links = model.links(start);
-                model.nodes[index].public.value.ov = model.links(heads).cast_mut().cast();
+                unsafe {
+                    (*current).links = model.links(start);
+                    (*current).public.value.ov = model.links(heads).cast_mut().cast();
+                }
             }
             Value::Array(a) => {
                 for (i, value) in a.iter().enumerate() {
@@ -268,7 +273,9 @@ pub(crate) fn tree(root: UclValue, facts: OutputFacts) -> *mut UclObject {
                     let child = model.allocate(value, cursor, None, 0);
                     model.links.push(child);
                 }
-                model.nodes[index].links = model.links(start);
+                unsafe {
+                    (*current).links = model.links(start);
+                }
             }
             _ => {}
         }
@@ -277,7 +284,16 @@ pub(crate) fn tree(root: UclValue, facts: OutputFacts) -> *mut UclObject {
     debug_assert_eq!(model.nodes.len(), count);
     debug_assert_eq!(model.links.len(), link_count);
     debug_assert_eq!(model.bytes.len(), byte_count);
-    let _ = Box::into_raw(model);
+    // A pointer derived from allocate(&mut self) would be invalidated by the next
+    // exclusive borrow of Model. Publish only the final Box::into_raw provenance,
+    // after construction; Model is subsequently accessed through raw field pointers.
+    let model = Box::into_raw(model);
+    let nodes = unsafe { (*model).nodes.as_mut_ptr() };
+    for index in 0..count {
+        unsafe {
+            (*nodes.add(index)).public.trash_stack[0] = model.cast();
+        }
+    }
     top
 }
 
