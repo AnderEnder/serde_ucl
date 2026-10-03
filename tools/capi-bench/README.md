@@ -92,3 +92,19 @@ Self/inclusive sample counts are retained; inclusive percentages overlap.
 Leaf categories based on symbol names are approximate CPU attribution, not
 allocation counts. Exact allocation counts/bytes come from the clean
 implementer's own counting allocator, with its scope stated in the report.
+
+To check that construction savings do not move into common reads, run matched
+C callers against the recorded before/after archives and reference:
+
+```sh
+python3 tools/capi-bench/read_bench.py --before target/c-bench --after target/c-bench-after
+```
+
+This rejects archives or inputs whose hashes changed after the main benchmark.
+It measures safe iterator creation, first child or all immediate children, and
+iterator cleanup on pre-parsed 10,000-element arrays and 1,000-key objects.
+Indexed lookup is measured separately. Parsing/destruction are outside timing;
+the full operation includes a volatile sink and traversal count check. Counts
+must agree for all libraries. Five rotated rounds of nine samples are calibrated
+to approximately 30 ms, with medians and every raw sample in `reads.{json,md}`.
+These timings do not represent recursive whole-tree traversal or Rust iteration.
