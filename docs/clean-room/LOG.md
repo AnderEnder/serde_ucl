@@ -6221,3 +6221,48 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
 
 - Owner requested C adapter optimization following same-input public API measurements. Created perf/c-api-adapter worktree from merged main 36da56c. Work-item goals contain observable baseline timings and invariant behavior, not implementation design. Fresh implementation delegation receives current instructions and protocol rules, released spec-v22 and allowed cases. Root remains spec-side and authors no src/ or capi/ implementation.
 - Inputs: current repository instructions/protocol, Git metadata, released Stage A artifacts, prior spec-owned measurements. Preserve unrelated original work and keep all plans local. The specification remains behaviour only. Coordinator benchmark/report work stays in its separate benchmark worktree.
+
+
+## 2026-10-03 — Implementation team — C15 adapter optimization
+
+Inputs: current CLAUDE.md and docs/clean-room/PROTOCOL.md, released spec-v22 Stage A
+contract and format sections 7, 8, 10 and 12, allowed C conformance cases/snapshots,
+current own Rust/C implementation and tests, approved rbl_group.conf corpus document,
+work-item performance goals, writing-plans skill, and coordinator-provided observable
+public checkpoint timings and black-box creation-time cwd observation. The local
+plan was derived independently, remains excluded, and no other session plans were
+consulted. An isolated baseline under target/adapter-profile/baseline-tree contains
+only allowed own HEAD implementation/manifest/document/benchmark files and the same
+independent profiling harness; no forbidden source/tooling was consulted.
+
+Removed unused successful snapshots and owned-tree rebuilds. Implemented compact
+stable public-node/terminated-byte/child-link arenas, shared singleton child/head
+ranges, reuse of the Rust key index and opaque positional output facts. Arena external
+ownership permits direct final destruction; releases with retained children preserve
+exact observable public refcounts. Lazy forced strings live in arena-owned storage.
+Creation-time cwd capture remains unchanged. Added regressions for independently
+retained children, retained single-quote/heredoc/escaped-key facts, escaped CURDIR,
+and chdir between parser creation and submission.
+
+Independent release counting profile: three warmups, 30 measured lifecycles, setup,
+submission and destruction separately, allocations/reallocations counted as Rust
+allocator requests, requested bytes and peak extra live bytes, input/caller buffers
+and libc allocations excluded. 10k own records: C 37.42ms ->7.47ms total, Rust6.13ms;
+820212 ->70059 requests (Rust70037); 74.64MB ->11.89MB requested bytes; 30.19MB ->9.92MB
+peak extra live storage; all measured lifecycles returned to original live baseline.
+Native C-only sample before/after and machine-readable profiles are local under
+target/adapter-profile/evidence/. Tiny fixed C environment cost remains, and zero
+total overhead is not claimed. No timed regression thresholds were introduced.
+
+Validation: full scripts/ci.sh passed; exact 43 exports, released header, C11/C++11
+signatures and linkage, ten golden snapshots, single-submission, retained lifetimes,
+iteration, emission facts and 1023-container/2MiB-stack checks passed for direct and
+installed static/shared libraries. C callers passed ASan/UBSan; nightly Rust ASan
+plus instrumented C callers passed static/shared checks. Darwin leak sanitizer is
+unavailable; independent Rust allocator live counts returned to zero excess instead.
+No native Linux execution, push, publication or merge was performed.
+
+Commit: perf(capi): minimize public adapter allocation and lifetime overhead
+(Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

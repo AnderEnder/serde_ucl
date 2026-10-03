@@ -69,7 +69,7 @@ mod vars;
 
 pub use builder::ParserBuilder;
 pub use error::{Error, ErrorKind};
-pub use facts::{OutputFacts, ValueFacts};
+pub use facts::{FactsCursor, OutputFacts, ValueFacts};
 pub use inputs::{Input, Inputs};
 #[cfg(feature = "fs")]
 pub use loader::FsLoader;

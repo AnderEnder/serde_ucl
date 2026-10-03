@@ -4,6 +4,21 @@ All notable changes to this crate are recorded here.
 
 ## Unreleased
 
+### C adapter performance
+
+C15 replaces per-node allocations, duplicate key paths and lookup maps with compact
+stable arena storage and the Rust object's existing lookup index. Successful C
+parses no longer snapshot or rebuild an already-owned Rust tree. Final arena release
+skips unobservable descendant refcount/destructor walks; retained subtrees still
+keep exact public reference counts, borrowed strings and emission facts.
+
+An independent counting/CPU profile measured about 5× faster C lifecycles for
+10,000 generated records, reducing allocator requests from 820,212 to 70,059
+(compared with Rust's 70,037), requested bytes from 74.64 MB to 11.89 MB, and peak
+extra live storage from 30.19 MB to 9.92 MB. Remaining adaptation and creation-time
+cwd costs are documented; zero total overhead is not claimed. The released header,
+43 functions/aliases and Rust parser behavior remain unchanged.
+
 ### C distribution
 
 C validation strips terminal styling from Cargo native-link diagnostics, so forced

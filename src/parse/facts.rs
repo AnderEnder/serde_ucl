@@ -513,6 +513,41 @@ impl PartialEq for OutputFacts {
 
 impl Eq for OutputFacts {}
 
+/// Opaque position in output facts, used by the read-only C adapter.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct FactsCursor(Option<std::num::NonZeroUsize>);
+
+impl FactsCursor {
+    /// Facts of the root value.
+    pub fn root() -> Self {
+        Self(std::num::NonZeroUsize::new(ROOT + 1))
+    }
+    /// Facts of an object's slot at its existing entry position.
+    pub fn entry(self, facts: &OutputFacts, entry: usize, key: &str, slot: usize) -> Self {
+        Self(
+            self.0
+                .and_then(|node| facts.child_entry(node.get() - 1, entry, key, slot))
+                .and_then(|node| std::num::NonZeroUsize::new(node + 1)),
+        )
+    }
+    /// Facts of an array element.
+    pub fn element(self, facts: &OutputFacts, index: usize) -> Self {
+        Self(
+            self.0
+                .and_then(|node| facts.child_element(node.get() - 1, index))
+                .and_then(|node| std::num::NonZeroUsize::new(node + 1)),
+        )
+    }
+    /// Facts recorded for this value.
+    pub fn get(self, facts: &OutputFacts) -> Option<&ValueFacts> {
+        self.0.and_then(|node| facts.facts_of(node.get() - 1))
+    }
+    pub(crate) fn node(self) -> Option<usize> {
+        self.0.map(|node| node.get() - 1)
+    }
+}
+
 impl OutputFacts {
     /// No facts.
     pub fn new() -> Self {

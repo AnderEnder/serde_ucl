@@ -17,8 +17,8 @@ struct Iterator {
 unsafe fn children(p: *const UclObject) -> Vec<*const UclObject> {
     let n = unsafe { node(p) };
     match n.public.r#type {
-        0 => n.heads.iter().map(|p| p.cast_const()).collect(),
-        1 => n.children.iter().map(|p| p.cast_const()).collect(),
+        0 => n.heads().iter().map(|p| p.cast_const()).collect(),
+        1 => n.children().iter().map(|p| p.cast_const()).collect(),
         _ => Vec::new(),
     }
 }
@@ -62,7 +62,7 @@ pub unsafe extern "C" fn ucl_object_iterate_with_error(
                 handle.cast::<OldObject>()
             };
             let cursor = unsafe { &mut *handle };
-            let out = unsafe { node(p) }.heads.get(cursor.index).copied();
+            let out = unsafe { node(p) }.heads().get(cursor.index).copied();
             if let Some(out) = out {
                 cursor.index += 1;
                 unsafe {
@@ -78,7 +78,7 @@ pub unsafe extern "C" fn ucl_object_iterate_with_error(
             }
         } else if expand && unsafe { (*p).r#type == 1 } {
             let index = handle as usize;
-            if let Some(out) = unsafe { node(p) }.children.get(index) {
+            if let Some(out) = unsafe { node(p) }.children().get(index) {
                 unsafe {
                     *it = (index + 1) as *mut c_void;
                 }

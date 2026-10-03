@@ -279,3 +279,64 @@ strings belong to the parser; exact wording is unspecified. get_object can
 return a partial tree after failure and does not imply parse success. Text
 emitter selectors 0–3 are supported. See the released contract for all flags,
 conversion and iterator details.
+
+
+## Adapter overhead and profiling
+
+Public objects use stable arena storage, with one terminated-byte buffer and one
+child-link buffer. Singleton object entries share their lookup/iteration heads
+with their children. Lookup reuses the Rust object's key index; facts are addressed
+by an opaque position instead of copied key paths. The usual final owned-reference
+release frees the complete arena directly. Releasing a parent while separately
+retained children survive still updates child ownership and public reference counts
+iteratively. Emission continues to use the original value and its facts; no tree
+construction is deferred to lookups, iteration or emission.
+
+A retained child keeps the entire arena and original Rust model alive until its
+last owned reference is released. This trades individual C-node reclamation for
+fewer allocations and stable borrowed strings. Forced conversion strings are
+created on first use and remain in arena-owned storage through that lifetime.
+Creation-time cwd capture, parser flags and all reviewed public fields are unchanged.
+
+An independent implementation-side counting profile is available in repository
+checkouts:
+
+```sh
+cargo run --release --manifest-path capi/Cargo.toml --example adapter_profile -- 10000
+cargo run --release --manifest-path capi/Cargo.toml --example adapter_profile -- \
+  benches/corpus/rspamd/scores.d/rbl_group.conf
+```
+
+The numeric argument generates deterministic records; a filename selects a
+standalone input document. JSON lines report three warmups, 30 measured lifecycles,
+setup/submission/destruction times, Rust allocator requests (reallocations count
+as requests), cumulative requested bytes, peak extra live bytes and remaining live
+bytes. Input generation and caller buffers are outside the counted scope; libc
+allocations, such as emission buffers, are not counted. No timing thresholds are
+asserted. The counting allocator adds measurement overhead; use ordinary public
+C/Rust benchmarks for precise timings. `PROFILE_ROUNDS` changes the sample count
+and `PROFILE_MODE=C` selects C-only runs for native CPU sampling.
+
+On local Apple M4 Max Darwin arm64, Rust 1.98 release with fat LTO and one codegen
+unit, the same counting harness compared the merged adapter with this change:
+
+| Input | C before, total | C after, total | Rust after, total | C allocation requests, before → after |
+| --- | ---: | ---: | ---: | ---: |
+| 1,000 generated records, 67,670 bytes | 3.39 ms | 0.711 ms | 0.610 ms | 82,159 → 7,045 |
+| 10,000 generated records, 706,670 bytes | 37.42 ms | 7.47 ms | 6.13 ms | 820,212 → 70,059 |
+| rbl_group.conf, 13,404 bytes | 293 µs | 81.8 µs | 57.4 µs | 6,644 → 658 |
+
+For 10,000 records, requested allocation bytes fell from 74.64 MB to 11.89 MB;
+peak extra live storage fell from 30.19 MB to 9.92 MB. Rust used 70,037 allocation
+requests, so adaptation adds 22 requests in that case; every measured lifecycle
+returned to its original live-allocation baseline. Native CPU samples identified
+allocator/free traffic and owned-tree reconstruction as the original hotspots;
+those reconstructions and per-node allocation graphs have been removed.
+
+These measurements do **not** establish zero total overhead. The remaining large
+input cost includes building immediately observable C headers, terminated bytes,
+child links, and retaining the immutable Rust emission model. Very small default
+C parses are dominated by creation-time cwd capture, which the default Rust memory
+parser does not perform. An empty-input lifecycle measured about 9.56 µs through
+C and 0.298 µs through Rust here. Retaining the reviewed C environment preserves
+that fixed cost; timing and ratios depend on shape, machine and measurement method.
