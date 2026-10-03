@@ -6120,3 +6120,52 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
 - Inputs: current repository instructions/protocol, GitHub CI failure output, Git metadata, changelog and clean-room documents. Both native jobs fail because ANSI terminal color resets pollute native linker flags. Implementation repair is delegated to a clean participant. No src/ or capi/ implementation authored by the coordinator. Specification remains behaviour only.
 
 - Owner steering: exclude implementation plan files from the PR, while preserving all local copies. Removed added docs/superpowers/plans files from tracking and excluded that directory locally; implementation participants keep new repair plans local.
+
+## 2026-10-03 — Implementation team — C15 rebased colored-Cargo CI repair
+
+Participant reread current CLAUDE.md and full PROTOCOL first and remains clean
+from the prior attested sessions. Inputs: owner-authorized sanitized CI diagnostic
+(final Linux `-lc`/Darwin `-lm` argument acquired Cargo ANSI reset), current allowed
+C package tooling/tests and Rust implementation, current-origin/main implementation
+diff, original released spec-v22 Stage A contract/header, and writing-plans skill.
+No raw coordinator CI logs, upstream source/header, tools source, predecessor or
+coordinator plans, forbidden history or session memory were read.
+
+Added a pure native-static-libs parser that strips terminal CSI styling before
+splitting linker arguments, preserves quoted arguments, and rejects absent/empty
+diagnostics. New fixtures reproduce colored Linux and Darwin final-library flags,
+embedded styling and missing/empty output; initial missing-helper failures were
+observed before the repair. Named capi search found no equivalent uncorrected
+native-static-libs parser.
+
+Reviewed the rebased current Rust integration: C cursor/partial observations are
+opt-in, capture the final include-search result, preserve existing default Rust
+reader/emitter paths, and retain borrowed-subtree output facts. No core code
+change was needed. Exact shipping header remains byte-identical to spec-v22.
+
+Validation:
+
+- `CARGO_TERM_COLOR=always scripts/ci.sh checks` passed all required formatting,
+  clippy, Rust feature/conformance/optimized and unoptimized depth/fuzzer tests,
+  examples/benches/docs and C static/shared/direct/installed signature, snapshot,
+  boundary/lifetime/depth checks on native Darwin arm64.
+- Twelve Python fixtures passed, including actual Linux/Darwin color regressions;
+  those Linux flag fixtures establish parsing only, not Linux execution.
+- A fresh local depth-one clone with `--no-tags` has no spec-v22 tag. The corrected
+  C driver and fixtures both passed there with `CARGO_TERM_COLOR=always`, confirming
+  ordinary PR checks require only the checked-in contract. Packaging still requires
+  fetched spec-v22; README states that future release prerequisite explicitly.
+- actionlint for CI/release workflows, exact-header and whitespace checks passed.
+- Source input construction passed without local implementation/validation plans;
+  corrected public C validation tooling remains included.
+
+Per owner instruction, capi implementation/validation plans were removed from
+tracking and source archive selection while preserving their local files; all
+superpowers plans stay local and are not staged. Independently authored repair
+plan is local only. Original checkout was not edited by this participant. No push,
+merge, release tag, publish, upload, native Linux or GitHub workflow execution was
+performed; coordinator handles remote update and real CI monitoring.
+
+Commit: `fix(capi): strip Cargo color from native linker flags` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

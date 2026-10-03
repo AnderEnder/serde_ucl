@@ -149,7 +149,7 @@ def source_tree(directory):
     files = ["Cargo.toml", "Cargo.lock", "README.md", "CHANGELOG.md", "LICENSE-MIT",
              "LICENSE-APACHE", "capi/Cargo.toml", "capi/Cargo.lock", "capi/README.md",
              "capi/Makefile", "capi/distribution.py", "capi/distribution_platform.py",
-             "capi/collect_distribution.py", "capi/IMPLEMENTATION.md",
+             "capi/collect_distribution.py",
              "capi/tests/check.py", "capi/tests/extra.c", "capi/tests/distribution_test.py",
              "capi/include/ucl.h",
              "docs/clean-room/PROTOCOL.md", "docs/clean-room/LOG.md"]

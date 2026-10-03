@@ -33,6 +33,16 @@ def run(command, *, cwd=ROOT, env=None):
     return result
 
 
+def native_static_libraries(output):
+    """Read linker arguments without Cargo's terminal styling (including forced color)."""
+    output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output)
+    match = re.search(r"native-static-libs:[ \t]*([^\r\n]+)", output)
+    dependencies = shlex.split(match.group(1)) if match else []
+    if not dependencies:
+        raise RuntimeError("Cargo did not report static native link dependencies")
+    return dependencies
+
+
 def signature_source(functions):
     lines = ['#include <ucl.h>', 'int main(void) {']
     for index, function in enumerate(functions):
@@ -106,11 +116,7 @@ def main():
     run([*cargo, "build", *build_options], env=env)
     native = run([*cargo, "rustc", *build_options,
                   "--", "--print=native-static-libs"], env=env)
-    output = (native.stdout + native.stderr).decode()
-    match = re.search(r"native-static-libs:\s*([^\n]+)", output)
-    if not match:
-        raise RuntimeError("Cargo did not report static native link dependencies")
-    dependencies = shlex.split(match.group(1))
+    dependencies = native_static_libraries((native.stdout + native.stderr).decode())
     shared = release / ("libucl.dylib" if platform.system() == "Darwin" else "libucl.so")
     # Rust's LLVM matches archive bitcode; Apple nm can be older than rustc's LLVM.
     rustc = ["rustc", "+nightly"] if args.rust_asan else ["rustc"]

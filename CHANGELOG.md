@@ -6,6 +6,9 @@ All notable changes to this crate are recorded here.
 
 ### C distribution
 
+C validation strips terminal styling from Cargo native-link diagnostics, so forced
+color in Linux/macOS CI no longer corrupts the final linker argument.
+
 C15 adds cargo-c installation using the unchanged reviewed header, distinct
 `serde-ucl-c` package and `serde-ucl` pkg-config identities, and independent shared
 ABI 1.0.0. Locally verified source and relocatable macOS arm64 SDK archives include

@@ -30,6 +30,36 @@ DYNAMIC = """ 0x000000000000000e (SONAME)             Library soname: [libucl.so
 VERSIONS = "Name: GLIBC_2.9\nName: GLIBC_2.2.5\nName: GLIBC_2.34\n"
 
 
+class NativeLinkTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("capi_check", CAPI / "tests/check.py")
+        cls.check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.check)
+
+    def test_plain_and_colored_linux_darwin_dependencies(self):
+        for flags in ("-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc",
+                      "-liconv -lSystem -lc -lm"):
+            for output in (f"note: native-static-libs: {flags}\n",
+                           f"\x1b[1m\x1b[32mnote\x1b[0m: \x1b[1mnative-static-libs: {flags}\x1b[0m\n"
+                           "\x1b[1m\x1b[32m    Finished\x1b[0m release build\n"):
+                with self.subTest(output=output):
+                    self.assertEqual(self.check.native_static_libraries(output), flags.split())
+
+    def test_embedded_styling_and_quoted_link_arguments(self):
+        output = ('note: native-static-libs: \x1b[38;5;2m-lc\x1b[0m '
+                  '\x1b[1m-lm\x1b[0m "library path/libextra.a"\r\n')
+        self.assertEqual(self.check.native_static_libraries(output),
+                         ["-lc", "-lm", "library path/libextra.a"])
+
+    def test_missing_or_empty_diagnostic_rejects(self):
+        for output in ("Finished release build\n", "note: native-static-libs: \x1b[0m\n",
+                       "note: native-static-libs:\n    Finished release build\n"):
+            with self.subTest(output=output):
+                with self.assertRaises(RuntimeError):
+                    self.check.native_static_libraries(output)
+
+
 class PlatformTests(unittest.TestCase):
     def test_native_matrix_and_cross_host_rejection(self):
         for target in TARGETS.values():

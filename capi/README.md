@@ -170,7 +170,9 @@ python3 capi/tests/check.py
 ```
 
 The archive builder reads released documentation from `spec-v22`, which must exist
-in the checkout and be available to release CI on the remote. It never pushes tags.
+in the checkout and be available to release CI on the remote. Source/SDK release
+jobs require that tag to be fetched; ordinary Rust/C pull-request checks use the
+checked-in contract and do not require it. The builder never pushes tags.
 `--kind source` emits only the source archive; `--kind sdk` emits only the native SDK;
 default `all` is convenient locally. `--assert-native --target TARGET` checks the
 actual host and refuses cross-target requests. `--require-clean` checks the release
