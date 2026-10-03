@@ -484,3 +484,9 @@ linkage, sanitizer checks and required Rust checks. Coordinator benchmarks the
 same inputs against pinned libucl and the pre-optimization result. Keep plans
 local and excluded from commits. Update changelog/docs/provenance and commit
 the completed optimization. No merge, push, tag or package publication.
+
+Owner steering: include CPU and allocation profiling before/after, and target
+zero or near-zero adapter overhead relative to the equivalent Rust API path.
+Measure C/Rust overhead ratios on identical inputs and profiles; identify the
+remaining allocation/copy/destruction cost. A small speedup alone does not
+satisfy the goal while avoidable material overhead remains.
