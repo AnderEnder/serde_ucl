@@ -54,3 +54,15 @@ results. Both APIs clean up their objects in the parsing measurement.
 
 See [the recorded macOS arm64 run](reports/2026-10-03-macos-arm64.md) for the first
 comparison of merged C15.
+
+To compare the Rust value API with the two C callers on these exact same inputs,
+first run the main benchmark above, then:
+
+```sh
+python3 tools/capi-bench/rust_baseline.py
+```
+
+This builds a Rust public-API caller with the same release profile and dependency
+versions, requires identical output for all three callers, and rotates their
+parse/drop timing order. Results go to `target/c-bench/rust-baseline.{json,md}`.
+See [the measured Rust/C comparison](reports/2026-10-03-rust-versus-c.md).
