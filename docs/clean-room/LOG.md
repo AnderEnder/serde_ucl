@@ -6314,3 +6314,61 @@ Commit: perf(capi): stream iteration and preserve arena pointer provenance
 (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+## 2026-10-03 — C15 adapter optimization independent implementation review
+
+Role: fresh clean-room implementation reviewer. Work item: C15.
+Reviewed implementation: dfefd2cff0c11a3f4710c9fce1720b2d5b2d273d, following
+initial checkpoint 5c8df1a2e4a3f5b66610fd1fcacb39d3fd42d3d5. Final review:
+[reviews/c15-adapter-optimization.md](reviews/c15-adapter-optimization.md).
+
+Inputs: current CLAUDE.md and PROTOCOL.md; released spec-v22 Stage A contract;
+clean-room work-item goals/provenance; current own C adapter, parser/value/emitter
+implementation and permitted recent own-code diffs; own C/Rust tests, profiling
+example and distribution code; released conformance snapshots through the public
+validation gate. No reference source, coordinator benchmark tooling or forbidden
+input was read. No implementation code was edited by this reviewer.
+
+Confirmed an unsafe Model-pointer provenance defect at the initial checkpoint
+with both a minimal own Rust reproduction and an actual public-API Miri case
+(parser creation, child/duplicate parsing, then get_object). The subsequent
+exclusive Model borrow invalidated a pointer saved inside allocate(&mut self).
+The final checkpoint installs the Model pointer from Box::into_raw after arena
+construction; the same case and expanded ownership checks pass. No open
+correctness finding remains. Independently assessed exact arena counts, public
+address/string stability, refcounts and retained descendants, intrusive release,
+lazy forced buffers, iterator anchoring and contract matrix, partial/error
+results, and iterative deepest-tree behavior.
+
+Independent commands: python3 capi/tests/check.py (all four direct/installed
+static/shared variants, exact 43 exports/header, C11/C++11, ten golden snapshots,
+parser/lifetimes/facts/iteration and 1023-container/2MiB depth); python3
+capi/tests/distribution_test.py (13 passed); MIRIFLAGS=-Zmiri-disable-isolation
+cargo +nightly miri test --manifest-path capi/Cargo.toml --test arena_lifetimes
+(passed); MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri run
+--manifest-path target/capi-review-miri/Cargo.toml (passed on repaired source),
+and the same scratch command with -Zmiri-tree-borrows (passed). Scratch cases
+cover retained child/grandchild, cached/borrowed strings, iteration after parent
+release, reset/full traversal, emission/free, partial errors, empty input and
+duplicates. Final adapter/test file SHA-256 values were compared with dfefd2c
+blobs and recorded in the review. Existing tests were not rerun during final
+coordinator timing because the reviewed implementation content was unchanged.
+
+Lookup and final streaming iteration do not defer tree conversion into reads.
+Near-zero total adapter overhead is not achieved: the recorded own-input profile
+is about 20% above default Rust and 19% above equivalent observed Rust. The
+coordinator reported final original-input 10k records at C 8.868ms/Rust 6.169ms/
+libucl 10.958ms, about 44% above Rust; no coordinator tooling/artifact was read.
+The zero/near-zero goal remains unmet. Additional linear header/link/terminated-
+byte construction remains material. A modest flat-object full-iteration timing
+regression was also reported, alongside improved array traversal/first reads
+and lookup. The review
+identifies safe local opportunities without claiming the residual irreducible.
+The repository-only profiling example claim matches source archive exclusions;
+new automatic example discovery does not break source packaging.
+
+Commit produced: docs(clean-room): record independent C15 adapter optimization
+review (Work item: C15). No push, merge or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
