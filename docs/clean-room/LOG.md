@@ -6241,3 +6241,26 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
 ### 2026-10-03 — spec coordinator — C15 public-read performance tooling
 
 Added matched released-interface C callers for safe iterator first/full immediate-child reads and indexed lookup, separate from parsing. Inputs: released Stage A header, allowed corpus documents, existing public benchmark evidence and current repository instructions/protocol. No implementation source authored. Archive/input hashes and traversal counts gate timings; profiling and allocation instrumentation remain separate. Tooling contains public observable operations only, not implementation guidance. Commit records work item C15; no push, merge or publication.
+
+### 2026-10-03 — spec coordinator — C15 final benchmark and profiling evidence
+
+Measured stable `dfefd2c` against merged `36da56c` with identical released
+headers, C caller and original inputs. All outputs match both libraries and
+the same candidate Rust core. The native oracle gate passed 43 functions,
+ten cases and four linkage combinations. Implementation and independent
+review checks are recorded on `perf/c-api-adapter` (review `af90a29`, measured
+checkpoint `f22dc04`). Original 10k-record C parsing improved from 42.589 to
+8.868 ms, versus Rust 6.169 ms and libucl 10.958 ms: 4.80x faster, with a 44%
+Rust gap. Native CPU allocator/release leaves fell from 47.73% to 16.02%.
+Separate own-fixture counting shows C requests fell from 820,212 to 70,059,
+versus Rust's 70,037. Public read measurements show a 142x first-child
+improvement and a 12% flat full-iteration regression.
+
+Raw timings, hashes, CPU summaries and scoped allocator evidence are committed
+under `tools/capi-bench/reports/evidence`. The report explicitly leaves the
+near-zero target open. Gzip hashes and CPU input/binary provenance were checked.
+No implementation source was authored; no new behavioral contract, research
+proposal, plan, upstream source or reference build was released. Inputs were
+current repository instructions/protocol, released spec/header, allowed corpus
+and conformance, public benchmark results and clean independent review.
+No push, merge, PR or publication; unrelated original work was preserved.

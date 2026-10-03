@@ -1,0 +1,12 @@
+{
+  "baseline_commit": "7a48e5b0f2361ad72aa09ae5f5f3f01dfa9949fa",
+  "spec": "spec-v22",
+  "host": "Darwin arm64",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "build": "release fat LTO codegen-units1",
+  "profile_scope": "Rust global allocator requests, realloc included; input generation/caller buffers/libc allocations excluded",
+  "warmup": 3,
+  "rounds": 30,
+  "cpu_sampling": "C-only1000lifecycles; sample5seconds1ms",
+  "plan": "independently derived, local and excluded"
+}

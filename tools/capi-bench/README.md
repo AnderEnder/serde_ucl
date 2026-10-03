@@ -108,3 +108,8 @@ the full operation includes a volatile sink and traversal count check. Counts
 must agree for all libraries. Five rotated rounds of nine samples are calibrated
 to approximately 30 ms, with medians and every raw sample in `reads.{json,md}`.
 These timings do not represent recursive whole-tree traversal or Rust iteration.
+
+See [the final optimization and profiling report](reports/2026-10-03-adapter-optimization.md)
+for before/after samples, allocation counts, CPU profiles and the remaining
+C/Rust gap. It records a substantial improvement without claiming the near-zero
+target has been met.

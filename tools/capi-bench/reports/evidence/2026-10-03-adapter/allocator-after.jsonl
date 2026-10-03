@@ -1,0 +1,12 @@
+{"mode":"Rust","input_bytes":0,"warmup":3,"rounds":30,"setup_ns":25,"submit_ns":188,"destroy_ns":37,"alloc_requests":0,"requested_bytes":0,"peak_extra_live_bytes":0,"remaining_live_bytes":0}
+{"mode":"RustObserved","input_bytes":0,"warmup":3,"rounds":30,"setup_ns":11693,"submit_ns":252,"destroy_ns":84,"alloc_requests":2,"requested_bytes":552,"peak_extra_live_bytes":512,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":0,"warmup":3,"rounds":30,"setup_ns":10820,"submit_ns":338,"destroy_ns":152,"alloc_requests":7,"requested_bytes":1320,"peak_extra_live_bytes":808,"remaining_live_bytes":0}
+{"mode":"Rust","input_bytes":67670,"warmup":3,"rounds":30,"setup_ns":29,"submit_ns":495148,"destroy_ns":108733,"alloc_requests":7027,"requested_bytes":654444,"peak_extra_live_bytes":474084,"remaining_live_bytes":0}
+{"mode":"RustObserved","input_bytes":67670,"warmup":3,"rounds":30,"setup_ns":12000,"submit_ns":499000,"destroy_ns":106834,"alloc_requests":7029,"requested_bytes":654996,"peak_extra_live_bytes":474124,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":67670,"warmup":3,"rounds":30,"setup_ns":8572,"submit_ns":597518,"destroy_ns":107226,"alloc_requests":7045,"requested_bytes":1195896,"peak_extra_live_bytes":998160,"remaining_live_bytes":0}
+{"mode":"Rust","input_bytes":706670,"warmup":3,"rounds":30,"setup_ns":17,"submit_ns":4986130,"destroy_ns":1085266,"alloc_requests":70037,"requested_bytes":6365892,"peak_extra_live_bytes":4661796,"remaining_live_bytes":0}
+{"mode":"RustObserved","input_bytes":706670,"warmup":3,"rounds":30,"setup_ns":10194,"submit_ns":5087125,"destroy_ns":1114734,"alloc_requests":70039,"requested_bytes":6366444,"peak_extra_live_bytes":4661836,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":706670,"warmup":3,"rounds":30,"setup_ns":12194,"submit_ns":6240612,"destroy_ns":1141742,"alloc_requests":70059,"requested_bytes":11887104,"peak_extra_live_bytes":9919872,"remaining_live_bytes":0}
+{"mode":"Rust","input_bytes":13404,"warmup":3,"rounds":30,"setup_ns":22,"submit_ns":46450,"destroy_ns":9159,"alloc_requests":643,"requested_bytes":54553,"peak_extra_live_bytes":39554,"remaining_live_bytes":0}
+{"mode":"RustObserved","input_bytes":13404,"warmup":3,"rounds":30,"setup_ns":7750,"submit_ns":48880,"destroy_ns":9304,"alloc_requests":645,"requested_bytes":55105,"peak_extra_live_bytes":39594,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":13404,"warmup":3,"rounds":30,"setup_ns":8055,"submit_ns":57701,"destroy_ns":9587,"alloc_requests":658,"requested_bytes":102160,"peak_extra_live_bytes":84121,"remaining_live_bytes":0}

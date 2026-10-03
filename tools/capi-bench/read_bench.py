@@ -53,11 +53,11 @@ def main():
             raise RuntimeError('input changed since main benchmark')
         repetitions, expected = {}, None
         for name in binaries:
-            result = measure(name, document, key, mode, 100)
+            result = measure(name, document, key, mode, 1000)
             if expected is not None and result['count'] != expected:
                 raise RuntimeError('library traversal counts differ')
             expected = result['count']
-            repetitions[name] = min(10000000, max(1, int(0.03 / (result['seconds'] / 100))))
+            repetitions[name] = min(10000000, max(1, int(0.03 / (result['seconds'] / 1000))))
         counts[f'{case}/{mode}'] = expected
         for round_index in range(args.rounds):
             for sample_index in range(args.samples):
