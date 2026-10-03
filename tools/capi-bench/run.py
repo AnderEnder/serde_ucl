@@ -109,6 +109,8 @@ def main():
     parser.add_argument('--samples', type=int, default=9)
     parser.add_argument('--sample-ms', type=float, default=25)
     parser.add_argument('--output', type=Path, default=ROOT / 'target/c-bench')
+    parser.add_argument('--candidate-root', type=Path, default=ROOT,
+                        help='clean implementation worktree to build and measure')
     args = parser.parse_args()
     if (args.rounds < 2 or args.samples < 3 or not math.isfinite(args.sample_ms)
             or args.sample_ms < 5):
@@ -116,14 +118,16 @@ def main():
     if platform.system() not in ('Darwin', 'Linux'):
         parser.error('supported benchmark hosts: Linux and macOS')
     output = args.output.resolve()
+    candidate_root = args.candidate_root.resolve()
     output.mkdir(parents=True, exist_ok=True)
     environment = dict(os.environ, CARGO_TERM_COLOR='never')
-    build = ['cargo', 'build', '--release', '--locked', '--manifest-path', 'capi/Cargo.toml',
-             '--target-dir', str(ROOT / 'capi/target')]
-    subprocess.run(build, cwd=ROOT, env=environment, check=True)
-    candidate = ROOT / 'capi/target/release/libucl.a'
+    build = ['cargo', 'build', '--release', '--locked', '--manifest-path',
+             str(candidate_root / 'capi/Cargo.toml'),
+             '--target-dir', str(candidate_root / 'capi/target')]
+    subprocess.run(build, cwd=candidate_root, env=environment, check=True)
+    candidate = candidate_root / 'capi/target/release/libucl.a'
     gate = [sys.executable, str(ROOT / 'tools/capi-conformance/ci.py'),
-            '--candidate-include', str(ROOT / 'capi/include'),
+            '--candidate-include', str(candidate_root / 'capi/include'),
             '--candidate-library', str(candidate),
             '--golden-dir', str(output / 'reference/golden'),
             '--work-dir', str(output / 'reference')]
@@ -211,9 +215,10 @@ def main():
     if platform.system() == 'Darwin':
         cpu = command(['sysctl', '-n', 'machdep.cpu.brand_string'], text=True).strip()
     manifest = json.loads((ROOT / 'docs/spec/c-api/stage-a/api.json').read_text())
-    result = {'candidate_commit': command(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+    result = {'candidate_root': str(candidate_root),
+              'candidate_commit': command(['git', 'rev-parse', 'HEAD'], cwd=candidate_root, text=True).strip(),
               'candidate_code_dirty': bool(command(['git', 'status', '--porcelain', '--', 'src', 'capi'],
-                                                   cwd=ROOT, text=True).strip()),
+                                                   cwd=candidate_root, text=True).strip()),
               'reference_commit': manifest['reference_commit'], 'started_utc': started,
               'machine': {'cpu': cpu, 'platform': platform.platform(), 'machine': platform.machine()},
               'rustc': command(['rustc', '-Vv'], text=True),

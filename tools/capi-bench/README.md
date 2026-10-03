@@ -66,3 +66,29 @@ This builds a Rust public-API caller with the same release profile and dependenc
 versions, requires identical output for all three callers, and rotates their
 parse/drop timing order. Results go to `target/c-bench/rust-baseline.{json,md}`.
 See [the measured Rust/C comparison](reports/2026-10-03-rust-versus-c.md).
+
+To measure a separate clean implementation worktree without copying spec-owned
+tooling into it:
+
+```sh
+python3 tools/capi-bench/run.py --candidate-root /path/to/implementation --output target/c-bench-after
+python3 tools/capi-bench/rust_baseline.py --output target/c-bench-after
+```
+
+The native Rust comparator uses that same candidate core and verifies its
+dependency versions against the candidate lockfile. Candidate code status,
+commits and library hashes distinguish measured checkpoints from final commits.
+
+On macOS with Xcode, capture a separate sampled CPU trace of the C caller:
+
+```sh
+python3 tools/capi-bench/cpu_profile.py --benchmark-dir target/c-bench-after --name optimized-cpu
+```
+
+Profiling is separate from timing runs. Time Profiler records a disposable
+benchmark process for eight seconds; the process is killed at the time limit.
+The script verifies the trace and exports app stacks inside submission/unref.
+Self/inclusive sample counts are retained; inclusive percentages overlap.
+Leaf categories based on symbol names are approximate CPU attribution, not
+allocation counts. Exact allocation counts/bytes come from the clean
+implementer's own counting allocator, with its scope stated in the report.

@@ -8,6 +8,8 @@ from pathlib import Path
 import statistics
 import subprocess
 import sys
+import shutil
+import re
 
 SPEC = importlib.util.spec_from_file_location('capi_bench', Path(__file__).with_name('run.py'))
 BENCH = importlib.util.module_from_spec(SPEC)
@@ -25,12 +27,28 @@ def main():
         parser.error('at least 2 rounds and 3 samples required')
     output = args.output.resolve()
     original = json.loads((output / 'results.json').read_text())
+    candidate_root = Path(original.get('candidate_root', ROOT))
     for library in original['libraries'].values():
         if BENCH.sha(Path(library['path'])) != library['sha256']:
             raise RuntimeError('C library changed; regenerate original benchmark')
-    build = ['cargo', 'build', '--release', '--locked', '--manifest-path',
-             str(ROOT / 'tools/capi-bench/rust/Cargo.toml'), '--target-dir', str(output / 'rust-build')]
+    package = output / 'rust-package'
+    package.mkdir(parents=True, exist_ok=True)
+    rust_source = ROOT / 'tools/capi-bench/rust'
+    manifest = (rust_source / 'Cargo.toml').read_text().replace('path = "../../.."',
+                                                              'path = ' + json.dumps(str(candidate_root)))
+    (package / 'Cargo.toml').write_text(manifest)
+    shutil.copy2(rust_source / 'main.rs', package / 'main.rs')
+    # Preserve candidate dependency versions; only this private caller package is adjusted.
+    shutil.copy2(candidate_root / 'capi/Cargo.lock', package / 'Cargo.lock')
+    build = ['cargo', 'build', '--release', '--offline', '--manifest-path',
+             str(package / 'Cargo.toml'), '--target-dir', str(output / 'rust-build')]
     subprocess.run(build, cwd=ROOT, check=True)
+    versions = lambda path: dict(re.findall(r'name = "([^"]+)"\nversion = "([^"]+)"',
+                                            path.read_text()))
+    pinned_versions = versions(candidate_root / 'capi/Cargo.lock')
+    for name, version in versions(package / 'Cargo.lock').items():
+        if name != 'capi-bench-rust-baseline' and pinned_versions.get(name) != version:
+            raise RuntimeError('Rust/C dependency version disagreement: ' + name)
     binaries = {'rust-api': output / 'rust-build/release/rust-api-baseline',
                 'serde-ucl-c': output / 'bench-serde-ucl-c', 'libucl': output / 'bench-libucl'}
     docs = BENCH.documents(output / 'documents')
@@ -91,7 +109,8 @@ def main():
               'reference_commit': original['reference_commit'], 'machine': original['machine'],
               'measurement_commit': BENCH.command(['git', 'rev-parse', 'HEAD'], cwd=ROOT,
                                                  text=True).strip(),
-              'build_command': build, 'rounds': args.rounds, 'samples_per_round': args.samples,
+              'build_command': build, 'dependency_versions_verified': True,
+              'rounds': args.rounds, 'samples_per_round': args.samples,
               'documents': original['documents'], 'summary': summary, 'samples': samples,
               'binaries': {tool: {'path': str(path), 'sha256': BENCH.sha(path)}
                            for tool, path in binaries.items()}}
