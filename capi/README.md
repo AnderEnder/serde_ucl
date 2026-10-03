@@ -46,7 +46,7 @@ dependencies are fetched by Cargo (the archive is not vendored or an offline bui
 ```sh
 cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
 cargo cinstall --locked --release --manifest-path capi/Cargo.toml \
-  --prefix "$HOME/.local/serde-ucl-c"
+  --prefix "$HOME/.local/serde-ucl-c" --libdir "$HOME/.local/serde-ucl-c/lib"
 ```
 
 On GNU/Linux install your distribution's native C/C++ compiler, pkg-config and
@@ -55,8 +55,10 @@ OpenSSL development files before building cargo-c (Debian/Ubuntu packages:
 and pkg-config; cargo-c may require the host's OpenSSL development package.
 These source build commands use the native host toolchain on all three targets.
 
-`make -C capi install PREFIX=... DESTDIR=...` wraps cargo-c; `DESTDIR` stages the
-installation while retaining the final prefix in the library/pkg-config metadata.
+`make -C capi install PREFIX=... DESTDIR=...` wraps cargo-c and explicitly uses
+`LIBDIR=$(PREFIX)/lib` on every host, matching the SDK layout. Override `LIBDIR=...`
+for a different source installation layout. `DESTDIR` stages the installation
+while retaining the final prefix in the library/pkg-config metadata.
 The default prefix is `/usr/local`; choose an isolated prefix explicitly. cargo-c
 copies the exact reviewed `include/ucl.h`; declaration generation and version
 constants are disabled. Package version follows the Rust release version; update

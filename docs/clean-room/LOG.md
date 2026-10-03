@@ -6191,3 +6191,28 @@ Local plan remains untracked. No push, release tag, publish or upload occurred.
 Commit: `docs(capi): use generic distribution staging paths` (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+## 2026-10-03 — Implementation team — C15 installed library directory CI repair
+
+Inputs: owner-authorized sanitized Linux failure (installed static archive absent
+at prefix/lib), current allowed C Makefile/driver/packaging/docs, and existing
+clean-room rules. No raw CI logs or forbidden source/tooling/plan inputs were read.
+
+Makefile cargo-c installation previously selected no libdir while the driver and
+release candidates expect prefix/lib. It now passes explicit `--libdir`, defaulting
+`LIBDIR` to `$(PREFIX)/lib`; callers may override source installation layout.
+Public direct cargo-c commands select the same libdir. Packaging already specifies
+prefix/lib, so release candidate paths remain consistent without behavior changes.
+
+An actual Makefile invocation fixture captures cargo-c argv and covers default
+libdir, override, DESTDIR and paths containing spaces. It failed before the repair
+for missing --libdir, then passed with all thirteen fixtures. Native Darwin C checks
+with CARGO_TERM_COLOR=always passed direct and installed static/shared exports,
+43 C/C++ signatures, ten snapshots, boundary/lifetime/depth checks. CI/release
+actionlint and whitespace checks passed. No Rust/C implementation/header changes
+were needed. Linux runtime verification remains GitHub CI's responsibility; this
+participant did not run native Linux or push. Repair plan stays local/untracked.
+
+Commit: `fix(capi): select consistent installed library directory` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

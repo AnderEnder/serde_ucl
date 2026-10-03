@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import shlex
+import subprocess
 from pathlib import Path
 import sys
 import tarfile
@@ -28,6 +30,39 @@ DYNAMIC = """ 0x000000000000000e (SONAME)             Library soname: [libucl.so
  0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
 """
 VERSIONS = "Name: GLIBC_2.9\nName: GLIBC_2.2.5\nName: GLIBC_2.34\n"
+
+
+class InstallPathTests(unittest.TestCase):
+    def test_make_install_explicit_libdir_and_staging_paths(self):
+        with tempfile.TemporaryDirectory(prefix="c-install-argv-") as temp:
+            work = Path(temp)
+            cargo = work / "fake cargo"
+            recorded = work / "arguments.json"
+            cargo.write_text("#!/usr/bin/env python3\n"
+                             "import json, sys\nfrom pathlib import Path\n"
+                             f"Path({str(recorded)!r}).write_text(json.dumps(sys.argv[1:]))\n")
+            cargo.chmod(0o755)
+            prefix = work / "install prefix"
+            staged = work / "staged root"
+            for override, destdir in ((None, None), (None, staged), (prefix / "lib64", staged)):
+                command = ["make", "-C", str(CAPI), "install", f"PREFIX={prefix}",
+                           f"CARGO={shlex.quote(str(cargo))}"]
+                if override is not None:
+                    command.append(f"LIBDIR={override}")
+                if destdir is not None:
+                    command.append(f"DESTDIR={destdir}")
+                subprocess.run(command, check=True, capture_output=True)
+                arguments = json.loads(recorded.read_text())
+                with self.subTest(libdir=override, destdir=destdir):
+                    self.assertEqual(arguments[0], "cinstall")
+                    self.assertEqual(arguments[arguments.index("--prefix") + 1], str(prefix))
+                    self.assertIn("--libdir", arguments)
+                    self.assertEqual(arguments[arguments.index("--libdir") + 1],
+                                     str(override or prefix / "lib"))
+                    if destdir is not None:
+                        self.assertEqual(arguments[arguments.index("--destdir") + 1], str(destdir))
+                    else:
+                        self.assertNotIn("--destdir", arguments)
 
 
 class NativeLinkTests(unittest.TestCase):
