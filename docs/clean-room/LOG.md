@@ -6216,3 +6216,10 @@ participant did not run native Linux or push. Repair plan stays local/untracked.
 Commit: `fix(capi): select consistent installed library directory` (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec team — C15 C-library performance comparison
+
+- Owner requested performance comparison of the merged C API versus libucl. Created isolated perf/c-api-vs-libucl worktree at merged main 36da56c, preserving unrelated original-worktree changes. Inputs: current CLAUDE.md/PROTOCOL.md, released Stage A contract/header, spec-owned conformance/benchmark tooling and benchmark corpus documents, Cargo build metadata. No src/ or capi/ implementation edits. The specification remains behaviour only.
+- Added tools/capi-bench: one unchanged C11 caller/header links against both static libraries. Cargo release (fat LTO/one codegen unit), pinned libucl CMake Release, caller -O3. Eight inputs pass byte-identical compact JSON and the 43-function/ten-case reference gate. Parsing includes complete lifetimes; emitter measurements exclude parsing. Five rounds, nine alternating samples per tool/mode/input, calibrated >=25ms: 1,440 raw samples with provenance/hashes and round spreads. Separate public-call phase measurements cover record inputs.
+- Apple M4 Max/macOS 15.8.1 arm64 results: C API parse is 1.29x libucl time on tiny inputs, 2.80–3.94x on larger ones. Compact JSON emits in 0.60–1.58x libucl time across these cases. Submission and destruction dominate measured record parsing; this does not isolate the underlying Rust parse from ABI-object construction. Recorded report tools/capi-bench/reports/2026-10-03-macos-arm64.md; raw evidence retained at target/c-bench/results.json. Native compile, correctness gate, sample/hash integrity, Python syntax and invalid-argument checks passed.
+- Local plan is ignored and retained on disk. No merge, push or publication. This session commits spec-owned benchmark tooling, measured report and provenance only.
