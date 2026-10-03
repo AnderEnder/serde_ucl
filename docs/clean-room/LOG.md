@@ -6391,3 +6391,64 @@ in WORKLIST, review and spec-owned report/evidence on perf/c-api-vs-libucl.
 Plans remain local/excluded, unrelated work preserved, no push/merge/publication.
 This entry and measured-checkpoint wording constitute provenance/goals only;
 no implementation design or new format behavior is supplied.
+
+### 2026-10-03 — spec team — C15 C-library performance comparison
+
+- Owner requested performance comparison of the merged C API versus libucl. Created isolated perf/c-api-vs-libucl worktree at merged main 36da56c, preserving unrelated original-worktree changes. Inputs: current CLAUDE.md/PROTOCOL.md, released Stage A contract/header, spec-owned conformance/benchmark tooling and benchmark corpus documents, Cargo build metadata. No src/ or capi/ implementation edits. The specification remains behaviour only.
+- Added tools/capi-bench: one unchanged C11 caller/header links against both static libraries. Cargo release (fat LTO/one codegen unit), pinned libucl CMake Release, caller -O3. Eight inputs pass byte-identical compact JSON and the 43-function/ten-case reference gate. Parsing includes complete lifetimes; emitter measurements exclude parsing. Five rounds, nine alternating samples per tool/mode/input, calibrated >=25ms: 1,440 raw samples with provenance/hashes and round spreads. Separate public-call phase measurements cover record inputs.
+- Apple M4 Max/macOS 15.8.1 arm64 results: C API parse is 1.29x libucl time on tiny inputs, 2.80–3.94x on larger ones. Compact JSON emits in 0.60–1.58x libucl time across these cases. Submission and destruction dominate measured record parsing; this does not isolate the underlying Rust parse from ABI-object construction. Recorded report tools/capi-bench/reports/2026-10-03-macos-arm64.md; raw evidence retained at target/c-bench/results.json. Native compile, correctness gate, sample/hash integrity, Python syntax and invalid-argument checks passed.
+- Local plan is ignored and retained on disk. No merge, push or publication. This session commits spec-owned benchmark tooling, measured report and provenance only.
+
+### 2026-10-03 — spec coordinator — C15 performance explanation
+
+- Owner asked why the C ABI is slower while the implementation's Rust API was faster. Inputs: current instructions/protocol, existing public benchmark caller and README, Cargo profiles/lockfile, own spec-owned benchmark output, and clean implementation participant's diagnosis of current own implementation. No implementation edits by coordinator. Specification remains behaviour only.
+- Added same-input public Rust API caller, matching release profile/dependency versions and parse/drop semantics of the existing README. All three callers emit byte-identical output on eight cases; five rotated rounds/nine samples yield 1,080 raw parse timings. For 10,000 records: Rust 6.30ms, libucl 11.07ms, our C ABI 42.59ms. For 1,000 records: Rust 0.619ms, libucl 1.087ms, C ABI 4.039ms. Rust is still faster; the C path adds substantial overhead.
+- Clean implementation review identified an unconditional fallback snapshot discarded on successful observed input; additional allocated ABI graph/keys/strings/paths; duplicated facts/path queries; and destruction of both C nodes and retained Rust representations. These are code facts; timings do not yet quantify each internal hotspot. Reviewer's separate required provenance is in the implementation worktree. No optimization scope or code changes.
+- Raw evidence target/c-bench/rust-baseline.json; recorded report tools/capi-bench/reports/2026-10-03-rust-versus-c.md. Full benchmark/output checks, 1,080-sample integrity, Rust fmt/clippy and Python syntax/whitespace checks passed. Local plan remains ignored; no push or publication.
+
+### 2026-10-03 — spec coordinator — C15 optimization profiling/benchmark isolation
+
+- Owner requested C adapter optimization, CPU/allocation profiling and zero or near-zero overhead relative to Rust. Fresh implementation participant works in isolated perf/c-api-adapter from merged main; coordinator authors only benchmark/profiling tools and work-item goals. Plans remain local. Inputs: current instructions/protocol, released Stage A contract, own benchmark output, own clean implementation participant's counters, native profiler output and black-box CWD lifecycle probe. Specification remains behaviour only.
+- Extended spec-owned benchmark to build a separate candidate root and record its commit/status/hashes. Native comparator uses the candidate core with matching dependency versions. Added macOS Time Profiler recording/export/summarization with explicit non-overlapping leaf versus overlapping inclusive stack scope. Baseline8s CPU recording has7,972 submission/unref samples:47.7% allocator/release leaves,8.8% copying/zeroing. Instruments Allocations recording stalled and was terminated; no allocation result is claimed from it. Clean implementer counting allocator is the before/after allocation evidence.
+- Independent first arena checkpoint reference gate passed all43 signatures/ten cases; original-record10k parse around10.25ms vs11.16ms libucl, compared prior42.59ms. Goal persists toward Rust6.3ms. Oracle and current merged C API both capture CURDIR at parser creation even if process changes directory before submission; reported as observable lifecycle regression goal, and implementer reverted delayed-cwd shortcut. No source or implementation hints from upstream were supplied.
+- Benchmark Python syntax/CLI/whitespace checks and actual candidate-root timing/gate passed. Final validation/report still pending optimized implementation. No merge, push or publication.
+
+### 2026-10-03 — spec coordinator — C15 public-read performance tooling
+
+Added matched released-interface C callers for safe iterator first/full immediate-child reads and indexed lookup, separate from parsing. Inputs: released Stage A header, allowed corpus documents, existing public benchmark evidence and current repository instructions/protocol. No implementation source authored. Archive/input hashes and traversal counts gate timings; profiling and allocation instrumentation remain separate. Tooling contains public observable operations only, not implementation guidance. Commit records work item C15; no push, merge or publication.
+
+### 2026-10-03 — spec coordinator — C15 final benchmark and profiling evidence
+
+Measured stable `dfefd2c` against merged `36da56c` with identical released
+headers, C caller and original inputs. All outputs match both libraries and
+the same candidate Rust core. The native oracle gate passed 43 functions,
+ten cases and four linkage combinations. Implementation and independent
+review checks are recorded on `perf/c-api-adapter` (review `af90a29`, measured
+checkpoint `f22dc04`). Original 10k-record C parsing improved from 42.589 to
+8.868 ms, versus Rust 6.169 ms and libucl 10.958 ms: 4.80x faster, with a 44%
+Rust gap. Native CPU allocator/release leaves fell from 47.73% to 16.02%.
+Separate own-fixture counting shows C requests fell from 820,212 to 70,059,
+versus Rust's 70,037. Public read measurements show a 142x first-child
+improvement and a 12% flat full-iteration regression.
+
+Raw timings, hashes, CPU summaries and scoped allocator evidence are committed
+under `tools/capi-bench/reports/evidence`. The report explicitly leaves the
+near-zero target open. Gzip hashes and CPU input/binary provenance were checked.
+No implementation source was authored; no new behavioral contract, research
+proposal, plan, upstream source or reference build was released. Inputs were
+current repository instructions/protocol, released spec/header, allowed corpus
+and conformance, public benchmark results and clean independent review.
+No push, merge, PR or publication; unrelated original work was preserved.
+
+### 2026-10-03 — spec coordinator — C15 optimization PR preparation
+
+The owner explicitly requested opening a PR after receiving the final optimization
+report. Assembled clean implementation branch perf/c-api-adapter with spec-owned
+benchmark/profile branch perf/c-api-vs-libucl on current origin/main (36da56c).
+Only the append-only provenance conflict was resolved, preserving both branches'
+entries. Implementation and reviewed source remain unchanged. Inputs consulted:
+current repository instructions/protocol, branch metadata, released behavioral
+contract, clean independent review and benchmark evidence. No src/ or capi/
+implementation authored. Plans remain local and excluded. The PR branch alone
+will be pushed under this explicit authorization; no main update, spec/release
+tag, merge or package publication is authorized.
