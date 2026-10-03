@@ -6372,3 +6372,22 @@ Commit produced: docs(clean-room): record independent C15 adapter optimization
 review (Work item: C15). No push, merge or publication.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 final optimization measurements
+
+Inputs: current repository instructions/protocol, released spec-v22 header and
+contract, allowed benchmark documents/conformance artifacts, independent clean
+implementation review, public black-box C/Rust measurements and allocation/CPU
+evidence. The fresh implementer authored all implementation changes; coordinator
+authored no src/ or capi/ implementation. Baseline merged36da56c versus final
+dfefd2c passed the spec-owned 43-function/four-linkage/10-case native gate and
+eight byte-identical benchmark outputs. Five-round/nine-sample original-input
+comparison measures records10k C42.589->8.868ms, Rust6.169ms and libucl10.958ms.
+Separate original-input CPU traces record 47.73->16.02% allocator/release leaves.
+Exact allocation and iterator instrumentation uses a different documented own
+fixture. Stable implementation independently reviewed in af90a29; no open
+correctness findings. Near-zero target remains unmet and is recorded explicitly
+in WORKLIST, review and spec-owned report/evidence on perf/c-api-vs-libucl.
+Plans remain local/excluded, unrelated work preserved, no push/merge/publication.
+This entry and measured-checkpoint wording constitute provenance/goals only;
+no implementation design or new format behavior is supplied.

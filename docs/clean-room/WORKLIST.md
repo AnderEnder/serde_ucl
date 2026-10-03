@@ -490,3 +490,23 @@ zero or near-zero adapter overhead relative to the equivalent Rust API path.
 Measure C/Rust overhead ratios on identical inputs and profiles; identify the
 remaining allocation/copy/destruction cost. A small speedup alone does not
 satisfy the goal while avoidable material overhead remains.
+
+Measured checkpoint (2026-10-03): implementation `dfefd2c`, independently
+reviewed in `reviews/c15-adapter-optimization.md` (`af90a29`). Original-input
+10,000-record C parse/drop is 8.868ms versus Rust 6.169ms and pinned libucl
+10.958ms: 4.80x faster than the merged adapter, but about 44% above Rust.
+Larger generated inputs retain 28–44% overhead; the small Rspamd document
+retains 52%, and default tiny parses retain creation-time cwd cost. The
+zero/near-zero target remains open; this checkpoint must not be described as
+zero-cost adaptation. No correctness or validation blocker remains in the
+reviewed implementation. Further work must reduce additional representation
+cost while preserving the released observable contract.
+
+Independent original-input CPU profiles reduce allocator/memory-release leaf
+samples from 47.73% to 16.02%. Separate implementation-owned generated-input
+allocation profiles reduce C requests from 820,212 to 70,059 versus Rust
+70,037, with no remaining extra live bytes. Array first-child reads improve
+about 142x without prebuilding traversal; full flat-object traversal regresses
+about 12%. Full required Rust/C checks, sanitizers, independent conformance and
+Miri passed. These are local Darwin arm64 results; Linux CI execution remains
+for future submission. No push, merge or publication was performed.
