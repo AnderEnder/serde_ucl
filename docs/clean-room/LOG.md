@@ -6169,3 +6169,8 @@ performed; coordinator handles remote update and real CI monitoring.
 Commit: `fix(capi): strip Cargo color from native linker flags` (Work item: C15).
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 release staging names
+
+- Owner questioned the C15 work-item name in release workflow staging paths. Replaced workflow target/c15-* paths with generic target/c-* paths consistently across producers, reference checks, collection and upload; public artifact names remain serde-ucl-c. Documentation alignment delegated to clean implementation participant.
+- Inputs: current release workflow and public distribution documentation. Coordinator edited workflow/provenance only; no implementation source authored. Specification remains observable behaviour only. Workflow lint and whitespace checks pass.

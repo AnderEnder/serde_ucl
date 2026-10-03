@@ -73,11 +73,11 @@ jobs:
       - name: Install pinned cargo-c
         run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
       - name: Build source archive once and verify clean source installation
-        run: python3 capi/distribution.py --kind source --target macos-arm64 --verify --require-clean --output target/c15-source
+        run: python3 capi/distribution.py --kind source --target macos-arm64 --verify --require-clean --output target/c-source
       - uses: actions/upload-artifact@v4
         with:
           name: serde-ucl-c-input-source
-          path: target/c15-source/*
+          path: target/c-source/*
           if-no-files-found: error
           overwrite: true
 
@@ -121,29 +121,29 @@ jobs:
       - name: Stage native candidate for reference verification
         env:
           SDK_TARGET: ${{ matrix.target }}
-        run: python3 capi/distribution.py --build-only --target "$SDK_TARGET" --candidate-prefix "$PWD/target/c15-candidate" --require-clean
+        run: python3 capi/distribution.py --build-only --target "$SDK_TARGET" --candidate-prefix "$PWD/target/c-candidate" --require-clean
       - name: Native black-box reference compatibility gate
         env:
           SDK_SHARED: ${{ matrix.shared }}
         run: |
           python3 tools/capi-conformance/ci.py \
-            --candidate-include target/c15-candidate/include \
-            --candidate-library target/c15-candidate/lib/libucl.a \
-            --candidate-library "target/c15-candidate/lib/$SDK_SHARED" \
-            --work-dir target/c15-oracle \
-            --golden-dir target/c15-oracle/golden
+            --candidate-include target/c-candidate/include \
+            --candidate-library target/c-candidate/lib/libucl.a \
+            --candidate-library "target/c-candidate/lib/$SDK_SHARED" \
+            --work-dir target/c-oracle \
+            --golden-dir target/c-oracle/golden
       - name: Package and verify extracted relocated native SDK and source build
         env:
           SDK_TARGET: ${{ matrix.target }}
         run: |
           python3 capi/distribution.py --kind sdk --target "$SDK_TARGET" \
-            --candidate-prefix target/c15-candidate \
-            --golden-dir target/c15-oracle/golden \
-            --verify --require-clean --output target/c15-sdk
+            --candidate-prefix target/c-candidate \
+            --golden-dir target/c-oracle/golden \
+            --verify --require-clean --output target/c-sdk
       - uses: actions/upload-artifact@v4
         with:
           name: serde-ucl-c-input-sdk-${{ matrix.target }}
-          path: target/c15-sdk/*
+          path: target/c-sdk/*
           if-no-files-found: error
           overwrite: true
 
@@ -159,13 +159,13 @@ jobs:
         with:
           pattern: serde-ucl-c-input-*
           merge-multiple: true
-          path: target/c15-incoming
+          path: target/c-incoming
       - name: Require source and all SDKs from this version and commit
-        run: python3 capi/collect_distribution.py --input target/c15-incoming --output target/c15-dist --commit "$GITHUB_SHA"
+        run: python3 capi/collect_distribution.py --input target/c-incoming --output target/c-dist --commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: serde-ucl-c-distribution
-          path: target/c15-dist/*
+          path: target/c-dist/*
           if-no-files-found: error
           overwrite: true
 
@@ -230,7 +230,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: serde-ucl-c-distribution
-          path: target/c15-dist
+          path: target/c-dist
       - name: Create the GitHub release and attach C artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -242,5 +242,5 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
               --notes-file target/release-notes.md
           fi
-          (cd target/c15-dist && shasum -a 256 -c SHA256SUMS)
-          gh release upload "$GITHUB_REF_NAME" target/c15-dist/* --clobber
+          (cd target/c-dist && shasum -a 256 -c SHA256SUMS)
+          gh release upload "$GITHUB_REF_NAME" target/c-dist/* --clobber
