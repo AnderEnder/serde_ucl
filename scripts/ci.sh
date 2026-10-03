@@ -39,6 +39,7 @@ run() {
 # The package in tests/features/ tests the crate with feature sets that the crate's own test
 # builds cannot have: its dev-dependency on itself turns `load` on in every one of them. It is a
 # workspace of its own, built in a target directory of its own.
+CAPI_MANIFEST=capi/Cargo.toml
 FEATURES_MANIFEST=tests/features/Cargo.toml
 FEATURES_TARGET=target/features
 # The differential fuzzer in fuzz/ is a package and workspace of its own too. The checks build
@@ -48,10 +49,12 @@ FUZZ_TARGET=target/fuzz
 
 checks() {
 	run cargo fmt --all --check
+	run cargo fmt --manifest-path "$CAPI_MANIFEST" --all --check
 	run cargo fmt --manifest-path "$FEATURES_MANIFEST" --all --check
 	run cargo fmt --manifest-path "$FUZZ_MANIFEST" --all --check
 
 	run cargo clippy --all-targets --all-features -- -D warnings
+	run cargo clippy --manifest-path "$CAPI_MANIFEST" --all-targets -- -D warnings
 	# The crate's dev-dependency on itself turns the features `fs` and `load` back on for every
 	# target except the library, so builds with other feature sets are checked on the library.
 	run cargo clippy --lib --no-default-features -- -D warnings
@@ -74,6 +77,10 @@ checks() {
 		--no-default-features
 	run cargo test --manifest-path "$FUZZ_MANIFEST" --target-dir "$FUZZ_TARGET"
 
+	# Packaging metadata/collection fixtures run on both hosts; no simulated conformance.
+	run python3 capi/tests/distribution_test.py
+	# Released C ABI signatures, linkage, installation, snapshots and caller lifetimes.
+	run python3 capi/tests/check.py
 	run cargo build --examples --benches
 	# Every example checks its results with assertions.
 	for example in examples/*.rs; do
@@ -339,6 +346,12 @@ release() {
 	manifest=${pkgid##*[#@]}
 	if [ "$version" != "$manifest" ]; then
 		echo "error: tag $tag does not match the version in Cargo.toml, $manifest" >&2
+		exit 1
+	fi
+	capi_pkgid=$(cargo pkgid --manifest-path "$CAPI_MANIFEST")
+	capi_version=${capi_pkgid##*[#@]}
+	if [ "$version" != "$capi_version" ]; then
+		echo "error: C distribution version $capi_version does not match release $tag" >&2
 		exit 1
 	fi
 	mkdir -p "$(dirname "$RELEASE_NOTES")"

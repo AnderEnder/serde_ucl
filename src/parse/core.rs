@@ -88,6 +88,9 @@ pub(crate) struct Document<'t> {
     /// The root's priority: that of the first input, which creates the root (§13.2, *The root's
     /// priority*; §8.7).
     root_priority: u8,
+    /// Last input cursor, for the C API observation adapter.
+    pub(crate) cursor: Position,
+    pub(crate) observe_cursor: bool,
 }
 
 /// A finished parse ([`Document::finish`]).
@@ -112,6 +115,8 @@ impl<'t> Document<'t> {
             boundary: Boundary::Start,
             depth,
             root_priority: 0,
+            cursor: Position::new(),
+            observe_cursor: false,
         }
     }
 
@@ -203,6 +208,29 @@ impl<'t> Document<'t> {
                 result
             }
         };
+        if self.observe_cursor {
+            let mut cursor = core.pos;
+            match result.as_ref().err().map(Error::kind) {
+                Some(ErrorKind::UnterminatedString | ErrorKind::UnterminatedHeredoc) => {
+                    cursor = src.len()
+                }
+                Some(ErrorKind::UnknownMacro { name }) => cursor = cursor + 1 + name.len(),
+                Some(ErrorKind::Stopped { .. }) => {
+                    while src.get(cursor).is_some_and(|&b| is_space(b)) {
+                        cursor += 1;
+                    }
+                }
+                _ if result.is_ok() && core.frames.is_empty() && cursor > 0 => cursor -= 1,
+                _ => {}
+            }
+            cursor = cursor.min(src.len());
+            self.cursor = position_at(src, cursor);
+            self.cursor.column = cursor
+                - src[..cursor.min(src.len())]
+                    .iter()
+                    .rposition(|&b| b == b'\n')
+                    .map_or(0, |i| i + 1);
+        }
         self.boundary = match &result {
             Ok(()) => core.boundary_at_end(),
             Err(_) => Boundary::Entry,
@@ -248,6 +276,10 @@ impl<'t> Document<'t> {
             }
         }
         root
+    }
+
+    pub(crate) fn observation_facts(&self) -> OutputFacts {
+        self.facts.clone().unwrap_or_default()
     }
 
     /// The comments saved so far, for a parse that failed.

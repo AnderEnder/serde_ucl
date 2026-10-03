@@ -1,0 +1,9 @@
+file:ok=1,code=0,message=0,line=2,column=0
+root-present=1
+root[7]=7b2261223a317d
+missing:ok=0,code=0,message=1,line=0,column=0
+root-present=0
+include:ok=1,code=0,message=0,line=1,column=22
+root-present=1
+root[7]=7b2261223a317d
+file-include-cwd=1,canonical-filename=1,curdir-file-parent=1

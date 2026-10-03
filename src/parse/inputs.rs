@@ -186,6 +186,8 @@ pub(crate) struct Reader<'p, 't> {
     /// `None` once the parse has failed.
     document: Option<Document<'t>>,
     failed: Option<Error>,
+    observe: bool,
+    observation: Option<super::CObservation>,
     out: Outputs<'p>,
 }
 
@@ -385,11 +387,41 @@ impl<'p, 't> Reader<'p, 't> {
             includes,
             document: Some(document),
             failed: None,
+            observe: false,
+            observation: None,
             out: Outputs {
                 comments,
                 attached,
                 facts,
             },
+        }
+    }
+
+    pub(crate) fn observe(&mut self) {
+        self.observe = true;
+        if let Some(document) = &mut self.document {
+            document.observe_cursor = true;
+        }
+    }
+
+    pub(crate) fn finish_observed(mut self, error: Option<Error>) -> super::CObservation {
+        if let Some(mut observation) = self.observation.take() {
+            observation.error = error;
+            return observation;
+        }
+        let document = self.document.as_ref().expect("observed document");
+        let cursor = document.cursor;
+        let snapshot = document.snapshot().into_owned();
+        let facts = document.observation_facts();
+        let root = match self.finish() {
+            Ok(root) => Some(root.into_owned()),
+            Err(_) => Some(snapshot),
+        };
+        super::CObservation {
+            root,
+            error,
+            cursor,
+            facts,
         }
     }
 
@@ -501,6 +533,29 @@ impl<'p, 't> Reader<'p, 't> {
     /// Fails the parse with `error`: the saved comments read so far go to the parser.
     fn fail(&mut self, error: Error) -> Result<(), Error> {
         if let Some(document) = self.document.take() {
+            if self.observe {
+                let partial = matches!(
+                    error.kind(),
+                    ErrorKind::UnterminatedObject
+                        | ErrorKind::UnterminatedArray
+                        | ErrorKind::FileNotFound { .. }
+                        | ErrorKind::NotAFile { .. }
+                );
+                self.observation = Some(super::CObservation {
+                    root: partial.then(|| document.snapshot().into_owned()),
+                    cursor: if matches!(error.kind(), ErrorKind::Io { .. }) {
+                        Position {
+                            line: 0,
+                            column: 0,
+                            offset: 0,
+                        }
+                    } else {
+                        document.cursor
+                    },
+                    error: None,
+                    facts: document.observation_facts(),
+                });
+            }
             *self.out.comments = document.into_comments();
         }
         self.failed = Some(error.clone());

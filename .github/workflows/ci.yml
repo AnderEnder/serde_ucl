@@ -28,7 +28,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy, rustfmt, llvm-tools
       - uses: Swatinem/rust-cache@v2
+      - name: Install pinned cargo-c
+        run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
       - name: scripts/ci.sh
         run: scripts/ci.sh

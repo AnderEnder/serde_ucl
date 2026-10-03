@@ -5533,3 +5533,686 @@
   `test(conformance): activate spec-v20 cases` commit on `c14/spec20-impl`. Not pushed.
   Attestation: the case move and documentation contain observable behavior only, with no libucl
   code, pseudo-code, internal names or source structure.
+
+- 2026-10-01 — Role: spec team (classification and draft). Item: C14, the seven open fuzzer
+  findings under `target/fuzz-differential/findings/`, questions #89 and #90, spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, released spec-v20
+    §§7.7, 9.2, 9.4, 9.6, 9.7, 12.5 and 13.2, the seven findings (input, original, flags,
+    directory, report), the fuzzer's classifier (`fuzz/src/uncertain.rs`) to tell a classifier gap
+    from a crate bug, the pinned libucl source, and the pinned oracle and the differential checker
+    as black boxes, with controls in three or five identical runs each.
+  - `crate-rejects-0480fbc2420ab897`, `crate-rejects-986bc4bfe9f1b299`,
+    `crate-rejects-fc3ab208a2acd907`: not libucl's result under the released spec, which makes a
+    rejected argument document an error (§9.2); the crate follows it. Each document ends with a
+    later skip, and the oracle accepts it the way §9.4's first-directory quirk describes for a
+    miss: the macro has run without ARGUMENTS with its VALUE directly after the `)`, and the skip
+    discards the error. Controls: the same with `.priority(x) 3`, with an unknown macro or a silent
+    stop in the argument document, and with the rejection in an included file; one skip covers a
+    rejection and a first-directory miss before it; a rejection after the skip, a `.load` that
+    reads its file, a `.try_include` of a missing file, and a macro that fails without ARGUMENTS
+    stay errors. New rule, #89: drafted in §9.2 with a cross-reference in §9.4.
+  - `values-differ-6dc7de42c47fd96a`: decided by the released spec as uncertain. Under
+    `rewrite`, the oracle gives the last `a` value the comment of a replaced value before its own
+    (`"c": ["# c", "# c"]`), the crate only its own (`"ca": ["# c"]`); §12.5 (#81) allows exactly
+    this, "the earlier comment appears before `k`'s own trailing comment. The project may instead
+    give `k` only `"ca": ["# c"]`". With distinct texts (`# c`, `# e`) the classifier already
+    excuses it; it misses the case where the reappearing comment has the same text as the value's
+    own. Fuzzer classifier gap.
+  - `values-differ-244706530c4e7da6`: decided as uncertain. The difference is the bytes after the
+    first NUL of a string that `.ctx` copies (`"\u0000\u0000"` against `"\u0000\""`), which §9.7
+    and §13.2 leave undefined. The classifier knows the class, but looks for the copying macro
+    only in the input itself, and here `.ctx` stands in the included `files/macro_ctx.inc`.
+    Fuzzer classifier gap.
+  - `crate-accepts-e04659ea272d36c7`, `crate-accepts-28d2d688c1a509e9`: decided as uncertain by
+    §7.7, whose wording speaks of the value; drafted a clarification, #90. A handler-resolved
+    reference shares a macro VALUE with other text (`"${H_}*/"`, `"a ${H_}"`). The oracle rejects
+    both; with `[handled]` written in place of the reference it accepts both and gives the crate's
+    results (an empty object; `a: ["handled"]` and `"{": []`). The crate is right under the
+    project's decision. Fuzzer classifier gap.
+  - Cases for #89: pending, because the crate fails them,
+    `macro_args_rejected_then_load_try_accepts`, `macro_args_rejected_then_url_try_accepts`,
+    `macro_args_rejected_unknown_macro_then_load_try_accepts`,
+    `macro_args_rejected_in_included_file_then_load_try_accepts`,
+    `macro_args_rejected_include_runs_without_args`,
+    `macro_args_rejected_and_first_miss_then_one_skip_accepts` (under `pending/09-macros/`, with
+    copies of `files/a.inc` and `files/v12/args_bad.inc`) and
+    `macro_registered_args_rejected_then_load_try_accepts` (under the new `pending/13-inputs/`);
+    active, because the crate passes them, `macro_args_rejected_after_skip_error`,
+    `macro_args_rejected_then_load_existing_file_error` and
+    `macro_args_rejected_include_space_value_error`. No case for #90: the oracle's result is
+    undefined there. Golden files only from `scripts/regen-golden.sh`, which changed no existing
+    golden file. The index counts 1,689 active cases, plus eighteen pending `spec-v20` and seven
+    pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following `docs(spec): draft C14 rejected-arguments and handler VALUE rules`
+    commit on `c14/spec-q86`. Not tagged or pushed; independent review pending.
+  - Attestation: the draft spec, questions and answers, cases and this log contain observable
+    behavior only, with no libucl code, pseudo-code, internal names or source structure.
+
+- 2026-10-01 — Role: independent clean-room spec reviewer. Item: C14 questions #89 and #90,
+  spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `1cbbd48..fa75a0b`
+    diff (§§7.7, 9.2 and 9.4, `docs/spec/README.md`, the conformance and pending READMEs,
+    questions #89 and #90 and their answers, the ten new cases, fixtures and golden files, the
+    spec-team entry), the released §9.2 *ARGUMENTS* and §13.1 *Errors and silent stops*, and
+    black-box runs of the pinned oracle binary of the `c14-followups` worktree from this
+    session's scratchpad. No libucl source, implementation or fuzzer source, `tools/`, or Claude
+    sessions or memory were read.
+  - Review: changes requested, one finding. No prohibited content: "the macro runs without
+    ARGUMENTS" and "stops the parse" are the released §9.2 and §13.1 terms, and each consequence
+    has an example and a case. Every example matches the oracle, in repeated runs: `a: int 1 @3`
+    after `.priority(x) 3` with either skip, with `.priority(.foo 1) 3`, and for `args_bad.inc`
+    `b: int 1 @1`; `.include(x)"files/a.inc"` includes the file; `.seen(x) v` gets the VALUE
+    `" v"` and no ARGUMENTS; one skip covers a miss and a rejection in either order and two
+    rejections, and none after it; a `.load` that reads its file does not count. With a later
+    skip, `.include(x) "b.inc"` includes a file named ` "b.inc"`, space and quotes included, as
+    the §9.2 sentence on ` "files/a.inc"` says. The §7.7 examples are errors with `${H_}` and
+    accepted with `[handled]`, in `cases/spec/09-macros` and `cases/spec/13-inputs`.
+    1. `docs/spec/09-macros.md:236-241` and the §9.4 cross-reference say the document is an error
+       unless "a later macro" skips its file, but not whether that macro may stand in a later
+       input (§13.1), and released `docs/spec/13-inputs-and-macros.md:183` says an error in any
+       input makes the result an error. The oracle accepts: `.priority(x) 3⏎a = 1`, then an input
+       `b = 2⏎.load(try=true, key="t") "missing.txt"`, gives `{ a: int 1 @3, b: int 2 }`, also
+       with an input between them and with the second given as a file; a first-directory miss
+       followed by an input with a skipped URL include or `.load` gives `pa: int 1`. Without a skip
+       in a later input both are errors, and a skip in an earlier input covers nothing after it.
+       Beyond the draft, `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by such an input gives
+       `{ a: int 1, b: int 2 }`, while the same include is an error within one document even with
+       a skip after it. The crate rejects all of these, the released URL form included (checked
+       in a scratch copy). Fix: find whether this is libucl's behaviour or how the oracle reports
+       an earlier input's error, then state in §13.1 and §§9.2 and 9.4 which errors a skip in a
+       later input discards, with cases (pending where the crate fails), or say why it is left
+       out.
+    Non-blocking: a silent stop in the argument document, `.priority(.try_include "missing") 3`,
+    and a rejection in text parsed in place, `.emit ".priority(x) 3"`, followed by a skip, are
+    accepted by the oracle and rejected by the crate, without a case; pending cases would pin
+    both. At `09-macros.md:256-258`, a macro that stops silently without ARGUMENTS also ends in an
+    error (`.try_include(x)"missing.inc"` then a skip), so "fails or stops" would be exact.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with
+    that binary and writing only to the scratchpad, matched all 6,848 tracked golden files.
+    1,689 active and 25 pending cases (eighteen `spec-v20`, seven draft), one coverage row each
+    (1,714), 25 case entries in `pending/README.md`, identical pending fixtures.
+    `cargo test --test conformance` passed all three tests; in a `git archive` copy of `fa75a0b`
+    with the seven draft cases and my probes moved in, the seven failed, the three boundary
+    cases passed (`src/` compiled, not read). `git diff --check 1cbbd48 fa75a0b`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team. Item: C14 question #89, spec-v21 draft review response.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the independent review
+    entry above (`aa1b0df`), the draft `fa75a0b`, released §13.1, `tools/ucl-dump/ucl_dump.c`, the
+    pinned libucl source, and a probe program linked against the pinned libucl (in the session
+    scratchpad) that reports each add call's result and the parser's error after it.
+  - Finding, whether libucl's or the tool's: both, by kind of error. For the rejected argument
+    document and the first-directory miss, libucl's add call returns success with an error
+    message set, and a later skip clears the message, in the same input or a later one; every
+    call then returned success and no message is left, so accepting is libucl's own result. For
+    an error that ends its input (`.include "nonexistent.inc"`), the add call returns failure with
+    a message; libucl still reads later inputs, and a skip there clears the message. The tool
+    checked only the message after the last input, contrary to its own description ("an error if
+    any input reported one"), so it accepted these. Fixed in `tools/ucl-dump/ucl_dump.c`: an
+    input whose add call fails with a message makes the result an error, whatever later inputs
+    clear; a silent stop, which fails without one, does not. A full `scripts/regen-golden.sh` run
+    with the fixed tool changed no golden file. `tests/conformance/README.md` describes the
+    criterion.
+  - Spec: §13.1 now says that an error ends its input and a skip in a later input does not
+    discard it, and, as a quirk, that a skip in a later input discards the two errors that do not
+    end the parse; §9.2 and §9.4 say "in the same input or a later one". Cases: pending
+    `inputs_args_rejected_then_skip_in_later_input`, `inputs_args_rejected_skip_two_inputs_later`,
+    `inputs_args_rejected_skip_in_later_file_input`,
+    `inputs_first_miss_then_url_skip_in_later_input` and
+    `inputs_first_miss_then_load_skip_in_later_input`; active
+    `inputs_args_rejected_later_input_without_skip_error`,
+    `inputs_skip_in_earlier_input_covers_nothing_error` and
+    `inputs_missing_include_then_skip_in_later_input_error`, all in five of five identical runs.
+  - Non-blocking notes taken: pending `macro_args_stopped_then_load_try_accepts` (a silent stop in
+    the argument document) and
+    `pending/13-inputs/macro_registered_text_args_rejected_then_load_try_accepts` (a rejection in
+    text parsed in place); "fails or stops silently", with the active
+    `macro_args_rejected_try_include_stops_error`.
+  - Observation: in a copy with every pending case moved in, the crate fails all of them except
+    the `spec-v20` case `comments_include_nested_text_before_first_name`, which it now passes on
+    this base; it can be activated with the other `spec-v20` cases.
+  - Cases: golden files only from `scripts/regen-golden.sh`. The index counts 1,693 active cases,
+    plus eighteen pending `spec-v20` and fourteen pending draft cases.
+  - Checks: `cargo test --test conformance`; `scripts/ci.sh`; `git diff --check`.
+  - Commit: the following commit on `c14/spec-q86`. Not tagged or pushed; independent re-review
+    pending.
+  - Attestation: the draft spec, question answer, cases, tool change and this log contain
+    observable behavior only, with no libucl code, pseudo-code, internal names or source
+    structure.
+
+- 2026-10-01 — Role: independent clean-room spec reviewer (re-review). Item: C14 questions #89 and
+  #90, spec-v21 draft.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the `aa1b0df..8460ba7`
+    diff of `docs/` and `tests/` (§§9.2, 9.4 and 13.1, `docs/spec/README.md`, the conformance and
+    pending READMEs, the #89 answer, the eleven new cases, further inputs and golden files, the
+    spec-team entry), and black-box runs of two pinned oracle binaries from this session's
+    scratchpad: this worktree's `target/libucl-oracle/ucl-dump`, built after the tool change, and
+    the older one of the `c14-followups` worktree. `tools/` was not opened; no libucl source,
+    implementation or fuzzer source, or Claude sessions or memory were read.
+  - Review: approved. The revision resolves my finding and adds no prohibited content: §13.1
+    states that an error ends its input and a later input's skip does not discard it, and, as a
+    quirk, that a skip in a later input discards a rejected argument document and a
+    first-directory miss; §§9.2 and 9.4 say "in the same input or a later one". With the new
+    binary my probes match the text: `.priority(x) 3⏎a = 1` then an input with a `.load(try=true)`
+    skip gives `{ a: int 1 @3, b: int 2 }`, also with an input between and as a file input; a
+    first-directory miss with a later input's URL or `.load` skip gives `pa: int 1`; without a
+    later skip, or with the skip in an earlier input, the result is an error; and
+    `a = 1⏎.include "nonexistent.inc"⏎c = 3` followed by a skip input is an error. The older
+    binary accepts that last document, as the spec team describes: comparing every golden file
+    with it, it differs only on `inputs_missing_include_then_skip_in_later_input_error`, which the
+    tool change accounts for; not a finding. The silent stop in an argument document, the
+    rejection in text parsed in place and `.try_include(x)"missing.inc"` give the results the new
+    sentences and cases state. No new finding.
+  - Checks: the flag and input mapping of `scripts/regen-golden.sh`, run over every case with the
+    new binary and writing only to the scratchpad, matched all 6,887 tracked golden files.
+    1,693 active and 32 pending cases (eighteen `spec-v20`, fourteen draft), one coverage row each
+    (1,725), and the same 32 in `pending/README.md`; the pending fixtures shared with active cases
+    are identical, and the further inputs of the pending `13-inputs` cases are under
+    `pending/13-inputs/files/`. `cargo test --test conformance` passed all three tests; in a
+    `git archive` copy of `8460ba7` with the fourteen draft cases moved in, only those fourteen
+    failed besides the four expected failures (`src/` compiled, not read).
+    `git diff --check aa1b0df 8460ba7 -- docs tests`.
+  - Commits: this reviewer log entry only on `c14/spec-q86`. Not tagged or pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: spec team (release). Item: C14 questions #89 and #90, spec-v21.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed §§7.7,
+    9.2, 9.4 and 13.1 of the draft and the answers to #89 and #90, the independent reviewer
+    entries through `72e199f`, the spec index and the conformance case lists. No Claude Code
+    sessions or memory were read.
+  - Work: after independent approval, changed the answers to #89 and #90, the spec index and the
+    conformance and pending READMEs from draft wording to `spec-v21`. The rules are unchanged from
+    `8460ba7`. The fourteen `spec-v21` and eighteen `spec-v20` cases stay under
+    `tests/conformance/pending/` until the crate passes them.
+  - Checks: the latest previous spec tag was `spec-v20`; the worktree was clean before the release
+    edits; 1,693 active and 32 pending cases; all three tests in `cargo test --test conformance`
+    passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v21` commit on `c14/spec-q86`, tagged locally
+    as `spec-v21`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.
+
+- 2026-10-02 — Role: spec coordinator. Item: C15 Stage A release, spec-v22.
+  - Inputs: current CLAUDE.md/PROTOCOL.md first; reviewed Stage A contract,
+    declaration header/inventory/case selection, independent review report, clean
+    public-interface cases/snapshots, current work goals/provenance and spec-owned
+    comparison runner. No forbidden notes/history or session memory consulted.
+  - Verified write access to .git and the separate implementation worktree.
+    Latest released spec-v21 (7a2319c) is not an ancestor of main (c497f7e);
+    release base is spec-v21, preserving all latest released format rules.
+  - Release includes only reviewed Stage A material and clean evidence, review
+    provenance and work goals. Draft status/relative links updated; no broader
+    research proposal, oracle tools or temporary owner implementation plan included.
+    Original checkout and its unrelated changes are preserved.
+  - Independent review: reviews/c15-stage-a.md approves behavior/declarations;
+    runtime/ASan evidence there is explicitly attributed to prior spec-side runs.
+  - Validation: reran the spec-owned comparison runner against the pinned reference:
+    all ten clean cases, 43 typed signature/link checks, two header/library
+    combinations and C++11 header checks passed on Darwin arm64; no golden drift.
+    Reviewed release links and git diff --check passed.
+  - Commit: docs(spec): release spec v22; annotated tag spec-v22 points to it.
+    Fresh implementation handoff follows release on c15/initial-c-api.
+  - Attestation: released specification contains observable behavior and public
+    interface declarations only, without executable upstream code or control-flow
+    pseudocode; no src/ or capi/ implementation authored by this participant.
+
+- 2026-10-02 — Role: fresh implementation participant. Item: C15 Stage A (spec-v22).
+  - Inputs consulted: current `CLAUDE.md` and `docs/clean-room/PROTOCOL.md` first;
+    released `docs/spec/` at spec-v22, notably the Stage A contract, declarations,
+    API inventory and case selection; clean `tests/conformance/capi/stage-a/probe.c`
+    and ten Darwin arm64 snapshots; work goals and provenance in `docs/clean-room/`;
+    current crate sources, public README/changelog, Cargo metadata, `scripts/ci.sh`
+    and `.github/workflows/ci.yml`;
+    the writing-plans skill. No upstream source, oracle tools, forbidden history,
+    research notes, spec-side temporary plans or session memory were read.
+  - Work: independently planned and implemented the separate `capi/` package, all
+    43 released functions and aliases, public object ABI, owned/borrowed references,
+    parser observations and one-submission boundary, conversions/lookup/iteration,
+    C-free-compatible text emission and exact-header installation. Core adapters
+    are additive and cursor recording is opt-in; existing Rust entry points remain
+    unchanged. A fresh implementation-side participant independently authored
+    signature/snapshot, boundary/lifetime, stack and sanitizer tests. Its own plan
+    was moved from the skill's default directory to `capi/tests/`; this participant
+    did not read it before provenance was confirmed.
+  - Checks: `scripts/ci.sh checks` passed twice, including the final integrated
+    C package fmt/clippy and Python driver. The final driver passes direct and
+    installed static/shared links, all 43 independently generated C11/C++11 typed
+    signatures and symbols, exact header and all ten snapshots for each linkage;
+    inaccessible second-input tests, retained children/conversion strings,
+    iterator reset/cleanup and 1023 nested child containers (arrays and objects)
+    on a 2 MiB pthread stack. The added C boundary/lifetime/depth program also
+    passed against an unoptimized debug static library. All Rust feature/test/stack/fuzzer/example/bench/doc
+    checks passed. Final spec-side black-box reference comparison is separately
+    attributed below. `git diff --check` passed.
+  - Commit: the following `feat(capi): implement released Stage A C ABI` commit on
+    `c15/initial-c-api`, with `Work item: C15`. No merge, push or publication.
+  - Attestation: I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-02 — Role: spec coordinator. Item: C15 independent candidate acceptance.
+  - Inputs: released spec-v22 Stage A contract/header/inventory/case selection;
+    spec-owned runner, public-interface probes and pinned compiled reference
+    libraries; candidate library/header artifacts and implementation-team test
+    reports. No forbidden notes/history/session memory consulted.
+  - Independently compared final release libucl.a and libucl.dylib against pinned
+    libucl on Darwin arm64: all ten cases, all 43 typed signatures/link checks,
+    four reference/released/shipping header-library combinations, C11/C++11
+    checks and unchanged oracle snapshots passed for each candidate library.
+  - Initial mixed-chain iterator exhaustion mismatch was reported as observable
+    output only; implementation participant resolved it from released evidence.
+    Final external comparison was rerun after the candidate correction/build.
+  - ASan-enabled C probe comparisons also passed for both candidate libraries,
+    including lifetime cases. These runs used ordinary release Rust libraries;
+    fully instrumented Rust+C sanitizer evidence is recorded separately by the
+    clean implementation validation participant.
+  - Commits: acceptance provenance included with the final C15 implementation
+    commit on c15/initial-c-api; no merge, push or publication performed.
+  - Attestation: specification remains behavior-only. Coordinator authored no
+    src/ or capi/ implementation and supplied no upstream code/design hints.
+
+## 2026-10-02 — Implementation team — C15 Stage A independent C validation
+
+Fresh implementation-side validation participant. Worktree: `ucl-rust-lexer-c15`, branch
+`c15/initial-c-api`. Inputs consulted: current `CLAUDE.md` and
+`docs/clean-room/PROTOCOL.md`; released `spec-v22` Stage A contract, API inventory,
+public declaration-only header and case list; released format depth rule; spec-owned
+Stage A public probe and Darwin arm64 snapshots; implementation-owned `capi/Cargo.toml`
+and `capi/Makefile`; the local writing-plans skill; Rust compiler/toolchain command help.
+No libucl checkout, oracle tooling, prohibited history, or oracle-side planning documents
+were read. The validation plan was independently authored by this participant and resides
+in `capi/tests/VALIDATION-PLAN.md`.
+
+Created `capi/tests/check.py` and `capi/tests/extra.c`. Normal and C ASan/UBSan runs
+passed for direct and make-installed static/shared libraries: exact shipping/installed
+header, 43 exported symbols, all 43 typed function pointers compiled/linked as C11 and
+C++11, ten exact Darwin arm64 snapshots, single-submission ESTATE with inaccessible
+second input storage, retained child and borrowed string lifetimes, restricted iterator
+cleanup/reset, and accepted maximum 1023 arrays/objects on a 2 MiB thread stack.
+Nightly Rust ASan plus C ASan/UBSan passed the same direct static/shared checks using
+Homebrew LLVM21 clang/clang++ with a shared external sanitizer runtime. Prebuilt Rust
+standard library was not instrumented; Darwin LeakSanitizer is unavailable. Targets
+without released snapshots explicitly skip comparisons and make no compatibility claim.
+
+Commits: none; changes handed to the parent implementation participant for review and commit.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+## 2026-10-02 — Implementation team — C15 C distribution
+
+Fresh implementation participant implemented opt-in cargo-c packaging and distribution
+on `c15/initial-c-api`, without modifying the original working checkout. Inputs:
+current CLAUDE.md and this protocol; released spec-v22 C contract/header/inventory;
+clean Stage A probe and Darwin arm64 snapshots; work-item distribution goals;
+existing crate/C package, Makefile, checks, manifests and release/CI workflow;
+writing-plans skill; official cargo-c v0.10.25 README, headers/configuration references
+and installed cargo-c source; official GitHub runner documentation; Cargo metadata,
+Rust toolchain/runtime notices and dependency license files. No oracle tooling,
+upstream libucl code, prohibited history or spec-side implementation plans were read.
+
+Changes: serde-ucl-c package, serde-ucl pkg-config identity, copied exact header with
+no generation, independently versioned ABI 1.0.0; source archive with released specs,
+clean cases, Rust path dependency and benchmark-free distribution manifest; relocatable
+macOS arm64 SDK with macOS 11.0 deployment metadata, static/shared libraries, README,
+project/dependency/Rust-runtime licenses, commit/spec/toolchain provenance and checksums.
+Release CI validates clean tagged-commit artifacts before unchanged crates.io Trusted
+Publishing and attaches those artifacts to its GitHub release. Binary targets beyond
+macOS arm64 remain deferred. No merge, push, tag, package publication or upload performed.
+
+Validation on macOS arm64 15.8.1: archive extraction/checksums/content, exact header,
+ABI/install-name/version/deployment/architecture metadata, relocation into a path with
+spaces, all 43 exports and C11/C++11 signatures, all ten golden snapshots and extra
+boundary/lifetime/depth tests via pkg-config static/shared linkage; clean extracted-source
+locked installation and repeated packaged checks passed. Existing capi/tests/check.py
+passed all four direct/installed variants. Full scripts/ci.sh passed; actionlint passed.
+Release-gate fixtures accepted matching versions/notes and rejected wrong tag, C/Rust
+version mismatch and missing changelog notes. macOS 11 runtime execution is not claimed;
+the checked deployment floor is 11.0. Current native static dependencies are iconv,
+System, c and m. Preparation artifacts record dirty=true; final release-ready local
+archives are regenerated from the completed clean commit with --require-clean.
+
+Commit: build(capi): package verified C source and macOS arm64 SDK (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-02 — Role: spec coordinator. Item: C15 distribution acceptance.
+  - Owner authorized implementing the proposed cargo-c/source/macOS arm64 SDK
+    distribution on the isolated C15 branch. Fresh implementation participant
+    received no inherited context, released-spec-only behavior inputs and
+    clean-room rules word for word; derived its own packaging plan.
+  - Inputs: current CLAUDE.md/PROTOCOL.md, release/tag metadata, current package
+    configuration/workflows, official cargo-c/GitHub runner documentation;
+    generated archives, released Stage A public-interface cases and spec-owned
+    comparison runner/pinned compiled reference. No forbidden notes/history or
+    Claude session memory consulted.
+  - Independently extracted SDK into a fresh temporary prefix and compared its
+    static/shared libraries against reference: ten cases, 43 typed signature/link
+    checks, four reference/released/shipping header-library combinations and
+    C/C++ header checks pass for each packaged library. Archive path audit excludes
+    oracle tools, drafts/research, local build output and session files.
+  - Reviewed workflow dependencies: existing version/changelog checks and Rust
+    CI precede verified C artifacts; crates.io Trusted Publishing preserved;
+    release upload checks digests and attaches archives only after prior success.
+    Native arm64 assertion prevents mislabeled SDK; no other binary target claimed.
+  - Implementation participant reports clean extracted-source/relocated-SDK
+    pkg-config static/shared linkage, all cases/boundary/lifetime/depth checks,
+    required integrated Rust/C CI, actionlint and release-gate fixtures passed.
+    Final archives will be regenerated and verified from the clean packaging
+    commit. macOS 11 is deployment floor; execution verified on macOS 15.8.1.
+  - Commits: acceptance provenance included in C15 packaging commit on
+    c15/initial-c-api. No merge, push, release tag or publication performed.
+  - Attestation: released specification remains behavior-only and unchanged.
+    Coordinator authored no src/ or capi/ implementation.
+
+
+### C15 distribution documentation followup
+
+After packaging commit `3a7e4d4`, coordinator artifact review identified that the
+README copied to SDK root needed a portable released-spec link and explicit source-only
+validation-program context. Updated capi/README.md to the immutable public spec-v22
+URL and identified the matching source archive/repository as the destination for
+conformance/build commands. No implementation or header changes. Inputs: current
+implementation-owned README, coordinator artifact-documentation observation.
+Commit: docs(capi): make SDK contract and validation references portable (Work item: C15).
+Final archives are rebuilt and validated from the resulting clean commit.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+### C15 offline contract documentation followup
+
+Coordinator noted spec-v22 is currently local, so the SDK README now gives an
+explicit offline route to the exact complete released contract and declaration
+artifact in the matching source archive. Removed reliance on an unpublished online
+tag. Documented the released tag prerequisite for future release CI; no tag was
+pushed. Inputs: current README, released-spec archive layout and owner/coordinator
+publication status. No implementation/header changes.
+Commit: docs(capi): point SDK users to bundled released contract (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-03 — Role: spec coordinator. Item: C15 native CI release reference gate.
+  - Owner requested GitHub CI release SDKs for Linux amd64, Linux arm64 and
+    macOS arm64; FreeBSD was a runner-availability question, not added scope.
+  - Inputs: current CLAUDE.md/PROTOCOL.md first; released spec-v22 Stage A
+    contract/header/case selection; existing spec-owned comparator; pinned
+    reference build metadata and current package/workflow metadata; official
+    GitHub runner documentation. No forbidden history/session memory consulted.
+  - Added spec-owned tools/capi-conformance black-box gate, isolated ignored
+    reference checkout/build, verified commit/header hash, oracle-only native
+    snapshots, then candidate static/shared comparisons; CI evidence records
+    platform and input/output hashes. Ten cases and 43 signatures only; broad
+    research proposal is excluded. Implementation participant receives public
+    CLI/evidence schema only and cannot read tools/ or upstream source.
+  - Validation on Darwin arm64: rebuilt pinned reference, verified unchanged
+    released snapshots, ten cases and 43 signature/link checks across both
+    candidates/four header-library combinations each; C11/C++11 checks pass.
+    Candidate-derived golden updates and corrupted oracle evidence are rejected.
+    Python syntax and git diff --check pass. Linux executes in future native
+    matrix jobs; no local Linux runtime result is claimed.
+  - Commit: test(capi): gate native release SDKs against pinned reference,
+    Work item C15. No merge, push, release tag or publication performed.
+  - Attestation: released specification remains behavior-only and unchanged;
+    coordinator changed spec-owned tooling/provenance only, no src/ or capi/ code.
+
+
+## 2026-10-03 — Implementation team — C15 native matrix — forbidden-input exposure
+
+Participant reread current CLAUDE.md and full PROTOCOL, then implemented native
+Linux amd64/arm64 and Darwin arm64 packaging/workflow changes from owner goals,
+released spec-v22, existing implementation-owned packaging/tests/workflows,
+writing-plans skill, official GitHub runner and GNU readelf documentation, and
+coordinator-provided black-box comparator CLI/evidence schema. It did not open
+oracle tool source or upstream files. All implementation edits remain uncommitted
+and predate the exposure described below.
+
+Exposure: after running the authorized black-box comparator, participant read
+`target/c15-matrix-reference.log`. The comparator forwarded upstream compiler
+output containing a source excerpt from
+`target/c15-matrix-oracle/upstream/src/mum.h:129` in an unused-expression warning.
+The log also contained upstream compiler include-file diagnostics. Although the
+black-box comparison passed, viewing this diagnostic excerpt is forbidden source
+exposure. Participant stopped immediately, notified coordinator and handed over.
+No implementation code was edited after exposure, so there is no post-exposure
+implementation code to quarantine. Task-specific background archive/check processes
+are stopped; any generated verification artifacts are provisional and not accepted.
+
+Before exposure: native assertions and eight synthetic packaging/ELF/collection
+fixtures passed; actionlint passed; Darwin staged candidate built and black-box
+reference gate passed. Full archive/source/CI verification had been launched but
+is not reported as accepted by this participant. Native Linux was not executed.
+
+Commits: none from this work session. A fresh clean-room participant must review
+and complete the pre-exposure changes. Spec owner should suppress upstream compiler
+source diagnostics in implementer-facing black-box output before further use.
+
+The implementer attestation cannot be made: this session accidentally received the
+forbidden upstream source diagnostic identified above.
+
+- 2026-10-03 — Role: spec coordinator. Item: C15 diagnostic boundary repair.
+  - Fresh distribution participant stopped after a forwarded upstream compiler
+    warning exposed source text. Its preceding entry records the exposure and
+    confirms no implementation edits occurred afterwards; there is no post-exposure
+    code to quarantine. Existing implementation edits remain pre-exposure work.
+  - Fixed spec-owned gate to capture and suppress upstream build/compiler streams
+    and internal tracebacks on success/failure. Only sanitized observable comparison
+    output is forwarded. Moved known unsafe reference logs outside clean worktree
+    into spec-side diagnostic storage, not an implementation input.
+  - Validation: synthetic failing compiler streams are suppressed by both gate
+    layers; fresh native Darwin reference comparison rerun follows this commit.
+  - Fresh replacement receives rules word for word, no inherited context, allowed
+    released spec/code/goals only, and must independently review/finish the
+    pre-exposure edits. No spec-side plan or unsafe diagnostic log is passed.
+  - Commit: fix(capi): suppress source diagnostics across reference gate boundary,
+    Work item C15. Coordinator changed no src/ or capi/ implementation.
+
+## 2026-10-03 — Implementation team — C15 fresh native release completion
+
+Fresh replacement participant read current CLAUDE.md and the complete PROTOCOL
+before any other repository inputs. Independently reviewed all pre-exposure native
+release implementation changes from latest released spec-v22, owner C15 goals,
+allowed crate/package code, clean public-interface cases, and current clean-room
+worklist/log. Predecessor/spec-side plans, tools source, upstream source/build logs,
+forbidden history and session memory were not consulted. An independent completion
+plan is `docs/superpowers/plans/2026-10-03-c15-clean-completion.md`.
+Additional inputs: writing-plans skill and official GitHub hosted runner reference
+(https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
+confirming native Ubuntu amd64/arm64 and macOS 15 arm64 runner labels.
+
+Reviewed/completed native OS/architecture assertions, Linux ELF64 machine/SONAME
+and measured GLIBC metadata, per-target native snapshot evidence and staged
+candidate hashes, relocatable static/shared pkg-config consumption, clean source
+builds, one source archive, unique input artifacts/manifests, and four-archive
+same-version/commit collection before existing publishing jobs. Strengthened
+collection to reject wrong native system/machine evidence and Darwin format/machine
+metadata. Rust/C implementation and exact spec-v22 header are unchanged.
+
+Accepted validation in this fresh session:
+
+- `scripts/ci.sh checks`: full Rust formatting/clippy/feature tests, optimized and
+  unoptimized depth checks, conformance, fuzzer unit tests, examples/benches/docs,
+  and C direct/installed static/shared signatures/snapshots/lifetime/depth passed.
+- Nine synthetic native identity, ELF metadata and artifact collection tests passed.
+  These fixture bytes are explicitly synthetic, never Linux runtime evidence.
+- `actionlint .github/workflows/release.yml` and `git diff --check` passed.
+- Fresh authorized black-box CLI in `target/c15-clean-oracle` generated native
+  Darwin snapshots and validated both newly staged candidate libraries: ten cases,
+  43 signatures/symbols and four header/library combinations per candidate passed.
+  Only sanitized observable output was received; upstream sources/tools were not read.
+- `distribution.py --kind all --target macos-arm64 --verify` using those fresh
+  snapshots/candidate passed exact header/ABI/deployment checks, all ten snapshots,
+  C/C++ static/shared pkg-config consumers and boundary/lifetime/depth checks before
+  and after extraction into a path with spaces, plus clean extracted-source install.
+- Release gates: matching `v0.6.0` and changelog passed; malformed/mismatched tags,
+  missing changelog section and C package version mismatch fixtures rejected.
+
+No native Linux runtime, GitHub workflow execution, macOS 11 runtime, merge, push,
+release-tag, publish or upload was performed. Linux runtime/full target reference
+checks are configured for future native GitHub execution and cannot be claimed
+as local passes. Original checkout was not modified. Clean-commit split archive
+modes are verified after this implementation commit and recorded in a follow-up
+provenance entry.
+
+Commit: `ci(capi): verify native SDK release matrix` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+- 2026-10-03 — Role: spec coordinator. Item: C15 three-platform CI acceptance.
+  - Final workflow review confirms Linux amd64 (ubuntu-24.04), Linux arm64
+    (ubuntu-24.04-arm), and macOS arm64 (macos-15) native jobs. Each asserts its
+    platform, stages candidate libraries, runs sanitized pinned-reference gate,
+    and verifies packaged SDK/clean source against actual-host evidence.
+  - Source is emitted once; unique input artifact/checksum names and overwrite
+    handling protect reruns. Collection requires all four consistent archives
+    before Trusted Publishing and consolidated GitHub release attachment.
+    FreeBSD is not included; only runner availability was asked.
+  - Independent extracted new Darwin SDK static/shared comparisons pass ten
+    oracle cases, 43 signature/link checks, four header/library combinations and
+    C/C++ headers each. Exact released header and behavior/spec paths unchanged.
+    Fresh implementer reports full Rust/C CI, nine platform/collector fixtures,
+    actionlint, release gates and source/SDK relocation/depth/lifetime tests pass.
+  - Protocol handover completed: exposed participant stopped before further code
+    edits; fresh participant independently reviewed pre-exposure code and derived
+    its own plan. Unsafe predecessor logs/plan are not implementation inputs.
+    Spec-owned diagnostics suppression tested on successful and failing commands.
+  - Native Linux and remote GitHub Actions execution are pending future workflow
+    use; no local Linux runtime result or completed publication is claimed.
+  - Commit: included with final build(capi) native matrix implementation; local
+    clean split artifact verification will be recorded by fresh implementer.
+    Coordinator authored no src/ or capi/ implementation. No merge/push/tag/upload.
+
+## 2026-10-03 — Implementation team — C15 clean-commit archive verification
+
+Continuation of the fresh native completion session above, with the same allowed
+inputs and no new forbidden inputs. Implementation commit: `c91391e`.
+
+After that commit the worktree was clean. Restaged the Darwin candidate with
+`--build-only --require-clean`; its static/shared bytes still matched the successful
+fresh native reference evidence. Separately ran source-only and SDK-only archive
+modes with `--verify --require-clean` at `c91391e`. Both passed clean extracted-source
+installation; SDK-only also passed staged and extracted/relocated static/shared
+C/C++ signatures, ten native snapshots, ABI/deployment and lifetime/depth checks.
+Outputs each contain exactly one archive plus their distinct `SHA256SUMS-source`
+or `SHA256SUMS-macos-arm64`; outer digest and BUILD-INFO clean/verified/commit fields
+were checked explicitly. Source emitted once; SDK mode emitted no source archive.
+
+This follow-up changes only provenance and the independent completion checklist.
+Native Linux/GitHub execution and older deployment runtime remain untested locally.
+No merge, push, tag, publish or upload occurred.
+
+Commit: `docs(capi): record clean native archive validation` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 pull request
+
+- Owner requested a GitHub PR following existing repository PRs; this authorizes pushing the implementation branch for review. No merge, tag push, or release publication.
+- Inputs: current CLAUDE.md and PROTOCOL.md, branch/worktree metadata, existing GitHub PR descriptions, workflow configuration, and diff file statistics. No implementation source was read or edited. The released specification remains behaviour only.
+- Fetched origin/main at e4dd295. A non-mutating merge preview reports conflicts in CHANGELOG.md, LOG.md, QUESTIONS.md, the spec index, and conformance README files. Existing validation applies to the implementation branch before integration with current main; these conflicts are disclosed in the PR.
+- This session produces a provenance-only commit and pushes c15/initial-c-api to open the PR. Original-worktree changes remain untouched.
+
+### 2026-10-03 — spec coordinator — C15 rebase and CI repair
+
+- Owner requested rebase and CI repair for PR #29. Rebased C15-only commits onto origin/main e4dd295, skipping spec-v21 commits already squash-merged there. Preserved current main documentation and appended the C15 changelog/provenance; released spec-v22 remains unchanged at its original tag.
+- Inputs: current repository instructions/protocol, GitHub CI failure output, Git metadata, changelog and clean-room documents. Both native jobs fail because ANSI terminal color resets pollute native linker flags. Implementation repair is delegated to a clean participant. No src/ or capi/ implementation authored by the coordinator. Specification remains behaviour only.
+
+- Owner steering: exclude implementation plan files from the PR, while preserving all local copies. Removed added docs/superpowers/plans files from tracking and excluded that directory locally; implementation participants keep new repair plans local.
+
+## 2026-10-03 — Implementation team — C15 rebased colored-Cargo CI repair
+
+Participant reread current CLAUDE.md and full PROTOCOL first and remains clean
+from the prior attested sessions. Inputs: owner-authorized sanitized CI diagnostic
+(final Linux `-lc`/Darwin `-lm` argument acquired Cargo ANSI reset), current allowed
+C package tooling/tests and Rust implementation, current-origin/main implementation
+diff, original released spec-v22 Stage A contract/header, and writing-plans skill.
+No raw coordinator CI logs, upstream source/header, tools source, predecessor or
+coordinator plans, forbidden history or session memory were read.
+
+Added a pure native-static-libs parser that strips terminal CSI styling before
+splitting linker arguments, preserves quoted arguments, and rejects absent/empty
+diagnostics. New fixtures reproduce colored Linux and Darwin final-library flags,
+embedded styling and missing/empty output; initial missing-helper failures were
+observed before the repair. Named capi search found no equivalent uncorrected
+native-static-libs parser.
+
+Reviewed the rebased current Rust integration: C cursor/partial observations are
+opt-in, capture the final include-search result, preserve existing default Rust
+reader/emitter paths, and retain borrowed-subtree output facts. No core code
+change was needed. Exact shipping header remains byte-identical to spec-v22.
+
+Validation:
+
+- `CARGO_TERM_COLOR=always scripts/ci.sh checks` passed all required formatting,
+  clippy, Rust feature/conformance/optimized and unoptimized depth/fuzzer tests,
+  examples/benches/docs and C static/shared/direct/installed signature, snapshot,
+  boundary/lifetime/depth checks on native Darwin arm64.
+- Twelve Python fixtures passed, including actual Linux/Darwin color regressions;
+  those Linux flag fixtures establish parsing only, not Linux execution.
+- A fresh local depth-one clone with `--no-tags` has no spec-v22 tag. The corrected
+  C driver and fixtures both passed there with `CARGO_TERM_COLOR=always`, confirming
+  ordinary PR checks require only the checked-in contract. Packaging still requires
+  fetched spec-v22; README states that future release prerequisite explicitly.
+- actionlint for CI/release workflows, exact-header and whitespace checks passed.
+- Source input construction passed without local implementation/validation plans;
+  corrected public C validation tooling remains included.
+
+Per owner instruction, capi implementation/validation plans were removed from
+tracking and source archive selection while preserving their local files; all
+superpowers plans stay local and are not staged. Independently authored repair
+plan is local only. Original checkout was not edited by this participant. No push,
+merge, release tag, publish, upload, native Linux or GitHub workflow execution was
+performed; coordinator handles remote update and real CI monitoring.
+
+Commit: `fix(capi): strip Cargo color from native linker flags` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-03 — spec coordinator — C15 release staging names
+
+- Owner questioned the C15 work-item name in release workflow staging paths. Replaced workflow target/c15-* paths with generic target/c-* paths consistently across producers, reference checks, collection and upload; public artifact names remain serde-ucl-c. Documentation alignment delegated to clean implementation participant.
+- Inputs: current release workflow and public distribution documentation. Coordinator edited workflow/provenance only; no implementation source authored. Specification remains observable behaviour only. Workflow lint and whitespace checks pass.
+
+## 2026-10-03 — Implementation team — C15 public distribution path cleanup
+
+Inputs: owner request to use generic C staging paths, current allowed
+`capi/README.md` and `capi/distribution.py`, existing packaging fixtures and current
+clean-room rules. Public examples now use `target/c-*`; the CLI default output
+is `target/c-dist`. Historical work-item evidence and internal temporary directory
+names were preserved. Coordinator updates release workflow paths separately.
+
+Validation: twelve packaging/native-link fixtures, CLI help, release-workflow
+actionlint and whitespace checks passed. No implementation behavior changed;
+full CI was not repeated for this documentation/default-directory cleanup.
+Local plan remains untracked. No push, release tag, publish or upload occurred.
+
+Commit: `docs(capi): use generic distribution staging paths` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+## 2026-10-03 — Implementation team — C15 installed library directory CI repair
+
+Inputs: owner-authorized sanitized Linux failure (installed static archive absent
+at prefix/lib), current allowed C Makefile/driver/packaging/docs, and existing
+clean-room rules. No raw CI logs or forbidden source/tooling/plan inputs were read.
+
+Makefile cargo-c installation previously selected no libdir while the driver and
+release candidates expect prefix/lib. It now passes explicit `--libdir`, defaulting
+`LIBDIR` to `$(PREFIX)/lib`; callers may override source installation layout.
+Public direct cargo-c commands select the same libdir. Packaging already specifies
+prefix/lib, so release candidate paths remain consistent without behavior changes.
+
+An actual Makefile invocation fixture captures cargo-c argv and covers default
+libdir, override, DESTDIR and paths containing spaces. It failed before the repair
+for missing --libdir, then passed with all thirteen fixtures. Native Darwin C checks
+with CARGO_TERM_COLOR=always passed direct and installed static/shared exports,
+43 C/C++ signatures, ten snapshots, boundary/lifetime/depth checks. CI/release
+actionlint and whitespace checks passed. No Rust/C implementation/header changes
+were needed. Linux runtime verification remains GitHub CI's responsibility; this
+participant did not run native Linux or push. Repair plan stays local/untracked.
+
+Commit: `fix(capi): select consistent installed library directory` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

@@ -1,0 +1,16 @@
+get-ref=2
+again:same=1,ref=3
+child-ref=2,scalar-ref=2
+root-after-parser=1
+retained:child-ref=1,scalar-ref=1
+child-survives[26]=7b22616e73776572223a34322c2271756f746564223a2278227d
+retained-format=0
+retained-emit[39]=7b0a2020202022616e73776572223a2034322c0a202020202271756f746564223a202278220a7d
+retained-format=1
+retained-emit[26]=7b22616e73776572223a34322c2271756f746564223a2278227d
+retained-format=2
+retained-emit[27]=616e73776572203d2034323b0a71756f746564203d202778273b0a
+retained-format=3
+retained-emit[22]=616e737765723a2034320a71756f7465643a20227822
+answer=42
+retained-scalar-value=1
