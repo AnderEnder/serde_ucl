@@ -277,7 +277,7 @@ def main():
     parser.add_argument("--target", choices=TARGETS, help="require this native host (no cross builds)")
     parser.add_argument("--assert-native", action="store_true", help="only assert OS/architecture")
     parser.add_argument("--kind", choices=("source", "sdk", "all"), default="all")
-    parser.add_argument("--output", type=Path, default=ROOT / "target/c15-dist")
+    parser.add_argument("--output", type=Path, default=ROOT / "target/c-dist")
     parser.add_argument("--candidate-prefix", type=Path, help="staged candidate checked by reference CLI")
     parser.add_argument("--build-only", action="store_true", help="install candidate for black-box reference check")
     parser.add_argument("--golden-dir", type=Path, help="actual native snapshots with reference-evidence.json")

@@ -164,7 +164,7 @@ For a local Darwin regression in a repository checkout:
 
 ```sh
 rustup component add llvm-tools rust-docs
-python3 capi/distribution.py --target macos-arm64 --verify --output target/c15-local
+python3 capi/distribution.py --target macos-arm64 --verify --output target/c-local
 python3 capi/tests/distribution_test.py
 python3 capi/tests/check.py
 ```
@@ -185,11 +185,11 @@ then SDK construction using the same staged libraries and generated target evide
 ```sh
 # TARGET is linux-amd64, linux-arm64 or macos-arm64 on its corresponding native host.
 python3 capi/distribution.py --build-only --target "$TARGET" \
-  --candidate-prefix target/c15-candidate --require-clean
+  --candidate-prefix target/c-candidate --require-clean
 # Release CI invokes the spec-owned reference comparator as a black box here.
 python3 capi/distribution.py --kind sdk --target "$TARGET" \
-  --candidate-prefix target/c15-candidate --golden-dir target/c15-oracle/golden \
-  --verify --require-clean --output target/c15-sdk
+  --candidate-prefix target/c-candidate --golden-dir target/c-oracle/golden \
+  --verify --require-clean --output target/c-sdk
 ```
 
 `--golden-dir` requires all ten snapshots and the successful comparator's

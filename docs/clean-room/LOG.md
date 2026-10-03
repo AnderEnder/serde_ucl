@@ -6174,3 +6174,20 @@ I did not read libucl source code or any forbidden input listed in docs/clean-ro
 
 - Owner questioned the C15 work-item name in release workflow staging paths. Replaced workflow target/c15-* paths with generic target/c-* paths consistently across producers, reference checks, collection and upload; public artifact names remain serde-ucl-c. Documentation alignment delegated to clean implementation participant.
 - Inputs: current release workflow and public distribution documentation. Coordinator edited workflow/provenance only; no implementation source authored. Specification remains observable behaviour only. Workflow lint and whitespace checks pass.
+
+## 2026-10-03 — Implementation team — C15 public distribution path cleanup
+
+Inputs: owner request to use generic C staging paths, current allowed
+`capi/README.md` and `capi/distribution.py`, existing packaging fixtures and current
+clean-room rules. Public examples now use `target/c-*`; the CLI default output
+is `target/c-dist`. Historical work-item evidence and internal temporary directory
+names were preserved. Coordinator updates release workflow paths separately.
+
+Validation: twelve packaging/native-link fixtures, CLI help, release-workflow
+actionlint and whitespace checks passed. No implementation behavior changed;
+full CI was not repeated for this documentation/default-directory cleanup.
+Local plan remains untracked. No push, release tag, publish or upload occurred.
+
+Commit: `docs(capi): use generic distribution staging paths` (Work item: C15).
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
