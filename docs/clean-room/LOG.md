@@ -7398,3 +7398,81 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commits: `docs(spec): answer the spec-v23 review and questions #97 to #99` and this entry,
     which also rewrites the inputs and findings of the earlier spec-team entry. Not released or
     tagged. Not pushed.
+
+- 2026-10-05 — Role: independent spec reviewer, oracle side (re-review). Item: C14 questions #91
+  to #93 and #97 to #99, the spec-v23 draft (`37d4646..0b9fa5e` on `c14/spec-v23`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the coordinator's
+    message, `git diff 37d4646..HEAD` (§§6.1, 7.6, 9.2, 9.4 and 13.1, `docs/spec/README.md`, the
+    conformance and pending READMEs, the #91 to #93 answers, questions #97 to #99 and their
+    answers, the 24 new cases with fixtures and golden files, both spec-team entries), the
+    question rows on `c14/fuzz-gaps` (`fc56837`, `a8d85b4`) and `c14/spec21-impl` (`41965cd`,
+    `80745c3`), the pinned libucl source (read as the oracle-side role allows), and black-box runs
+    of this worktree's `target/libucl-oracle/ucl-dump` and `ucl-differential --check` on probe
+    files in this session's scratchpad. MISS and SKIP are as in my entry above.
+  - Earlier findings: all four resolved. (1) §9.2 *Quirk: a first-directory miss inside an
+    argument document*, the §9.4 notes, four pending cases and the active
+    `macro_args_path_list_stays_in_argument_document_error`; my probes give the stated results.
+    (2) §9.4 *Quirk: while an error waits for a skip*, with three pending cases; but see 1 below.
+    (3) The first spec-team entry now names only the pinned libucl source. (4) The #91 and #92
+    answers say that they refine #87; the first-name quirk refers forward to the file's own `}`,
+    and "(above)" is gone; the #93 answer no longer refers to runs outside the question; the
+    pending README names the cases that also need §9.2; the #91 bullet lists the whitespace bytes.
+  - Result: not approved, one blocking finding. The answers and the new text state behaviour only.
+    1. Blocking. *Quirk: while an error waits for a skip* says that an include with `try=true` of
+       a directory "then fails with that error instead … so a later skip is never read". That
+       holds only when the search list has one directory, or when every directory tried gives a
+       directory; a waiting first-directory miss always leaves a list in effect. With a list of
+       several, a directory in one list directory sends the include on to the next one, where a
+       missing path is skipped, and the later skip is read:
+       `MISS⏎.include(try=true, path=["files", "files/v4/p1"]) "v4"⏎SKIP⏎b = 2` →
+       `{ pa: int 1, b: int 2 }`, while with `path=["files", "files"]` it is an error;
+       `.priority(x) 3⏎a = 1⏎.include(try=true, path=["files", "nothere"]) "v4"⏎SKIP⏎b = 2` →
+       `{ a: int 1 @3, b: int 2 @3 }`; with a glob, the last directory decides, as in the glob
+       rule: `.include(try=true, glob=true, path=["files/v4/g", "nothere"]) "*/"` in place of that
+       include is accepted, and with `path=["files/v4/g"]` alone it is an error. With
+       `["nothere", "files"]` the first directory skips the include, as the list rule says, and
+       the directory is never reached. The draft's text also contradicts that rule ("with
+       `try=true` it is skipped without looking further"), and the table note and the #98 answer
+       repeat it. The crate agrees with the oracle on the first form today; following the draft
+       as written would make it reject it. This is not the *Uncertain* search-path item of
+       *Missing and unusable files*, which is about a file that fails while it is parsed. Fix:
+       state the behaviour with a search list, in the quirk, the table note and the #98 answer,
+       with cases (the miss form agrees on origin/main's crate; check `c14/spec21-impl`'s).
+    2. Should fix. The #97 question row is the `fc56837` text. `c14/fuzz-gaps` has since
+       corrected it (`a8d85b4`): the crate gives `"unknown"` for the two documents with a `$`
+       outside the string, as origin/main's crate does on the pending
+       `quoted_unicode_dollar_dollar_outside_string_not_counted`. Take the corrected row, or the
+       two branches conflict or undo the correction on merge. Rows #98 and #99 match both
+       `41965cd` and the branch head.
+    3. Not blocking. (a) "Whatever ends the input in the meantime" can be read to include the
+       input's normal end; "ends the input early" would be exact. (b) The directory rule does not
+       reach into an argument document: `MISS⏎.priority(.include(try=true) "files"; priority=2);⏎`
+       `SKIP⏎b = 2` → `b: int 2 @2`, which the crate gives too; a clause would make it explicit.
+       (c) The first spec-team entry's earlier wording is still in this branch's history
+       (`05a4a40`); a squash merge keeps it out of `main`.
+  - Probes that match the draft: #97: `"$ABI"` in an array, in an object, as JSON
+    `{"a": "$ABI"}` and after the key `"$k"` stays `"$ABI"`; `"$$"` → `"$$"`,
+    `"\$$ABI"` → `"$$ABI"`, `"$ABI$"` → `"unknown$"`, `"\\$ABI"` → `"\unknown"`,
+    `"\x24ABI"` → `"x24ABI"`, and a later value `"$ABI"` does not count. #98: a silent stop in an
+    included file, and a glob with no match, while a rejection waits are errors with SKIP in a
+    later input, and the glob without the rejection gives the tree so far; `/dev/null` with
+    `try=true` behaves as a directory; a silent stop inside an argument document is a rejection,
+    which SKIP discards. #99: a `)` at the end of an argument document is not observable apart,
+    since every macro available there fails with no ARGUMENTS and an empty VALUE anyway.
+  - Checks: `cargo test --test conformance` at `0b9fa5e`: all three tests pass, 1,743 cases,
+    1,739 pass, the four expected failures. In `git archive` copies with all 35 pending cases and
+    their fixtures moved into `cases/spec/` (`src/` compiled, not read): origin/main's crate,
+    1,778 cases, 1,741 pass, failing 33 pending cases (not the two `try_directory` rejection
+    forms) and no active one; `c14/spec21-impl`'s crate at `80745c3`, 1,756 pass, failing 18
+    pending cases (all `spec-v23`) and no active one. So every active case passes on both crates
+    and every pending case fails on at least one. `scripts/ci.sh golden` with `LIBUCL_DIR` at the
+    pin `24c8b39`: "golden files are current", worktree clean afterwards. 1,743 active and 35
+    pending cases, 1,778 coverage rows, one per case, in order; `pending/README.md` lists all 21
+    new pending cases; the pending fixtures shared with active cases are identical; the case
+    counts in the #93 and #97 to #99 answers and in the README notes are right. New lines are
+    within 100 columns; `git diff --check` flags only the trailing space that three case inputs
+    need.
+  - Commits: this reviewer log entry only, on `c14/spec-v23`. Not tagged or pushed.
+  - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
+    This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
+    names or source structure.
