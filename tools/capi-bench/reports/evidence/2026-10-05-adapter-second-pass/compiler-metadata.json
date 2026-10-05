@@ -1,0 +1,11 @@
+{
+  "before_compiler": "Rust 1.98.1 / LLVM 22.1.8",
+  "after_compiler": "Rust 1.99.0 / LLVM 23.1.1",
+  "source_identity_check": "git diff --quiet dfefd2c 80b7785 -- src capi Cargo.toml Cargo.lock scripts/ci.sh passed",
+  "same_rust_driver_and_dependencies_sha256": {
+    "rust-package/main.rs": "a74f4f41beb52b6f2b98b71ded21add13eac971089cfd72c467b63e1ff8a82cf",
+    "rust-package/Cargo.lock": "07411733ddf8e36649a20cacd868c33ef466127f879e95727084f62409fffca7"
+  },
+  "same_c_driver_header_documents": "Verified by paired.py",
+  "scope": "Frozen same-source binaries remeasured interleaved; compiler/toolchain effect on these optimized builds; no general compiler regression claim"
+}

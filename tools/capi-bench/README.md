@@ -113,3 +113,24 @@ See [the final optimization and profiling report](reports/2026-10-03-adapter-opt
 for before/after samples, allocation counts, CPU profiles and the remaining
 C/Rust gap. It records a substantial improvement without claiming the near-zero
 target has been met.
+
+For another optimization pass, freeze and validate both before/after builds with
+the main runner and Rust comparator, then interleave them in one timing session:
+
+```sh
+python3 tools/capi-bench/paired.py --before target/c-bench-before \
+  --after target/c-bench-after --output target/c-bench-paired
+```
+
+The paired runner verifies recorded binary/input/output/header/driver hashes and
+requires the same compiler and reference pin. It rotates both C builds, both
+same-core Rust callers and libucl for complete parse/drop; compact JSON emission
+rotates the three C callers on pre-parsed roots. Every sample and round median,
+iteration count, load average and compiler identity is retained. This reduces
+confounding from machine-load changes between long-separated before/after runs;
+it cannot eliminate noise or justify another platform's performance.
+
+`--allow-compiler-change` explicitly labels a compiler+code comparison. Verify
+own source identity separately before using that mode to describe compiler-only
+effects. Performance gains from updating Rust must be reported separately from
+adapter-code changes. Timing profiles and allocator counts remain separate.

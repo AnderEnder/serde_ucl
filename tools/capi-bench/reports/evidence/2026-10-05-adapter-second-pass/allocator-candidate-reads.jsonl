@@ -1,0 +1,2 @@
+{"mode":"CRead","traversal":"first_child","input_bytes":706670,"warmup":3,"rounds":20000,"elapsed_ns":37,"alloc_requests":1,"requested_bytes":32,"peak_extra_live_bytes":32,"remaining_live_bytes":0}
+{"mode":"CRead","traversal":"all_children","input_bytes":706670,"warmup":3,"rounds":20000,"elapsed_ns":15559,"alloc_requests":1,"requested_bytes":32,"peak_extra_live_bytes":32,"remaining_live_bytes":0}

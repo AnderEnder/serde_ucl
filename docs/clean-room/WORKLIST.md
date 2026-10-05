@@ -544,3 +544,20 @@ measured performance, and synchronize manifests/docs if new APIs require1.99.
 Remeasure merged baseline and final candidate on the same1.99 compiler before
 attributing any gain to adapter code. New implementation remains stable Rust;
 nightly is limited to existing sanitizer/Miri validation.
+
+### C15 second-pass checkpoint (2026-10-05)
+
+Completed reviewed source db08f32, independent tests059dfa0/review6e2ed75 and
+public acceptance docs a77a6c0. Lateststable Rust1.99 synchronized across packages.
+Same-compiler interleaved original10k C8.953→7.717ms (1.160×throughput,13.8%less
+time), normal Rust6.296ms, libucl11.130ms. Residual22.6%C/Rustgap: near-zero
+target remains unmet, though performance and read paths materially improve.
+Generated requests70059→10060; peak storage9.920→8.949MB. Public native CPU
+allocator leaf16.08→7.27%; emission stable and flat traversal regression recovered.
+Same-source compiler-only comparison shows no broad parsing gain from1.99.
+
+Full Rust/C gates, four static/shared direct/installed linkages, sanitizers and
+six native/Miri ownership tests passed; no independent correctness blocker.
+Report and hashed raw evidence: tools/capi-bench/reports/2026-10-05-adapter-second-pass.md.
+Local Darwin execution only; Linux CI awaits future submission. No push, PR,
+merge, tag or publication; plans stay local and excluded.

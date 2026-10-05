@@ -1,0 +1,72 @@
+{
+  "after-c.json.gz": {
+    "sha256": "f6825716d7137b2a792061e7dd7e222878750c2c98436f7bad748fe33f1b4b49",
+    "uncompressed_sha256": "61446284b4fe3ae0ebf594b67bc17cb6986060d8d764d20d9a3cbb0ae11d47fb"
+  },
+  "after-cpu.json": {
+    "sha256": "1a51573dd9727a006c3dae6f2908f912687c63c293a2d58e6d8c4fc9da5137f2"
+  },
+  "after-rust.json.gz": {
+    "sha256": "4be0180c2395a16c4a1fe7fbec9395a40f738dfe077aafffa22b65d77d42a004",
+    "uncompressed_sha256": "a059ffffca9686db63ce8f8a06c3c117c954842f5dc8b4dc9fdbfe9498c581d2"
+  },
+  "allocator-baseline-rbl.jsonl": {
+    "sha256": "ecc1674243e90e62ef808d9f7c9e7d0b814f0a3a16c0cd05b8e5679177f21ccb"
+  },
+  "allocator-baseline-reads.jsonl": {
+    "sha256": "7af415a88a2441b1e218a9784619e3eab2604292e63d0b7de1efbd2a5b7444fc"
+  },
+  "allocator-baseline-records10k.jsonl": {
+    "sha256": "70b5fe685dbfa0d79856fa8e39374bd40cb0ce55b5265ea0d7128dfbe613aab1"
+  },
+  "allocator-baseline-records1k.jsonl": {
+    "sha256": "76c62ae10a992d370972609e81715af88ef4501ba3c0eef7320c5bb9522c39db"
+  },
+  "allocator-candidate-rbl.jsonl": {
+    "sha256": "0c9d7ed299506687a9e797829a07db6bb52e4cdfad6f81704e3915d941a8d622"
+  },
+  "allocator-candidate-reads.jsonl": {
+    "sha256": "53295477b2fa8f7f7af9892443ee6fcc7b9848e7b8505e5ab63ce4a9be459428"
+  },
+  "allocator-candidate-records10k.jsonl": {
+    "sha256": "b7ccf18235b30994c877f1b944461053610939e43d3c49b813e49cb9b45d87b1"
+  },
+  "allocator-candidate-records1k.jsonl": {
+    "sha256": "190b0acd5f3feb8f4cd636bd129acded38f657c5891fcdb24c6371f393405e2b"
+  },
+  "allocator-cpu-diagnostic.json": {
+    "sha256": "1111bd651e25774d5bbf4c7571c4238ad84b9a5b7e6b6ab918fa3dcdcda1fc39"
+  },
+  "allocator-metadata.json": {
+    "sha256": "f463d43f32ea725d5541167e808aa77424613c983778d48623aabdd703cc4222"
+  },
+  "before-c.json.gz": {
+    "sha256": "97488c7ba9f741dfcc2c54821351624db8042d164cbe5b89e66e8f94423150b0",
+    "uncompressed_sha256": "0e1bc54d817adb4d5361eba60ba5302508d07173d354ee00aaebf7ec35f108fe"
+  },
+  "before-cpu.json": {
+    "sha256": "b271b7bcf302613809d123df9a7393f76b530cbdc53e6f3406b75d9f3522481f"
+  },
+  "before-rust.json.gz": {
+    "sha256": "7582bd9ee9c1fc939b407dcde679d08335bbe36b19b8c5839ddcd0f70cedd5f2",
+    "uncompressed_sha256": "f636bdd7165cc8d4b89cdebd5492272c3a3fd407239aaee9e4f6d33da903b70b"
+  },
+  "compiler-metadata.json": {
+    "sha256": "3225a1b5dcfc5be74bd34599a3f96b6ee3961063dd8dd66f8357f808b592fb65"
+  },
+  "compiler-paired.json.gz": {
+    "sha256": "e9a050cfbc1510873024431564e3b0e1ed0978dfe50a46f82789c280555b4a4b",
+    "uncompressed_sha256": "dc53d1ab91a8c71f3ccce6c2b3b39c7f44f386c0d518b4567b4077cc2b714b8a"
+  },
+  "paired.json.gz": {
+    "sha256": "1ca6b2ed0639f4813111abae6f1f445f4f11c1ee3486afaa2f7a683e9b6796db",
+    "uncompressed_sha256": "8192381d6fd073dcb2ad1e5ee2c785d93782c112857ed92ee5819aba61382624"
+  },
+  "reads.json.gz": {
+    "sha256": "6faf97790712c8a91a11dce74f2fcdb05f65df3cedd1243d3945bbcc9ea132a4",
+    "uncompressed_sha256": "dd7ff2454f4306f4961b5c056662363e7df981249f02a443ed23e4b41fd79632"
+  },
+  "source-checkpoint.json": {
+    "sha256": "4f68ae40287cdf935f8a1fc8874e55c0db229a9a5da0b78a8294b62eb8df39c4"
+  }
+}

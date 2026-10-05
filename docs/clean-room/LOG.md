@@ -6592,3 +6592,22 @@ profiles. Source/test blobs and all validation remain unchanged. Commit produced
 PR, merge, tag or publication.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — spec coordinator — C15 completed evidence integration
+
+Integrated spec-owned measurement runner77adf26 and evidence/report69f8ff5 into
+the completed implementation branch as additive tools/docs only. Implementation
+source remains db08f32; independent review6e2ed75, acceptance documentationa77a6c0.
+Frozen interleaved C original10k8.953→7.717ms, Rust6.296ms, libucl11.130ms,22.6%
+residualgap. Record near-zero goal unmet rather than promoting instrumented parity.
+Lateststable1.99 manifests and CI policy preserved; same-source compiler-only
+measurements recorded separately. Final measured source blobs match release
+checkpoint despite raw pre-commit HEAD/dirty metadata, explained in report.
+
+Inputs: current CLAUDE/protocol, releasedspec-v22 and clean conformance, clean-room
+goals/independent review, own spec-team tools and black-box performance results,
+author-supplied counters, officialRust release docs. No src/ or capi/ changes
+authored by coordinator. Contract contains observable behavior only and remains
+unchanged. Both participants attest clean-room isolation. Full local validations
+pass; Linux CI execution remains for submission. Unrelated original changes and
+local plans preserved. No push, PR, merge, tag or publication. Work item:C15.
