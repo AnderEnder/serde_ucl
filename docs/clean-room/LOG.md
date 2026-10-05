@@ -7476,3 +7476,37 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
     This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
     names or source structure.
+
+- 2026-10-05 — Role: spec team (draft, third round). Item: C14, the spec-v23 re-review above, on
+  `c14/spec-v23`.
+  - Inputs consulted: the re-review entry above; the corrected #97 row on `c14/fuzz-gaps`
+    (`a8d85b4`); the pinned libucl source; ucl-dump and `ucl-differential --check` (origin/main's
+    crate and `c14/spec21-impl`'s at `80745c3`) on probe files in `target/v23-probe/`.
+  - (1) Confirmed: while an error waits for a skip, a directory or another non-regular file does
+    not skip a `.include(try=true)`; without a search list the include fails with the error, and
+    with one it goes on to the next directory, where a missing path is skipped and a readable
+    file included, and it fails only when the last directory tried gives a directory too. With
+    `glob=true` the last directory decides. The §9.4 quirk, the table note, the search-list rule,
+    §9.2's pointer, the README note and the #98 answer now say so. Cases: four active
+    (`include_path_first_miss_then_try_directory_next_dir_missing`,
+    `include_path_first_miss_then_try_first_dir_missing`,
+    `include_path_first_miss_then_glob_try_last_dir_no_match`,
+    `include_path_first_miss_then_try_directory_in_args`) and six pending
+    (`include_path_first_miss_then_try_directory_every_dir_error`, `…_next_dir_file`,
+    `include_path_first_miss_then_glob_try_directory_last_dir_error`,
+    `macro_args_rejected_then_try_directory_next_dir_missing`,
+    `macro_args_rejected_then_glob_try_last_dir_no_match`,
+    `macro_args_rejected_then_glob_try_directory_one_dir_error`), with the fixture
+    `pending/09-macros/files/v23/v4`. (2) The #97 question cell is now the `a8d85b4` text, byte
+    for byte; the answer already covers the two forms with a `$` outside the string. (3) "ends
+    the input early"; a clause that the rule does not reach into an argument document, with the
+    active case above.
+  - Checks: `cargo test --test conformance`: 1,747 cases, the four expected failures. With all
+    41 pending cases moved in, origin/main's crate fails 38 of them (it passes the three
+    rejection cases ending in `_error`) and nothing else; `c14/spec21-impl`'s fails 22 (it passes
+    the fourteen `spec-v21` cases and five `spec-v23` ones that need §9.2) and nothing else. So
+    every active case passes on both and every pending case fails on at least one.
+    `scripts/ci.sh golden` at `27cf911`: golden files are current. Coverage index: 1,747 active
+    and 41 pending cases.
+  - Commits: `docs(spec): state the waiting-error directory rule with search lists` and this
+    entry. Not released or tagged. Not pushed.
