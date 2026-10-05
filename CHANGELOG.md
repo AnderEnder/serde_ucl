@@ -43,6 +43,11 @@ are reported separately from these primary same-input timings.
 
 ### C distribution
 
+Rename the C Cargo package and distribution archives from `serde-ucl-c` to
+`serde-ucl-capi`. The `ucl` library, `ucl.h` header and `serde-ucl` pkg-config
+module retain their released identities. Historical profiling evidence retains
+its original labels.
+
 C validation strips terminal styling from Cargo native-link diagnostics, so forced
 color in Linux/macOS CI no longer corrupts the final linker argument.
 

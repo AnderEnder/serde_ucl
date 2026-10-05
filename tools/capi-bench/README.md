@@ -1,7 +1,9 @@
 # C API comparison with libucl
 
 Spec-team tooling for C15: the same C11 caller links separately against the
-merged `serde-ucl-c` library and libucl at the released contract's pinned commit.
+`serde-ucl-capi` library and libucl at the released contract's pinned commit.
+Historical measurement keys and frozen binary names retain `serde-ucl-c` for
+evidence compatibility; the Cargo package is now `serde-ucl-capi`.
 Implementation participants may receive the resulting measurements as work-item
 goals; this tooling and its reference checkout are not implementation inputs.
 

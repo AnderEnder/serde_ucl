@@ -76,7 +76,7 @@ jobs:
         run: python3 capi/distribution.py --kind source --target macos-arm64 --verify --require-clean --output target/c-source
       - uses: actions/upload-artifact@v4
         with:
-          name: serde-ucl-c-input-source
+          name: serde-ucl-capi-input-source
           path: target/c-source/*
           if-no-files-found: error
           overwrite: true
@@ -142,7 +142,7 @@ jobs:
             --verify --require-clean --output target/c-sdk
       - uses: actions/upload-artifact@v4
         with:
-          name: serde-ucl-c-input-sdk-${{ matrix.target }}
+          name: serde-ucl-capi-input-sdk-${{ matrix.target }}
           path: target/c-sdk/*
           if-no-files-found: error
           overwrite: true
@@ -157,14 +157,14 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          pattern: serde-ucl-c-input-*
+          pattern: serde-ucl-capi-input-*
           merge-multiple: true
           path: target/c-incoming
       - name: Require source and all SDKs from this version and commit
         run: python3 capi/collect_distribution.py --input target/c-incoming --output target/c-dist --commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
-          name: serde-ucl-c-distribution
+          name: serde-ucl-capi-distribution
           path: target/c-dist/*
           if-no-files-found: error
           overwrite: true
@@ -229,7 +229,7 @@ jobs:
         run: scripts/ci.sh release "$GITHUB_REF_NAME"
       - uses: actions/download-artifact@v4
         with:
-          name: serde-ucl-c-distribution
+          name: serde-ucl-capi-distribution
           path: target/c-dist
       - name: Create the GitHub release and attach C artifacts
         env:
