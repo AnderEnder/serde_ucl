@@ -7229,3 +7229,53 @@ publication. Work item:C15; final integration commit recorded in handover.
     with this entry. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-05 — Role: spec team (draft). Item: C14 questions #91, #92 and #93, spec-v23 draft, on
+  `c14/spec-v23` from origin/main `80b7785` (worktree `c14-spec-v23`). `spec-v22`, the C15
+  Stage A release, is a local tag of the C15 session; this draft is the next version and leaves
+  the C15 work unchanged.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, `QUESTIONS.md` #86 to
+    #93 and the spec-v20 implementer's and reviewer's entries in this log; released §9.2, §9.4,
+    §13.1 and §13.2; `tools/ucl-dump/ucl_dump.c`; the pinned libucl source (`ucl_parser.c`: the
+    init, key and macro states and the end-of-chunk check; `ucl_util.c`: the include search over
+    the path list, single-file include, `.load` and URL skips, the error helpers); ucl-dump and
+    `ucl-differential --check` on probe files in `target/v23-probe/`.
+  - Findings. #91 and #92: the takeover again happens when the parser comes back to the file
+    after a macro and reads anything more from it. The trailing whitespace and `;` that end a
+    macro are consumed with it, so a macro with only those after it up to the end of the file
+    takes nothing over; a key or a `}` of the file's own ends the takeover. An object holds at
+    most one brace, so one that still holds a brace taken over gets no second one. #93: the
+    error of a first-directory miss or a rejected argument document stays set for the whole
+    parse, whichever unit raised it, and the next skip that the parse reads clears it, in any
+    unit except an argument document, which has a parser of its own. The question's runs all
+    reproduce. On the disagreement: the reviewer's probe files went with the removed worktree, but
+    the only rejection of a skip in an included file after a miss in the document that I could
+    reproduce comes from the search list, which stays in effect after the miss: a plain
+    `.include` of the file holding the skip is searched in the listed directories, and when none
+    of them has it the include itself is an error and the skip is never read. With a `path`
+    naming the file's directory, or the file in a listed directory, it is accepted, as in the
+    implementer's runs.
+  - Spec: §9.4, *Quirk: macros before the first key*, says when nothing is taken over again
+    (#91) and that the file's own `}` ends the takeover (#92), and a new §9.4 quirk, *the miss
+    and the skip in different units*, states #93 with the search-list caveat; §9.2, §13.1 and
+    §13.2 refer to it. README version notes for `spec-v22` and `spec-v23`, the coverage index
+    (1,731 active cases, fourteen pending `spec-v21` and nine pending `spec-v23` cases), and the
+    conformance and pending READMEs. QUESTIONS #91 to #93 answered as `spec-v23`.
+  - Cases: twenty active, fixtures under `cases/spec/09-macros/files/v23/`: ten for #91
+    (`include_braced_file_nested_macro_at_end`, `…_at_end_then_brace_error`,
+    `…_nested_macro_then_comment_unclosed_error`, `…_then_comment_closed_by_includer`,
+    `include_braced_file_nested_left_open_at_end_brace_error`, `…_left_open_then_comment`,
+    `include_braced_file_nested_open_brace_kept`, `…_kept_then_brace_error`,
+    `include_braced_text_nested_macro_at_end`, `…_then_comment_unclosed_error`), five for #92
+    (`include_braced_file_own_brace_ends_takeover_error`, `…_then_macro_brace_error`,
+    `…_then_priority`, `…_then_name_no_brace_error`, `…_after_nested_then_name_error`) and five
+    boundary cases for #93 (`include_path_first_miss_in_included_file_error`,
+    `…_in_text_error`, `…_then_skip_in_args_error`, `…_then_skip_file_outside_list_error`,
+    `include_path_skip_in_included_file_then_miss_error`). Nine pending under
+    `pending/09-macros/` for #93, listed in `pending/README.md`.
+  - Checks: `cargo test --test conformance` passes (1,731 cases, the four expected failures). In
+    a copy with the nine pending cases moved into `cases/spec/09-macros/`, the crate fails all
+    nine and nothing else. `scripts/regen-golden.sh` changed no existing golden file before or
+    after the new cases; `scripts/ci.sh golden` at the draft commit: golden files are current.
+  - Commits: `docs(spec): draft C14 brace takeover end and cross-unit skip rules` and this entry.
+    Not released or tagged; an independent spec review comes first. Not pushed.
