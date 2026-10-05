@@ -561,3 +561,8 @@ six native/Miri ownership tests passed; no independent correctness blocker.
 Report and hashed raw evidence: tools/capi-bench/reports/2026-10-05-adapter-second-pass.md.
 Local Darwin execution only; Linux CI awaits future submission. No push, PR,
 merge, tag or publication; plans stay local and excluded.
+
+Owner follow-up: open a PR for the completed second pass. Pushing the completed
+branch and opening a PR against main are now authorized. Keep plans local; do
+not merge, create release tags or publish packages. GitHub CI should validate
+the submitted head on Linux/macOS and under coverage.

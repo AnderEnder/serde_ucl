@@ -6611,3 +6611,20 @@ authored by coordinator. Contract contains observable behavior only and remains
 unchanged. Both participants attest clean-room isolation. Full local validations
 pass; Linux CI execution remains for submission. Unrelated original changes and
 local plans preserved. No push, PR, merge, tag or publication. Work item:C15.
+
+### 2026-10-05 — spec coordinator — C15 second-pass PR submission
+
+Owner explicitly requested opening a PR after reviewing the performance and Rust
+core changes. This authorizes pushing perf/c-api-adapter-second-pass and opening
+a PR against main; earlier no-PR checkpoints describe the authorization at their
+time. Refetched origin/main:80b7785, unchanged baseline, branch is seven commits
+ahead with no divergence. Verified clean worktree, exact independent source/review
+checkpoint, complete recorded Rust/C/sanitizer/Miri gates and evidence hashes.
+Local plan files remain excluded from the PR. Original unrelated changes preserved.
+
+Inputs: current CLAUDE/protocol, clean-room independent review and gate outputs,
+current branch metadata and paths, previous merged PR30 presentation, own benchmark
+report/evidence. Coordinator edits only this provenance entry and work-item
+authorization; implementation remains db08f32 and released spec-v22 remains
+unchanged observable behavior. No merge, release tag or package publication.
+Work item:C15. Submission provenance commit and PR URL recorded in handover.
