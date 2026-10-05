@@ -1,0 +1,4 @@
+.include "files/v23/nested_left_open_at_end.inc"
+q = 1
+}
+r = 2

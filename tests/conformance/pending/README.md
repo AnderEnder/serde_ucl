@@ -32,3 +32,27 @@ the move; the `13-inputs/` cases with a first-directory miss read `files/v4/p1` 
   `13-inputs/inputs_first_miss_then_url_skip_in_later_input`,
   `13-inputs/inputs_first_miss_then_load_skip_in_later_input`: a skip in a later input discards
   both errors; their further inputs are under `13-inputs/files/`.
+
+Nine `spec-v23` cases, for question #93 (§9.4, *Quirk: the miss and the skip in different
+units*), wait for implementation, all under `09-macros/`. Each has a first-directory miss or a
+rejected argument document and a later skip in different units of the parse. Their fixtures are
+under `09-macros/files/v23/`: `first_miss.inc`, `miss_then_load_skip.inc` and `load_skip.inc` are
+identical to the active ones and can be dropped on the move, `url_skip.inc` moves with the cases.
+They also read `09-macros/files/v4/p1/pa.inc`, which the `spec-v21` cases share, so it stays
+until the last of them moves.
+
+- `09-macros/include_path_first_miss_and_load_try_in_included_file`: the miss and the skip in
+  the same included file.
+- `09-macros/include_path_first_miss_in_included_file_then_load_try`: the miss in an included
+  file, the skip later in the document.
+- `09-macros/include_path_first_miss_then_load_try_in_included_file`,
+  `09-macros/include_path_first_miss_then_url_try_in_included_file`: the miss in the document,
+  the skip (a `.load` or a URL include) in a file included after it.
+- `09-macros/include_path_first_miss_then_load_try_in_text`,
+  `09-macros/include_path_first_miss_and_load_try_in_text`,
+  `09-macros/include_path_first_miss_in_text_then_load_try`: the miss or the skip, or both, in
+  text parsed in place (`registered-macros`).
+- `09-macros/include_path_skip_in_included_file_then_miss_then_skip`: a skip in an included file
+  covers the miss before it; a later miss needs the later skip.
+- `09-macros/macro_args_rejected_then_load_try_in_included_file`: a rejected argument document in
+  the document, the skip in a file included after it.

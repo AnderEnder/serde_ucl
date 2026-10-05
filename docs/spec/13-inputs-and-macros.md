@@ -188,7 +188,9 @@ needs one; the `joins_*` cases show each of them.
   (`inputs_missing_include_then_skip_in_later_input_error`).
 - **Quirk.** The two errors that do not end the parse, a rejected argument document (§9.2,
   *ARGUMENTS*) and the first-directory miss of a `.include` (§9.4, *Quirk: a later skipped URL
-  include or `.load`*), are discarded by a skip in a later input as by one later in their own:
+  include or `.load`*), are discarded by a skip in a later input as by one later in their own,
+  in an included file or text parsed in place as in the input itself (§9.4, *Quirk: the miss and
+  the skip in different units*):
   `.priority(x) 3⏎a = 1` followed by that input gives `{ a: int 1 @3, b: int 2 }`, also with an
   input in between and with the input given as a file; the first-directory miss of
   `.include(path=["", "…/files/v4/p1"]) "pa.inc"` followed by an input with a skipped URL include
@@ -337,8 +339,11 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   (`macro_registered_text_takes_input_priority`, `macro_registered_text_takes_input_strategy`;
   compare `macro_registered_text_include_differs`). Comments in it are saved as in the input
   (`macro_registered_text_comments`), and a silent stop in it stops the input
-  (`macro_registered_text_stop_stops_all`). Under `zerocopy`, text from an expanded macro VALUE
-  has an undefined result for its keys and strings and for what later depends on them (§12.2).
+  (`macro_registered_text_stop_stops_all`). A first-directory miss, a rejected argument document
+  and a skip in it count as in the input that holds the macro, in the order the parse reads them
+  (§9.4, *Quirk: the miss and the skip in different units*). Under `zerocopy`, text from an
+  expanded macro VALUE has an undefined result for its keys and strings and for what later
+  depends on them (§12.2).
 
   **Quirk: text in place and a section object left open.** When text is parsed in place while
   the innermost open object is a section object (§3.4), that object stops closing on its own for

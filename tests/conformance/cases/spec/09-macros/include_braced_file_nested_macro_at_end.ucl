@@ -1,0 +1,2 @@
+.include "files/v23/nested_macro_at_end.inc"
+q = 1

@@ -1,0 +1,2 @@
+.include "files/v23/nested_open_brace_then_brace.inc"
+q = 1
