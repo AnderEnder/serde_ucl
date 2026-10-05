@@ -238,16 +238,15 @@ rejected argument document, and the skip that discards it, may be in different u
 parse: included files and text parsed in place, as well as later inputs; a miss inside an
 argument document is no error (§9.2, §9.4). While such an error waits for a skip, a silent stop
 ends the input with it, and a directory does not skip an include with `try=true` (§9.4, §13.1).
-A `)` that is
-the last byte of its unit after rejected ARGUMENTS is an error (§9.2). A double-quoted string is
-expanded only if it holds a `$` as written (§7.6).
+A `)` that is the last byte of its unit after rejected ARGUMENTS is an error (§9.2). A
+double-quoted string is expanded only if it holds a `$` as written (§7.6).
 
 The cases of `spec-v13`, `spec-v15`, `spec-v18` and `spec-v20` are all in `cases/spec/`; the
 three `spec-v15` cases moved there when the crate followed §9.4 in C14, the six `spec-v18` cases
 when it followed §12.5, and the eighteen `spec-v20` cases when it followed §9.4 and §12.5
 again. The fourteen `spec-v21` cases are under `tests/conformance/pending/` until the crate
-follows §9.2 and §13.1, and the twenty-seven `spec-v23` cases until it follows §7.6, §9.2 and
-§9.4 as `spec-v23` states them. The thirty-six other `spec-v23` cases are active: the crate
+follows §9.2 and §13.1, and the thirty-two `spec-v23` cases until it follows §7.6, §9.2 and
+§9.4 as `spec-v23` states them. The forty-two other `spec-v23` cases are active: the crate
 already follows the brace rules of #91 and #92 and gives the oracle's result for the other
 boundary cases.
 
@@ -287,8 +286,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1747 cases in `cases/` and
-`libucl/`, plus fourteen pending `spec-v21` cases and twenty-seven pending `spec-v23` cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1753 cases in `cases/` and
+`libucl/`, plus fourteen pending `spec-v21` cases and thirty-two pending `spec-v23` cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1301,6 +1300,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1747 case
 | `cases/spec/09-macros/include_path_first_miss_in_included_file_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_in_text_error` | §9, §13 |
 | `cases/spec/09-macros/include_path_first_miss_load_try_after_each_miss_accepts` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_glob_try_directory_match_after_file` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_glob_try_last_dir_no_match` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_load_missing_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_load_try_accepts_later` | §9 |
@@ -1545,6 +1545,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1747 case
 | `cases/spec/09-macros/macro_args_escaped_quote_error` | §9 |
 | `cases/spec/09-macros/macro_args_filename_is_undef` | §9, §7 |
 | `cases/spec/09-macros/macro_args_filename_no_filevars` | §9, §7 |
+| `cases/spec/09-macros/macro_args_first_miss_in_included_file_then_try_directory_error` | §9 |
+| `cases/spec/09-macros/macro_args_first_miss_inside_skip_then_try_directory` | §9 |
+| `cases/spec/09-macros/macro_args_first_miss_inside_then_try_directory_error` | §9 |
 | `cases/spec/09-macros/macro_args_include_inside` | §9 |
 | `cases/spec/09-macros/macro_args_inherit_inside` | §9 |
 | `cases/spec/09-macros/macro_args_key_lowercase` | §9 |
@@ -1557,6 +1560,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1747 case
 | `cases/spec/09-macros/macro_args_nested_rejected_in_included_file` | §9 |
 | `cases/spec/09-macros/macro_args_nested_rejected_no_value_error` | §9 |
 | `cases/spec/09-macros/macro_args_nested_rejected_space_before_value_error` | §9 |
+| `cases/spec/09-macros/macro_args_nested_rejected_then_try_directory_then_skip` | §9 |
 | `cases/spec/09-macros/macro_args_nested_rejected_value_after_paren` | §9 |
 | `cases/spec/09-macros/macro_args_nested_stop_dropped` | §9 |
 | `cases/spec/09-macros/macro_args_nested_unknown_macro_dropped` | §9 |
@@ -1583,6 +1587,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1747 case
 | `cases/spec/09-macros/macro_args_then_end_error` | §9 |
 | `cases/spec/09-macros/macro_args_then_last_byte_hash_empty_value` | §9 |
 | `cases/spec/09-macros/macro_args_then_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_args_try_directory_inside_without_miss` | §9 |
 | `cases/spec/09-macros/macro_args_two_prefixes_last_wins` | §9 |
 | `cases/spec/09-macros/macro_args_unknown_macro_inside_error` | §9 |
 | `cases/spec/09-macros/macro_bare_value` | §9 |
@@ -1694,6 +1699,8 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1747 case
 | `pending/09-macros/include_path_first_miss_in_included_file_then_load_try` | §9 |
 | `pending/09-macros/include_path_first_miss_in_text_then_load_try` | §9, §13 |
 | `pending/09-macros/include_path_first_miss_then_glob_try_directory_last_dir_error` | §9 |
+| `pending/09-macros/include_path_first_miss_then_glob_try_directory_match_every_dir_error` | §9 |
+| `pending/09-macros/include_path_first_miss_then_glob_try_directory_match_skips_rest` | §9 |
 | `pending/09-macros/include_path_first_miss_then_load_try_in_included_file` | §9 |
 | `pending/09-macros/include_path_first_miss_then_load_try_in_text` | §9, §13 |
 | `pending/09-macros/include_path_first_miss_then_try_directory_error` | §9 |
@@ -1704,7 +1711,10 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1747 case
 | `pending/09-macros/macro_args_first_miss_in_included_file_no_error` | §9 |
 | `pending/09-macros/macro_args_first_miss_inside_in_text` | §9, §13 |
 | `pending/09-macros/macro_args_first_miss_inside_no_error` | §9 |
+| `pending/09-macros/macro_args_first_miss_inside_then_try_directory_next_dir_missing` | §9 |
+| `pending/09-macros/macro_args_first_miss_inside_then_try_directory_then_skip` | §9 |
 | `pending/09-macros/macro_args_first_miss_inside_then_value` | §9 |
+| `pending/09-macros/macro_args_nested_rejected_then_try_directory_error` | §9 |
 | `pending/09-macros/macro_args_rejected_and_first_miss_then_one_skip_accepts` | §9 |
 | `pending/09-macros/macro_args_rejected_in_included_file_then_load_try_accepts` | §9 |
 | `pending/09-macros/macro_args_rejected_include_runs_without_args` | §9 |

@@ -314,7 +314,10 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   (`pending/09-macros/macro_args_first_miss_inside_no_error`,
   `pending/09-macros/macro_args_first_miss_in_included_file_no_error`,
   `pending/09-macros/macro_args_first_miss_inside_then_value`,
-  `pending/09-macros/macro_args_first_miss_inside_in_text`.) The search list that an include in
+  `pending/09-macros/macro_args_first_miss_inside_in_text`.) Until the argument document ends,
+  such a miss, like a rejection nested there (above), waits within it as in any document, so an
+  include with `try=true` of a directory after it can still reject the argument document (§9.4,
+  *Quirk: while an error waits for a skip*). The search list that an include in
   an argument document sets (§9.4) stays in that document and does not reach the document that
   holds the macro: the line `.priority(.include(path=["files/v4/p1"]) "pa.inc"; priority=3);`
   followed by `.include "pa.inc"⏎a = 1` is an error, because `pa.inc` is then looked for in the
@@ -1172,10 +1175,43 @@ project*. libucl behaves as follows:
         `pending/09-macros/include_path_first_miss_then_glob_try_directory_last_dir_error`,
         `pending/09-macros/macro_args_rejected_then_glob_try_last_dir_no_match`,
         `pending/09-macros/macro_args_rejected_then_glob_try_directory_one_dir_error`).
-    - Inside a macro argument document, no error of the enclosing document waits (§9.2), so such
-      an include is skipped there as usual:
-      `MISS⏎.priority(.include(try=true) "files"; priority=2);⏎SKIP⏎b = 2` →
-      `{ pa: int 1, b: int 2 @2 }` (`include_path_first_miss_then_try_directory_in_args`).
+      - A directory's matches are taken in byte order (*Globs*, above). When one of them is a
+        directory, the matches before it are included, the ones after it are not, and the next
+        directory of the list is tried. With `files/v23/gg` holding a directory `a` and a file
+        `b.inc` (`gb = 2`), and `files/v23/gh` holding a file `a.inc` (`ha = 1`) and a directory
+        `b`, `MISS⏎.include(try=true, glob=true, path=["files/v23/gg", "nothere"]) "*"⏎SKIP⏎b = 2`
+        → `{ pa: int 1, b: int 2 }`, without `gb`; `path=["files/v23/gh", "nothere"]` gives
+        `{ pa: int 1, ha: int 1, b: int 2 }`; and `path=["files/v23/gg", "files/v23/gh"]` is an
+        error, since the last directory has a directory match
+        (`pending/09-macros/include_path_first_miss_then_glob_try_directory_match_skips_rest`,
+        `include_path_first_miss_then_glob_try_directory_match_after_file`,
+        `pending/09-macros/include_path_first_miss_then_glob_try_directory_match_every_dir_error`).
+    - A macro argument document (§9.2) has waiting errors of its own, and those of the document
+      that holds the macro do not reach into it. With no error waiting in it, such an include is
+      skipped there as usual: `MISS⏎.priority(.include(try=true) "files"; priority=2);⏎SKIP⏎b = 2`
+      → `{ pa: int 1, b: int 2 @2 }`, and
+      `.priority(.include(try=true, path=["files"]) "v4"; priority=2) 5⏎b = 1` →
+      `{ b: int 1 @5 }` (`include_path_first_miss_then_try_directory_in_args`,
+      `macro_args_try_directory_inside_without_miss`). A first-directory miss in the argument
+      document, or a rejected argument document nested in it, waits within that document, and
+      the rules of this quirk apply there; a failure they cause rejects the argument document
+      (§9.2, *ARGUMENTS*), which then waits for a skip in the document that holds the macro:
+      - `.priority(MISS; .include(try=true, path=["files"]) "v4"; priority=2) 5⏎b = 1` is an
+        error, and so is the same with `.include "files/v23/first_miss.inc"` in place of MISS;
+        with SKIP on a line after it, it gives `{ b: int 1 @5 }`
+        (`macro_args_first_miss_inside_then_try_directory_error`,
+        `macro_args_first_miss_in_included_file_then_try_directory_error`,
+        `pending/09-macros/macro_args_first_miss_inside_then_try_directory_then_skip`).
+      - `.priority(.priority(x) 3; .include(try=true) "files/v4"; priority=2) 5⏎b = 1` is an
+        error, and with SKIP after it, it gives `{ b: int 1 @5 }`
+        (`pending/09-macros/macro_args_nested_rejected_then_try_directory_error`,
+        `macro_args_nested_rejected_then_try_directory_then_skip`).
+      - A SKIP in the argument document before the include, or a list whose next directory lacks
+        the path, lets the argument document pass:
+        `.priority(MISS; SKIP; .include(try=true, path=["files"]) "v4"; priority=2) 5⏎b = 1` and
+        `.priority(MISS; .include(try=true, path=["files", "nothere"]) "v4"; priority=2) 5⏎b = 1`
+        → `{ b: int 1 @5 }` (`macro_args_first_miss_inside_skip_then_try_directory`,
+        `pending/09-macros/macro_args_first_miss_inside_then_try_directory_next_dir_missing`).
   - With `glob=true`, the pattern is expanded in every directory, and all matches are included
     (`include_path_glob_all_dirs`). Without `try=true`, `.include` then fails when the **last**
     directory has no match, whatever the others had (`include_path_glob_last_dir_must_match_error`).
