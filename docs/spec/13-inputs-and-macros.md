@@ -209,6 +209,11 @@ needs one; the `joins_*` cases show each of them.
   them; the check at the end of that later input stops before them, but still covers the
   containers it opened itself (`inputs_stop_inside_object_next_input_fills_it`,
   `inputs_stop_inside_object_next_input_unclosed_error`, `macro_registered_failure_then_later_input`).
+  **Quirk.** A silent stop while a rejected argument document or a first-directory miss waits for
+  a skip, in its own input or an earlier one, makes the result that error, and no later input
+  discards it (§9.4, *Quirk: while an error waits for a skip*;
+  `inputs_args_rejected_then_stop_then_skip_in_later_input_error`,
+  `inputs_args_rejected_then_stop_in_later_input_error`).
 
 ### File variables and paths
 

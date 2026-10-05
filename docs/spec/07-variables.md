@@ -88,6 +88,19 @@ The same holds for unquoted values: `$ABI$$x` → `"unknown$x"`, `$$x` → `"$$x
 
 - In **double-quoted** strings, escapes are decoded before expansion, so `"\$ABI"` → `"unknown"`
   (`backslash_dollar`).
+- **Quirk.** A double-quoted string is expanded only if it holds a `$` as written, also one
+  written as `\$`. A `$` that a `\u0024` escape decodes to does not count on its own:
+  `"\u0024ABI"` → `"$ABI"`, `"\u0024{ABI}"` → `"${ABI}"`, `"x\u0024ABI"` → `"x$ABI"`, and under
+  `variable-handler` (§7.7) `"\u0024{H_X}"` → `"${H_X}"`. Only the string itself counts, not a
+  `$` elsewhere in the document: `a = "\u0024ABI" # $` and `b = "\u0024ABI"; c = "$"` keep
+  `"$ABI"` (`pending/07-variables/quoted_unicode_dollar_not_expanded`,
+  `pending/07-variables/quoted_unicode_dollar_handler_not_expanded`,
+  `pending/07-variables/quoted_unicode_dollar_dollar_outside_string_not_counted`). When the
+  string holds a `$` as written, the decoded text is expanded as a whole, the `$` of a `\u0024`
+  included: `"$ABI\u0024ABI"` → `"unknownunknown"`, `"\u0024ABI$"` → `"unknown$"`,
+  `"\u0024ABI\$"` → `"unknown$"`, `"\$A\u0024ABI"` → `"$Aunknown"`
+  (`quoted_unicode_dollar_with_written_dollar_expanded`). Unquoted values follow the next
+  quirk; a heredoc decodes no escapes (§6.3).
 - **Quirk.** In **unquoted** values, escapes are decoded first too (§4.7), so `\$` becomes `$`.
   Expansion then happens only if the value as written has at least one `$` that is not written as
   `\$`; otherwise the decoded text is kept as it is (`backslash_dollar`,

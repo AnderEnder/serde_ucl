@@ -1,0 +1,18 @@
+a = 1;
+seen {
+    data = " ";
+    args = null;
+}
+seen {
+    data = "";
+    args = null;
+}
+seen {
+    data = " /* c */";
+    args = null;
+}
+seen {
+    data = "";
+    args = null;
+}
+b = 2;

@@ -33,14 +33,30 @@ the move; the `13-inputs/` cases with a first-directory miss read `files/v4/p1` 
   `13-inputs/inputs_first_miss_then_load_skip_in_later_input`: a skip in a later input discards
   both errors; their further inputs are under `13-inputs/files/`.
 
-Nine `spec-v23` cases, for question #93 (§9.4, *Quirk: the miss and the skip in different
-units*), wait for implementation, all under `09-macros/`. Each has a first-directory miss or a
-rejected argument document and a later skip in different units of the parse. Their fixtures are
-under `09-macros/files/v23/`: `first_miss.inc`, `miss_then_load_skip.inc` and `load_skip.inc` are
-identical to the active ones and can be dropped on the move, `url_skip.inc` moves with the cases.
-They also read `09-macros/files/v4/p1/pa.inc`, which the `spec-v21` cases share, so it stays
-until the last of them moves.
+Twenty-one `spec-v23` cases wait for implementation: three under `07-variables/` (§7.6,
+question #97), seventeen under `09-macros/` and one under `13-inputs/` (§9.2 and §9.4, questions
+#93, #98 and #99). Their fixtures are under `09-macros/files/v23/` and `13-inputs/files/`:
+`first_miss.inc`, `miss_then_load_skip.inc` and `load_skip.inc` are identical to the active ones
+and can be dropped on the move, and so can the copy of `files/v4/g/`; `url_skip.inc`,
+`args_rejected_space_end.inc` and the further inputs of
+`13-inputs/inputs_args_rejected_value_at_end_of_input` move with their cases. They also read
+`09-macros/files/v4/p1/pa.inc`, which the `spec-v21` cases share, so it stays until the last of
+them moves.
 
+Five of them also need §9.2's rejected argument documents (`spec-v21`) before they can pass:
+`macro_args_rejected_then_load_try_in_included_file`,
+`macro_args_rejected_then_try_directory_error`,
+`macro_args_rejected_then_glob_try_directory_error`,
+`macro_args_rejected_value_at_end_of_file_and_text` and
+`13-inputs/inputs_args_rejected_value_at_end_of_input`. The two
+`try_directory` rejection cases are errors in the oracle; the crate on `origin/main` gives an error
+too, but only because it rejects every rejected argument document, so they wait here with the
+others until the crate follows §9.2 and the rule of #98.
+
+- `07-variables/quoted_unicode_dollar_not_expanded`,
+  `07-variables/quoted_unicode_dollar_handler_not_expanded`,
+  `07-variables/quoted_unicode_dollar_dollar_outside_string_not_counted`: a double-quoted string
+  without a `$` as written is not expanded, whatever a `\u0024` in it or a `$` elsewhere gives.
 - `09-macros/include_path_first_miss_and_load_try_in_included_file`: the miss and the skip in
   the same included file.
 - `09-macros/include_path_first_miss_in_included_file_then_load_try`: the miss in an included
@@ -56,3 +72,15 @@ until the last of them moves.
   covers the miss before it; a later miss needs the later skip.
 - `09-macros/macro_args_rejected_then_load_try_in_included_file`: a rejected argument document in
   the document, the skip in a file included after it.
+- `09-macros/macro_args_first_miss_inside_no_error`,
+  `09-macros/macro_args_first_miss_in_included_file_no_error`,
+  `09-macros/macro_args_first_miss_inside_then_value`,
+  `09-macros/macro_args_first_miss_inside_in_text`: a first-directory miss inside an argument
+  document, or in a file it includes, is no error, and the macro keeps its ARGUMENTS.
+- `09-macros/include_path_first_miss_then_try_directory_error`,
+  `09-macros/macro_args_rejected_then_try_directory_error`,
+  `09-macros/macro_args_rejected_then_glob_try_directory_error`: while an error waits for a skip,
+  an include with `try=true` of a directory fails with it.
+- `09-macros/macro_args_rejected_value_at_end_of_file_and_text`,
+  `13-inputs/inputs_args_rejected_value_at_end_of_input`: after rejected ARGUMENTS at the end of
+  a unit, any byte after the `)` is VALUE.

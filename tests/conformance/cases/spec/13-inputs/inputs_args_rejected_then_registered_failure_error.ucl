@@ -1,0 +1,3 @@
+.priority(x) 3
+.fail x
+q = 1

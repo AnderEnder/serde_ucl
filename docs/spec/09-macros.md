@@ -189,6 +189,20 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   (`macro_args_then_last_byte_hash_error`, `macro_args_comment_then_last_byte_hash_error`). The
   same holds after NAME: `a = 1⏎.try_include⏎#` stops silently
   (`macro_name_then_last_byte_hash_empty_value`).
+- After ARGUMENTS that are rejected, nothing is skipped (*ARGUMENTS*, *Quirk*, below), so only a
+  `)` that is the last byte of its unit, an input, an included file or text parsed in place, is
+  such an error. No skip discards it, because it ends the input: `a = 1⏎.seen(x)` followed by an
+  input with a skip is an error, and so are the file `.seen(x)` and the text `.seen(x)` with a
+  skip after the macro that reads them (`registered-macros`;
+  `inputs_args_rejected_paren_last_byte_error`, `macro_args_rejected_paren_last_byte_of_file_error`,
+  `macro_args_rejected_paren_last_byte_of_text_error`). Any byte after that `)` is VALUE, read
+  as usual: inputs that end in `.seen(x)␠`, `.seen(x)⏎`, `.seen(x) /* c */` and `.seen(x)# c⏎`
+  give `.seen` the VALUEs `" "`, `""`, `" /* c */"` and `""` and no ARGUMENTS, once a later skip
+  discards the rejections, and so do a file and a text that end in `.seen(x)␠`
+  (`pending/13-inputs/inputs_args_rejected_value_at_end_of_input`,
+  `pending/09-macros/macro_args_rejected_value_at_end_of_file_and_text`). With ARGUMENTS
+  accepted, the rule above holds after the skipping: `a = 1⏎.seen(k=1)␠` at the end of an input
+  is an error, whatever later inputs hold (`inputs_args_accepted_space_at_end_error`).
 - Objects that a section path left without a closing bracket (§3.4) do not make an ignored macro
   an error: `a b .foo"{"` → `{ a: { b: {} } }`, `"a" .foo"{"` → `{ a: {} }`. An object opened
   with `{` still has to be closed: `a { .foo` is an error
@@ -240,7 +254,9 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
   same input or a later one (§13.1), and in a file included or text parsed in place after the
   rejection (§9.4, *Quirk: the miss and the skip in different units*). The skipping macros are a
   skipped `.include(try=true, url=true)` or `.try_include(url=true)` with `://` in its path, and
-  a `.load(try=true)` that reads nothing.
+  a `.load(try=true)` that reads nothing. Until that skip, a silent stop, or an include with
+  `try=true` of a directory, ends the input with the error (§9.4, *Quirk: while an error waits
+  for a skip*).
   `.priority(x) 3⏎a = 1⏎.load(try=true, key="t") "missing.txt"` and the same with
   `.include(try=true, url=true) ://` as the last line give `a: int 1 @3`; so do
   an unknown macro in the argument document, `.priority(.foo 1) 3`, a silent stop there,
@@ -285,6 +301,24 @@ Whitespace alone, line breaks included, is fine: `.include (try=true) …`
     `macro_args_nested_rejected_space_before_value_error`,
     `macro_args_nested_rejected_no_value_error`). Such an error rejects the enclosing argument
     document, and at the document level that is an error as above.
+- **Quirk: a first-directory miss inside an argument document.** A first-directory miss of a
+  `.include` (§9.4, *Quirk: a later skipped URL include or `.load`*) in an argument document, or
+  in a file that an argument document includes, is not an error either. It needs no skip: the
+  later directory's file is included into the argument document, and the macro gets its
+  ARGUMENTS. With MISS for `.include(path=["", "files/v4/p1"]) "pa.inc"`:
+  - `.priority(MISS; priority=3);⏎a = 1` → `a: int 1 @3`, and the same with
+    `.priority(.include "files/v23/first_miss.inc"; priority=3);`, where the file holds MISS;
+  - `.priority(MISS) 2⏎a = 1` → `a: int 1 @2`;
+  - `.emit {.priority(MISS) 2}⏎a = 1` (§13.2) → `{ a: int 1 }`.
+
+  (`pending/09-macros/macro_args_first_miss_inside_no_error`,
+  `pending/09-macros/macro_args_first_miss_in_included_file_no_error`,
+  `pending/09-macros/macro_args_first_miss_inside_then_value`,
+  `pending/09-macros/macro_args_first_miss_inside_in_text`.) The search list that an include in
+  an argument document sets (§9.4) stays in that document and does not reach the document that
+  holds the macro: the line `.priority(.include(path=["files/v4/p1"]) "pa.inc"; priority=3);`
+  followed by `.include "pa.inc"⏎a = 1` is an error, because `pa.inc` is then looked for in the
+  working directory (`macro_args_path_list_stays_in_argument_document_error`).
 - Everything in this specification applies inside that document, macros included:
   `.priority(.priority 3⏎priority = 2);⏎a = 1` → `a: int 1 @2`;
   `.priority(d { priority = 3 }; .inherit "d");⏎a = 1` → `a: int 1 @3`; an unknown macro there
@@ -556,8 +590,9 @@ create an object. The entries still go into the object where the macro stands
 - **Quirk.** When the file's leading `{` has taken over the brace of the root, of an object written
   with braces, or of the object that `key` or `prefix` creates for the file (below), and the first
   key the file then reads, after comments and macros, is the first name of a section path (§3.4),
-  that name's object gets a brace of its own: a `}` closes it, and if it is still open at the end
-  of the file, the check below reports it. The brace taken over stays with the object where the
+  that name's object gets a brace of its own, unless a `}` of the file's own came before it
+  (*Quirk: macros before the first key*, below): a `}` closes it, and if it is still open at the
+  end of the file, the check below reports it. The brace taken over stays with the object where the
   macro stands. So a file `{⏎x "y{" z` is an error, also written `{ x "y{" z`, `{⏎# c⏎x "y{" z`,
   `{ "q" "y{" z`, `{⏎c "x{" =⏎` or `{⏎"s".priority {3}⏎`
   (`include_braced_file_first_name_unclosed_error`,
@@ -633,10 +668,11 @@ create an object. The entries still go into the object where the macro stands
   - Once the file has read a key of its own, a nested file's `}` removes the brace for good: a
     file `{ a0 = 0⏎.include "files/v4/braced.inc"⏎}` is an error, because its `}` has nothing
     left to close (`include_braced_file_entry_then_nested_braced_error`).
-  - Nothing is taken over again after a macro that only whitespace and `;` follow up to the end of
-    the file. With a file `{ .include "files/v4/braced.inc"⏎;⏎`, `.include "…"⏎q = 1` →
-    `{ a: int 1, q: int 1 }`, and `…⏎q = 1⏎}` is an error at its `}`. The same holds without the
-    `;`, without the line break, with blank lines and spaces, and with a second macro
+  - Nothing is taken over again after a macro that only whitespace (space, TAB, LF, CR, VT and FF,
+    as in §9.2, *NAME*) and `;` follow up to the end of the file. With a file
+    `{ .include "files/v4/braced.inc"⏎;⏎`, `.include "…"⏎q = 1` → `{ a: int 1, q: int 1 }`, and
+    `…⏎q = 1⏎}` is an error at its `}`. The same holds without the `;`, without the line break,
+    with blank lines and spaces, and with a second macro
     `.include "files/v4/close_brace.inc"` as the last line, after which nothing follows either
     (`include_braced_file_nested_macro_at_end`,
     `include_braced_file_nested_macro_at_end_then_brace_error`).
@@ -663,7 +699,8 @@ create an object. The entries still go into the object where the macro stands
     error (`include_braced_file_nested_open_brace_kept`,
     `include_braced_file_nested_open_brace_kept_then_brace_error`).
   - A `}` of the file's own, read before any key of its own, ends the takeover as a key does:
-    later macros take no brace over, and the first name after it gets no brace of its own (above).
+    later macros take no brace over, and the first name after it gets no brace of its own, unlike
+    the first name of the quirk above.
     Each of these files makes the document an error, whether the including unit is
     `.include "…"⏎q = 1` or `.include "…"⏎q = 1⏎}`:
     `{ }⏎.include "files/v4/braced.inc"⏎a2 = 2⏎}` and `{ }⏎.priority 1⏎}`, at their last `}`;
@@ -784,11 +821,13 @@ files record that tree, and §11.1 counts it as a result, not an error.
 | is the file that holds the macro (resolved path, §9.3) | error (`include_self_error`, `include_main_document_itself_error`) | error (`include_self_with_try_error`) | stops silently (`try_include_self_stops_parsing`, `try_include_main_document_itself_stops`) | stops silently (`try_include_try_false_self_stops`) |
 | exists and is readable | included (`try_include_present`) | included | included | included |
 
-"Skipped" means nothing is included and parsing goes on after the macro. `.try_include(try=true)`
-behaves as `.try_include` (`try_include_try_true_directory_stops`). Only the file that holds the
-macro counts as itself; a cycle through other files ends at the nesting limit (above), for
-`.try_include` too. `libucl/basic/9` ends with a `.try_include` of a missing file, so nothing is
-lost there.
+"Skipped" means nothing is included and parsing goes on after the macro; a directory or another
+non-regular file is not skipped while a first-directory miss or a rejected argument document waits
+for a skip (*Signatures, URLs and search paths*, *Quirk: while an error waits for a skip*).
+`.try_include(try=true)` behaves as `.try_include` (`try_include_try_true_directory_stops`). Only
+the file that holds the macro counts as itself; a cycle through other files ends at the nesting
+limit (above), for `.try_include` too. `libucl/basic/9` ends with a `.try_include` of a missing
+file, so nothing is lost there.
 
 **Filesystem-dependent access failure.** A glob match that is a regular file but cannot be
 opened for reading is also an error, even with `try=true` or `.try_include`. On the oracle host,
@@ -989,7 +1028,8 @@ project*. libucl behaves as follows:
   include an error (`include_path_no_string_entries_error`). `.load` does not use the list (§9.6).
   **Quirks:**
   - The list stays in effect for every later include of the whole parse, with or without `path`
-    (`include_path_persists`).
+    (`include_path_persists`). A list set in a macro argument document stays in that document
+    (§9.2, *Quirk: a first-directory miss inside an argument document*).
   - While a list is in effect, each path is tried as `DIR/PATH`, absolute paths included, for
     the directories in order. For `.include`, the first directory normally decides: if the file
     is missing there, the document is an error (`include_path_first_dir`,
@@ -1064,9 +1104,9 @@ project*. libucl behaves as follows:
 
     Without a later skip, a miss in an included file or in text parsed in place is an error
     (`include_path_first_miss_in_included_file_error`, `include_path_first_miss_in_text_error`).
-    A skip in a macro argument document does not count, because that document is parsed on its
-    own (§9.2): `MISS⏎.priority(SKIP) 1⏎q = 1` is an error
-    (`include_path_first_miss_then_skip_in_args_error`).
+    A skip in a macro argument document does not count: `MISS⏎.priority(SKIP) 1⏎q = 1` is an
+    error (`include_path_first_miss_then_skip_in_args_error`). A miss there is no error at all
+    (§9.2, *Quirk: a first-directory miss inside an argument document*).
 
     The list that the miss set stays in effect (above), so a file included after it is searched
     in those directories too. `MISS⏎.include "files/v23/load_skip.inc"⏎q = 1` is an error: no
@@ -1078,6 +1118,33 @@ project*. libucl behaves as follows:
     again. With a further SKIP before `q = 1`, it gives `pa: ⟨int 1 | int 1⟩`
     (`include_path_skip_in_included_file_then_miss_error`,
     `pending/09-macros/include_path_skip_in_included_file_then_miss_then_skip`).
+  - **Quirk: while an error waits for a skip.** A first-directory miss or a rejected argument
+    document (§9.2) waits for a skip until the end of the parse. Whatever ends the input in the
+    meantime makes the result that error, and no later input discards it (§13.1). With MISS and
+    SKIP as above:
+    - A silent stop, by any macro (*Missing and unusable files*, below; §13.2): with SKIP in a
+      later input, `.priority(x) 3⏎a = 1⏎.try_include "missing.inc"⏎z = 1` is an error, and so
+      is `.priority(x) 3⏎a = 1` followed by an input `.try_include "missing.inc"⏎z = 9`; so are
+      `MISS⏎.fail x⏎q = 1` and `.priority(x) 3⏎.fail x⏎q = 1` (`registered-macros`), and,
+      within one input, `.priority(x) 3⏎a = 1⏎.try_include "missing.inc"⏎b = 2` and
+      `MISS⏎.fail⏎b = 2`. Without a waiting error, a silent stop ends its input only (§13.1)
+      (`inputs_args_rejected_then_stop_then_skip_in_later_input_error`,
+      `inputs_args_rejected_then_stop_in_later_input_error`,
+      `inputs_first_miss_then_registered_failure_error`,
+      `inputs_args_rejected_then_registered_failure_error`,
+      `macro_args_rejected_then_silent_stop_error`,
+      `include_path_first_miss_then_silent_stop_error`).
+    - An include with `try=true` of a directory or another non-regular file, which the table
+      below skips, then fails with that error instead, also as a match of a glob pattern, so a
+      later skip is never read. `MISS⏎.include(try=true, path=["files"]) "v4"⏎SKIP⏎b = 2` is an
+      error, while without the miss, with `path=["files/v4/p1"]` in the first include, it gives
+      `{ pa: int 1, b: int 2 }`; `.priority(x) 3⏎a = 1⏎.include(try=true) "files/v4"⏎SKIP⏎b = 2`
+      and the same with `.include(try=true, glob=true) "files/v4/g/*/"` are errors, while
+      without `(x) 3` they give `{ a: int 1, b: int 2 }`
+      (`pending/09-macros/include_path_first_miss_then_try_directory_error`,
+      `pending/09-macros/macro_args_rejected_then_try_directory_error`,
+      `pending/09-macros/macro_args_rejected_then_glob_try_directory_error`;
+      `include_directory_try`). A missing file is still skipped then.
   - With `glob=true`, the pattern is expanded in every directory, and all matches are included
     (`include_path_glob_all_dirs`). Without `try=true`, `.include` then fails when the **last**
     directory has no match, whatever the others had (`include_path_glob_last_dir_must_match_error`).

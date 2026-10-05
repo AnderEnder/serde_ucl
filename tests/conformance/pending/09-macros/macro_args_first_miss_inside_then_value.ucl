@@ -1,0 +1,2 @@
+.priority(.include(path=["", "files/v4/p1"]) "pa.inc") 2
+a = 1
