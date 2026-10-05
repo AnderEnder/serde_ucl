@@ -96,42 +96,71 @@ other bytes than letters, digits and `_`.
   reads; the crate rejected the input for a project divergence (spec README, *Divergences
   decided by the project*): non-UTF-8 text, an unsupported feature (signatures), the limit on
   nested argument documents, or the nesting limit; or the results differ only in behaviour the
-  spec marks **Uncertain** (`src/uncertain.rs`): a handler result that shares its string with
-  other text, where the handler's names cannot be registered (§7.7, above), a float outside the 64-bit range with `kb`, `mb` or `gb` (§5.4), the byte
-  saved after a block comment that ends its unit and the comments of a value §8 replaced
-  (§12.5), which may come before a later value's own comments, also with the same text, when
-  the crate read them before that value's own (a value with no comments of its own is not
-  ordered), the bytes after a NUL in a string, at the same length, when `.inherit` or a test
-  macro that copies stands in some unit of the document: the input, a file it reads, or text
-  parsed in place (§9.7, §13.2; any such string of that document is excused, copied or not), the
-  key of a collection in `.seen`'s copy of ARGUMENTS (§13.2), and an included file or text in
-  place that starts with `[` (§9.4, §13.2), which the crate rejects there. Four uncertain
-  rules that the dumps cannot show are reported by the crate's parse
+  spec marks **Uncertain** (`src/uncertain.rs`):
+  - a handler result that shares its string with other text, where the handler's names cannot
+    be registered (§7.7, above);
+  - a float outside the 64-bit range with `kb`, `mb` or `gb` (§5.4);
+  - the byte saved after a block comment that ends its unit (§12.5);
+  - in a document that can replace a value under `rewrite` or by a higher priority (its flags
+    set `rewrite` or a priority, or some unit holds `rewrite` or `priority` in any letter case),
+    the comments of a replaced value (§12.5), which may come before a later value's own
+    comments, also with the same text, when the crate read them before that value's own (a
+    value with no comments of its own is not ordered);
+  - the bytes after a NUL in a string, at the same length, when `.inherit`, a test macro that
+    copies, or `.priority` under `registered-priority-override`, which runs `.seen`'s handler,
+    stands in some unit of the document: the input, a file it reads, or text parsed in place
+    (§9.7, §13.2; any such string of that document is excused, copied or not);
+  - the key of a collection in `.seen`'s copy of ARGUMENTS (§13.2);
+  - an included file or text in place that starts with `[` (§9.4, §13.2), which the crate
+    rejects there.
+
+  Four uncertain rules that the dumps cannot show are reported by the crate's parse
   (`Parser::uncertain_reached`, hidden from the crate's documentation): a macro after a name
   followed only by comments when the value created most recently is not an object (§9.1), a
   container of an ended unit at the check at the end of a later included file, a `}` in an
   included file that closes an array element, and a `/` at the end of a glob pattern that leaves
   out a symbolic link to a regular file, or at the end of a plain include path after the name of
   a file (§9.4, which depends on the operating system); any difference of such a parse is
-  skipped.
-  Nothing the spec specifies is skipped.
+  skipped. Nothing else the spec specifies is skipped, apart from the *Known limits* below.
 - **differ**: `crate-accepts` (libucl rejects the input), `crate-rejects` (libucl accepts it),
   `values-differ`, or `crate-panics`.
 
 ### Known limits
 
-Where a recogniser cannot tell an uncertain difference from a nearby specified one, it excuses
-more than the rule allows:
+Where a recogniser cannot tell an uncertain difference from a nearby specified one, it errs one
+way or the other.
 
-- §12.5, comments of a replaced value: a value that has no comments of its own in the crate's
-  parse, and alone gets a comment the crate dropped, is excused whenever it was created, also
-  before the replaced value. The crate's public notes do not say where a value was created, and
-  no hidden note in `src/` is kept for it.
+It excuses more than the rule allows:
+
+- §7.7, where the handler's names cannot be registered: any string in which either result holds
+  `[handled]` with other text is excused, also one written without a braced reference. With
+  `e = "${H_X}"` in the document, a crate that asked the handler for the unbraced reference in
+  `f = "$H_X$"` (§7.4) would give `[handled]$` and be excused.
+- §12.5, comments of a replaced value:
+  - The crate's notes do not say why a comment was dropped. In a document that can replace a
+    value, a comment of a value discarded at a lower priority, or one pending at a silent stop
+    (§9.4), is excused as a replaced value's would be when libucl gives it to a later value.
+    Whether the document can replace a value is read from the bytes as written: `rewrite` or
+    `priority` anywhere in a unit counts, also in a comment or a string, and so does `.priority`
+    under `registered-priority-override`, which sets no priority.
+  - A value that has no comments of its own in the crate's parse, and alone gets a comment the
+    crate dropped, is excused whenever it was created, also before the replaced value. The
+    crate's public notes do not say where a value was created, and no hidden note in `src/` is
+    kept for it.
 - §9.7 and §13.2, bytes after a NUL in a copy: once a copying macro stands in some unit of the
   document, any string of that document that differs only after its first NUL, at the same
   length, is excused, copied or not. A file that `.load` reads counts as a unit, since the
-  loader is not told why it reads, and `.priority` under `registered-priority-override`, which
-  runs `.seen`'s handler, is not looked for.
+  loader is not told why it reads.
+
+It reports what the rule allows:
+
+- §12.5, comments of a replaced value: each comment the crate dropped can be given to one value
+  of the document, the first in dump order whose list it fits, and it takes the earliest such
+  comment. If libucl gives two dropped comments of the same text to two values, the first value
+  can take the one that only the second could have, and the second value is reported.
+- §12.5: a priority set through a parameter name that is a shorter prefix of `priority`
+  (`.include(p=2)`, §9.2), or a `rewrite` written with escapes, is not seen; in such a document
+  a replaced value's comment that libucl moves to a later value is reported.
 
 A difference is reduced to a smaller input with the same verdict, by deleting pieces and pairs
 of brackets, and saved under `findings/<verdict>-<hash>/`:

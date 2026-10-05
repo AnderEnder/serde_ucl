@@ -7,24 +7,28 @@
 //! | Reason | Spec | What differs |
 //! | --- | --- | --- |
 //! | [`HANDLER`] | §7.7 | a string where a handler's result shares the string with other text |
-//! | [`BINARY_MULTIPLIER`] | §5.4 | an int from a float outside the 64-bit range with `kb`, `mb` or `gb` |
+//! | [`BINARY_MULTIPLIER`] | §5.4 | an int from an out-of-range float with `kb`, `mb` or `gb` |
 //! | [`BLOCK_COMMENT_END`] | §12.5 | the byte saved after a block comment that ends its unit |
-//! | [`REPLACED_COMMENTS`] | §12.5 | comments of a value §8 replaced, which libucl can attach to a later value |
-//! | [`NUL_IN_COPY`] | §9.7, §13.2 | the bytes after the first NUL of a string that `.inherit`, `.seen` or `.ctx` copies |
-//! | [`SEEN_COLLECTED_KEY`] | §13.2 | the key of a `no-implicit-arrays` collection in `.seen`'s copy of ARGUMENTS |
-//! | [`ARRAY_TEXT`] | §9.4, §13.2 | an included file, or text parsed in place, that starts with `[` and holds more |
+//! | [`REPLACED_COMMENTS`] | §12.5 | a replaced value's comments, on a value created later |
+//! | [`NUL_IN_COPY`] | §9.7, §13.2 | the bytes after a NUL in a string that a macro copies |
+//! | [`SEEN_COLLECTED_KEY`] | §13.2 | a collection's key in `.seen`'s copy of ARGUMENTS |
+//! | [`ARRAY_TEXT`] | §9.4, §13.2 | an included file or text in place that starts with `[` |
+//!
+//! Where the dumps and the input cannot tell an uncertain difference from a nearby specified
+//! one, a recogniser excuses more, or reports more, than its rule allows; `fuzz/README.md`,
+//! *Known limits*, lists where.
 //!
 //! Four more cannot be seen in the dumps or the input, so the crate reports when a parse reaches
 //! them ([`serde_ucl::parse::Parser::uncertain_reached`]), and any difference of such a parse is
 //! skipped ([`reached`]): a macro after a name followed only by comments when the value created
 //! most recently is not an object (§9.1), a container of an ended unit at the check at the end of
-//! a later included file (§9.4), a `}` in an included file that closes an array element
-//! opened by the including unit (§9.4), and a `/` at the end of a glob pattern that leaves out a
+//! a later included file (§9.4), a `}` in an included file that closes an array element opened
+//! by the including unit (§9.4), and a `/` at the end of a glob pattern that leaves out a
 //! symbolic link to a regular file, or at the end of a plain include path after the name of a
-//! file, which depends on the operating system (§9.4). The rest of the uncertain rules crash libucl, which the
-//! fuzzer skips in any case: macro argument documents nested very deep (§9.2), a failure in an
-//! included file after which libucl goes on with the same macro (§9.4), and a `}` in a file
-//! included under a key where the object holds only its own bracket (§9.4).
+//! file, which depends on the operating system (§9.4). The rest of the uncertain rules crash
+//! libucl, which the fuzzer skips in any case: macro argument documents nested very deep (§9.2),
+//! a failure in an included file after which libucl goes on with the same macro (§9.4), and a
+//! `}` in a file included under a key where the object holds only its own bracket (§9.4).
 //!
 //! What `zerocopy` leaves undefined in libucl (§12.2) needs no recogniser: the expected result of
 //! a document with `zerocopy` is the one without it, so the oracle runs without the flag
@@ -229,11 +233,34 @@ impl Context<'_> {
     }
 
     /// A unit of the document, the input, an included file or text parsed in place, has a macro
-    /// that copies values: `.inherit`, or the test macros `.seen` and `.ctx` (spec §9.7, §13.2).
+    /// that copies values: `.inherit`, or the test macros `.seen` and `.ctx` (spec §9.7, §13.2),
+    /// and `.priority` under `registered-priority-override`, which runs `.seen`'s handler.
     fn copies(&self) -> bool {
         self.some_unit_has(b".inherit")
             || (self.has_flag("registered-macros")
                 && (self.some_unit_has(b".seen") || self.some_unit_has(b".ctx")))
+            || (self.has_flag("registered-priority-override") && self.some_unit_has(b".priority"))
+    }
+
+    /// The document can replace a value in the two ways whose comments §12.5 leaves uncertain:
+    /// under `rewrite`, or by a higher priority (§8.3, §8.4). True when the flags set the
+    /// `rewrite` strategy or a priority, or some unit holds `rewrite` or `priority` in any letter
+    /// case: an include's `duplicate` or `priority`, `.priority`, `.load`'s `priority`, and
+    /// `PRIORITY` under `key-lowercase` (§9.2). Comments that the crate dropped in any other
+    /// document, such as those pending at a silent stop (§9.4), are compared as they are.
+    fn replaces_values(&self) -> bool {
+        self.has_flag("strategy:rewrite")
+            || self.flags.iter().any(|flag| flag.starts_with("priority:"))
+            || [b"rewrite".as_slice(), b"priority"]
+                .into_iter()
+                .any(|word| {
+                    std::iter::once(self.input)
+                        .chain(self.units.iter().map(Vec::as_slice))
+                        .any(|unit| {
+                            unit.windows(word.len())
+                                .any(|w| w.eq_ignore_ascii_case(word))
+                        })
+                })
     }
 }
 
@@ -453,8 +480,9 @@ fn comment_list(node: &J) -> Option<(&'static str, Vec<String>)> {
 }
 
 /// The comments of one value (§12.5): the byte after a block comment that ends its unit, which
-/// lies outside the unit in libucl, and comments that libucl attached to this value from a value
-/// that §8 replaced, which the crate drops ([`replaced_comments_first`]).
+/// lies outside the unit in libucl, and, in a document that can replace values
+/// ([`Context::replaces_values`]), comments that libucl attached to this value from a value that
+/// §8 replaced, which the crate drops ([`replaced_comments_first`]).
 fn comments(
     golden: &mut J,
     actual: &J,
@@ -484,7 +512,10 @@ fn comments(
             changed = true;
         }
     }
-    if g_texts != a_texts && replaced_comments_first(&g_texts, &a_texts, a_key, actual, walk, ctx) {
+    if g_texts != a_texts
+        && ctx.replaces_values()
+        && replaced_comments_first(&g_texts, &a_texts, a_key, actual, walk, ctx)
+    {
         g_texts = a_texts;
         g_key = a_key;
         reasons.insert(REPLACED_COMMENTS);
@@ -499,18 +530,23 @@ fn comments(
     }
 }
 
-/// §12.5: libucl can attach the comments of a value that §8 replaced to a value created later,
-/// before that value's own. True when the oracle's list `golden` is the crate's list `own` (with
-/// the dump key `own_key`) of the value at the walk's path after one or more comments, each of
-/// which is a distinct comment the crate saved but attached to no value, with that text, not
-/// taken for another value's list already, and read before the first of the value's own
-/// comments: so the value was created after the replaced one, even
-/// when the texts are the same. With no own comments there is nothing to order by, and the
-/// comments only have to be ones the crate dropped, so such a value is excused even when it was
-/// created before the replaced one; only the crate's own record of where values were created
-/// could tell, which it does not give. A container whose own comments come after
-/// it is left out: the outermost object of a section path counts as the value created most
-/// recently when its bracket closes, though it was created first.
+/// §12.5: libucl can attach the comments of a value that was replaced, under `rewrite` or by a
+/// higher priority, to a value created later, before that value's own. True when the oracle's
+/// list `golden` is the crate's list `own` (with the dump key `own_key`) of the value at the
+/// walk's path after one or more comments, each of which is a distinct comment the crate saved
+/// but attached to no value, with that text, not taken for another value's list already, and
+/// read before the first of the value's own comments: so the value was created after the
+/// replaced one, even when the texts are the same. The caller asks only in a document that can
+/// replace values ([`Context::replaces_values`]); the crate's notes do not say why a comment
+/// was dropped, so there a comment of a value discarded at a lower priority, or one pending at a
+/// silent stop, is taken for a replaced value's too.
+///
+/// With no own comments there is nothing to order by, and the comments only have to be ones the
+/// crate dropped, so such a value is excused even when it was created before the replaced one;
+/// only the crate's own record of where values were created could tell, which it does not give.
+/// A container whose own comments come after it is left out: the outermost object of a section
+/// path counts as the value created most recently when its bracket closes, though it was created
+/// first.
 fn replaced_comments_first(
     golden: &[String],
     own: &[String],
@@ -650,49 +686,84 @@ mod tests {
         assert!(excused(string("\0\0"), &string("\0x"), &in_place).0);
         let no_text = with_units(context(input, &flags, &[]), &[]);
         assert!(!excused(string("\0\0"), &string("\0x"), &no_text).0);
+        // `.priority` runs `.seen`'s handler under `registered-priority-override` (§13.2).
+        let input = "a = \"\\u0000x\"\n.priority(a = \"\\u0000x\") 1";
+        let overridden = strings(&["registered-priority-override", "string-input"]);
+        let ctx = context(input, &overridden, &[]);
+        assert!(excused(string("\0\0"), &string("\0x"), &ctx).0);
+        let built_in = strings(&["registered-macros", "string-input"]);
+        let ctx = context(input, &built_in, &[]);
+        assert!(!excused(string("\0\0"), &string("\0x"), &ctx).0);
     }
 
     /// §12.5: comments of replaced values before a later value's own comments, the same text
     /// included (C14 finding `values-differ-6dc7de42c47fd96a`, QUESTIONS #81), identified by the
-    /// crate's notes: which comments it dropped, and the order it read them in.
+    /// crate's notes: which comments it dropped, and the order it read them in. Under `rewrite`,
+    /// so that values can be replaced.
     #[test]
     fn comments_of_replaced_values_before_a_later_values_own() {
+        let rewrite = strings(&["strategy:rewrite"]);
         let path = [PathSegment::Key {
             key: "a".to_owned(),
             index: 0,
         }];
-        let value = |key: &str, texts: &[&str]| json!({"t": "object", "entries": [{"k": "a", "v": [{"t": "string", "v": "v", key: texts}]}]});
+        let value = |key: &str, texts: &[&str]| {
+            json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "string", "v": "v", key: texts}]}
+            ]})
+        };
         let own = value("ca", &["# c"]);
         // Dropped `# c` read first, then the value's own `# c`.
         let notes = vec![saved("# c", None), saved("# c", Some(&path))];
-        let ctx = context("", &[], &notes);
+        let ctx = context("", &rewrite, &notes);
         let (same, reasons) = excused(value("c", &["# c", "# c"]), &own, &ctx);
         assert!(same);
         assert_eq!(reasons, BTreeSet::from([REPLACED_COMMENTS]));
         // A distinct text the same way.
         let notes = vec![saved("# x", None), saved("# c", Some(&path))];
-        assert!(excused(value("c", &["# x", "# c"]), &own, &context("", &[], &notes)).0);
+        assert!(
+            excused(
+                value("c", &["# x", "# c"]),
+                &own,
+                &context("", &rewrite, &notes)
+            )
+            .0
+        );
         // The value's own comment read first: an earlier value, not excused.
         let notes = vec![saved("# c", Some(&path)), saved("# c", None)];
-        assert!(!excused(value("c", &["# c", "# c"]), &own, &context("", &[], &notes)).0);
+        assert!(
+            !excused(
+                value("c", &["# c", "# c"]),
+                &own,
+                &context("", &rewrite, &notes)
+            )
+            .0
+        );
         // Two extra comments with one dropped.
         let notes = vec![saved("# c", None), saved("# c", Some(&path))];
-        let ctx = context("", &[], &notes);
+        let ctx = context("", &rewrite, &notes);
         assert!(!excused(value("c", &["# c", "# c", "# c"]), &own, &ctx).0);
         // Nothing dropped, the extra one after the own one, or the own list changed.
         let notes = vec![saved("# c", Some(&path))];
-        assert!(!excused(value("c", &["# c", "# c"]), &own, &context("", &[], &notes)).0);
+        assert!(
+            !excused(
+                value("c", &["# c", "# c"]),
+                &own,
+                &context("", &rewrite, &notes)
+            )
+            .0
+        );
         let notes = vec![saved("# c", Some(&path)), saved("# x", None)];
         assert!(
             !excused(
                 value("ca", &["# c", "# x"]),
                 &own,
-                &context("", &[], &notes)
+                &context("", &rewrite, &notes)
             )
             .0
         );
         let notes = vec![saved("# x", None), saved("# c", Some(&path))];
-        let ctx = context("", &[], &notes);
+        let ctx = context("", &rewrite, &notes);
         assert!(!excused(value("c", &["# x", "# d"]), &own, &ctx).0);
         // A dropped comment with another text.
         assert!(!excused(value("c", &["# y", "# c"]), &own, &ctx).0);
@@ -702,11 +773,23 @@ mod tests {
             index: 0,
         }];
         let notes = vec![saved("# x", Some(&other)), saved("# c", Some(&path))];
-        assert!(!excused(value("c", &["# x", "# c"]), &own, &context("", &[], &notes)).0);
+        assert!(
+            !excused(
+                value("c", &["# x", "# c"]),
+                &own,
+                &context("", &rewrite, &notes)
+            )
+            .0
+        );
         // One dropped comment given to two values: it can reappear once, on the first reached.
         let notes = vec![saved("# c", None), saved("# c", Some(&path))];
-        let ctx = context("", &[], &notes);
-        let two = |a: J, b: J| json!({"t": "object", "entries": [{"k": "a", "v": [a]}, {"k": "b", "v": [b]}]});
+        let ctx = context("", &rewrite, &notes);
+        let two = |a: J, b: J| {
+            json!({"t": "object", "entries": [
+                {"k": "a", "v": [a]},
+                {"k": "b", "v": [b]}
+            ]})
+        };
         let a_own = json!({"t": "string", "v": "v", "ca": ["# c"]});
         let a_both = json!({"t": "string", "v": "v", "c": ["# c", "# c"]});
         let b = json!({"t": "int", "v": "1"});
@@ -716,11 +799,67 @@ mod tests {
         assert!(!excused(two(a_both, b_dropped), &actual, &ctx).0);
         // A container whose own comments come after it: the outermost object of a section path
         // closed by its bracket counts as the most recent value, though created first.
-        let object = |key: &str, texts: &[&str]| json!({"t": "object", "entries": [{"k": "a", "v": [{"t": "object", "entries": [], key: texts}]}]});
+        let object = |key: &str, texts: &[&str]| {
+            json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "object", "entries": [], key: texts}]}
+            ]})
+        };
         let notes = vec![saved("# c", None), saved("# z", Some(&path))];
-        let ctx = context("", &[], &notes);
+        let ctx = context("", &rewrite, &notes);
         assert!(!excused(object("c", &["# c", "# z"]), &object("ca", &["# z"]), &ctx).0);
         assert!(excused(object("c", &["# c", "# z"]), &object("c", &["# z"]), &ctx).0);
+    }
+
+    /// §12.5 leaves uncertain the comments of a value replaced under `rewrite` or by a higher
+    /// priority: a dropped comment is excused only where the flags or some unit can replace a
+    /// value (review of the C14 classifier gaps, finding 2).
+    #[test]
+    fn replaced_comments_only_where_values_can_be_replaced() {
+        let notes = [saved("# c", None)];
+        let dump = |c: &[&str]| {
+            let q = if c.is_empty() {
+                json!({"t": "int", "v": "4"})
+            } else {
+                json!({"t": "int", "v": "4", "c": c})
+            };
+            json!({"t": "object", "entries": [{"k": "q", "v": [q]}]})
+        };
+        let excused_in = |input: &str, flags: &[&str], units: &[Vec<u8>]| {
+            let flags = strings(flags);
+            let ctx = Context {
+                units,
+                ..context(input, &flags, &notes)
+            };
+            excused(dump(&["# c"]), &dump(&[]), &ctx).0
+        };
+        let plain = "# c\nk = 2\nk = 3\nq = 4";
+        // Nothing can replace a value: under `append` or `merge` with one priority, or at a
+        // silent stop, a dropped comment is compared as it is.
+        assert!(!excused_in(plain, &[], &[]));
+        assert!(!excused_in(
+            plain,
+            &["strategy:merge", "no-implicit-arrays"],
+            &[]
+        ));
+        assert!(!excused_in(
+            &format!("{plain}\n.fail"),
+            &["registered-macros"],
+            &[]
+        ));
+        // The flags, the input, or another unit can.
+        for flag in ["strategy:rewrite", "priority:2"] {
+            assert!(excused_in(plain, &[flag], &[]), "{flag}");
+        }
+        for input in [
+            ".priority 2\n# c\nk = 2",
+            ".include(duplicate=\"rewrite\") \"f.inc\"\nq = 4",
+            ".include(PRIORITY=2) \"f.inc\"\nq = 4",
+            ".load(key=\"k\", priority=3) \"f.txt\"\nq = 4",
+        ] {
+            assert!(excused_in(input, &[], &[]), "{input}");
+        }
+        assert!(excused_in(plain, &[], &[b".priority 3\nk = 1".to_vec()]));
+        assert!(!excused_in(plain, &[], &[b"k = 1".to_vec()]));
     }
 
     #[test]
@@ -784,14 +923,15 @@ mod tests {
 
     #[test]
     fn comments_of_replaced_values_and_block_comment_ends() {
+        let rewrite = strings(&["strategy:rewrite"]);
         let with = |key: &str, texts: &[&str]| json!({"t": "int", "v": "4", key: texts});
         let none = json!({"t": "int", "v": "4"});
         // The comment `# c` of a replaced value, then the value's own `# d`.
         let notes = [saved("# c", None), saved("# d", Some(&[]))];
-        let ctx = context("# c\nk = 2\nk = 3\nq = 4", &[], &notes[..1]);
+        let ctx = context("# c\nk = 2\nk = 3\nq = 4", &rewrite, &notes[..1]);
         let (same, reasons) = excused(with("c", &["# c"]), &none, &ctx);
         assert!(same && reasons.contains(REPLACED_COMMENTS));
-        let ctx = context("# c\nk = 2\nk = 3\nq = 4 # d", &[], &notes);
+        let ctx = context("# c\nk = 2\nk = 3\nq = 4 # d", &rewrite, &notes);
         assert!(excused(with("c", &["# c", "# d"]), &with("ca", &["# d"]), &ctx).0);
         // Only dropped comments are excused.
         assert!(!excused(with("c", &["# e"]), &none, &ctx).0);

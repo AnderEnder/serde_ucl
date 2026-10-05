@@ -1503,4 +1503,38 @@ mod tests {
             }
         ));
     }
+
+    /// Review of the C14 classifier gaps, finding 2 (§12.5): the comment `# c`, pending at the
+    /// silent stop of `.fail`, is lost in libucl and in the crate. Nothing can replace a value
+    /// there, so a stand-in oracle that gives it to `b` is reported. Under `rewrite` the crate's
+    /// notes cannot tell that drop from a replaced value's, and it is excused
+    /// (`fuzz/README.md`, *Known limits*).
+    #[test]
+    fn comment_pending_at_a_silent_stop_is_not_excused() {
+        let input = "a { b = 1\n# c\n.fail\n}\n";
+        let dump = |b: J| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "object", "entries": [{"k": "b", "v": [b]}]}]}
+            ]})
+        };
+        let lost = dump(serde_json::json!({"t": "int", "v": "1"}));
+        let given = dump(serde_json::json!({"t": "int", "v": "1", "ca": ["# c"]}));
+        let run_flags = flags(&["registered-macros", "dump-comments", "string-input"]);
+        assert!(matches!(
+            verdict_in("13-inputs", input, &run_flags, &lost),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_in(
+            "13-inputs",
+            input,
+            &run_flags,
+            &given
+        )));
+        let mut rewrite = run_flags;
+        rewrite.push("strategy:rewrite".to_string());
+        assert!(matches!(
+            verdict_in("13-inputs", input, &rewrite, &given),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+        ));
+    }
 }
