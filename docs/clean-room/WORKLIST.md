@@ -535,3 +535,12 @@ Use branch perf/c-api-adapter-second-pass in a separate worktree based on
 merged80b7785. Plans remain local and excluded. Update public docs/changelog and
 provenance; commit stable completed improvements with measured residual costs.
 No new push, PR, merge, tag or package publication is authorized for this pass.
+
+Owner steering: use the latest stable Rust version. On 2026-10-05 official
+release notes and rustup confirm Rust1.99.0 (released2026-10-01); stable was
+updated from1.98.1. Evaluate new stabilized APIs and compiler changes using
+official Rust documentation, adopt only changes justified by ownership or
+measured performance, and synchronize manifests/docs if new APIs require1.99.
+Remeasure merged baseline and final candidate on the same1.99 compiler before
+attributing any gain to adapter code. New implementation remains stable Rust;
+nightly is limited to existing sanitizer/Miri validation.

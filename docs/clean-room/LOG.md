@@ -6465,3 +6465,9 @@ observable benchmark goals. No implementation code authored. Fresh clean-room
 implementation delegation will receive rules verbatim and released/allowed
 inputs only. This entry supplies goals/provenance, no implementation design;
 no new spec behavior or publication.
+
+2026-10-05 owner steering: latest stable Rust is explicitly authorized. Official
+Rust1.99 announcement/release notes and rustup stable channel were checked;
+installedstable is now rustc1.99.0/LLVM23.1.1. General language/library docs
+only were consulted, with no upstreamlibucl materials. Baseline and candidate
+measurements will both use1.99 to distinguish compiler effects from code gains.
