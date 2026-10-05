@@ -6648,3 +6648,24 @@ No push, tag or publication by this implementer. Commit: this package rename
 commit. Work item: C15.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — spec coordinator — C15 package name and PR update
+
+Owner chose serde-ucl-capi as the C Cargo package name. Clean implementer rename
+2b0acde changes manifest/lockfile, capi docs and source/SDK archive/collector names.
+Coordinator46f3800 aligns release artifact upload/download aliases, rootREADME,
+changelog and toolingREADME; historical measured keys and frozen evidence retain
+their original labels/hashes. Libraryucl, headerucl.h, pkg-configserde-ucl and
+released spec-v22/ABI1 remain unchanged. Rename alone does not enable publishing.
+
+Locked releasebuild, six capi ownership tests,13distribution tests, four direct/
+installed static/shared checks and clean macos-arm64 source+SDK verification pass.
+Verified archive names/rootdirectories serde-ucl-capi-0.6.0-{source,macos-arm64},
+clean source install, relocated C/C++ consumers,43signatures/ten snapshots, clean
+BUILD-INFO and checksums. Runtime source/test blobs remain the reviewed checkpoint.
+Inputs: current CLAUDE/protocol, clean-room implementer handover, own integration
+docs/workflow/tooling paths, currentGit/PR metadata. No src/ or capi/ implementation
+authored by coordinator. Spec contains observable behavior only and remains unchanged.
+Owner's PR32 authorization persists: push rename/provenance and update description.
+Plans stay local; unrelated original changes preserved. No merge/tag/package
+publication. Work item:C15; final integration commit recorded in handover.
