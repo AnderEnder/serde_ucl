@@ -7207,3 +7207,25 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commits: this LOG-only review commit. No change to `fuzz/` or `src/`; not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-05 — Role: clean-room implementer. Item: C14, the follow-ups of the third review of the
+  fuzzer's classifier gaps (the entry above, approved), under released spec-v22.
+  - Inputs consulted: the coordinator's request; the round 3 entry; own `fuzz/`; the oracle as a
+    black box. No libucl source, `tools/`, or other forbidden input was read.
+  - `fix(fuzz): drop the escaped brace from the handler-name bail`: the bail set is a `\` before
+    `u`, `H`, `_` or `{`; an escaped `}` inside a braced name leaves its `\` there, a name of other
+    bytes, and elsewhere yields no byte of a reference. `a = "x\}"⏎.include(g=true)"${H_}*/"` now
+    keeps `var:H_=[handled]` and agrees with the oracle (`a: "x}"`). The README sentence on a `\` in
+    a comment now says the bytes are matched anywhere, so `# \u` stops the registration; a test pins
+    `.include(g=true)"${H_}*/"1⏎# \u` as a `crate-accepts`. The new tests fail with `}` back in the
+    set (2).
+  - `docs(fuzz): narrow the exception to the §7.7 macro VALUE limit`: *Known limits* names what the
+    two recognisers excuse, a lone `.include` whose quoted path ends the input with an empty crate
+    result, and a lone `.emit "KEY=…"` giving one entry.
+  - Checks: 34 fuzz unit tests pass; `scripts/ci.sh` passed (29 test runs, 721 tests); `--check`
+    against the oracle: the escaped-brace document agrees, the `# \u` one is a `crate-accepts` as
+    documented. No fuzz run, as agreed.
+  - Commits: `8fcaf63` and `b7e630a` (subjects above), and the following `docs(clean-room)` commit
+    with this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
