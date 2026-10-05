@@ -6471,3 +6471,24 @@ Rust1.99 announcement/release notes and rustup stable channel were checked;
 installedstable is now rustc1.99.0/LLVM23.1.1. General language/library docs
 only were consulted, with no upstreamlibucl materials. Baseline and candidate
 measurements will both use1.99 to distinguish compiler effects from code gains.
+
+### 2026-10-05 — independent implementation reviewer — C15 adapter second pass
+
+Read current CLAUDE.md and PROTOCOL.md first; confirmed latest release spec-v22.
+Independently reviewed the author's frozen compact-node/immutable-input adapter
+checkpoint, with no implementation edits. Added three independent retained-memory,
+mixed-source, partial-error and scalar-facts regression tests; native Rust1.99,
+focused clippy/fmt and final nightly Miri runs pass. A temporary post-submission
+variable replacement stress also passed, but is outside Stage A and excluded
+from maintained tests. Report: reviews/c15-adapter-second-pass.md; source blobs
+identify the checkpoint pending the author's final implementation commit and
+broader Rust/C/linkage/sanitizer validation.
+
+Inputs: current instructions/protocol and clean-room provenance; released spec-v22
+C contract; current own adapter/parser/emitter/value sources, tests, profile
+example, distribution checks and public docs/manifests. No tools, coordinator
+benchmark artifacts, research/plans or upstream implementation. Produced reviewer
+test/report/provenance commit with Work item:C15 footer; final hash recorded in
+handover. No push, PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
