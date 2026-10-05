@@ -29,7 +29,7 @@ def collect(incoming, output, version, commit):
     if not re.fullmatch(r"\d+\.\d+\.\d+", version) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise RuntimeError("Expected concrete release version and full commit SHA")
     kinds = ["source", *TARGETS]
-    archive_names = {kind: f"serde-ucl-c-{version}-{kind}.tar.gz" for kind in kinds}
+    archive_names = {kind: f"serde-ucl-capi-{version}-{kind}.tar.gz" for kind in kinds}
     expected = set(archive_names.values()) | {"SHA256SUMS-" + kind for kind in kinds}
     actual = {p.name for p in incoming.iterdir()}
     if actual != expected:

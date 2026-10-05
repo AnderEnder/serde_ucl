@@ -6628,3 +6628,23 @@ report/evidence. Coordinator edits only this provenance entry and work-item
 authorization; implementation remains db08f32 and released spec-v22 remains
 unchanged observable behavior. No merge, release tag or package publication.
 Work item:C15. Submission provenance commit and PR URL recorded in handover.
+
+### 2026-10-05 — implementation — C15 C package name selection
+
+Owner selected `serde-ucl-capi`. Renamed the C Cargo package and its lockfile,
+public C documentation, archive filenames/root directories and collector/test
+expectations. Preserved library `ucl`, pkg-config `serde-ucl`, `publish=false`,
+runtime sources and historical evidence names. Inputs: current CLAUDE.md,
+PROTOCOL.md, released tag identity spec-v22, current own capi manifests, README,
+distribution scripts/tests and writing-plans skill. Local plan remains excluded.
+
+Validation: locked Cargo metadata confirms package identity, library name and
+publication disabled; locked release build and all six adapter integration tests
+pass. All 13 distribution tests, format/diff checks and direct/installed
+static/shared gates pass: exact 43 symbols/signatures, C11/C++11 linkage, ten
+released snapshots and boundary/lifetime/depth checks. Clean source/SDK archive
+verification follows this commit, with final results recorded in handover.
+No push, tag or publication by this implementer. Commit: this package rename
+commit. Work item: C15.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

@@ -4,7 +4,7 @@ This separate package builds `libucl.a` and `libucl.dylib` (Darwin), or `libucl.
 (on Unix platforms using that suffix), with an installable `ucl.h`. It provides
 exactly the 43 read-only functions and aliases in released spec-v22.
 The exact released contract is bundled in the matching
-`serde-ucl-c-VERSION-source.tar.gz` archive at `docs/spec/c-api/stage-a/README.md`,
+`serde-ucl-capi-VERSION-source.tar.gz` archive at `docs/spec/c-api/stage-a/README.md`,
 with the declaration artifact at `docs/spec/c-api/stage-a/include/ucl.h` and its
 function/case inventories alongside them. Extract that archive to read the contract
 offline; the SDK does not depend on an online spec tag for its documentation.
@@ -22,7 +22,7 @@ The public Rust crate retains its existing defaults and APIs.
 
 ## Distribution identity and isolation
 
-The opt-in C package/distribution is **serde-ucl-c**; its pkg-config module is
+The opt-in C package/distribution is **serde-ucl-capi**; its pkg-config module is
 **serde-ucl**. It exports library `ucl` and header `ucl.h` to preserve the released
 C interface. The Rust crate `serde_ucl` does not build/install this library by
 default, and its crates.io package contents remain unchanged.
@@ -46,7 +46,7 @@ dependencies are fetched by Cargo (the archive is not vendored or an offline bui
 ```sh
 cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
 cargo cinstall --locked --release --manifest-path capi/Cargo.toml \
-  --prefix "$HOME/.local/serde-ucl-c" --libdir "$HOME/.local/serde-ucl-c/lib"
+  --prefix "$HOME/.local/serde-ucl-capi" --libdir "$HOME/.local/serde-ucl-capi/lib"
 ```
 
 On GNU/Linux install your distribution's native C/C++ compiler, pkg-config and
@@ -77,7 +77,7 @@ does not change the C ABI major. Rebuild static consumers when upgrading.
 
 ## Native SDKs: no Rust needed
 
-Normal future GitHub releases produce one `serde-ucl-c-VERSION-source.tar.gz`
+Normal future GitHub releases produce one `serde-ucl-capi-VERSION-source.tar.gz`
 and three native SDK archives, collected under one outer `SHA256SUMS`:
 
 | SDK archive suffix | Native release runner | Deployment evidence |
@@ -119,8 +119,8 @@ Verify downloaded outer checksums with `sha256sum -c SHA256SUMS` on Linux or
 `shasum -a 256 -c SHA256SUMS` on macOS, then extract your matching SDK. For example:
 
 ```sh
-tar -xzf serde-ucl-c-VERSION-linux-amd64.tar.gz
-cd serde-ucl-c-VERSION-linux-amd64
+tar -xzf serde-ucl-capi-VERSION-linux-amd64.tar.gz
+cd serde-ucl-capi-VERSION-linux-amd64
 sha256sum -c SHA256SUMS
 export SDK="$PWD"
 export PKG_CONFIG_PATH="$SDK/lib/pkgconfig"
