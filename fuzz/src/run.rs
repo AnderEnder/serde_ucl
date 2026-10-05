@@ -1179,9 +1179,14 @@ mod tests {
         let input = "d { a = \"\\u0000x\" }\ne { .emit \"$I d\" }";
         assert!(!input.contains(".inherit"));
         let oracle = |copied: &str| {
+            let object = |v: &str| {
+                serde_json::json!([{"t":"object","entries":[
+                    {"k":"a","v":[{"t":"string","v":v}]}
+                ]}])
+            };
             serde_json::json!({"t":"object","entries":[
-                {"k":"d","v":[{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":"\u{0}x"}]}]}]},
-                {"k":"e","v":[{"t":"object","entries":[{"k":"a","v":[{"t":"string","v":copied}]}]}]}
+                {"k":"d","v":object("\u{0}x")},
+                {"k":"e","v":object(copied)}
             ]})
         };
         assert!(matches!(
@@ -1378,7 +1383,11 @@ mod tests {
             ]})
         };
         let c = serde_json::json!({"t":"string","v":"p"});
-        let a = |key: &str, texts: &[&str], v: &str| serde_json::json!({"t":"string","v":v, key: texts});
+        let a = |key: &str, texts: &[&str], v: &str| {
+            serde_json::json!({
+                "t": "string", "v": v, key: texts
+            })
+        };
         let oracle = dump(c.clone(), a("c", &["# c", "# c"], "v"));
         assert!(matches!(
             verdict_12_flags(input, &rewrite, &oracle),
