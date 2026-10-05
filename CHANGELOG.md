@@ -23,6 +23,19 @@ longer copy or allocate complete traversal sequences. Arena owner pointers are
 published from final owner provenance, with a maintained ownership regression
 checked in ordinary CI and with Miri.
 
+The second pass uses Rust 1.99 and parses memory submissions from one adapter-owned
+immutable input copy, reusing the existing borrowed reader instead of allocating
+unchanged Rust keys and strings individually. Caller storage remains reusable after
+submission; retained trees keep their backing text, emission facts and terminated
+C strings alive. Public headers occupy 64 bytes per node, with container-only metadata,
+contiguous child ranges, duplicate head tables and a sparse forced-string cache.
+The generated 10,000-record counting profile reduces C requests further from 70,059
+to 10,060 and peak extra live storage from 9.920 MB to 8.949 MB. Same-toolchain lifecycle
+and iterator measurements are documented in `capi/README.md`; input-dependent
+representation and cwd costs remain. The 1.99 non-null Box ownership APIs support
+explicit backing-storage transfer, with retained/mutated-input regressions checked
+by Miri and sanitizers. Ordinary Rust owned/default parsing is unchanged.
+
 ### C distribution
 
 C validation strips terminal styling from Cargo native-link diagnostics, so forced

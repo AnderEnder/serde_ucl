@@ -36,7 +36,7 @@ Other operating systems, Intel macOS and musl targets remain deferred.
 
 ## Build and install from source
 
-Source builds require Rust 1.98 or newer, a native C linker/toolchain, and pinned
+Source builds require Rust 1.99 or newer, a native C linker/toolchain, and pinned
 [cargo-c 0.10.25](https://github.com/lu-zero/cargo-c/blob/v0.10.25/docs/configuration.md).
 The source archive includes both `capi/` and its Rust path dependency; keep them
 together. Its root manifest omits benchmark targets because those development
@@ -283,20 +283,38 @@ conversion and iterator details.
 
 ## Adapter overhead and profiling
 
-Public objects use stable arena storage, with one terminated-byte buffer and one
-child-link buffer. Singleton object entries share their lookup/iteration heads
-with their children. Lookup reuses the Rust object's key index; facts are addressed
-by an opaque position instead of copied key paths. The usual final owned-reference
-release frees the complete arena directly. Releasing a parent while separately
-retained children survive still updates child ownership and public reference counts
-iteratively. Emission continues to use the original value and its facts; no tree
-construction is deferred to lookups, iteration or emission.
+Public objects use stable arena storage with 64-byte public headers. Only containers
+have private child-range, entry-head and fact metadata. Array elements and object
+values occupy contiguous arena ranges; only objects with duplicate entries need a
+separate head-pointer table. Lookup reuses the Rust object's key index and iteration
+uses the cached head count. All headers, terminated key/value bytes and child ranges
+are built during submission.
 
-A retained child keeps the entire arena and original Rust model alive until its
-last owned reference is released. This trades individual C-node reclamation for
-fewer allocations and stable borrowed strings. Forced conversion strings are
-created on first use and remain in arena-owned storage through that lifetime.
-Creation-time cwd capture, parser flags and all reviewed public fields are unchanged.
+For memory submissions, the Rust emission tree borrows unchanged keys and strings
+from one adapter-owned immutable copy of the input. The caller's buffer can be reused
+immediately after ordinary submission; no caller buffer is retained. File input,
+decoded/expanded strings and error snapshots keep their existing owned paths. A
+retained child keeps the arena, Rust tree, output facts and backing input alive until
+the last owned reference is released. Final release drops the Rust tree before its
+backing input; parent release with retained children still updates public reference
+counts iteratively without allocating a traversal.
+
+Forced conversions use a sparse arena-owned cache. Its inner terminated buffers
+keep their addresses when cache metadata grows. Container emissions retain their
+subtree fact cursor; scalar string emissions select the recorded single-quote/heredoc
+facts already represented by their public flags. No tree construction is deferred to
+lookups, iteration or emission. Creation-time cwd capture and all released public
+observations remain supported.
+
+Latest stable Rust 1.99 is used throughout. Its new `Box::into_non_null` and
+`Box::from_non_null` APIs make the backing-input ownership transfer explicit: the
+allocation is not represented by an exclusive `Box` while parsed strings borrow it.
+This follows the standard library's [Box ownership guidance](https://doc.rust-lang.org/stable/std/boxed/struct.Box.html#method.into_non_null).
+The [Rust 1.99 release](https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/) was also
+reviewed for performance opportunities: C variadic definitions, unsized raw layout,
+boxed-array iteration, lossy UTF-8 conversion and filesystem timestamp APIs do not
+apply to these fixed-signature, valid-UTF-8, sized arena paths. Compiler and adapter
+changes are measured separately, with baseline and candidate both built on 1.99.
 
 An independent implementation-side counting profile is available in repository
 checkouts:
@@ -334,8 +352,9 @@ and three allocations requesting 160,064 bytes to 43 ns and one allocation reque
 32 bytes; full immediate-child traversal fell from 23.8 µs to 15.8 µs in this Rust
 calling harness. Ordinary separately compiled C callers may have different timings.
 
-On local Apple M4 Max Darwin arm64, Rust 1.98 release with fat LTO and one codegen
-unit, the same counting harness compared the merged adapter with this change:
+Historical first-pass evidence (2026-10-03): on local Apple M4 Max Darwin arm64,
+Rust 1.98 release with fat LTO and one codegen unit, the counting harness compared
+the original merged Stage A adapter with the first arena optimization:
 
 | Input | C before, total | C after, total | Rust after, total | C allocation requests, before → after |
 | --- | ---: | ---: | ---: | ---: |
@@ -366,7 +385,52 @@ runs it. To also check Rust aliasing/provenance rules in a repository checkout:
 
 ```sh
 MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test \
-  --manifest-path capi/Cargo.toml --test arena_lifetimes
+  --manifest-path capi/Cargo.toml --test arena_lifetimes --test review_ownership
 ```
 
 Filesystem isolation is disabled for the existing creation-time cwd service.
+
+
+The second pass on Rust 1.99 reduces 10,000 generated-record C allocator requests
+from 70,059 to 10,060 by borrowing unchanged parsed text from one owned input.
+Requested bytes fall from 11.887 MB to 10.916 MB and peak extra live storage from
+9.920 MB to 8.949 MB. The 1,000-record request count falls from 7,045 to 1,046;
+rbl_group.conf falls from 658 to 214. All measured lifecycles return to their original
+live-allocation baseline. These counters are scoped as described above and compare
+frozen merged and candidate binaries using the same Rust 1.99 toolchain.
+
+One local second-pass counting run measured 6.405 ms for C, 6.423 ms for default
+Rust and 6.546 ms for RustObserved on the 706,670-byte generated document. Full
+immediate-object traversal measured 15.6 µs against about 17.4 µs for the frozen
+merged adapter, with one handle allocation in each. These means are diagnostic,
+not timing guarantees: machine load varied during this session and independent
+interleaved public-call measurements are the acceptance evidence. The small rbl
+counting run retained about 18% total overhead and tiny parses still pay creation-time
+cwd capture. Escapes, lowercase keys, included/file text and partial error snapshots
+can require owned text, while immediately observable C headers and terminated
+strings remain additional representation cost. Near-zero total cost on one generated
+shape does not establish zero overhead for every input or equal memory usage with Rust.
+
+
+Implementation-owned native CPU sampling of the frozen Rust 1.99 counting binaries
+collected 8,315 baseline and 8,296 candidate samples. Allocator-library leaf samples
+shown in `sample`'s flat table fell from 15.03% to 5.01%; copy/zero leaf samples fell
+from 4.71% to 4.38%. The flat table omits symbols below five samples, and the counting
+allocator itself affects this diagnostic; these percentages are not whole-program
+speedup claims. The measured remaining arena initialization/key-quoting/copy work
+and backing-input retention still explain why adaptation is not universally free.
+
+
+Second-pass profile values above are arithmetic means after three warmups and
+100 measured lifecycles; the iterator mean uses 20,000 measured traversals. The
+backing `Box<[u8]>` requests exactly the memory-input length once (no allocation
+for empty text). Reported allocation bytes are requested layout sizes, including
+reallocations, rather than allocator usable capacity.
+
+The near-parity comparison is with the public **owned/default** Rust parser.
+The C memory path now uses the internal borrowed reader, so the two paths have
+different text-storage costs. It still adds eagerly constructed C headers,
+container metadata, terminated bytes and backing ownership over a borrowed Rust
+tree; equal total time against owned Rust does not demonstrate zero ABI marshalling
+against that borrowed representation. `RustObserved` remains an owned Rust
+observation diagnostic, not a borrowed-parser baseline.

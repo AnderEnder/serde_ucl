@@ -1,5 +1,5 @@
 use crate::boundary;
-use crate::object::{UclObject, release, retain, tree};
+use crate::object::{OwnedInput, UclObject, release, retain, tree};
 use serde_ucl::parse::{ErrorKind, FsLoader, Input, Parser};
 use serde_ucl::value::ParserFlags;
 use std::ffi::{CStr, CString, c_char, c_int};
@@ -22,18 +22,24 @@ impl Drop for UclParser {
     }
 }
 
-fn submit(p: &mut UclParser, input: Input<'_>) -> bool {
+fn submit(p: &mut UclParser, input: Input<'_>, backing: Option<OwnedInput>) -> bool {
     if p.submitted {
         p.code = 3;
         p.error = Some(c"Stage A accepts only one input submission".into());
         return false;
     }
     p.submitted = true;
-    let observation = p.parser.observe_c_input(input);
+    let observation = if let Some(backing) = &backing {
+        // submit keeps the owner live through observation and transfers it into
+        // the result's Model below. The immutable borrowed Rust tree never escapes.
+        p.parser.observe_c_static_input(unsafe { backing.text() })
+    } else {
+        p.parser.observe_c_input(input)
+    };
     p.line = observation.cursor.line as u32;
     p.column = observation.cursor.column as u32;
     if let Some(root) = observation.root {
-        p.root = tree(root, observation.facts);
+        p.root = tree(root, observation.facts, backing);
     }
     match observation.error {
         None => true,
@@ -102,14 +108,14 @@ pub unsafe extern "C" fn ucl_parser_add_chunk(
     boundary(|| {
         let p = unsafe { &mut *p };
         if p.submitted {
-            return submit(p, Input::bytes(b""));
+            return submit(p, Input::bytes(b""), None);
         }
         let bytes = if len == 0 {
             &[]
         } else {
             unsafe { std::slice::from_raw_parts(data, len) }
         };
-        submit(p, Input::bytes(bytes))
+        submit(p, Input::bytes(bytes), Some(OwnedInput::copy(bytes)))
     })
 }
 #[unsafe(no_mangle)]
@@ -120,7 +126,7 @@ pub unsafe extern "C" fn ucl_parser_add_string(
 ) -> bool {
     boundary(|| {
         if unsafe { (*p).submitted } {
-            return submit(unsafe { &mut *p }, Input::bytes(b""));
+            return submit(unsafe { &mut *p }, Input::bytes(b""), None);
         }
         let len = if len == 0 {
             unsafe { CStr::from_ptr(data) }.to_bytes().len()
@@ -135,12 +141,12 @@ pub unsafe extern "C" fn ucl_parser_add_file(p: *mut UclParser, filename: *const
     boundary(|| {
         let p = unsafe { &mut *p };
         if p.submitted {
-            return submit(p, Input::bytes(b""));
+            return submit(p, Input::bytes(b""), None);
         }
         let name = unsafe { CStr::from_ptr(filename) }
             .to_str()
             .expect("UTF-8 filename");
-        submit(p, Input::file(name))
+        submit(p, Input::file(name), None)
     })
 }
 #[unsafe(no_mangle)]

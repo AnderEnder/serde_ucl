@@ -6492,3 +6492,56 @@ test/report/provenance commit with Work item:C15 footer; final hash recorded in
 handover. No push, PR, merge, tag or publication.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — fresh clean implementer — C15 further adapter optimization
+
+Worktree `ucl-rust-lexer-c-opt2`, branch `perf/c-api-adapter-second-pass`, based on
+merged `80b7785` and goals-only authorization. Verified the latest released tag
+is `spec-v22`; inspected unreleased spec differences only to confirm they update
+conformance references. Consulted current CLAUDE.md and PROTOCOL, released C API
+behavior/header/snapshots, WORKLIST goals/provenance, current own Rust/C adapter,
+implementation tests/profile example, allowed standalone corpus documents, current
+CI and distribution checks, and official Rust 1.99 release/Box documentation.
+Used the writing-plans skill for a local excluded plan; no coordinator plans,
+benchmark/oracle tooling or reference implementation sources were inputs.
+
+Independent before/after release CPU/allocation profiles identified individual
+unchanged key/string allocations, repeated scalar walks and per-scalar metadata.
+The retained implementation parses memory text from one privately owned immutable
+copy using the existing borrowed reader; public 64-byte headers remain eager,
+container metadata supplies child ranges/head counts/fact cursors, duplicate entry
+keys are terminated once, and forced conversions use a sparse stable-buffer cache.
+Rust owned/default APIs retain their behavior. Latest stable Rust 1.99 is explicitly
+owner-authorized; all four rust-version manifests and current build documentation
+were synchronized. Its new non-null Box transfer APIs establish backing allocation
+ownership without round-trip leaking; other new APIs were assessed and not adopted
+without a relevant measured use.
+
+Generated 10k requests fall 70,059 → 10,060; requested bytes 11.887 → 10.916 MB;
+peak extra live storage 9.920 → 8.949 MB; all lifecycle scopes release their live
+allocations. One counting run gives C 6.405 ms versus default Rust 6.423 ms, while
+rbl retains about 18% overhead and tiny inputs retain creation-time cwd cost.
+Frozen implementation-owned CPU profiles show allocator-library leaf share
+15.03% → 5.01% in the flat tables (which omit symbols below five samples). These
+are diagnostic local Darwin arm64 measurements with an instrumented allocator;
+independent interleaved public timings are coordinated separately. No universal
+zero-cost or equal-memory claim is made. Rejected intermediate experiments were
+not committed; construction is not deferred to normal reads or emission.
+
+Validation: full scripts/ci.sh passes all Rust features, optimized/unoptimized
+stack depth, tests/examples/benches/docs and C distribution checks. Exact shipping
+and installed header, 43 symbols/signatures, C11/C++11, ten snapshots, retained
+lifetimes/partial graphs and 1023-container depth pass direct/installed static/shared
+linkage. Nightly Rust ASan plus C ASan/UBSan pass direct static/shared; separate C
+ASan/UBSan passes all four direct/installed linkage variants (Darwin has no leak
+sanitizer). Three maintained arena regressions pass native and nightly Miri;
+independent reviewer tests compare memory/file/include/load/variable, partial graph
+and scalar cursor behavior, and pass native/clippy/Miri. Refreshed C all-target
+clippy and all C tests include those new review tests. Independent clean review
+`059dfa0` found no correctness blocker; final source commit verification follows.
+
+Commit produced: `perf(capi): borrow owned input and compact public arenas` (this
+commit), with independent test/review commit `059dfa0` immediately before it.
+Plans/profile scratch remain excluded. No push, PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

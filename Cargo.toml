@@ -2,8 +2,8 @@
 name = "serde_ucl"
 version = "0.6.0"
 edition = "2024"
-# The crate targets the latest stable Rust (1.98 at this release); CI builds with stable only.
-rust-version = "1.98"
+# The crate targets the latest stable Rust (1.99 at this release); CI builds with stable only.
+rust-version = "1.99"
 authors = ["Andrii Radyk"]
 description = "UCL (Universal Configuration Language) with serde: reads and writes UCL as libucl does"
 license = "MIT OR Apache-2.0"

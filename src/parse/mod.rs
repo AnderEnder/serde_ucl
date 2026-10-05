@@ -730,6 +730,16 @@ impl Parser {
         reader.finish_observed(error)
     }
 
+    /// C observations of immutable static text, allowing keys and strings to borrow
+    /// its storage as the serde reader does. Owned/default Rust parsing is unchanged.
+    #[doc(hidden)]
+    pub fn observe_c_static_input(&mut self, input: &'static [u8]) -> CObservation {
+        let mut reader = self.reader();
+        reader.observe();
+        let error = reader.read(Input::bytes(input), Some(input)).err();
+        reader.finish_observed(error)
+    }
+
     /// Parses a document given as bytes rather than read from a file.
     ///
     /// Unless [`ParserFlags::NO_FILEVARS`] is set, the file variables are defined as for such a

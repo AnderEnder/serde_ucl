@@ -58,7 +58,7 @@ serde_ucl = "0.6"
 serde = { version = "1", features = ["derive"] }
 ```
 
-It targets the latest stable Rust (1.98 at this release). See [Cargo features](#cargo-features)
+It targets the latest stable Rust (1.99 at this release). See [Cargo features](#cargo-features)
 for `fs` and `load`.
 
 ## C API
