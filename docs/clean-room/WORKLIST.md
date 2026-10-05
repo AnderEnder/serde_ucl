@@ -510,3 +510,28 @@ about 142x without prebuilding traversal; full flat-object traversal regresses
 about 12%. Full required Rust/C checks, sanitizers, independent conformance and
 Miri passed. These are local Darwin arm64 results; Linux CI execution remains
 for future submission. No push, merge or publication was performed.
+
+### C15 further adapter optimization (owner request, 2026-10-05)
+
+After merging PR #30 as 80b7785, the owner requested further performance work.
+Continue toward zero or near-zero adapter overhead relative to the equivalent
+Rust API, with before/after CPU and allocation profiles and independent same-input
+measurements. Current original-input records10k baseline is C8.868ms versus
+Rust6.169ms and libucl10.958ms; flat inputs retain35% overhead, floats33%,
+escaped strings28%, small Rspamd52%, and tiny default parses retain creation-time
+cwd cost. These are measured goals, not an implementation design.
+
+A fresh clean-room implementation participant must derive its own plan and
+profile current own code from released spec-v22. Seek material further gains,
+including remaining read-path regressions, without moving cost into normal
+lookup/iteration/emission. Preserve all 43 functions/aliases, public ABI fields,
+stable addresses/strings, parser environment semantics, partial results, errors,
+retained ownership, emitter facts and deep-stack behavior. Core changes must
+preserve Rust behavior. Validate full Rust/C checks, static/shared installed
+linkage, sanitizer and Miri ownership regressions; obtain independent clean
+review. Coordinator handles oracle and public comparison tooling separately.
+
+Use branch perf/c-api-adapter-second-pass in a separate worktree based on
+merged80b7785. Plans remain local and excluded. Update public docs/changelog and
+provenance; commit stable completed improvements with measured residual costs.
+No new push, PR, merge, tag or package publication is authorized for this pass.

@@ -6452,3 +6452,16 @@ contract, clean independent review and benchmark evidence. No src/ or capi/
 implementation authored. Plans remain local and excluded. The PR branch alone
 will be pushed under this explicit authorization; no main update, spec/release
 tag, merge or package publication is authorized.
+
+### 2026-10-05 — spec coordinator — C15 further optimization authorization
+
+The owner confirmed PR #30 was merged and requested further performance work.
+Verified merged origin/main80b7785 and successful prior Linux/macOS/coverage CI,
+latest local released specification spec-v22, clean separate implementation and
+measurement worktrees, writable git metadata and shared exclusion of local plans.
+Original unrelated changes and earlier worktrees remain untouched. Inputs:
+current CLAUDE.md/protocol, branch metadata, public CI metadata and existing
+observable benchmark goals. No implementation code authored. Fresh clean-room
+implementation delegation will receive rules verbatim and released/allowed
+inputs only. This entry supplies goals/provenance, no implementation design;
+no new spec behavior or publication.
