@@ -7611,3 +7611,65 @@ publication. Work item:C15; final integration commit recorded in handover.
     Coverage index: 1,753 active and 46 pending cases.
   - Commits: `docs(spec): apply the waiting-error rules inside argument documents` and this
     entry. Not released or tagged. Not pushed.
+
+- 2026-10-05 — Role: independent spec reviewer, oracle side (re-review, round 4). Item: C14, the
+  spec-v23 draft (`c658681..f6e2d87` on `c14/spec-v23`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the coordinator's
+    message, `git diff c658681..HEAD` (§§9.2 and 9.4, `docs/spec/README.md`, the conformance and
+    pending READMEs, the #98 answer, the eleven new cases with the fixtures `files/v23/gg/` and
+    `files/v23/gh/` and their golden files, the spec-team entry), the pinned libucl source (read
+    as the oracle-side role allows), and black-box runs of this worktree's
+    `target/libucl-oracle/ucl-dump` and `ucl-differential --check` on probe files in this
+    session's scratchpad, with two more probe directories of my own: `gm/` holding `a.inc`
+    (`ma = 1`), a directory `b/` and `c.inc` (`mc = 3`), and `gu/` holding `B.inc` (`ub = 2`) and
+    a directory `a/`. MISS and SKIP are as in my first entry.
+  - Result: approved. Both round-3 findings are resolved, the stray README line is rewrapped, the
+    new text and the #98 answer state behaviour only, and §9.2's miss quirk ("not an error
+    either. It needs no skip" for the miss alone, and the new sentence that it still waits within
+    the argument document) agrees with the new §9.4 clause. No new finding.
+  - Probes at the boundaries, all matching the draft:
+    - Argument documents with their own miss or a nested rejection: every example of the new
+      §9.4 clause; also two levels deep, where the innermost document's miss and directory
+      include reject it, the middle one then fails at its own directory include, and the
+      document is an error, or `b: int 1 @5` after a SKIP; with no directory include in the
+      middle one, or with only a miss in the innermost one, `b: int 1 @5` without a skip. A glob
+      there behaves as at the document level: `path=["files/v23/gg"]` rejects the argument
+      document, `["files/v23/gh", "nothere"]` passes.
+    - Skips inside and outside: a SKIP in the argument document after the directory include is
+      never read (an error); a SKIP in an argument document does not clear the enclosing
+      document's miss (an error); an argument document rejected by its own directory include
+      waits outside like any rejection, so a later `.include(try=true) "files/v4"` in the
+      document fails even with a SKIP after it.
+    - The enclosing document's errors do not reach in: after `.priority(x) 3⏎a = 1`, an
+      argument document's `.include(try=true) "files/v4"` is skipped and a later SKIP gives
+      `{ a: int 1 @3, b: int 1 @5 }`; an argument document's miss does not wait outside, so a
+      later `.include(try=true) "files/v4"` in the document is skipped without any SKIP.
+    - Glob byte order, after MISS with `path=[DIR, "nothere"]` and `"*"`: a directory match
+      first (`files/v23/gg`) includes nothing from that directory; in the middle (`gm`) `ma` is
+      included and `mc` is not, while without a waiting error both are; last (`files/v23/gh`)
+      `ha` is included; byte order puts `B.inc` before the directory `a/` (`gu`), so `ub` is
+      included.
+    - Several list directories: with `"a*"` and `["files/v23/gh", "files/v23/gg", "gm"]`, `ha`
+      and `ma` are included and the middle directory's directory match only fails that
+      directory; with `"*"` and `["files/v23/gh", "files/v23/gg", "nothere"]`, `ha` is included
+      and the last directory decides.
+  - Observation, not a finding: the active `macro_args_first_miss_inside_then_try_directory_error`
+    and `macro_args_first_miss_in_included_file_then_try_directory_error` pass on both crates
+    because both reject a miss inside an argument document; they will guard the §9.2 miss quirk
+    when it is implemented.
+  - Checks: `cargo test --test conformance` at `f6e2d87`: all three tests pass, 1,753 cases,
+    1,749 pass, the four expected failures. In `git archive` copies with all 46 pending cases and
+    their fixtures moved into `cases/spec/` (`src/` compiled, not read): origin/main's crate,
+    1,799 cases, 1,752 pass, failing 43 pending cases (all but the three rejection cases ending in
+    `_error`) and no active one; `c14/spec21-impl`'s crate at `80745c3`, 1,769 pass, failing 26
+    pending cases and no active one; no pending case passes on both. `scripts/ci.sh golden` with
+    `LIBUCL_DIR` at the pin `24c8b39`: "golden files are current", worktree clean afterwards.
+    1,753 active and 46 pending cases, 1,799 coverage rows, one per case, in order;
+    `pending/README.md` lists every pending case; the active and pending copies of
+    `files/v23/gg/` and `files/v23/gh/` are identical; the counts in the #98 answer (sixteen
+    active, fourteen pending) and in the README notes are right. New lines are within 100
+    columns; `git diff --check c658681..HEAD` is clean.
+  - Commits: this reviewer log entry only, on `c14/spec-v23`. Not tagged or pushed.
+  - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
+    This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
+    names or source structure.
