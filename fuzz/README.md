@@ -81,9 +81,12 @@ its string, or a macro's VALUE, with other text, acceptance included, and gives 
 result of the text with the value substituted in place, as for registered variables; a
 registered variable gives that result where writing `[handled]` into the source would not
 (`a = [handled]y` starts an array). The handler then resolves nothing, so the rules below are
-applied without it. Where registering could change other text (an unbraced `$H_`, a `$$`, or a
-name of other bytes than letters, digits and `_`), the handler's own result stays the
-expectation, with the §7.7 rule below.
+applied without it. Where registering could change other text, the handler's own result stays
+the expectation, with the §7.7 rule below: a unit holds an unbraced `$H_`, which a registered
+name would replace while the handler is never asked for it (§7.4), or a `\` anywhere, since
+escapes are decoded before expansion (§7.6) and the scan reads the bytes as written (`"$\H_X"`
+and `"$\u0048_X"` are an unbraced `$H_X`, `"$\{H_X}y"` a braced reference), or the name has
+other bytes than letters, digits and `_`.
 
 ## Verdicts
 

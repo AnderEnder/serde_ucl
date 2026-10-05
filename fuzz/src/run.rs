@@ -66,10 +66,19 @@ pub fn expectation(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Expecta
 /// Under `variable-handler`, the names of the braced references `${H_…}` in the input and its
 /// other units that are not registered, which the test handler resolves (§7.7), in the order
 /// found; empty without the flag. `None` when registering them could change other text, and the
-/// handler's own result stays the expectation: a `$H_` that is not braced, which a registered
-/// name that is a prefix of the text after the `$` would replace (§7.4), a `$$` (§7.5), or a
-/// name of other bytes than letters, digits and `_`. Every `${` is looked at, also inside another
-/// reference's name, since references inside it are expanded (§7.3).
+/// handler's own result stays the expectation:
+///
+/// - a `$H_` that is not braced, which a registered name that is a prefix of the text after the
+///   `$` would replace, while the handler is never asked for it (§7.4);
+/// - a `\` anywhere in a unit. Escapes are decoded before expansion (§6.1, §7.6), so `"$\H_X"`,
+///   `"$\u0048_X"` and the unquoted `$\H_X` are the unbraced `$H_X` too, and `"$\{H_X}y"` is a
+///   braced reference that this scan of the bytes as written does not see;
+/// - a name of other bytes than letters, digits and `_`.
+///
+/// A `$$` needs no such care: it matters only in a string where a reference was replaced (§7.5),
+/// which for a handler reference is the string whose result §7.7 gives as that of the registered
+/// name (`"${H_X}$$"` → `[handled]$`). Every `${` is looked at, also inside another reference's
+/// name, since references inside it are expanded (§7.3).
 pub fn handler_names(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Option<Vec<String>> {
     if !flags.iter().any(|flag| flag == "variable-handler") {
         return Some(Vec::new());
@@ -81,8 +90,7 @@ pub fn handler_names(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Optio
         .collect();
     let mut names: Vec<String> = Vec::new();
     for text in std::iter::once(input).chain(units.iter().map(Vec::as_slice)) {
-        let has = |needle: &[u8]| text.windows(needle.len()).any(|w| w == needle);
-        if has(b"$H_") || has(b"$$") {
+        if text.contains(&b'\\') || text.windows(3).any(|w| w == b"$H_") {
             return None;
         }
         for at in 0..text.len() {
@@ -872,10 +880,15 @@ mod tests {
             handler_names(&registered, b"a = \"x${H_X}${H_Y}\"", &[]),
             Some(vec!["H_Y".to_string()])
         );
-        // Registering could change other text: an unbraced `$H_`, a `$$`, or another name.
+        // A `$$` changes nothing that registering would (§7.5).
+        assert_eq!(
+            handler_names(&handler, b"a = \"x${H_X}$$\"\nb = \"$${H_Y}\"", &[]),
+            Some(vec!["H_X".to_string(), "H_Y".to_string()])
+        );
+        // Registering could change other text: an unbraced `$H_`, a backslash, or another name.
         for text in [
             "a = \"x${H_X}\"\nb = $H_X",
-            "a = \"x${H_X}$$\"",
+            "a = \"x${H_X}\"\nb = \"\\n\"",
             "a = \"x${H_X.y}\"",
             "a = \"x${H_$ABI}\"",
         ] {
@@ -893,6 +906,14 @@ mod tests {
         }
         assert_eq!(
             handler_names(&handler, b"x = 1", &[b"y = $H_Z".to_vec()]),
+            None
+        );
+        assert_eq!(
+            handler_names(
+                &handler,
+                b"x = \"${H_X}y\"",
+                &[b"y = \"$\\{H_Z}\"".to_vec()]
+            ),
             None
         );
         // Nothing to register, or no handler.
@@ -1267,6 +1288,18 @@ mod tests {
                 "{other}"
             );
         }
+        // A `$$` after the reference: the registered name gives `$` for it (§7.5), libucl's
+        // handler `x[handled]`.
+        let dollars = "a = \"x${H_X}$$\"";
+        assert!(matches!(
+            verdict_12_flags(dollars, &run_flags, &dump("x[handled]$")),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            dollars,
+            &run_flags,
+            &dump("x[handled]")
+        )));
         let fallback = "a = \"x${H_X}y\"\nb = $H_X";
         let handled = serde_json::json!({"t": "object", "entries": [
             {"k": "a", "v": [{"t": "string", "v": "x[handled]"}]},
@@ -1276,6 +1309,59 @@ mod tests {
             verdict_12_flags(fallback, &run_flags, &handled),
             Verdict::Skipped(uncertain::HANDLER)
         ));
+    }
+
+    /// Review of the C14 classifier gaps, finding 1 (§7.4, §7.6, §7.7): `${H_X}` resolved by the
+    /// handler, and in the same document an unbraced `$H_X`, as written or once its escapes are
+    /// decoded. The handler is never asked for the unbraced reference, which a registered `H_X`
+    /// would replace, so the oracle runs with the handler alone. Its results, the dumps here,
+    /// agree, and the registered run's `[handled]` for `f` is reported.
+    #[test]
+    fn unbraced_handler_references_keep_the_handlers_result() {
+        let run_flags = flags(&["string-input", "variable-handler"]);
+        let dump = |f: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "e", "v": [{"t": "string", "v": "[handled]"}]},
+                {"k": "f", "v": [{"t": "string", "v": f}]}
+            ]})
+        };
+        for (form, result) in [
+            ("\"$H_X\"", "$H_X"),
+            ("$H_X", "$H_X"),
+            ("\"$\\H_X\"", "$H_X"),
+            ("\"$H_X$\"", "$H_X$"),
+            ("\"$\\u0048_X\"", "$H_X"),
+            ("$\\H_X", "$H_X"),
+        ] {
+            let input = format!("e = \"${{H_X}}\"\nf = {form}");
+            assert_eq!(
+                handler_names(&run_flags, input.as_bytes(), &[]),
+                None,
+                "{input}"
+            );
+            let expected = expectation(&run_flags, input.as_bytes(), &[]);
+            assert_eq!(expected.oracle_flags, run_flags, "{input}");
+            assert_eq!(expected.context_flags, run_flags, "{input}");
+            assert!(
+                matches!(
+                    verdict_in("07-variables", &input, &run_flags, &dump(result)),
+                    Verdict::Agree
+                ),
+                "{input}"
+            );
+            let registered = result.replace("$H_X", "[handled]");
+            let verdict = verdict_in("07-variables", &input, &run_flags, &dump(&registered));
+            if registered == "[handled]" {
+                assert!(values_differ(&verdict), "{input}");
+            } else {
+                // `[handled]$` holds the handler's value with other text, which the §7.7
+                // recogniser excuses in any string (fuzz/README.md, *Known limits*).
+                assert!(
+                    matches!(verdict, Verdict::Skipped(uncertain::HANDLER)),
+                    "{input}"
+                );
+            }
+        }
     }
 
     /// C14 finding `values-differ-6dc7de42c47fd96a` (§12.5, QUESTIONS #81): the comment `# c` of
