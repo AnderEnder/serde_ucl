@@ -7236,25 +7236,20 @@ publication. Work item:C15; final integration commit recorded in handover.
   the C15 work unchanged.
   - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, `QUESTIONS.md` #86 to
     #93 and the spec-v20 implementer's and reviewer's entries in this log; released §9.2, §9.4,
-    §13.1 and §13.2; `tools/ucl-dump/ucl_dump.c`; the pinned libucl source (`ucl_parser.c`: the
-    init, key and macro states and the end-of-chunk check; `ucl_util.c`: the include search over
-    the path list, single-file include, `.load` and URL skips, the error helpers); ucl-dump and
+    §13.1 and §13.2; `tools/ucl-dump/ucl_dump.c`; the pinned libucl source; ucl-dump and
     `ucl-differential --check` on probe files in `target/v23-probe/`.
-  - Findings. #91 and #92: the takeover again happens when the parser comes back to the file
-    after a macro and reads anything more from it. The trailing whitespace and `;` that end a
-    macro are consumed with it, so a macro with only those after it up to the end of the file
-    takes nothing over; a key or a `}` of the file's own ends the takeover. An object holds at
-    most one brace, so one that still holds a brace taken over gets no second one. #93: the
-    error of a first-directory miss or a rejected argument document stays set for the whole
-    parse, whichever unit raised it, and the next skip that the parse reads clears it, in any
-    unit except an argument document, which has a parser of its own. The question's runs all
-    reproduce. On the disagreement: the reviewer's probe files went with the removed worktree, but
-    the only rejection of a skip in an included file after a miss in the document that I could
-    reproduce comes from the search list, which stays in effect after the miss: a plain
-    `.include` of the file holding the skip is searched in the listed directories, and when none
-    of them has it the include itself is an error and the skip is never read. With a `path`
-    naming the file's directory, or the file in a listed directory, it is accepted, as in the
-    implementer's runs.
+  - Findings. #91 and #92: the oracle runs of both questions reproduce. A macro followed by
+    nothing but whitespace and `;` up to the end of the file takes no brace over again, anything
+    else after it does, and a key or a `}` of the file's own ends the takeover; an object that
+    still holds a brace taken over gets no second one. #93: the runs reproduce. A first-directory
+    miss or a rejected argument document in any unit is discarded by the next skip that the
+    parse reads, in any unit except a macro argument document. On the disagreement: the
+    reviewer's probe files went with the removed worktree, but the only rejection of a skip in an
+    included file after a miss in the document that I could reproduce comes from the search
+    list, which stays in effect after the miss: a plain `.include` of the file holding the skip
+    is searched in the listed directories, and when none of them has it the include itself is an
+    error and the skip is never read. With a `path` naming the file's directory, or the file in a
+    listed directory, it is accepted, as in the implementer's runs.
   - Spec: §9.4, *Quirk: macros before the first key*, says when nothing is taken over again
     (#91) and that the file's own `}` ends the takeover (#92), and a new §9.4 quirk, *the miss
     and the skip in different units*, states #93 with the search-list caveat; §9.2, §13.1 and
@@ -7361,3 +7356,45 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
     This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
     names or source structure.
+
+- 2026-10-05 — Role: spec team (draft, second round). Item: C14, the spec-v23 review above and
+  questions #97 (asked on `c14/fuzz-gaps`, `fc56837`), #98 and #99 (asked on `c14/spec21-impl`,
+  `41965cd`), on `c14/spec-v23`.
+  - Inputs consulted: the review entry above; the three question rows, copied unchanged; the
+    pinned libucl source; ucl-dump and `ucl-differential --check` on probe files in
+    `target/v23-probe/`; the conformance tests of origin/main's crate and of `c14/spec21-impl`'s
+    crate, each built from a `git archive` copy under `target/` with every pending case moved
+    in, run as black boxes.
+  - Review findings: (1) a first-directory miss inside an argument document, or in a file it
+    includes, is no error and needs no skip, and the list it sets stays in that document: new
+    §9.2 quirk and a note in §9.4, four pending cases and one active. (2) While a miss or a
+    rejected argument document waits for a skip, an include with `try=true` of a directory, also
+    as a glob match, ends the input with the error, while a missing file is still skipped: new
+    §9.4 quirk *while an error waits for a skip*, with pointers in §9.2 and the table note, three
+    pending cases. (3) The earlier spec-team entry above now names only the pinned libucl source.
+    (4) The #91 and #92 answers say that they refine #87; the first-name quirk refers forward to
+    the file's own `}`; the #93 answer no longer refers to runs outside the question; the
+    pending README says which cases also need §9.2; the #91 bullet names §9.2's whitespace bytes.
+  - Questions: #97, a double-quoted string is expanded only if it holds a `$` as written, `\$`
+    included; a `$` alone, or a `$` elsewhere in the document, does not count (§7.6, §6.1):
+    three pending cases, one active. #98, a silent stop while such an error waits makes the
+    result that error, and no later input discards it (§9.4, §13.1): six active cases, together
+    with finding (2). The question's miss forms with `.try_include` fail for another reason, the
+    search list, so the cases use `.fail`. #99, after rejected ARGUMENTS only a `)` that is the
+    last byte of its unit is the end-of-input error, and any byte after it is VALUE (§9.2): four
+    active cases, two pending.
+  - Pending or active: a case is active when both crates give the oracle's result. The two
+    rejection forms of finding (2) pass on origin/main only because it rejects every rejected
+    argument document, and fail on `c14/spec21-impl`, so they are pending. `c14/spec21-impl`
+    passes the fourteen `spec-v21` pending cases and three `spec-v23` ones that need §9.2
+    (`macro_args_rejected_then_load_try_in_included_file` and the two #99 VALUE cases); they stay
+    pending until that fix merges.
+  - Checks: `cargo test --test conformance`: 1,743 cases, the four expected failures. With every
+    pending case moved in, origin/main's crate fails the 35 pending cases except the two named
+    above, and nothing else; `c14/spec21-impl`'s fails the eighteen `spec-v23` cases it does not
+    follow, and nothing else. `scripts/regen-golden.sh` changed no existing golden file;
+    `scripts/ci.sh golden` at `aacc08f`: golden files are current. Coverage index: 1,743 active
+    and 35 pending cases.
+  - Commits: `docs(spec): answer the spec-v23 review and questions #97 to #99` and this entry,
+    which also rewrites the inputs and findings of the earlier spec-team entry. Not released or
+    tagged. Not pushed.
