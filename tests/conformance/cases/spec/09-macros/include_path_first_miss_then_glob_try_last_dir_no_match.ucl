@@ -1,0 +1,4 @@
+.include(path=["", "files/v4/p1"]) "pa.inc"
+.include(try=true, glob=true, path=["files/v4/g", "nothere"]) "*/"
+.load(try=true, key="t") "missing.txt"
+b = 2

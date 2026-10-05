@@ -1,0 +1,5 @@
+.priority(x) 3
+a = 1
+.include(try=true, path=["files", "nothere"]) "v4"
+.load(try=true, key="t") "missing.txt"
+b = 2

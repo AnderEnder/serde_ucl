@@ -1,0 +1,5 @@
+.priority(x) 3
+a = 1
+.include(try=true, glob=true, path=["files/v4/g"]) "*/"
+.load(try=true, key="t") "missing.txt"
+b = 2
