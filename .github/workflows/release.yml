@@ -74,7 +74,7 @@ jobs:
         run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
       - name: Build source archive once and verify clean source installation
         run: python3 capi/distribution.py --kind source --target macos-arm64 --verify --require-clean --output target/c-source
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: serde-ucl-capi-input-source
           path: target/c-source/*
@@ -140,7 +140,7 @@ jobs:
             --candidate-prefix target/c-candidate \
             --golden-dir target/c-oracle/golden \
             --verify --require-clean --output target/c-sdk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: serde-ucl-capi-input-sdk-${{ matrix.target }}
           path: target/c-sdk/*
@@ -155,14 +155,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: serde-ucl-capi-input-*
           merge-multiple: true
           path: target/c-incoming
       - name: Require source and all SDKs from this version and commit
         run: python3 capi/collect_distribution.py --input target/c-incoming --output target/c-dist --commit "$GITHUB_SHA"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: serde-ucl-capi-distribution
           path: target/c-dist/*
@@ -227,7 +227,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: scripts/ci.sh release
         run: scripts/ci.sh release "$GITHUB_REF_NAME"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: serde-ucl-capi-distribution
           path: target/c-dist
