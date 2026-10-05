@@ -631,13 +631,16 @@ fn report(options: &Options, input: &Input, dir: &Path, checked: &Checked) -> St
     let _ = writeln!(text, "input: {}", input.origin);
     let _ = writeln!(text, "flags: {}", input.flags.join(" "));
     let _ = writeln!(text, "working directory: {}", input.dir.display());
-    if let Some(line) = oracle_flags_line(&input.flags) {
+    if let Some(line) = oracle_flags_line(&input.flags, &checked.oracle_flags) {
         let _ = writeln!(text, "{line}");
     }
     let _ = writeln!(text, "oracle: {}", oracle_text(&checked.oracle));
     let _ = writeln!(text, "crate:  {}", crate_text(&checked.krate));
-    let options_text = run::expectation_options(&input.flags)
+    let options_text = run::oracle_options(&checked.oracle_flags)
         .unwrap_or_default()
+        .iter()
+        .map(|option| shell_word(option))
+        .collect::<Vec<_>>()
         .join(" ");
     let _ = writeln!(
         text,
@@ -654,16 +657,35 @@ fn report(options: &Options, input: &Input, dir: &Path, checked: &Checked) -> St
     text
 }
 
-/// For flags the oracle does not run with all of ([`run::expectation_flags`]), a line that says
-/// which it runs with.
-fn oracle_flags_line(flags: &[String]) -> Option<String> {
-    let expected = run::expectation_flags(flags);
-    (expected.len() < flags.len()).then(|| {
-        format!(
-            "oracle flags: {} (the expected result is the one without zerocopy, spec §12.2)",
-            expected.join(" ")
-        )
-    })
+/// When the oracle ran with other flags than the input's ([`run::expectation`]), a line that says
+/// which, and why.
+fn oracle_flags_line(flags: &[String], oracle_flags: &[String]) -> Option<String> {
+    if oracle_flags == flags {
+        return None;
+    }
+    let mut why = Vec::new();
+    if flags.iter().any(|flag| flag == "zerocopy") {
+        why.push("without zerocopy, spec §12.2");
+    }
+    if oracle_flags.iter().any(|flag| !flags.contains(flag)) {
+        why.push("the handler's names registered with its value, spec §7.7");
+    }
+    Some(format!(
+        "oracle flags: {} (the expected result: {})",
+        oracle_flags.join(" "),
+        why.join("; ")
+    ))
+}
+
+/// `word` as one word of a POSIX shell command: as it is when it holds only bytes that are
+/// never special, otherwise in single quotes.
+fn shell_word(word: &str) -> String {
+    let plain = |b: u8| b.is_ascii_alphanumeric() || b"_-./:=,+@%".contains(&b);
+    if !word.is_empty() && word.bytes().all(plain) {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
 }
 
 fn oracle_text(result: &OracleResult) -> String {
@@ -707,7 +729,7 @@ fn check_one(options: &Options, file: &Path) -> ExitCode {
     };
     let dir = options.check_dir.clone().expect("set by parse_options");
     let checked = run::check(&target, &bytes, &flags, &dir);
-    if let Some(line) = oracle_flags_line(&flags) {
+    if let Some(line) = oracle_flags_line(&flags, &checked.oracle_flags) {
         println!("{line}");
     }
     println!("oracle: {}", oracle_text(&checked.oracle));
@@ -777,7 +799,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     /// `check` runs the oracle, and a report tells how to run it again, with the options of the
-    /// flags without `zerocopy` (spec §12.2, `run::expectation_options`). A stand-in oracle
+    /// flags without `zerocopy` (spec §12.2, `run::expectation`). A stand-in oracle
     /// writes the options it was given as its dump.
     #[test]
     fn the_oracle_runs_and_is_reproduced_without_zerocopy() {
@@ -846,5 +868,50 @@ mod tests {
             text.contains("oracle flags: registered-macros string-input priority:3 "),
             "{text}"
         );
+
+        // Under `variable-handler`, the handler's names reach the oracle registered with its
+        // value (spec §7.7), and the reproduce line quotes them for the shell.
+        let flags: Vec<String> = ["string-input", "variable-handler"]
+            .map(String::from)
+            .into();
+        let bytes = b"a = \"x${H_X}y\"";
+        let checked = run::check(&target, bytes, &flags, &dir);
+        let OracleResult::Dump(dump) = &checked.oracle else {
+            panic!(
+                "no dump from the stand-in: {}",
+                oracle_text(&checked.oracle)
+            );
+        };
+        assert_eq!(
+            dump["entries"][0]["v"][0]["v"],
+            format!("-S -H -v H_X=[handled] {}", file.display())
+        );
+        let input = Input {
+            bytes: bytes.to_vec(),
+            flags,
+            dir: dir.clone(),
+            origin: "a test".to_string(),
+        };
+        let text = report(&options, &input, &dir, &checked);
+        let reproduce = text
+            .lines()
+            .find(|line| line.starts_with("reproduce:"))
+            .expect("a reproduce line");
+        assert!(
+            reproduce.contains(" -S -H -v 'H_X=[handled]' "),
+            "{reproduce}"
+        );
+        assert!(
+            text.contains("oracle flags: string-input variable-handler var:H_X=[handled] "),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn shell_words() {
+        assert_eq!(shell_word("-S"), "-S");
+        assert_eq!(shell_word("H_X=[handled]"), "'H_X=[handled]'");
+        assert_eq!(shell_word("a'b"), "'a'\\''b'");
+        assert_eq!(shell_word(""), "''");
     }
 }

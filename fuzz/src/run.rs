@@ -2,36 +2,126 @@
 //! the conformance runner compares a case with its golden file (`tests/common/oracle.rs`).
 
 use crate::oracle::{self, Setup};
-use crate::uncertain::{self, Context};
+use crate::uncertain::{self, Context, SavedComment};
 use serde_json::Value as J;
-use serde_ucl::parse::{ErrorKind, Parser, Uncertain};
+use serde_ucl::parse::{ErrorKind, FileKind, FsLoader, Loader, Parser, Uncertain};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Read;
-use std::path::Path;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-/// The flags the oracle runs with to give the expected result of an input with `flags`: all of
-/// them but `zerocopy`. Spec §12.2 gives a document with `zerocopy` the result the spec gives it
-/// without `zerocopy`, all other settings unchanged, while libucl's own result with the flag is
-/// undefined in places (the text of an expanded `.emit` and what depends on it, and documents
-/// that include a file with entries). The crate still parses with every flag.
-pub fn expectation_flags(flags: &[String]) -> Vec<String> {
-    flags
+/// What the expected result of an input is: the oracle's result with `oracle_flags`, compared
+/// with the help of the recognisers of uncertain behaviour, which see `context_flags`.
+pub struct Expectation {
+    pub oracle_flags: Vec<String>,
+    pub context_flags: Vec<String>,
+}
+
+/// The expected result of `input` with `flags`, given `units`, the document's other units in the
+/// crate's parse (`CrateNotes::units`). The crate still parses with `flags`; the oracle runs with
+/// them but for two changes, each the result the spec gives the project:
+///
+/// - `zerocopy` is dropped. Spec §12.2 gives a document with `zerocopy` the result it gives it
+///   without, all other settings unchanged, while libucl's own result with the flag is undefined
+///   in places (the text of an expanded `.emit` and what depends on it, and documents that
+///   include a file with entries).
+/// - Under `variable-handler`, each name that the test handler would resolve in the document
+///   ([`handler_names`]) is registered as a variable with the handler's value, `[handled]`.
+///   Spec §7.7 leaves libucl's result undefined where such a reference shares its string, or a
+///   macro's VALUE, with other text, whether the document is accepted included, and gives the
+///   project the result of the text with the value substituted in place, as for registered
+///   variables. A registered variable gives exactly that, where writing `[handled]` into the
+///   source would not: `a = [handled]y` starts an array, while `a = ${H_X}y` is the string
+///   `[handled]y`. Registered names take precedence over the handler (§7.7), which then resolves
+///   nothing, so the recognisers do not see `variable-handler`: its uncertainty cannot arise.
+pub fn expectation(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Expectation {
+    let mut oracle_flags: Vec<String> = flags
         .iter()
         .filter(|flag| *flag != "zerocopy")
         .cloned()
-        .collect()
+        .collect();
+    let mut context_flags = oracle_flags.clone();
+    if let Some(names) = handler_names(&oracle_flags, input, units)
+        && !names.is_empty()
+    {
+        oracle_flags.extend(names.iter().map(|name| format!("var:{name}=[handled]")));
+        context_flags = oracle_flags
+            .iter()
+            .filter(|flag| *flag != "variable-handler")
+            .cloned()
+            .collect();
+    }
+    Expectation {
+        oracle_flags,
+        context_flags,
+    }
 }
 
-/// The options the oracle runs with for an input with `flags`: those of the
-/// [`expectation_flags`]. Running it ([`check`]) and telling how to run it again (the fuzzer's
-/// reports) both use this.
-pub fn expectation_options(flags: &[String]) -> Result<Vec<String>, String> {
-    oracle_options(&expectation_flags(flags))
+/// Under `variable-handler`, the names of the braced references `${H_…}` in the input and its
+/// other units that are not registered, which the test handler resolves (§7.7), in the order
+/// found; empty without the flag. `None` when registering them could change other text, and the
+/// handler's own result stays the expectation:
+///
+/// - a `$H_` that is not braced, which a registered name that is a prefix of the text after the
+///   `$` would replace, while the handler is never asked for it (§7.4);
+/// - an escape that can make or hide a reference: a `\` before `u`, `H`, `_` or `{`. Escapes are
+///   decoded before expansion in double-quoted strings and unquoted values (§6.1, §4.7, §7.6), so
+///   `"$\H_X"`, `"$\u0048_X"` and the unquoted `$\H_X` are the unbraced `$H_X` too, and
+///   `"$\{H_X}y"` is a braced reference that this scan of the bytes as written does not see. Other
+///   escapes cannot: one that yields `$` is `\$`, which leaves `$H_` or `${H_` in the bytes as
+///   written; an escaped byte of a braced name, `}` included, leaves its `\` in the name as
+///   written, a name of other bytes (below); and the rest, `\n` or `\"` for example, yield no byte
+///   of a reference. A `\` in a comment, a key, a single-quoted string, a heredoc or a macro VALUE,
+///   which decode no escapes before expansion or expand nothing (§7.2, §9.2), is matched all the
+///   same;
+/// - a name of other bytes than letters, digits and `_`.
+///
+/// A `$$` needs no such care: it matters only in a string where a reference was replaced (§7.5),
+/// which for a handler reference is the string whose result §7.7 gives as that of the registered
+/// name (`"${H_X}$$"` → `[handled]$`). Every `${` is looked at, also inside another reference's
+/// name, since references inside it are expanded (§7.3).
+pub fn handler_names(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Option<Vec<String>> {
+    if !flags.iter().any(|flag| flag == "variable-handler") {
+        return Some(Vec::new());
+    }
+    let registered: Vec<&str> = flags
+        .iter()
+        .filter_map(|flag| flag.strip_prefix("var:"))
+        .filter_map(|var| var.split_once('=').map(|(name, _)| name))
+        .collect();
+    let mut names: Vec<String> = Vec::new();
+    for text in std::iter::once(input).chain(units.iter().map(Vec::as_slice)) {
+        let escape = |w: &[u8]| w[0] == b'\\' && matches!(w[1], b'u' | b'H' | b'_' | b'{');
+        if text.windows(2).any(escape) || text.windows(3).any(|w| w == b"$H_") {
+            return None;
+        }
+        for at in 0..text.len() {
+            let Some(after) = text[at..].strip_prefix(b"${") else {
+                continue;
+            };
+            let Some(end) = after.iter().position(|&b| b == b'}') else {
+                continue;
+            };
+            let name = &after[..end];
+            if !name.starts_with(b"H_") {
+                continue;
+            }
+            if !name.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_') {
+                return None;
+            }
+            let name = std::str::from_utf8(name).expect("ASCII");
+            if !registered.contains(&name) && !names.iter().any(|known| known == name) {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    Some(names)
 }
 
 /// The oracle's options for the entries of a `.flags` file, mapped as `scripts/regen-golden.sh`
@@ -149,27 +239,39 @@ pub enum CrateResult {
 
 /// Parses `bytes` as a document given as text, set up as the oracle runs with `setup` from the
 /// working directory `base_dir`. With `dump-comments`, the dump has the saved comments, as the
-/// oracle's does. Also returns what [`uncertain`] needs from the parse: the texts of the comments
-/// the crate saved but attached to no value (spec §12.5), and the uncertain rules the parse
-/// reached that its result does not show ([`Parser::uncertain_reached`]).
+/// oracle's does. Also returns what [`uncertain`] needs from the parse: the comments the crate
+/// saved and the values they are attached to (spec §12.5), the uncertain rules the parse reached
+/// that its result does not show ([`Parser::uncertain_reached`]), and the document's other units.
 pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, CrateNotes) {
     let result = oracle::quietly(|| {
+        let units = Rc::new(RefCell::new(Vec::new()));
         let mut parser = oracle::configure(setup, base_dir);
+        parser.set_loader(RecordingLoader {
+            units: Rc::clone(&units),
+        });
+        if setup.registered_macros {
+            let units = Rc::clone(&units);
+            parser.register_macro("emit", move |call| {
+                units.borrow_mut().push(call.value().to_vec());
+                oracle::emit_macro(call)
+            });
+        }
         let parsed = match parser.parse(bytes) {
             Ok(value) => Ok(value),
             Err(e) if e.is_stopped() => Ok(e.into_partial().expect("a stop keeps its result")),
             Err(e) => Err(e),
         };
         let mut notes = CrateNotes {
-            dropped_comments: Vec::new(),
+            comments: Vec::new(),
             uncertain: parser.uncertain_reached(),
+            units: units.take(),
         };
         let value = match parsed {
             Ok(value) => value,
             Err(e) => return (Err(e), notes),
         };
         let comments = setup.dump_comments.then(|| oracle::comment_map(&parser));
-        notes.dropped_comments = dropped_comments(&parser);
+        notes.comments = saved_comments(&parser);
         (Ok(oracle::dump(&value, comments.as_ref())), notes)
     });
     match result {
@@ -197,23 +299,77 @@ pub fn run_crate(setup: &Setup, base_dir: &Path, bytes: &[u8]) -> (CrateResult, 
 /// What the crate's parse tells [`uncertain`] besides its result.
 #[derive(Default)]
 pub struct CrateNotes {
-    pub dropped_comments: Vec<String>,
+    /// The comments the crate saved, in the order it read them ([`Parser::comments`]).
+    pub comments: Vec<SavedComment>,
     pub uncertain: Vec<Uncertain>,
+    /// The bytes of the document's units other than the input: every file the loader read, and
+    /// every text the test macro `.emit` had parsed in place (spec §9.4, §13.2). A file that
+    /// `.load` reads is among them, since the loader is not told why it reads (§9.6).
+    pub units: Vec<Vec<u8>>,
 }
 
-/// The texts of the saved comments that are attached to no value of the result.
-fn dropped_comments(parser: &Parser) -> Vec<String> {
-    let attached: BTreeSet<usize> = parser
-        .attached_comments()
-        .iter()
-        .flat_map(|group| group.comments.iter().copied())
-        .collect();
+/// The filesystem loader of `oracle::configure`, which also keeps the bytes of every file it
+/// reads. Each method is the filesystem loader's own.
+struct RecordingLoader {
+    units: Rc<RefCell<Vec<Vec<u8>>>>,
+}
+
+impl RecordingLoader {
+    fn keep(&self, read: io::Result<Vec<u8>>) -> io::Result<Vec<u8>> {
+        if let Ok(bytes) = &read {
+            self.units.borrow_mut().push(bytes.clone());
+        }
+        read
+    }
+}
+
+impl Loader for RecordingLoader {
+    fn current_dir(&self) -> io::Result<PathBuf> {
+        FsLoader.current_dir()
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        FsLoader.canonicalize(path)
+    }
+
+    fn canonicalize_optional(&self, path: &Path) -> io::Result<PathBuf> {
+        FsLoader.canonicalize_optional(path)
+    }
+
+    fn kind(&self, path: &Path) -> Option<FileKind> {
+        FsLoader.kind(path)
+    }
+
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.keep(FsLoader.read(path))
+    }
+
+    fn read_limited(&self, path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+        self.keep(FsLoader.read_limited(path, limit))
+    }
+
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
+        FsLoader.read_dir(path)
+    }
+}
+
+/// The saved comments of the last parse, in the order read, each with the path of the value it
+/// is attached to, or none when §8 replaced or discarded that value (spec §12.5).
+fn saved_comments(parser: &Parser) -> Vec<SavedComment> {
+    let mut values = vec![None; parser.comments().len()];
+    for group in parser.attached_comments() {
+        for &index in &group.comments {
+            values[index] = Some(group.path.clone());
+        }
+    }
     parser
         .comments()
         .iter()
-        .enumerate()
-        .filter(|(i, _)| !attached.contains(i))
-        .map(|(_, comment)| comment.text.clone())
+        .zip(values)
+        .map(|(comment, value)| SavedComment {
+            text: comment.text.clone(),
+            value,
+        })
         .collect()
 }
 
@@ -360,36 +516,58 @@ pub struct Target<'a> {
 /// The outcome of one input, with both results for a report.
 pub struct Checked {
     pub oracle: OracleResult,
+    /// The flags the oracle ran with ([`Expectation::oracle_flags`]), for a report to run it
+    /// again with.
+    pub oracle_flags: Vec<String>,
     pub krate: CrateResult,
     pub verdict: Verdict,
 }
 
-/// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both: the
-/// oracle with the [`expectation_options`], the crate with `flags`.
+/// Runs `bytes`, with the flags `flags` and the working directory `dir`, through both: the crate
+/// with `flags`, then the oracle with the [`expectation`]'s flags, which depend on the units the
+/// crate's parse read.
 pub fn check(target: &Target<'_>, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
-    let options = expectation_options(flags).expect("the fuzzer's flags are known");
+    let setup = Setup::from_flags(flags).expect("the fuzzer's flags are known");
+    let (krate, notes) = run_crate(&setup, dir, bytes);
+    let expected = expectation(flags, bytes, &notes.units);
+    let options = oracle_options(&expected.oracle_flags).expect("the fuzzer's flags are known");
     fs::write(target.file, bytes).expect("the work file can be written");
     let oracle = run_oracle(target.oracle, &options, target.file, dir, target.timeout);
-    check_against(oracle, bytes, flags, dir)
+    judge(oracle, krate, &notes, bytes, expected)
 }
 
 /// Runs `bytes` through the crate with `flags` from the working directory `dir` and compares its
-/// result with `oracle`, the oracle's result with the [`expectation_flags`]. The recognisers of
-/// uncertain behaviour see those flags too: the result expected with `zerocopy` is uncertain
-/// where the result without it is (§12.2).
+/// result with `oracle`, given as the oracle's result with the [`expectation`]'s flags, as
+/// [`check`] does. The unit tests use it with the oracle's dumps written out.
+#[cfg(test)]
 pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: &Path) -> Checked {
     let setup = Setup::from_flags(flags).expect("the fuzzer's flags are known");
     let (krate, notes) = run_crate(&setup, dir, bytes);
-    let expected_flags = expectation_flags(flags);
+    let expected = expectation(flags, bytes, &notes.units);
+    judge(oracle, krate, &notes, bytes, expected)
+}
+
+/// Compares the two results; the recognisers of uncertain behaviour see the expectation's
+/// context flags, so that the result expected with `zerocopy` is uncertain where the result
+/// without it is (§12.2).
+fn judge(
+    oracle: OracleResult,
+    krate: CrateResult,
+    notes: &CrateNotes,
+    bytes: &[u8],
+    expected: Expectation,
+) -> Checked {
     let ctx = Context {
         input: bytes,
-        flags: &expected_flags,
-        dropped_comments: &notes.dropped_comments,
+        flags: &expected.context_flags,
+        comments: &notes.comments,
         uncertain: &notes.uncertain,
+        units: &notes.units,
     };
     let verdict = compare(&oracle, &krate, &ctx);
     Checked {
         oracle,
+        oracle_flags: expected.oracle_flags,
         krate,
         verdict,
     }
@@ -398,6 +576,15 @@ pub fn check_against(oracle: OracleResult, bytes: &[u8], flags: &[String], dir: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The texts of the comments the crate attached to no value.
+    fn dropped(comments: &[SavedComment]) -> Vec<&str> {
+        comments
+            .iter()
+            .filter(|comment| comment.value.is_none())
+            .map(|comment| comment.text.as_str())
+            .collect()
+    }
 
     fn flags(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
@@ -426,8 +613,9 @@ mod tests {
         let ctx = Context {
             input: b"",
             flags: &[],
-            dropped_comments: &[],
+            comments: &[],
             uncertain: &[],
+            units: &[],
         };
         let compare = |oracle: &OracleResult, krate: &CrateResult| compare(oracle, krate, &ctx);
         let value = |text: &str| match dump(text) {
@@ -469,6 +657,8 @@ mod tests {
         ));
     }
 
+    /// The §7.7 recogniser, which applies where the handler's names cannot be registered
+    /// ([`expectation`]); this test gives it the handler's flags directly.
     #[test]
     fn mixed_handler_include_path_skips_only_the_undefined_empty_result() {
         let input = b".include(g=true,y=e)\"${H_}.*\"";
@@ -480,8 +670,9 @@ mod tests {
             let ctx = Context {
                 input,
                 flags,
-                dropped_comments: &notes.dropped_comments,
+                comments: &notes.comments,
                 uncertain: &notes.uncertain,
+                units: &notes.units,
             };
             compare(&OracleResult::Error, &krate, &ctx)
         };
@@ -516,6 +707,8 @@ mod tests {
         ));
     }
 
+    /// The §7.7 recogniser, which applies where the handler's names cannot be registered
+    /// ([`expectation`]); this test gives it the handler's flags directly.
     #[test]
     fn mixed_handler_emit_text_rejection_skips_only_its_undefined_value() {
         let input = b".emit \"x=${H_}c\"";
@@ -539,8 +732,9 @@ mod tests {
         let ctx = Context {
             input,
             flags: &flags,
-            dropped_comments: &notes.dropped_comments,
+            comments: &notes.comments,
             uncertain: &notes.uncertain,
+            units: &notes.units,
         };
         let oracle = |key: &str| {
             OracleResult::Dump(serde_json::json!({
@@ -563,8 +757,9 @@ mod tests {
         let extra_ctx = Context {
             input: extra,
             flags: ctx.flags,
-            dropped_comments: ctx.dropped_comments,
+            comments: ctx.comments,
             uncertain: ctx.uncertain,
+            units: ctx.units,
         };
         assert!(matches!(
             compare(&oracle("x"), &krate, &extra_ctx),
@@ -600,12 +795,13 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
         let (krate, notes) = run_crate(&setup, &dir, input);
         assert!(matches!(&krate, CrateResult::Dump(_)));
-        assert_eq!(notes.dropped_comments, ["# c"]);
+        assert_eq!(dropped(&notes.comments), ["# c"]);
         let ctx = Context {
             input,
             flags: &run_flags,
-            dropped_comments: &notes.dropped_comments,
+            comments: &notes.comments,
             uncertain: &notes.uncertain,
+            units: &notes.units,
         };
         let golden = serde_json::json!({"t":"object","entries":[
             {"k":"a","v":[{"t":"int","v":"2"}]},
@@ -649,23 +845,127 @@ mod tests {
             "string-input",
             "priority:3",
         ]);
-        let expected = expectation_flags(&with);
+        let expected = expectation(&with, b"a = 1", &[]);
         assert_eq!(
-            expected,
+            expected.oracle_flags,
             flags(&["registered-macros", "string-input", "priority:3"])
         );
-        let options = oracle_options(&expected).unwrap();
+        assert_eq!(expected.context_flags, expected.oracle_flags);
+        let options = oracle_options(&expected.oracle_flags).unwrap();
         assert!(!options.iter().any(|option| option == "-z"));
         assert_eq!(options, ["-R", "-S", "-p", "3"]);
         let without = flags(&["no-time", "string-input", "var:zerocopy=1"]);
-        assert_eq!(expectation_flags(&without), without);
+        assert_eq!(expectation(&without, b"", &[]).oracle_flags, without);
+    }
+
+    /// §7.7: the names the test handler would resolve, and when they cannot be registered.
+    #[test]
+    fn the_expectation_registers_the_handlers_names() {
+        let handler = flags(&["string-input", "variable-handler", "zerocopy"]);
+        let expected = expectation(&handler, b"a = \"x${H_X}y\"\nb = ${H_}\nc = ${Q}", &[]);
+        assert_eq!(
+            expected.oracle_flags,
+            flags(&[
+                "string-input",
+                "variable-handler",
+                "var:H_X=[handled]",
+                "var:H_=[handled]"
+            ])
+        );
+        assert_eq!(
+            expected.context_flags,
+            flags(&["string-input", "var:H_X=[handled]", "var:H_=[handled]"])
+        );
+        // Names in included files and texts parsed in place, names inside a name, each once.
+        let units = [b"k = \"${H_A}\"".to_vec(), b"${${H_B}}${H_A}".to_vec()];
+        assert_eq!(
+            handler_names(&handler, b"x = 1", &units),
+            Some(vec!["H_A".to_string(), "H_B".to_string()])
+        );
+        // A registered name takes precedence and is left alone.
+        let registered = flags(&["string-input", "variable-handler", "var:H_X=v"]);
+        assert_eq!(
+            handler_names(&registered, b"a = \"x${H_X}${H_Y}\"", &[]),
+            Some(vec!["H_Y".to_string()])
+        );
+        // A `$$` changes nothing that registering would (§7.5).
+        assert_eq!(
+            handler_names(&handler, b"a = \"x${H_X}$$\"\nb = \"$${H_Y}\"", &[]),
+            Some(vec!["H_X".to_string(), "H_Y".to_string()])
+        );
+        // Escapes that yield no byte of a reference, and a backslash in a comment, leave the
+        // names registered.
+        for text in [
+            "a = \"x${H_X}\"\nb = \"\\n\\t\\\"\\\\\\/\\$\"",
+            "a = \"x${H_X}\"\nb = x\\;y\\q # \\",
+            "a = \"x${H_X}\"\nb = \"x\\}\"",
+        ] {
+            assert_eq!(
+                handler_names(&handler, text.as_bytes(), &[]),
+                Some(vec!["H_X".to_string()]),
+                "{text}"
+            );
+        }
+        // Registering could change other text: an unbraced `$H_`, an escape that can make or
+        // hide a reference, or another name.
+        for text in [
+            "a = \"x${H_X}\"\nb = $H_X",
+            "a = \"x${H_X}\"\nb = \"\\u0041\"",
+            "a = \"x${H_X}\"\nb = \"$\\Hz\"",
+            "a = \"x${H_X}\"\nb = \"$H\\_X\"",
+            "a = \"x${H_X}\"\nb = \"$\\{H_Z}\"",
+            "a = \"x${H_X}\"\nb = \"${H_Z\\}\"",
+            "a = \"x${H_X.y}\"",
+            "a = \"x${H_$ABI}\"",
+        ] {
+            assert_eq!(
+                handler_names(&handler, text.as_bytes(), &[]),
+                None,
+                "{text}"
+            );
+            let expected = expectation(&handler, text.as_bytes(), &[]);
+            assert_eq!(
+                expected.oracle_flags,
+                flags(&["string-input", "variable-handler"])
+            );
+            assert_eq!(expected.context_flags, expected.oracle_flags);
+        }
+        assert_eq!(
+            handler_names(&handler, b"x = 1", &[b"y = $H_Z".to_vec()]),
+            None
+        );
+        assert_eq!(
+            handler_names(
+                &handler,
+                b"x = \"${H_X}y\"",
+                &[b"y = \"$\\{H_Z}\"".to_vec()]
+            ),
+            None
+        );
+        // Nothing to register, or no handler.
+        let none = expectation(&handler, b"a = \"${Q}x\"", &[]);
+        assert_eq!(
+            none.oracle_flags,
+            flags(&["string-input", "variable-handler"])
+        );
+        let no_handler = flags(&["string-input"]);
+        assert_eq!(
+            expectation(&no_handler, b"a = \"x${H_X}y\"", &[]).oracle_flags,
+            no_handler
+        );
     }
 
     /// The crate's verdict with `run_flags` in `cases/spec/12-flags` against the oracle's `dump`,
     /// through [`check_against`], as the fuzzer compares.
     fn verdict_12_flags(input: &str, run_flags: &[String], dump: &J) -> Verdict {
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
+        verdict_in("12-flags", input, run_flags, dump)
+    }
+
+    /// The same in `cases/spec/<case_dir>`.
+    fn verdict_in(case_dir: &str, input: &str, run_flags: &[String], dump: &J) -> Verdict {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/conformance/cases/spec")
+            .join(case_dir);
         let checked = check_against(
             OracleResult::Dump(dump.clone()),
             input.as_bytes(),
@@ -832,6 +1132,426 @@ mod tests {
         }
     }
 
+    /// C14 finding `values-differ-244706530c4e7da6`: `.ctx` copies a string with a NUL byte in an
+    /// included file, whose bytes after the NUL libucl leaves undefined (§9.7, §13.2). The crate
+    /// parse records the file, so the copy counts; the oracle's dump is that of the finding.
+    #[test]
+    fn nul_bytes_in_a_copy_made_in_an_included_file() {
+        let run_flags = flags(&["registered-macros", "string-input"]);
+        let with = |file: &str| format!("a \\u000x\"\no {{.include \"files/{file}\"}}");
+        let input = with("macro_ctx.inc");
+        let oracle = |copied: &str| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"a","v":[{"t":"string","v":"\u{0}\""}]},
+                {"k":"o","v":[{"t":"object","entries":[
+                    {"k":"a","v":[{"t":"int","v":"1"}]},
+                    {"k":"ctx","v":[{"t":"object","entries":[
+                        {"k":"a","v":[{"t":"string","v":copied}]},
+                        {"k":"o","v":[{"t":"object","entries":[
+                            {"k":"a","v":[{"t":"int","v":"1"}]}
+                        ]}]}
+                    ]}]}
+                ]}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_in("13-inputs", &input, &run_flags, &oracle("\u{0}\u{0}")),
+            Verdict::Skipped(uncertain::NUL_IN_COPY)
+        ));
+        for copied in ["x\u{0}", "\u{0}\u{0}\u{0}", "\u{0}"] {
+            assert!(
+                values_differ(&verdict_in(
+                    "13-inputs",
+                    &input,
+                    &run_flags,
+                    &oracle(copied)
+                )),
+                "{copied:?}"
+            );
+        }
+        let mut changed = oracle("\u{0}\u{0}");
+        changed["entries"][1]["v"][0]["entries"][0]["v"][0]["v"] = serde_json::json!("2");
+        assert!(values_differ(&verdict_in(
+            "13-inputs",
+            &input,
+            &run_flags,
+            &changed
+        )));
+        // An included file without a copying macro: the NUL string is compared as it is.
+        let plain = with("macro_x1.inc");
+        let dump = |a: &str| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"a","v":[{"t":"string","v":a}]},
+                {"k":"o","v":[{"t":"object","entries":[{"k":"x","v":[{"t":"int","v":"1"}]}]}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_in("13-inputs", &plain, &run_flags, &dump("\u{0}\"")),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_in(
+            "13-inputs",
+            &plain,
+            &run_flags,
+            &dump("\u{0}\u{0}")
+        )));
+    }
+
+    /// Text that `.emit` parses in place counts as a unit: the macro name comes only from a
+    /// variable here, and the oracle's dump is its result for this document.
+    #[test]
+    fn nul_bytes_in_a_copy_made_in_text_parsed_in_place() {
+        let run_flags = flags(&["registered-macros", "string-input", "var:I=.inherit"]);
+        let input = "d { a = \"\\u0000x\" }\ne { .emit \"$I d\" }";
+        assert!(!input.contains(".inherit"));
+        let oracle = |copied: &str| {
+            let object = |v: &str| {
+                serde_json::json!([{"t":"object","entries":[
+                    {"k":"a","v":[{"t":"string","v":v}]}
+                ]}])
+            };
+            serde_json::json!({"t":"object","entries":[
+                {"k":"d","v":object("\u{0}x")},
+                {"k":"e","v":object(copied)}
+            ]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &oracle("\u{0}\u{0}")),
+            Verdict::Skipped(uncertain::NUL_IN_COPY)
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &run_flags,
+            &oracle("y\u{0}")
+        )));
+    }
+
+    fn crate_accepts(verdict: &Verdict) -> bool {
+        matches!(
+            verdict,
+            Verdict::Differs {
+                kind: Kind::CrateAccepts,
+                ..
+            }
+        )
+    }
+
+    /// C14 findings `crate-accepts-e04659ea272d36c7` and `crate-accepts-28d2d688c1a509e9`
+    /// (§7.7, QUESTIONS #90). libucl rejects both under its handler, an undefined result; the
+    /// expectation is its result with `H_` registered as `[handled]`, the dumps given here, and
+    /// every difference from it is reported, a rejection included.
+    #[test]
+    fn handler_results_in_a_macro_value_expect_the_substituted_text() {
+        let include = flags(&["string-input", "variable-handler"]);
+        let input = ".include(g=true)\"${H_}*/\"1";
+        let empty = serde_json::json!({"t": "object", "entries": []});
+        let verdict = |oracle: OracleResult, run_flags: &[String], dir: &str, input: &str| {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../tests/conformance/cases/spec")
+                .join(dir);
+            check_against(oracle, input.as_bytes(), run_flags, &dir)
+        };
+        let checked = verdict(
+            OracleResult::Dump(empty.clone()),
+            &include,
+            "09-macros",
+            input,
+        );
+        assert!(matches!(checked.verdict, Verdict::Agree));
+        assert_eq!(
+            checked.oracle_flags,
+            flags(&["string-input", "variable-handler", "var:H_=[handled]"])
+        );
+        let rejected = verdict(OracleResult::Error, &include, "09-macros", input);
+        assert!(crate_accepts(&rejected.verdict));
+        let entry = serde_json::json!({"t": "object", "entries": [
+            {"k": "x", "v": [{"t": "int", "v": "1"}]}
+        ]});
+        let other = verdict(OracleResult::Dump(entry), &include, "09-macros", input);
+        assert!(values_differ(&other.verdict));
+
+        let emit = flags(&["registered-macros", "string-input", "variable-handler"]);
+        let input = ".emit \"a ${H_}\"\"{\"[]";
+        let oracle = |handled: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "array", "v": [{"t": "string", "v": handled}]}]},
+                {"k": "{", "v": [{"t": "array", "v": []}]}
+            ]})
+        };
+        let checked = verdict(
+            OracleResult::Dump(oracle("handled")),
+            &emit,
+            "13-inputs",
+            input,
+        );
+        assert!(matches!(checked.verdict, Verdict::Agree));
+        let rejected = verdict(OracleResult::Error, &emit, "13-inputs", input);
+        assert!(crate_accepts(&rejected.verdict));
+        let changed = verdict(
+            OracleResult::Dump(oracle("handlex")),
+            &emit,
+            "13-inputs",
+            input,
+        );
+        assert!(values_differ(&changed.verdict));
+    }
+
+    /// Re-review of the C14 classifier gaps, finding 1 (§7.7): a `\` that cannot make or hide a
+    /// reference, in a comment or in an unrelated string, leaves the handler's names registered,
+    /// so the include of `crate-accepts-e04659ea272d36c7` keeps the substituted result as its
+    /// expectation. The dumps are the oracle's with `H_` registered; under the handler alone it
+    /// rejects the documents, which is now reported. An escaped `}` is one of them (round 3,
+    /// finding 2). An unbraced `$H_`, or a `\u` even in a comment, still stops the registration,
+    /// and libucl's undefined rejection is then reported (`fuzz/README.md`, *Known limits*).
+    #[test]
+    fn escapes_that_make_no_reference_keep_the_handlers_names_registered() {
+        let run_flags = flags(&["string-input", "variable-handler"]);
+        let registered = flags(&["string-input", "variable-handler", "var:H_=[handled]"]);
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/09-macros");
+        let in_comment = ".include(g=true)\"${H_}*/\"1\n# \\";
+        let in_string = "a = \"\\n\"\n.include(g=true)\"${H_}*/\"";
+        let brace = "a = \"x\\}\"\n.include(g=true)\"${H_}*/\"";
+        let empty = serde_json::json!({"t": "object", "entries": []});
+        let string = |v: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "string", "v": v}]}
+            ]})
+        };
+        for (input, dump) in [
+            (in_comment, empty),
+            (in_string, string("\n")),
+            (brace, string("x}")),
+        ] {
+            let checked =
+                check_against(OracleResult::Dump(dump), input.as_bytes(), &run_flags, &dir);
+            assert_eq!(checked.oracle_flags, registered, "{input:?}");
+            assert!(matches!(checked.verdict, Verdict::Agree), "{input:?}");
+            let rejected = check_against(OracleResult::Error, input.as_bytes(), &run_flags, &dir);
+            assert!(crate_accepts(&rejected.verdict), "{input:?}");
+        }
+        for stops in [
+            "a = $H_\n.include(g=true)\"${H_}*/\"",
+            ".include(g=true)\"${H_}*/\"1\n# \\u",
+        ] {
+            assert_eq!(handler_names(&run_flags, stops.as_bytes(), &[]), None);
+            let checked = check_against(OracleResult::Error, stops.as_bytes(), &run_flags, &dir);
+            assert_eq!(checked.oracle_flags, run_flags);
+            assert!(crate_accepts(&checked.verdict), "{stops:?}");
+        }
+    }
+
+    /// A string that shares a handler result with other text: libucl's handler result
+    /// (`x[handled]`) is no expectation, the substituted text (`x[handled]y`) is, and no
+    /// recogniser excuses a difference from it. Where the names cannot be registered, the
+    /// handler's result stays the expectation and its recogniser still applies.
+    #[test]
+    fn handler_results_in_a_string_expect_the_substituted_text() {
+        let run_flags = flags(&["string-input", "variable-handler"]);
+        let input = "a = \"x${H_X}y\"";
+        let dump = |v: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "string", "v": v}]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &run_flags, &dump("x[handled]y")),
+            Verdict::Agree
+        ));
+        for other in ["x[handled]", "x[handled]Y", "[handled]y"] {
+            assert!(
+                values_differ(&verdict_12_flags(input, &run_flags, &dump(other))),
+                "{other}"
+            );
+        }
+        // A `$$` after the reference: the registered name gives `$` for it (§7.5), libucl's
+        // handler `x[handled]`.
+        let dollars = "a = \"x${H_X}$$\"";
+        assert!(matches!(
+            verdict_12_flags(dollars, &run_flags, &dump("x[handled]$")),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            dollars,
+            &run_flags,
+            &dump("x[handled]")
+        )));
+        let fallback = "a = \"x${H_X}y\"\nb = $H_X";
+        let handled = serde_json::json!({"t": "object", "entries": [
+            {"k": "a", "v": [{"t": "string", "v": "x[handled]"}]},
+            {"k": "b", "v": [{"t": "string", "v": "$H_X"}]}
+        ]});
+        assert!(matches!(
+            verdict_12_flags(fallback, &run_flags, &handled),
+            Verdict::Skipped(uncertain::HANDLER)
+        ));
+    }
+
+    /// Review of the C14 classifier gaps, finding 1 (§7.4, §7.6, §7.7): `${H_X}` resolved by the
+    /// handler, and in the same document an unbraced `$H_X`, as written or once its escapes are
+    /// decoded. The handler is never asked for the unbraced reference, which a registered `H_X`
+    /// would replace, so the oracle runs with the handler alone. Its results, the dumps here,
+    /// agree, and the registered run's `[handled]` for `f` is reported.
+    #[test]
+    fn unbraced_handler_references_keep_the_handlers_result() {
+        let run_flags = flags(&["string-input", "variable-handler"]);
+        let dump = |f: &str| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "e", "v": [{"t": "string", "v": "[handled]"}]},
+                {"k": "f", "v": [{"t": "string", "v": f}]}
+            ]})
+        };
+        for (form, result) in [
+            ("\"$H_X\"", "$H_X"),
+            ("$H_X", "$H_X"),
+            ("\"$\\H_X\"", "$H_X"),
+            ("\"$H_X$\"", "$H_X$"),
+            ("\"$\\u0048_X\"", "$H_X"),
+            ("$\\H_X", "$H_X"),
+        ] {
+            let input = format!("e = \"${{H_X}}\"\nf = {form}");
+            assert_eq!(
+                handler_names(&run_flags, input.as_bytes(), &[]),
+                None,
+                "{input}"
+            );
+            let expected = expectation(&run_flags, input.as_bytes(), &[]);
+            assert_eq!(expected.oracle_flags, run_flags, "{input}");
+            assert_eq!(expected.context_flags, run_flags, "{input}");
+            assert!(
+                matches!(
+                    verdict_in("07-variables", &input, &run_flags, &dump(result)),
+                    Verdict::Agree
+                ),
+                "{input}"
+            );
+            let registered = result.replace("$H_X", "[handled]");
+            let verdict = verdict_in("07-variables", &input, &run_flags, &dump(&registered));
+            if registered == "[handled]" {
+                assert!(values_differ(&verdict), "{input}");
+            } else {
+                // `[handled]$` holds the handler's value with other text, which the §7.7
+                // recogniser excuses in any string (fuzz/README.md, *Known limits*).
+                assert!(
+                    matches!(verdict, Verdict::Skipped(uncertain::HANDLER)),
+                    "{input}"
+                );
+            }
+        }
+    }
+
+    /// C14 finding `values-differ-6dc7de42c47fd96a` (§12.5, QUESTIONS #81): the comment `# c` of
+    /// the value `d` that `rewrite` replaced appears before the last value's own `# c`. The
+    /// oracle's dumps here are its results, or nearby differences built on them.
+    #[test]
+    fn replaced_comment_of_the_same_text_before_a_later_values_own() {
+        let rewrite = flags(&["dump-comments", "strategy:rewrite", "string-input"]);
+        let input = "c p\na=\n# c\nv\na d\na p\na=\n# c\nv";
+        let dump = |c: J, a: J| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"c","v":[c]},
+                {"k":"a","v":[a]}
+            ]})
+        };
+        let c = serde_json::json!({"t":"string","v":"p"});
+        let a = |key: &str, texts: &[&str], v: &str| {
+            serde_json::json!({
+                "t": "string", "v": v, key: texts
+            })
+        };
+        let oracle = dump(c.clone(), a("c", &["# c", "# c"], "v"));
+        assert!(matches!(
+            verdict_12_flags(input, &rewrite, &oracle),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+        ));
+        for changed in [
+            // A value changed, or another value's comments: another text, or the one dropped
+            // comment given to it as well, which can reappear only once.
+            dump(c.clone(), a("c", &["# c", "# c"], "w")),
+            dump(
+                serde_json::json!({"t":"string","v":"p","c":["# z"]}),
+                a("c", &["# c", "# c"], "v"),
+            ),
+            dump(
+                serde_json::json!({"t":"string","v":"p","c":["# c"]}),
+                a("c", &["# c", "# c"], "v"),
+            ),
+            // More comments than the crate dropped, or one after the value's own.
+            dump(c.clone(), a("c", &["# c", "# c", "# c"], "v")),
+            dump(c.clone(), a("ca", &["# c", "# d"], "v")),
+            dump(c.clone(), a("c", &["# d", "# c"], "v")),
+        ] {
+            assert!(
+                values_differ(&verdict_12_flags(input, &rewrite, &changed)),
+                "{changed}"
+            );
+        }
+        // Under `append` nothing is replaced, so nothing is dropped.
+        let append = flags(&["dump-comments", "strategy:append", "string-input"]);
+        let appended = |last: J| {
+            serde_json::json!({"t":"object","entries":[
+                {"k":"c","v":[{"t":"string","v":"p"}]},
+                {"k":"a","v":[
+                    {"t":"string","v":"v"},
+                    {"t":"string","v":"d","c":["# c"]},
+                    {"t":"string","v":"p"},
+                    last
+                ]}
+            ]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &append, &appended(a("ca", &["# c"], "v"))),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &append,
+            &appended(a("c", &["# c", "# c"], "v"))
+        )));
+        // With a distinct first comment: before the own one it is excused, after it not.
+        let distinct = "c p\na=\n# x\nv\na d\na p\na=\n# c\nv";
+        assert!(matches!(
+            verdict_12_flags(
+                distinct,
+                &rewrite,
+                &dump(c.clone(), a("c", &["# x", "# c"], "v"))
+            ),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            distinct,
+            &rewrite,
+            &dump(c, a("ca", &["# c", "# x"], "v"))
+        )));
+    }
+
+    /// The outermost object of a section path counts as the most recent value when its bracket
+    /// closes (§12.5), though it was created before the replaced value: a dropped comment before
+    /// its own `# z` is not excused there.
+    #[test]
+    fn replaced_comment_not_excused_on_an_earlier_section_object() {
+        let rewrite = flags(&["dump-comments", "strategy:rewrite", "string-input"]);
+        let input = "a b {\n# c\nk 1\nk 2\n} # z";
+        let dump = |key: &str, texts: &[&str]| {
+            serde_json::json!({"t":"object","entries":[{"k":"a","v":[{
+                "t":"object",
+                key: texts,
+                "entries":[{"k":"b","v":[{"t":"object","entries":[
+                    {"k":"k","v":[{"t":"int","v":"2"}]}
+                ]}]}]
+            }]}]})
+        };
+        assert!(matches!(
+            verdict_12_flags(input, &rewrite, &dump("ca", &["# z"])),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_12_flags(
+            input,
+            &rewrite,
+            &dump("c", &["# c", "# z"])
+        )));
+    }
+
     #[test]
     fn dropped_comment_cannot_reappear_on_an_earlier_value() {
         let input = b"p { v 1 # c\n}\n# c\na 1\na 2\n";
@@ -841,12 +1561,13 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/12-flags");
         let (krate, notes) = run_crate(&setup, &dir, input);
         assert!(matches!(&krate, CrateResult::Dump(_)));
-        assert_eq!(notes.dropped_comments, ["# c"]);
+        assert_eq!(dropped(&notes.comments), ["# c"]);
         let ctx = Context {
             input,
             flags: &run_flags,
-            dropped_comments: &notes.dropped_comments,
+            comments: &notes.comments,
             uncertain: &notes.uncertain,
+            units: &notes.units,
         };
         let wrong_earlier_comment = serde_json::json!({"t":"object","entries":[
             {"k":"p","v":[{"t":"object","entries":[
@@ -860,6 +1581,40 @@ mod tests {
                 kind: Kind::ValuesDiffer,
                 ..
             }
+        ));
+    }
+
+    /// Review of the C14 classifier gaps, finding 2 (§12.5): the comment `# c`, pending at the
+    /// silent stop of `.fail`, is lost in libucl and in the crate. Nothing can replace a value
+    /// there, so a stand-in oracle that gives it to `b` is reported. Under `rewrite` the crate's
+    /// notes cannot tell that drop from a replaced value's, and it is excused
+    /// (`fuzz/README.md`, *Known limits*).
+    #[test]
+    fn comment_pending_at_a_silent_stop_is_not_excused() {
+        let input = "a { b = 1\n# c\n.fail\n}\n";
+        let dump = |b: J| {
+            serde_json::json!({"t": "object", "entries": [
+                {"k": "a", "v": [{"t": "object", "entries": [{"k": "b", "v": [b]}]}]}
+            ]})
+        };
+        let lost = dump(serde_json::json!({"t": "int", "v": "1"}));
+        let given = dump(serde_json::json!({"t": "int", "v": "1", "ca": ["# c"]}));
+        let run_flags = flags(&["registered-macros", "dump-comments", "string-input"]);
+        assert!(matches!(
+            verdict_in("13-inputs", input, &run_flags, &lost),
+            Verdict::Agree
+        ));
+        assert!(values_differ(&verdict_in(
+            "13-inputs",
+            input,
+            &run_flags,
+            &given
+        )));
+        let mut rewrite = run_flags;
+        rewrite.push("strategy:rewrite".to_string());
+        assert!(matches!(
+            verdict_in("13-inputs", input, &rewrite, &given),
+            Verdict::Skipped(uncertain::REPLACED_COMMENTS)
         ));
     }
 }
