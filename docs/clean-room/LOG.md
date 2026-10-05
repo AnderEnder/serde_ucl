@@ -6685,43 +6685,47 @@ publication. Work item:C15; final integration commit recorded in handover.
     `cases/spec/13-inputs/files/macro_ctx.inc` and its neighbours; the oracle as a black box. No
     libucl source, `tools/`, or other forbidden input was read.
   - Branch: `c14/fuzz-gaps` in worktree `agent-ae56e5508d126285c`, from `c14/fuzz-zerocopy-work`
-    at `73ae658`.
-  - Gap 2 (`97f57fa`): the crate's parse in the fuzzer records the document's other units, every
-    file its loader reads (a wrapper whose methods all forward to `FsLoader`'s) and every text the
-    `.emit` test macro parses in place (`oracle::emit_macro` made public and wrapped), and the
-    copy class applies when `.inherit`, `.seen` or `.ctx` stands in any unit. A file `.load` reads
-    counts too, as the loader is not told why it reads. In such a document any NUL string that
-    differs only after its NUL, at the same length, is excused, copied or not, as before for the
-    input. `.priority` under `registered-priority-override`, which runs `.seen`'s handler, is not
-    covered: a possible follow-up.
-  - Gap 1 (`79f7d6c`, `08f6256`): the crate's notes keep every saved comment in read order with
-    the path of the value it is attached to, and the dump walk tracks paths as `oracle::dump`
-    builds them. A value's list is excused when the oracle's is the crate's after one or more
-    distinct comments the crate attached to no value, with those texts, read before the value's
-    first own comment; same texts included. Each dropped comment can be used once in the whole
-    document (`08f6256`): giving it to two values is reported. A value with no own comments is
-    not ordered, as before, so one created earlier that alone gets a dropped comment is still
-    excused, which falls short of "every other comment list must still agree"; only the crate's
-    record of where values were created could tell, and it is not public. Closing that needs a
-    doc-hidden note in `src/` of the read-order point at which each value was created, as
-    `Parser::uncertain_reached` is for the fuzzer: a decision for the coordinator. A container with own `ca` comments is refused
-    (the outermost section object closed by its bracket). The exact-source recogniser of #81 is
-    removed as covered; with it the last recogniser that needed an exact flag set, so
-    `zerocopy_keeps_the_uncertain_rules_of_the_result_without_it` no longer fails if the
-    recognisers get the flags with `zerocopy`.
+    (the branch has since been rebased onto `origin/main`; commit names corrected to subjects on
+    2026-10-05, in the entry for the review fixes below, as the hashes changed with each rebase).
+  - Gap 2 (`fix(fuzz): look for copying macros in every unit of the document`): the crate's parse in
+    the fuzzer records the document's other units, every file its loader reads (a wrapper whose
+    methods all forward to `FsLoader`'s) and every text the `.emit` test macro parses in place
+    (`oracle::emit_macro` made public and wrapped), and the copy class applies when `.inherit`,
+    `.seen` or `.ctx` stands in any unit. A file `.load` reads counts too, as the loader is not told
+    why it reads. In such a document any NUL string that differs only after its NUL, at the same
+    length, is excused, copied or not, as before for the input. `.priority` under
+    `registered-priority-override`, which runs `.seen`'s handler, is not covered: a possible
+    follow-up.
+  - Gap 1 (`fix(fuzz): identify replaced values' comments by the crate's notes` and `fix(fuzz): let
+    each replaced value's comment reappear once per document`): the crate's notes keep every saved
+    comment in read order with the path of the value it is attached to, and the dump walk tracks
+    paths as `oracle::dump` builds them. A value's list is excused when the oracle's is the crate's
+    after one or more distinct comments the crate attached to no value, with those texts, read
+    before the value's first own comment; same texts included. Each dropped comment can be used once
+    in the whole document (the second commit): giving it to two values is reported. A value with no
+    own comments is not ordered, as before, so one created earlier that alone gets a dropped comment
+    is still excused, which falls short of "every other comment list must still agree"; only the
+    crate's record of where values were created could tell, and it is not public. Closing that needs
+    a doc-hidden note in `src/` of the read-order point at which each value was created, as
+    `Parser::uncertain_reached` is for the fuzzer: a decision for the coordinator. A container with
+    own `ca` comments is refused (the outermost section object closed by its bracket). The
+    exact-source recogniser of #81 is removed as covered; with it the last recogniser that needed an
+    exact flag set, so `zerocopy_keeps_the_uncertain_rules_of_the_result_without_it` no longer fails
+    if the recognisers get the flags with `zerocopy`.
   - Checks: both findings and their generated inputs pass `ucl-differential --check` with their
-    flags and this worktree's `cases/spec/12-flags` and `13-inputs` (skipped as §12.5 and §9.7).
-    The other saved findings give the verdicts they gave before; `values-differ-b20d95e0` (#83)
-    now agrees with no excuse, from the rebase onto #24, not from this work. New tests fail when
-    only the input is scanned (3), without the read-order bound (2), without the container
-    restriction (2), or with a separate record of used comments per list (2). 26 fuzz unit tests
-    pass. `scripts/ci.sh` passed (702 tests) at `79f7d6c` and again at `08f6256`. Two runs of
-    `scripts/ci.sh fuzz 180` saved no finding: at `79f7d6c` (seed 1790864078555293000, 329,282
-    inputs; 5 §12.5 replaced-comment skips, 0 §9.7 NUL-in-copy skips) and on the final code at
-    `08f6256` (seed 1790864868607778000, 268,779 inputs; 3 and 2). Their summaries are in
-    `target/c14-scratch/gaps-run1/` and `gaps-run2/`.
-  - Commits: `97f57fa`, `79f7d6c`, `08f6256` (`fix(fuzz)`), `3129db8` with this entry, and the
-    following `docs(clean-room)` commit that brings it up to date. Not pushed.
+    flags and this worktree's `cases/spec/12-flags` and `13-inputs` (skipped as §12.5 and §9.7). The
+    other saved findings give the verdicts they gave before; `values-differ-b20d95e0` (#83) now
+    agrees with no excuse, from the rebase onto #24, not from this work. New tests fail when only
+    the input is scanned (3), without the read-order bound (2), without the container restriction
+    (2), or with a separate record of used comments per list (2). 26 fuzz unit tests pass.
+    `scripts/ci.sh` passed (702 tests) after the first gap 1 commit and again after the second. Two
+    runs of `scripts/ci.sh fuzz 180` saved no finding: after the first gap 1 commit (seed
+    1790864078555293000, 329,282 inputs; 5 §12.5 replaced-comment skips, 0 §9.7 NUL-in-copy skips)
+    and on the final code (seed 1790864868607778000, 268,779 inputs; 3 and 2). Their summaries are
+    in `target/c14-scratch/gaps-run1/` and `gaps-run2/`.
+  - Commits: the three `fix(fuzz)` commits named above; `docs(clean-room): log the fuzzer's
+    §12.5 and §9.7 classifier gaps` with this entry, and `docs(clean-room): bring the fuzzer gaps
+    entry up to date`. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
 
@@ -6735,18 +6739,19 @@ publication. Work item:C15; final integration commit recorded in handover.
     in the main checkout's `target/fuzz-differential/findings/`; the `handler_*` and
     `registered_wins_over_handler` conformance cases; the oracle as a black box. No libucl source,
     `tools/`, or other forbidden input was read.
-  - Known limits (`167e437`): `fuzz/README.md` had no such list. It now has one: gap 1's value
-    without own comments, left as it is by the coordinator's decision (no hidden note in
-    `src/`), and gap 2's bounds (any NUL string of such a document, `.load` reads,
-    `.priority` under the override).
-  - Gap 3 (`5bd263d`): under `variable-handler`, the oracle runs with each name the test handler
-    would resolve (a braced `${H_…}` that is not registered, in the input or the crate's recorded
-    units) registered as `var:NAME=[handled]`, `-H` kept; the recognisers see the flags without
-    `variable-handler`, since the handler then resolves nothing, so no §7.7 excuse applies and a
-    rejection is reported as `crate-accepts`. Where registering could change other text (an
-    unbraced `$H_`, a `$$`, a name of other bytes than letters, digits and `_`) the handler's
-    result stays the expectation with the old recogniser. `check` runs the crate first, keeps the
-    oracle's flags in `Checked` for reports and `--check`, and quotes the reproduce line.
+  - Known limits (`docs(fuzz): list the classifier's known limits`): `fuzz/README.md` had no such
+    list. It now has one: gap 1's value without own comments, left as it is by the coordinator's
+    decision (no hidden note in `src/`), and gap 2's bounds (any NUL string of such a document,
+    `.load` reads, `.priority` under the override).
+  - Gap 3 (`fix(fuzz): expect the substituted handler result (spec-v21 §7.7)`): under
+    `variable-handler`, the oracle runs with each name the test handler would resolve (a braced
+    `${H_…}` that is not registered, in the input or the crate's recorded units) registered as
+    `var:NAME=[handled]`, `-H` kept; the recognisers see the flags without `variable-handler`, since
+    the handler then resolves nothing, so no §7.7 excuse applies and a rejection is reported as
+    `crate-accepts`. Where registering could change other text (an unbraced `$H_`, a `$$`, a name of
+    other bytes than letters, digits and `_`) the handler's result stays the expectation with the
+    old recogniser. `check` runs the crate first, keeps the oracle's flags in `Checked` for reports
+    and `--check`, and quotes the reproduce line.
   - Decision, against the brief's wording: the handler's value is given as a registered
     variable, not written into the source text with all flags unchanged. §7.7 gives the project
     the text "substituted in place, as for registered variables", and a literal rewrite changes
@@ -6765,8 +6770,9 @@ publication. Work item:C15; final integration commit recorded in handover.
     `variable-handler` (2). 30 fuzz unit tests pass; `scripts/ci.sh` passed (706 tests);
     `scripts/ci.sh fuzz 180` (seed 1790866397886705000, 464,008 inputs) saved no finding, with 2
     §7.7 skips (15 to 44 in earlier runs). Its summary is in `target/c14-scratch/gap3-run1/`.
-  - Commits: `167e437` (`docs(fuzz)`), `5bd263d` (`fix(fuzz)`), and the following
-    `docs(clean-room)` commit with this entry. Not pushed.
+  - Commits: the `docs(fuzz)` and `fix(fuzz)` commits named above, and `docs(clean-room): log
+    the fuzzer's §7.7 gap and known limits` with this entry (commit names corrected to subjects on
+    2026-10-05, in the entry for the review fixes below). Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
 
@@ -6838,5 +6844,116 @@ publication. Work item:C15; final integration commit recorded in handover.
     `-5c419af14916bd52` (`FileNotFound`), mutations of spec-v20 and spec-v21 cases whose seeds
     agree; origin/main's fuzzer gives them the same verdict. Scratch: `target/review-c14-gaps/`.
   - Commits: this LOG-only review commit. No change to `fuzz/` or `src/`; not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-05 — Role: clean-room implementer. Item: C14, the review of the fuzzer's classifier gaps
+  (the entry above, `docs(clean-room): review the fuzzer classifier gaps`), under released spec-v22,
+  whose §§1–13 are spec-v21's.
+  - Inputs consulted: the embedded current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`,
+    `WORKLIST.md`, `QUESTIONS.md` (#21, #81, #90 and the highest number) and this LOG's C14 entries,
+    the review included; released spec-v22 §6.1, §7, §8, §9.2, §9.4 (*Parameters*), §9.5 to §9.7,
+    §12.5 and §13.2 through `git show spec-v22:`, and `git diff spec-v22 -- docs/spec` (case paths
+    only); `tests/conformance/README.md` (flags); own `fuzz/` and `tests/common/oracle.rs`, and the
+    doc comments of `Parser::comments` and `Parser::attached_comments` in `src/parse/mod.rs`; the
+    conformance cases (inputs, flags, golden files); the saved findings in the main checkout's and
+    this worktree's `target/fuzz-differential/findings/`, read only, copied to
+    `target/c14-scratch/replay/` with their directories mapped into this worktree; the oracle as a
+    black box. No libucl source, `tools/`, or other forbidden input was read.
+  - Finding 1 (`fix(fuzz): keep the handler's result where escapes can hide a reference`): `--check`
+    against the oracle, with `e = "${H_X}"` in the document: `"$H_X"`, `$H_X` and `"$H_X$"` already
+    agreed, through the `$H_` bail; `"$\H_X"`, `"$\u0048_X"` and the unquoted `$\H_X` gave
+    `values-differ` (the registered run `[handled]`, the crate `$H_X`, as §7.4 and §7.6 give).
+    `handler_names` now also returns `None` for a `\` in any unit, which covers an escaped brace
+    (`"$\{H_X}y"`) too, and all six agree. The `$$` bail goes (3d): the oracle gives `"x${H_X}$$"` →
+    `x[handled]$` with the name registered and `x[handled]` with the handler alone, and `"$${H_X}"`
+    → `$${H_X}` both ways. A test per form checks that no name is registered and that the oracle's
+    dump agrees. A crate result `[handled]$` for `"$H_X$"` would still be excused by the §7.7
+    recogniser, which sees only the two strings; *Known limits* says so.
+  - Finding 2 (`fix(fuzz): excuse replaced comments only where values can be replaced`): the excuse
+    applies only when the flags set `strategy:rewrite` or a priority, or some unit holds `rewrite`
+    or `priority` in any letter case. The reviewer's document `a { b = 1⏎# c⏎.fail⏎}`
+    (`registered-macros`, `dump-comments`): the oracle's dump has no comment, the crate agrees, and
+    the stand-in that gives `b` `"ca": ["# c"]` is now reported; under `rewrite` it is still
+    excused, since the crate's notes do not say why a comment was dropped. That, a comment of a
+    value discarded at a lower priority in such a document, and a priority set through a shorter
+    parameter prefix (`.include(p=2)`, §9.2) are under *Known limits*. Probe: `a = 1 # x⏎.priority
+    2⏎# c⏎a = 2⏎k = 3 # d` gives the second `a` `"c": ["# x", "# c"]`, and the crate agrees.
+  - Finding 3: (a) the two implementer entries above now name their commits by subject, edited in
+    place, since the hashes changed with each rebase; this entry gives the hashes at the time of
+    writing. (b) `test(fuzz): wrap two test dumps at 100 columns`, the rewritten README text and
+    module table, and the LOG line; the options table of `fuzz/README.md` (129 columns) is as on
+    `origin/main`. (c) *Known limits* now separates what excuses more than its rule allows from what
+    reports what it allows, and `.priority` under `registered-priority-override` counts as a copying
+    macro for §9.7 and §13.2, which removes that limit. (d) with finding 1.
+  - Also found (`fix(fuzz): recognise .seen's collected keys under the priority override`): every
+    conformance case without `.inputs` (1,577), with its own flags and with `dump-comments`,
+    `variable-handler`, `registered-macros`, `registered-priority-override`, or `dump-comments` and
+    `strategy:rewrite` added, through the reviewed build (`6b86640`, from `git archive` into
+    `target/c14-scratch/base-6b86640/`) and the current one: 9,462 runs with the same verdicts but
+    one, `cases/spec/09-macros/macro_args_no_implicit_arrays_repeated_name_error` with the override,
+    a false `values-differ` in both builds (the §13.2 collected key, `a` and seven NULs against
+    `priority`), now skipped.
+  - Question #97 (the commit docs(clean-room): ask question #97 on a `\u0024` in double-quoted
+    strings), found while probing escape forms: the oracle expands a double-quoted string only when
+    it holds a `$` as written (`"\u0024ABI"` → `"$ABI"`, `"\u0024{ABI}"` → `"${ABI}"`), while §6.1
+    and §7.6 decode first, and the crate gives `"unknown"`. A crate behaviour where the spec is
+    unclear: `src/` is unchanged, and the crate keeps its reading until the answer.
+  - Checks: 33 fuzz unit tests pass; the new tests fail without the backslash bail (2), without the
+    §12.5 gate (2), and without the overridden `.priority` in `copies` (1) or in the collected-key
+    recogniser (1). `--check` on the six forms and on the four `variable-handler` conformance cases:
+    agree. `--replay` of the 16 saved findings: the same verdicts as the reviewed build (9 agree, 2
+    skipped as §9.7 and §12.5, 5 `crate-rejects`); `crate-rejects-5c419af14916bd52` and
+    `-6097f6b0b5dffecd` now agree with both builds, from the rebase onto `e4dd295` (#28), not from
+    this work. Same-seed runs of both builds (seed 4242, 1 job, 40,001 inputs) give identical
+    summaries. `scripts/ci.sh` passed (29 test runs, 720 tests). `scripts/ci.sh fuzz 180` (seed
+    1791205568194907000, 14 jobs, 616,506 inputs; skips: 1 §7.7, 3 §12.5 replaced comments, 2 §9.7,
+    25 §12.5 block-comment ends) exited 1 with 20 `crate-rejects` (`MissingValue`), three saved, in
+    `cases/spec/09-macros` under `string-input`, and copied to
+    `target/c14-scratch/review-fix-run1/`:
+    - `crate-rejects-22dbca1299fb6045`: `.priority(x)3⏎.load(t=true,k="t")d`; libucl gives `{}`.
+      reproduce:
+
+      ```sh
+      (cd "$WT/tests/conformance/cases/spec/09-macros" &&
+        "$WT/target/libucl-oracle/ucl-dump" -S \
+        "$WT/target/fuzz-differential/findings/crate-rejects-22dbca1299fb6045/input.ucl")
+      ```
+
+    - `crate-rejects-22dbd41299fb7143`: `.priority(x)3⏎.load(t=true,k="t")r`; libucl gives `{}`.
+      reproduce:
+
+      ```sh
+      (cd "$WT/tests/conformance/cases/spec/09-macros" &&
+        "$WT/target/libucl-oracle/ucl-dump" -S \
+        "$WT/target/fuzz-differential/findings/crate-rejects-22dbd41299fb7143/input.ucl")
+      ```
+
+    - `crate-rejects-d1776ef76904f5dd`: `.priority(x)3⏎a 1⏎.load(t=true,k="t")f`; libucl gives `a:
+      int 1 @3`. reproduce:
+
+      ```sh
+      (cd "$WT/tests/conformance/cases/spec/09-macros" &&
+        "$WT/target/libucl-oracle/ucl-dump" -S \
+        "$WT/target/fuzz-differential/findings/crate-rejects-d1776ef76904f5dd/input.ucl")
+      ```
+    `$WT` is the worktree root,
+    `/Users/andrii/work2/ucl-rust-lexer/.claude/worktrees/agent-ae56e5508d126285c`; the saved lines
+    spell it out.
+  - All three are crate behaviour, not the classifier: §9.2 (*Quirk*, since spec-v21) lets a later
+    `.load(try=true)` that reads nothing pass a rejected argument document, the files `d`, `r` and
+    `f` do not exist, and the crate rejects the argument document (`key has no value`, line 1,
+    column 12); the pending cases (`pending/09-macros/macro_args_rejected_*`) wait for the crate to
+    follow §9.2. The reviewed build gives them the same verdict. Not changed here.
+  - Commits, hashes at the time of writing: `e4a4b3d` fix(fuzz): keep the handler's result where
+    escapes can hide a reference; `3360458` fix(fuzz): excuse replaced comments only where values
+    can be replaced; `ed2daeb` test(fuzz): wrap two test dumps at 100 columns; `fc56837`
+    docs(clean-room): ask question #97 on a `\u0024` in double-quoted strings; `11dfea2` fix(fuzz):
+    recognise .seen's collected keys under the priority override; and the following
+    `docs(clean-room)` commit with this entry and the corrections above. Not pushed. While writing
+    them, the editing tool turned a `\uXXXX` typed in prose into its character, so before anything
+    was pushed I rewrote the first of these commits (two prose lines and its message) and the
+    message of the question commit, and replayed the commits between; the replaced commits were
+    never pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
