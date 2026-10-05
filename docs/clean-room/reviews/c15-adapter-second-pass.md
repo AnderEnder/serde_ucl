@@ -89,13 +89,45 @@ The candidate's own counting-profile documentation reports 70,059 to 10,060
 allocation requests and 9.920 to 8.949 MB peak extra live storage for generated
 10,000 records. These are author-supplied diagnostic measurements, not an
 independent timing reproduction. Paired public C/Rust performance and broader
-oracle comparisons remain the coordinator's acceptance evidence. Whole Rust/C
-checks, four linkage configurations, sanitizer results and final implementation
-commit identity will be recorded after the implementation author's final gate.
+oracle comparisons remain the coordinator's acceptance evidence.
+
+## Final checkpoint verification
+
+Reviewed implementation commit:
+`db08f32ce601aa134b20ef045cc61732fd468dd6`. All five source blob identities
+above match this commit exactly. The source was unchanged between focused review,
+the author's broad gates and this final verification. Reviewer test/provenance
+commit is `059dfa0`; final closeout changes only this report and LOG.
+
+Independently reran all capi native tests at the final implementation commit:
+three arena tests and three independent review tests pass, as do all-target
+clippy with warnings denied and capi fmt. Independently reran the documented
+combined nightly Miri command at this final commit: all six tests pass
+(arena 1.07 seconds, review 12.29 seconds).
+
+Read only implementation-owned gate output under `target/adapter-second`:
+`ci.log`, `asan.log` and `c-sanitize.log`. The author confirms each producing
+command exited zero. The complete `scripts/ci.sh` output confirms Rust feature
+checks, optimized/unoptimized depth, tests/examples/benches/docs and distribution
+validation. The C gate confirms shipping/installed header, exactly 43 symbols,
+C11/C++11 signatures/linkage, ten snapshots and boundary/lifetime/depth for all
+four direct/installed static/shared configurations. `check.py --rust-asan` with
+Homebrew LLVM21 clang/clang++ confirms Rust nightly ASan plus C ASan/UBSan for
+direct static/shared; separate `check.py --sanitize` confirms C ASan/UBSan for
+all four linkage configurations. Darwin leak detection is unavailable; no
+LeakSanitizer claim is made. These broad gates were run by the author; focused
+native/clippy/fmt and all-six Miri verification were rerun by the reviewer.
+
+Final documentation inspection confirms the Rust 1.99 source-build requirement,
+explicit historical first-pass labels, combined Miri command and arithmetic-mean
+measurement qualifications. It explicitly distinguishes parity against the
+owned/default Rust parser from overhead against the borrowed representation.
+No correctness blocker or outstanding requested documentation correction remains.
 
 Inputs consulted: current CLAUDE.md and clean-room protocol/provenance, released
 spec-v22 C contract, current own adapter/parser/emitter/value sources, own tests,
-profile example, distribution checks and public docs/manifests. No coordinator
+profile example, distribution checks and public docs/manifests, plus the named
+implementation-owned validation logs for final closeout. No coordinator
 benchmark sources/artifacts, tools, plans/research or upstream implementation
 were consulted.
 

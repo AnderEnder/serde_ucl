@@ -6545,3 +6545,27 @@ commit), with independent test/review commit `059dfa0` immediately before it.
 Plans/profile scratch remain excluded. No push, PR, merge, tag or publication.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — independent implementation reviewer — C15 final checkpoint
+
+Final implementation reviewed: db08f32ce601aa134b20ef045cc61732fd468dd6.
+All five previously recorded own source blobs match exactly. Reviewer test/report
+commit059dfa0 remains unchanged; final closeout edits review/provenance only.
+Independently reran all six native capi tests, all-target clippy with warnings
+denied, fmt, and combined nightly Miri (three arena + three review tests), all
+passing. Reviewed final public docs: Rust1.99 minimum, historical first-pass
+labels, combined Miri command and owned/default-vs-borrowed performance
+qualification are consistent. No correctness blocker remains.
+
+Additional allowed inputs were the author's named implementation-owned validation
+outputs target/adapter-second/{ci,asan,c-sanitize}.log and final own source/docs.
+Author confirms exit0; logs show complete scripts/ci.sh, direct/installed
+static/shared C gates, exactly43 symbols/header/signatures/ten snapshots/depth,
+RustASan+C ASan/UBSan direct static/shared and C ASan/UBSan all four linkage
+variants. Darwin has no leak sanitizer; no leak-sanitizer claim. Broad checks
+were author-run; focused checks and all-six Miri were reviewer-run at final hash.
+Performance acceptance remains coordinator-owned paired public comparisons.
+Produced docs-only final review commit with Work item:C15 footer; hash recorded
+in handover. No src edits, push, PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
