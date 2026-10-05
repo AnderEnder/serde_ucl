@@ -7129,3 +7129,81 @@ publication. Work item:C15; final integration commit recorded in handover.
     (subjects above), and the following `docs(clean-room)` commit with this entry. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-05 — Role: fresh clean-room implementation reviewer. Item: C14, third review of the
+  fuzzer's classifier gaps, after the implementer's answer to the re-review (`7fb01ba`..`58d464d`).
+  Reviewed `git diff ce19ee7..HEAD` (HEAD `58d464d`) and the branch as a whole against
+  origin/main `80b7785`, on `c14/fuzz-gaps` in worktree `agent-ae56e5508d126285c`, under released
+  spec-v22.
+  - Inputs consulted: the coordinator's request; the embedded current `CLAUDE.md`; this LOG's C14
+    entries; the branch's `QUESTIONS.md` (#97, #101, #102); released spec-v22 §4, §6.1,
+    §7, §9.1, §9.2 and §9.4 through `git show spec-v22:`; the round's diff, `fuzz/`, and the
+    conformance inputs of `cases/spec/07-variables`, `09-macros` and `cases/migrated` for probes;
+    the `ce19ee7` tree through `git archive`, built in `target/c14-rereview3/prev/`; the
+    implementer's copied findings in `target/c14-scratch/round3/run1/`, listed only; the oracle
+    as a black box. Disclosures: the harness wrote the output of two background commands
+    (`scripts/ci.sh` and the fuzz run) under `/private/tmp/…/tasks/`, which I did not open; each
+    also wrote its own log under `target/c14-rereview3/`, which I read. No guard refusal this
+    round, and I did not list `target/libucl-oracle/`. Every probe file is under
+    `target/c14-rereview3/`; `git status` is clean. No libucl source, `tools/`, or other forbidden
+    input was read.
+  - Review result: approved.
+  - The re-review's findings (the entry of `ce19ee7`):
+    - 1 (blocking): resolved. The bail now needs a `\` before `u`, `H`, `_`, `{` or `}`.
+      `.include(g=true)"${H_}*/"1`, the same with `⏎# \`, `a = "\n"⏎.include(g=true)"${H_}*/"` and
+      `a = "\n"⏎.include(g=true)"${H_}*/"1` agree with `H_` registered. With `e = "${H_X}"`,
+      `"$\H_X"`, `"$\u0048_X"` and `$\H_X` still agree, `"$\{H_X}y"` is still skipped as §7.7,
+      and the unit test of all six forms of the first review passes. The remaining case,
+      `a = $H_⏎.include(g=true)"${H_}*/"` (`crate-accepts`), is under *Known limits* with its
+      effect, and a test pins it. Leaving `\$` out is sound: with `e = "${H_X}"` in the document,
+      `"\$H_X"`, `"\${H_X}y"`, `\${H_X}`, `\${H_X}$`, `"\$${H_X}"`, `"\\${H_X}"`, `"a\"${H_X}"`,
+      `"${H_X}\n"`, `x\;${H_X}`, `"\q${H_X}"`, `"$\${H_X}"` and `\$ABI${H_X}` agree with the names
+      registered, or under the `$H_` bail. Keeping the coarse `$H_` check is a sound choice, and
+      documented.
+    - 2 (should fix): resolved. `seen_collected_key` uses `some_unit_has`.
+    - 3 and 4 (not blocking): resolved in `fuzz/README.md`.
+    - 5 (not blocking): resolved in question #97's row.
+    - 6 (not blocking): asked as #101 and #102. Every form in them reproduces with the oracle and
+      the crate (`string-input`, in the stated directories): the 12 rejected and 8 accepted
+      documents of #101, with the messages and positions given, and the 19 runs of #102, with
+      the messages, the paths that reject or accept, and `.try_include "/"`. Both state black-box
+      observations only.
+  - Findings:
+    1. Should fix (`fuzz/README.md`, *What it generates*): "Other escapes, such as `\n`, and a `\`
+       in a comment do not stop the registration" is wrong for a comment: the bail matches the
+       bytes anywhere, as the doc comment of `handler_names` says. `.include(g=true)"${H_}*/"1⏎# \u`
+       under `variable-handler` gives `crate-accepts`, libucl's undefined handler result. The
+       effect is under *Known limits*; only the sentence needs correcting.
+    2. Not blocking: `}` in the bail set is redundant. An escaped `}` in a braced name already
+       makes a name of other bytes, and anywhere else it makes or hides no reference; without it
+       no test fails. It costs false reports: `a = "x\}"⏎.include(g=true)"${H_}*/"` gives
+       `crate-accepts`, while `ucl-dump -S -H -v 'H_=[handled]'` gives the crate's result. The
+       README counts it among escapes that "can make or hide a reference". Suggest dropping it, or
+       stating why it stays.
+    3. Not blocking: the new *Known limits* entry says a macro VALUE with a handler result is
+       reported "unless the document is that one macro alone, which two recognisers cover". They
+       cover a lone `.include` whose quoted path ends the input, with an empty crate result, and
+       a lone `.emit "KEY=…"` with one entry; `.include(g=true)"${H_}*/"1⏎# \u` is one macro and
+       is reported. The effect stated is right; its exception is narrower than written.
+  - Checks:
+    - 34 fuzz unit tests pass. `scripts/ci.sh` passed (29 test runs, 721 tests).
+    - Mutations of a scratch copy of HEAD (`target/c14-rereview3/mut/`): the blanket `\` bail (2
+      tests fail), no escape bail (2), the set without `u` (2), `H` (2), `_` (1) or `{` (1), with
+      `$` added (1), and the collected-key check on the input for `.seen` (1) or the overridden
+      `.priority` (1) are each caught; the set without `}` is not (finding 2).
+    - `scripts/ci.sh fuzz 200` (seed 1791209162758458000, 14 jobs, 733,737 inputs; skips: 1 §7.7,
+      4 §12.5 replaced comments, 40 §12.5 block-comment ends, 3 §13.2 collected keys, 2 texts
+      starting with `[`) exited 1 with 19 `crate-rejects` (`MissingValue`), three saved:
+      `crate-rejects-d17769f76904ed5e` (`no-implicit-arrays`), `-d1776cf76904f277` and
+      `-d1777cf769050da7`, all `.priority(x)3⏎a 1⏎.load(t=true,k="t")…` in `cases/spec/09-macros`,
+      the known §9.2 rejected-arguments gap, not the classifier; the `ce19ee7` build gives them the
+      same verdicts (`--replay`). Copies: `target/c14-rereview3/run1/`.
+    - Same-seed runs of the `ce19ee7` build and HEAD (seed 4242, 1 job, 40,002 inputs): identical
+      summaries.
+    - Every `*.ucl` file under `tests/conformance/cases/` without a sibling `.inputs` file (1,551),
+      through `--check` with its own flags, then also with `variable-handler`, then also with
+      `registered-macros` and `no-implicit-arrays`: the same verdict from both builds in each of
+      the 4,653 case runs.
+  - Commits: this LOG-only review commit. No change to `fuzz/` or `src/`; not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
