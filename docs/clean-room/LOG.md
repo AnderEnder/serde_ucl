@@ -7578,3 +7578,36 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
     This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
     names or source structure.
+
+- 2026-10-05 — Role: spec team (draft, fourth round). Item: C14, the spec-v23 re-review above
+  (round 3), on `c14/spec-v23`.
+  - Inputs consulted: the re-review entry above; the pinned libucl source; ucl-dump and
+    `ucl-differential --check` (origin/main's crate and `c14/spec21-impl`'s at `80745c3`) on
+    probe files in `target/v23-probe/`.
+  - (1) Confirmed: an argument document's own first-directory miss, or a rejected argument
+    document nested in it, waits within that document; a later `.include(try=true)` of a
+    directory there, with no further directory to go on to, fails and rejects the argument
+    document, which then waits for a skip outside. A skip in the argument document before the
+    include, or a later list directory that lacks the path, lets it pass; the errors of the
+    document that holds the macro do not reach in. §9.4's clause and §9.2's miss quirk now say
+    so; §9.2's "needs no skip" still holds for the miss alone. Six cases active
+    (`macro_args_first_miss_inside_then_try_directory_error`,
+    `macro_args_first_miss_in_included_file_then_try_directory_error`,
+    `macro_args_try_directory_inside_without_miss`,
+    `macro_args_nested_rejected_then_try_directory_then_skip`,
+    `macro_args_first_miss_inside_skip_then_try_directory`,
+    `include_path_first_miss_then_glob_try_directory_match_after_file`), five pending
+    (`macro_args_first_miss_inside_then_try_directory_then_skip`, `…_next_dir_missing`,
+    `macro_args_nested_rejected_then_try_directory_error`,
+    `include_path_first_miss_then_glob_try_directory_match_skips_rest`,
+    `…_match_every_dir_error`). (2) Confirmed: in a directory whose glob matches include a
+    directory, the matches before it are included and those after it are not; one sentence in
+    §9.4, with the fixtures `files/v23/gg/` and `files/v23/gh/` (active and pending copies) and
+    three of the cases above. (3) The stray README line is rewrapped. The #98 answer covers both.
+  - Checks: `cargo test --test conformance`: 1,753 cases, the four expected failures. With all
+    46 pending cases moved in, origin/main's crate fails 43 and nothing else, and
+    `c14/spec21-impl`'s fails 26 and nothing else; no pending case passes on both, and every
+    active case passes on both. `scripts/ci.sh golden` at `53db8e5`: golden files are current.
+    Coverage index: 1,753 active and 46 pending cases.
+  - Commits: `docs(spec): apply the waiting-error rules inside argument documents` and this
+    entry. Not released or tagged. Not pushed.
