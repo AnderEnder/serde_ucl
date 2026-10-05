@@ -168,10 +168,12 @@ It reports what the rule allows:
 - §7.7, where the handler's names cannot be registered (a unit holds an unbraced `$H_`, an
   escape that can make or hide a reference, or a name of other bytes; *What it generates*): a
   macro VALUE that shares a handler result with other text is compared with libucl's result
-  under its handler, which the spec leaves undefined, acceptance included. Unless the document
-  is that one macro alone, which two recognisers cover, the difference is reported, as a false
-  `crate-accepts`, `crate-rejects` or `values-differ`: with `a = $H_` before it,
-  `.include(g=true)"${H_}*/"` is a `crate-accepts`. Strings are excused as above.
+  under its handler, which the spec leaves undefined, acceptance included. The difference is
+  reported, as a false `crate-accepts`, `crate-rejects` or `values-differ`: with `a = $H_` before
+  it, or `# \u` after it, `.include(g=true)"${H_}*/"` is a `crate-accepts`. Two recognisers
+  excuse only a document that is one `.include` whose quoted path ends the input and whose
+  result in the crate is empty, and one that is a single `.emit "KEY=…"` giving one entry.
+  Strings are excused as above.
 - §12.5, comments of a replaced value: each comment the crate dropped can be given to one value
   of the document, the first in dump order whose list it fits, and it takes the earliest such
   comment. If libucl gives two dropped comments of the same text to two values, the first value
