@@ -188,7 +188,9 @@ needs one; the `joins_*` cases show each of them.
   (`inputs_missing_include_then_skip_in_later_input_error`).
 - **Quirk.** The two errors that do not end the parse, a rejected argument document (§9.2,
   *ARGUMENTS*) and the first-directory miss of a `.include` (§9.4, *Quirk: a later skipped URL
-  include or `.load`*), are discarded by a skip in a later input as by one later in their own:
+  include or `.load`*), are discarded by a skip in a later input as by one later in their own,
+  in an included file or text parsed in place as in the input itself (§9.4, *Quirk: the miss and
+  the skip in different units*):
   `.priority(x) 3⏎a = 1` followed by that input gives `{ a: int 1 @3, b: int 2 }`, also with an
   input in between and with the input given as a file; the first-directory miss of
   `.include(path=["", "…/files/v4/p1"]) "pa.inc"` followed by an input with a skipped URL include
@@ -207,6 +209,11 @@ needs one; the `joins_*` cases show each of them.
   them; the check at the end of that later input stops before them, but still covers the
   containers it opened itself (`inputs_stop_inside_object_next_input_fills_it`,
   `inputs_stop_inside_object_next_input_unclosed_error`, `macro_registered_failure_then_later_input`).
+  **Quirk.** A silent stop while a rejected argument document or a first-directory miss waits for
+  a skip, in its own input or an earlier one, makes the result that error, and no later input
+  discards it (§9.4, *Quirk: while an error waits for a skip*;
+  `inputs_args_rejected_then_stop_then_skip_in_later_input_error`,
+  `inputs_args_rejected_then_stop_in_later_input_error`).
 
 ### File variables and paths
 
@@ -337,8 +344,11 @@ receives the macro's VALUE and ARGUMENTS; a context macro also receives the root
   (`macro_registered_text_takes_input_priority`, `macro_registered_text_takes_input_strategy`;
   compare `macro_registered_text_include_differs`). Comments in it are saved as in the input
   (`macro_registered_text_comments`), and a silent stop in it stops the input
-  (`macro_registered_text_stop_stops_all`). Under `zerocopy`, text from an expanded macro VALUE
-  has an undefined result for its keys and strings and for what later depends on them (§12.2).
+  (`macro_registered_text_stop_stops_all`). A first-directory miss, a rejected argument document
+  and a skip in it count as in the input that holds the macro, in the order the parse reads them
+  (§9.4, *Quirk: the miss and the skip in different units*). Under `zerocopy`, text from an
+  expanded macro VALUE has an undefined result for its keys and strings and for what later
+  depends on them (§12.2).
 
   **Quirk: text in place and a section object left open.** When text is parsed in place while
   the innermost open object is a section object (§3.4), that object stops closing on its own for

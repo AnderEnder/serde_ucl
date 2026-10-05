@@ -229,12 +229,26 @@ changed keys and strings, and to included files.
 before its first key and how the first name closes in a section object (§9.4, §12.5).
 `spec-v21` answers #89 and #90: it extends the same skips to a rejected argument document
 (§9.2) and to later inputs (§13.1), and applies the §7.7 handler uncertainty to macro VALUEs.
+`spec-v22` adds the C15 Stage A C API (*Initial C API*, above) and keeps the format rules of
+`spec-v21`.
+`spec-v23` answers #91 to #93 and #97 to #99. An included braced file takes its brace over
+again after a macro only when more than whitespace and `;` follows the macro in the file, and a
+`}` of its own ends the takeover as its first key does (§9.4). A first-directory miss or a
+rejected argument document, and the skip that discards it, may be in different units of the
+parse: included files and text parsed in place, as well as later inputs; a miss inside an
+argument document is no error (§9.2, §9.4). While such an error waits for a skip, a silent stop
+ends the input with it, and a directory does not skip an include with `try=true` (§9.4, §13.1).
+A `)` that is the last byte of its unit after rejected ARGUMENTS is an error (§9.2). A
+double-quoted string is expanded only if it holds a `$` as written (§7.6).
 
 The cases of `spec-v13`, `spec-v15`, `spec-v18` and `spec-v20` are all in `cases/spec/`; the
 three `spec-v15` cases moved there when the crate followed §9.4 in C14, the six `spec-v18` cases
 when it followed §12.5, and the eighteen `spec-v20` cases when it followed §9.4 and §12.5
 again. The fourteen `spec-v21` cases are under `tests/conformance/pending/` until the crate
-follows §9.2 and §13.1.
+follows §9.2 and §13.1, and the thirty-two `spec-v23` cases until it follows §7.6, §9.2 and
+§9.4 as `spec-v23` states them. The forty-two other `spec-v23` cases are active: the crate
+already follows the brace rules of #91 and #92 and gives the oracle's result for the other
+boundary cases.
 
 Golden files that depend on the platform's C library are recorded per platform for the drift
 check (`tests/conformance/README.md`, *Golden files per platform*). The files next to each case
@@ -272,8 +286,8 @@ Two rules are stated but have no committed case, because their golden files cann
 
 ## Coverage
 
-Every case in `tests/conformance/` and the section(s) that explain it: 1711 cases in `cases/` and
-`libucl/`, plus fourteen pending `spec-v21` cases.
+Every case in `tests/conformance/` and the section(s) that explain it: 1753 cases in `cases/` and
+`libucl/`, plus fourteen pending `spec-v21` cases and thirty-two pending `spec-v23` cases.
 
 - Cases under `cases/spec/NN-topic/` belong to section NN.
 - Every case that parses also has output golden files (§10); the table lists §10 only for the
@@ -1001,6 +1015,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/07-variables/not_in_keys` | §7 |
 | `cases/spec/07-variables/not_in_single_quotes` | §7 |
 | `cases/spec/07-variables/numbers_are_not_expanded` | §7 |
+| `cases/spec/07-variables/quoted_unicode_dollar_with_written_dollar_expanded` | §7, §6 |
 | `cases/spec/07-variables/registered_wins_over_handler` | §7 |
 | `cases/spec/07-variables/reregister_keeps_position` | §7 |
 | `cases/spec/07-variables/unbraced` | §7 |
@@ -1008,6 +1023,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/07-variables/unknown_preserved` | §7 |
 | `cases/spec/07-variables/unterminated_brace_inner_reference` | §7 |
 | `cases/spec/07-variables/upstream_mix` | §7 |
+| `pending/07-variables/quoted_unicode_dollar_dollar_outside_string_not_counted` | §7, §6 |
+| `pending/07-variables/quoted_unicode_dollar_handler_not_expanded` | §7, §6 |
+| `pending/07-variables/quoted_unicode_dollar_not_expanded` | §7, §6 |
 | `cases/spec/08-duplicates/chunk_priority` | §8 |
 | `cases/spec/08-duplicates/explicit_array_not_flattened` | §8 |
 | `cases/spec/08-duplicates/include_merge_scalar_quirk_default_mode` | §8 |
@@ -1130,17 +1148,32 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/include_braced_file_nested_braced_before_first_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_nested_braced_then_entry` | §9 |
 | `cases/spec/09-macros/include_braced_file_nested_close_brace_before_first_name` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_nested_left_open_at_end_brace_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_nested_left_open_then_comment` | §9, §3, §2 |
+| `cases/spec/09-macros/include_braced_file_nested_macro_at_end` | §9 |
+| `cases/spec/09-macros/include_braced_file_nested_macro_at_end_then_brace_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_nested_macro_then_comment_closed_by_includer` | §9, §2 |
+| `cases/spec/09-macros/include_braced_file_nested_macro_then_comment_unclosed_error` | §9, §2 |
+| `cases/spec/09-macros/include_braced_file_nested_open_brace_kept` | §9 |
+| `cases/spec/09-macros/include_braced_file_nested_open_brace_kept_then_brace_error` | §9 |
 | `cases/spec/09-macros/include_braced_file_nested_path_before_first_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_nested_path_one_brace_closed_by_includer` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_nested_path_one_brace_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_nested_path_then_braces` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_nested_path_then_entry` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_nested_text_before_first_name` | §9, §3, §13 |
+| `cases/spec/09-macros/include_braced_file_own_brace_after_nested_then_name_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_own_brace_ends_takeover_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_own_brace_then_macro_brace_error` | §9 |
+| `cases/spec/09-macros/include_braced_file_own_brace_then_name_no_brace_error` | §9, §3 |
+| `cases/spec/09-macros/include_braced_file_own_brace_then_priority` | §9, §8 |
 | `cases/spec/09-macros/include_braced_file_priority_then_first_name` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_then_entries` | §9 |
 | `cases/spec/09-macros/include_braced_file_twice` | §9 |
 | `cases/spec/09-macros/include_braced_file_two_names_error` | §9, §3 |
 | `cases/spec/09-macros/include_braced_file_with_key_inside_braces` | §9 |
+| `cases/spec/09-macros/include_braced_text_nested_macro_at_end` | §9, §13 |
+| `cases/spec/09-macros/include_braced_text_nested_macro_then_comment_unclosed_error` | §9, §13, §2 |
 | `cases/spec/09-macros/include_braces` | §9 |
 | `cases/spec/09-macros/include_braces_variables` | §9 |
 | `cases/spec/09-macros/include_closes_braced_root` | §9, §3 |
@@ -1264,7 +1297,11 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/include_path_first_dir` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_after_load_try_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_again_after_load_try_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_in_included_file_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_in_text_error` | §9, §13 |
 | `cases/spec/09-macros/include_path_first_miss_load_try_after_each_miss_accepts` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_glob_try_directory_match_after_file` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_glob_try_last_dir_no_match` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_load_missing_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_load_try_accepts_later` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_load_try_accepts_later_file_input` | §9 |
@@ -1272,6 +1309,12 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/include_path_first_miss_then_load_try_empty_file_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_load_try_existing_file_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_optional_file_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_silent_stop_error` | §9, §13 |
+| `cases/spec/09-macros/include_path_first_miss_then_skip_file_outside_list_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_skip_in_args_error` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_try_directory_in_args` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_try_directory_next_dir_missing` | §9 |
+| `cases/spec/09-macros/include_path_first_miss_then_try_first_dir_missing` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_try_include_url_accepts_later` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_url_error` | §9 |
 | `cases/spec/09-macros/include_path_first_miss_then_url_try_accepts_later` | §9 |
@@ -1286,6 +1329,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/include_path_no_string_entries_error` | §9 |
 | `cases/spec/09-macros/include_path_param_entry_ends_at_nul` | §9 |
 | `cases/spec/09-macros/include_path_persists` | §9 |
+| `cases/spec/09-macros/include_path_skip_in_included_file_then_miss_error` | §9 |
 | `cases/spec/09-macros/include_path_string_ignored` | §9 |
 | `cases/spec/09-macros/include_path_try_first_dir_only` | §9 |
 | `cases/spec/09-macros/include_path_two_first_misses_then_load_try_accepts` | §9 |
@@ -1501,6 +1545,9 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/macro_args_escaped_quote_error` | §9 |
 | `cases/spec/09-macros/macro_args_filename_is_undef` | §9, §7 |
 | `cases/spec/09-macros/macro_args_filename_no_filevars` | §9, §7 |
+| `cases/spec/09-macros/macro_args_first_miss_in_included_file_then_try_directory_error` | §9 |
+| `cases/spec/09-macros/macro_args_first_miss_inside_skip_then_try_directory` | §9 |
+| `cases/spec/09-macros/macro_args_first_miss_inside_then_try_directory_error` | §9 |
 | `cases/spec/09-macros/macro_args_include_inside` | §9 |
 | `cases/spec/09-macros/macro_args_inherit_inside` | §9 |
 | `cases/spec/09-macros/macro_args_key_lowercase` | §9 |
@@ -1513,6 +1560,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/macro_args_nested_rejected_in_included_file` | §9 |
 | `cases/spec/09-macros/macro_args_nested_rejected_no_value_error` | §9 |
 | `cases/spec/09-macros/macro_args_nested_rejected_space_before_value_error` | §9 |
+| `cases/spec/09-macros/macro_args_nested_rejected_then_try_directory_then_skip` | §9 |
 | `cases/spec/09-macros/macro_args_nested_rejected_value_after_paren` | §9 |
 | `cases/spec/09-macros/macro_args_nested_stop_dropped` | §9 |
 | `cases/spec/09-macros/macro_args_nested_unknown_macro_dropped` | §9 |
@@ -1522,10 +1570,14 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/macro_args_no_variables` | §9 |
 | `cases/spec/09-macros/macro_args_paren_in_quotes` | §9 |
 | `cases/spec/09-macros/macro_args_parse_error` | §9 |
+| `cases/spec/09-macros/macro_args_path_list_stays_in_argument_document_error` | §9 |
 | `cases/spec/09-macros/macro_args_registered_variables_unavailable_error` | §9 |
 | `cases/spec/09-macros/macro_args_rejected_after_skip_error` | §9 |
 | `cases/spec/09-macros/macro_args_rejected_include_space_value_error` | §9 |
+| `cases/spec/09-macros/macro_args_rejected_paren_last_byte_of_file_error` | §9, §13 |
+| `cases/spec/09-macros/macro_args_rejected_paren_last_byte_of_text_error` | §9, §13 |
 | `cases/spec/09-macros/macro_args_rejected_then_load_existing_file_error` | §9 |
+| `cases/spec/09-macros/macro_args_rejected_then_silent_stop_error` | §9 |
 | `cases/spec/09-macros/macro_args_rejected_try_include_stops_error` | §9 |
 | `cases/spec/09-macros/macro_args_repeated_first_wins` | §9 |
 | `cases/spec/09-macros/macro_args_single_quotes_do_not_protect_error` | §9 |
@@ -1535,6 +1587,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/macro_args_then_end_error` | §9 |
 | `cases/spec/09-macros/macro_args_then_last_byte_hash_empty_value` | §9 |
 | `cases/spec/09-macros/macro_args_then_last_byte_hash_error` | §9 |
+| `cases/spec/09-macros/macro_args_try_directory_inside_without_miss` | §9 |
 | `cases/spec/09-macros/macro_args_two_prefixes_last_wins` | §9 |
 | `cases/spec/09-macros/macro_args_unknown_macro_inside_error` | §9 |
 | `cases/spec/09-macros/macro_bare_value` | §9 |
@@ -1641,12 +1694,40 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/09-macros/try_include_url_try_false_error` | §9 |
 | `cases/spec/09-macros/unknown_macro_error` | §9 |
 | `cases/spec/09-macros/zero_byte_file_moves_filevars` | §9, §7 |
+| `pending/09-macros/include_path_first_miss_and_load_try_in_included_file` | §9 |
+| `pending/09-macros/include_path_first_miss_and_load_try_in_text` | §9, §13 |
+| `pending/09-macros/include_path_first_miss_in_included_file_then_load_try` | §9 |
+| `pending/09-macros/include_path_first_miss_in_text_then_load_try` | §9, §13 |
+| `pending/09-macros/include_path_first_miss_then_glob_try_directory_last_dir_error` | §9 |
+| `pending/09-macros/include_path_first_miss_then_glob_try_directory_match_every_dir_error` | §9 |
+| `pending/09-macros/include_path_first_miss_then_glob_try_directory_match_skips_rest` | §9 |
+| `pending/09-macros/include_path_first_miss_then_load_try_in_included_file` | §9 |
+| `pending/09-macros/include_path_first_miss_then_load_try_in_text` | §9, §13 |
+| `pending/09-macros/include_path_first_miss_then_try_directory_error` | §9 |
+| `pending/09-macros/include_path_first_miss_then_try_directory_every_dir_error` | §9 |
+| `pending/09-macros/include_path_first_miss_then_try_directory_next_dir_file` | §9 |
+| `pending/09-macros/include_path_first_miss_then_url_try_in_included_file` | §9 |
+| `pending/09-macros/include_path_skip_in_included_file_then_miss_then_skip` | §9 |
+| `pending/09-macros/macro_args_first_miss_in_included_file_no_error` | §9 |
+| `pending/09-macros/macro_args_first_miss_inside_in_text` | §9, §13 |
+| `pending/09-macros/macro_args_first_miss_inside_no_error` | §9 |
+| `pending/09-macros/macro_args_first_miss_inside_then_try_directory_next_dir_missing` | §9 |
+| `pending/09-macros/macro_args_first_miss_inside_then_try_directory_then_skip` | §9 |
+| `pending/09-macros/macro_args_first_miss_inside_then_value` | §9 |
+| `pending/09-macros/macro_args_nested_rejected_then_try_directory_error` | §9 |
 | `pending/09-macros/macro_args_rejected_and_first_miss_then_one_skip_accepts` | §9 |
 | `pending/09-macros/macro_args_rejected_in_included_file_then_load_try_accepts` | §9 |
 | `pending/09-macros/macro_args_rejected_include_runs_without_args` | §9 |
+| `pending/09-macros/macro_args_rejected_then_glob_try_directory_error` | §9 |
+| `pending/09-macros/macro_args_rejected_then_glob_try_directory_one_dir_error` | §9 |
+| `pending/09-macros/macro_args_rejected_then_glob_try_last_dir_no_match` | §9 |
 | `pending/09-macros/macro_args_rejected_then_load_try_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_then_load_try_in_included_file` | §9 |
+| `pending/09-macros/macro_args_rejected_then_try_directory_error` | §9 |
+| `pending/09-macros/macro_args_rejected_then_try_directory_next_dir_missing` | §9 |
 | `pending/09-macros/macro_args_rejected_then_url_try_accepts` | §9 |
 | `pending/09-macros/macro_args_rejected_unknown_macro_then_load_try_accepts` | §9 |
+| `pending/09-macros/macro_args_rejected_value_at_end_of_file_and_text` | §9, §13 |
 | `pending/09-macros/macro_args_stopped_then_load_try_accepts` | §9 |
 | `cases/spec/10-output/arrays` | §10 |
 | `cases/spec/10-output/comments_output_array_elements` | §10, §12 |
@@ -1783,7 +1864,12 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/12-flags/zerocopy_include_empty_file` | §12, §9 |
 | `cases/spec/12-flags/zerocopy_no_effect` | §12 |
 | `cases/spec/12-flags/zerocopy_registered_macros_stable` | §12, §13 |
+| `cases/spec/13-inputs/inputs_args_accepted_space_at_end_error` | §13, §9 |
 | `cases/spec/13-inputs/inputs_args_rejected_later_input_without_skip_error` | §13, §9 |
+| `cases/spec/13-inputs/inputs_args_rejected_paren_last_byte_error` | §13, §9 |
+| `cases/spec/13-inputs/inputs_args_rejected_then_registered_failure_error` | §13, §9 |
+| `cases/spec/13-inputs/inputs_args_rejected_then_stop_in_later_input_error` | §13, §9 |
+| `cases/spec/13-inputs/inputs_args_rejected_then_stop_then_skip_in_later_input_error` | §13, §9 |
 | `cases/spec/13-inputs/inputs_array_root_then_array_error` | §13 |
 | `cases/spec/13-inputs/inputs_array_root_then_entries_error` | §13 |
 | `cases/spec/13-inputs/inputs_braced_root_then_braced_root_error` | §13 |
@@ -1806,6 +1892,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `cases/spec/13-inputs/inputs_entry_split_across_inputs_error` | §13 |
 | `cases/spec/13-inputs/inputs_error_in_first_input` | §13 |
 | `cases/spec/13-inputs/inputs_error_in_later_input` | §13 |
+| `cases/spec/13-inputs/inputs_first_miss_then_registered_failure_error` | §13, §9 |
 | `cases/spec/13-inputs/inputs_heredoc_at_end` | §13 |
 | `cases/spec/13-inputs/inputs_include_depth_shared_error` | §13 |
 | `cases/spec/13-inputs/inputs_include_depth_shared_ok` | §13 |
@@ -1983,6 +2070,7 @@ Every case in `tests/conformance/` and the section(s) that explain it: 1711 case
 | `pending/13-inputs/inputs_args_rejected_skip_in_later_file_input` | §13, §9 |
 | `pending/13-inputs/inputs_args_rejected_skip_two_inputs_later` | §13, §9 |
 | `pending/13-inputs/inputs_args_rejected_then_skip_in_later_input` | §13, §9 |
+| `pending/13-inputs/inputs_args_rejected_value_at_end_of_input` | §13, §9 |
 | `pending/13-inputs/inputs_first_miss_then_load_skip_in_later_input` | §13, §9 |
 | `pending/13-inputs/inputs_first_miss_then_url_skip_in_later_input` | §13, §9 |
 | `pending/13-inputs/macro_registered_args_rejected_then_load_try_accepts` | §13, §9 |

@@ -1,0 +1,3 @@
+.priority(.include(path=["files/v4/p1"]) "pa.inc"; priority=3);
+.include "pa.inc"
+a = 1

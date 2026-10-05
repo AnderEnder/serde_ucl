@@ -1,0 +1,2 @@
+.include "files/v23/own_brace_then_priority.inc"
+q = 1

@@ -1,0 +1,3 @@
+a: "$ABI"
+b: "${ABI}"
+c: "x$ABI"

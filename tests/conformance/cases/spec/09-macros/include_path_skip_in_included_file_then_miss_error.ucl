@@ -1,0 +1,3 @@
+.include "files/v23/miss_then_load_skip.inc"
+.include "pa.inc"
+q = 1

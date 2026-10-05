@@ -1,0 +1,3 @@
+.include "files/v23/args_rejected_space_end.inc"
+.emit ".seen(x) "
+.load(try=true, key="t") "missing.txt"

@@ -43,8 +43,9 @@ Errors:
 - `"""…"""` and `"a" + "b"` are not supported; both are errors (`triple_quote_error`,
   `concatenation_error`, `cases/additions/a01_plus_concat`, `cases/additions/a03_two_strings`).
 
-Escapes are decoded first, then variables are expanded (§7). A `\$` therefore does not stop
-expansion inside double quotes (§7.6).
+Escapes are decoded first, then variables are expanded (§7), but only in a string that holds a
+`$` as written, escaped or not (§7.6, **quirk**). A `\$` therefore does not stop expansion inside
+double quotes, and a `$` that only a `\u0024` escape gives does not start it (§7.6).
 
 ## 6.2 Single-quoted strings
 

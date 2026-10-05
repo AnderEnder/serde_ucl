@@ -1,0 +1,2 @@
+.include "files/v23/nested_macro_then_comment.inc"
+q = 1

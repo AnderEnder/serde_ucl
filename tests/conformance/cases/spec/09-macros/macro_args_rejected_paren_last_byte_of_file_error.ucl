@@ -1,0 +1,2 @@
+.include "files/v23/args_rejected_paren_end.inc"
+.load(try=true, key="t") "missing.txt"

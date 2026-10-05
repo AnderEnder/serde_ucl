@@ -1,0 +1,3 @@
+.include "files/v23/first_miss.inc"
+.load(try=true, key="t") "missing.txt"
+q = 1

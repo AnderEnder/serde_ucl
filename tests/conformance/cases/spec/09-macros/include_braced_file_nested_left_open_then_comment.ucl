@@ -1,0 +1,5 @@
+.include "files/v23/nested_left_open_then_comment.inc"
+q = 1
+}
+r = 2
+}

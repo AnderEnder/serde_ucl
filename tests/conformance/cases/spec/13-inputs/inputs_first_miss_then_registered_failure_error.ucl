@@ -1,0 +1,3 @@
+.include(path=["", "../09-macros/files/v4/p1"]) "pa.inc"
+.fail x
+q = 1

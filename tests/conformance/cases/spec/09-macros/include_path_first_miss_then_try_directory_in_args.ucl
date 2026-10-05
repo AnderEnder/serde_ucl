@@ -1,0 +1,4 @@
+.include(path=["", "files/v4/p1"]) "pa.inc"
+.priority(.include(try=true) "files"; priority=2);
+.load(try=true, key="t") "missing.txt"
+b = 2

@@ -1,0 +1,4 @@
+.include "files/v23/miss_then_load_skip.inc"
+.include "pa.inc"
+.load(try=true, key="t") "missing.txt"
+q = 1
