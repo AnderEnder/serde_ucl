@@ -84,11 +84,13 @@ registered variable gives that result where writing `[handled]` into the source 
 applied without it. Where registering could change other text, the handler's own result stays
 the expectation, with the §7.7 rule below: a unit holds an unbraced `$H_`, which a registered
 name would replace while the handler is never asked for it (§7.4); or an escape that can make
-or hide a reference, a `\` before `u`, `H`, `_`, `{` or `}`, since escapes are decoded before
+or hide a reference, a `\` before `u`, `H`, `_` or `{`, since escapes are decoded before
 expansion (§6.1, §7.6) and the scan reads the bytes as written (`"$\H_X"` and `"$\u0048_X"` are
 an unbraced `$H_X`, `"$\{H_X}y"` a braced reference); or the name has other bytes than
-letters, digits and `_`. Other escapes, such as `\n`, and a `\` in a comment do not stop the
-registration. Where it stops, a macro VALUE is compared as *Known limits* says.
+letters, digits and `_`, an escaped one included. Other escapes, such as `\n` or `\}`, do not
+stop the registration. The bytes are matched anywhere in a unit, so a `\u` or a `$H_` in a
+comment or a single-quoted string stops it too. Where it stops, a macro VALUE is compared as
+*Known limits* says.
 
 ## Verdicts
 
