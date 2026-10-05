@@ -83,10 +83,12 @@ registered variable gives that result where writing `[handled]` into the source 
 (`a = [handled]y` starts an array). The handler then resolves nothing, so the rules below are
 applied without it. Where registering could change other text, the handler's own result stays
 the expectation, with the §7.7 rule below: a unit holds an unbraced `$H_`, which a registered
-name would replace while the handler is never asked for it (§7.4), or a `\` anywhere, since
-escapes are decoded before expansion (§7.6) and the scan reads the bytes as written (`"$\H_X"`
-and `"$\u0048_X"` are an unbraced `$H_X`, `"$\{H_X}y"` a braced reference), or the name has
-other bytes than letters, digits and `_`.
+name would replace while the handler is never asked for it (§7.4); or an escape that can make
+or hide a reference, a `\` before `u`, `H`, `_`, `{` or `}`, since escapes are decoded before
+expansion (§6.1, §7.6) and the scan reads the bytes as written (`"$\H_X"` and `"$\u0048_X"` are
+an unbraced `$H_X`, `"$\{H_X}y"` a braced reference); or the name has other bytes than
+letters, digits and `_`. Other escapes, such as `\n`, and a `\` in a comment do not stop the
+registration. Where it stops, a macro VALUE is compared as *Known limits* says.
 
 ## Verdicts
 
@@ -155,6 +157,13 @@ It excuses more than the rule allows:
 
 It reports what the rule allows:
 
+- §7.7, where the handler's names cannot be registered (a unit holds an unbraced `$H_`, an
+  escape that can make or hide a reference, or a name of other bytes; *What it generates*): a
+  macro VALUE that shares a handler result with other text is compared with libucl's result
+  under its handler, which the spec leaves undefined, acceptance included. Unless the document
+  is that one macro alone, which two recognisers cover, the difference is reported, as a false
+  `crate-accepts`, `crate-rejects` or `values-differ`: with `a = $H_` before it,
+  `.include(g=true)"${H_}*/"` is a `crate-accepts`. Strings are excused as above.
 - §12.5, comments of a replaced value: each comment the crate dropped can be given to one value
   of the document, the first in dump order whose list it fits, and it takes the earliest such
   comment. If libucl gives two dropped comments of the same text to two values, the first value

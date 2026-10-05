@@ -70,9 +70,15 @@ pub fn expectation(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Expecta
 ///
 /// - a `$H_` that is not braced, which a registered name that is a prefix of the text after the
 ///   `$` would replace, while the handler is never asked for it (§7.4);
-/// - a `\` anywhere in a unit. Escapes are decoded before expansion (§6.1, §7.6), so `"$\H_X"`,
-///   `"$\u0048_X"` and the unquoted `$\H_X` are the unbraced `$H_X` too, and `"$\{H_X}y"` is a
-///   braced reference that this scan of the bytes as written does not see;
+/// - an escape that can make or hide a reference: a `\` before `u`, `H`, `_`, `{` or `}`.
+///   Escapes are decoded before expansion in double-quoted strings and unquoted values (§6.1,
+///   §4.7, §7.6), so `"$\H_X"`, `"$\u0048_X"` and the unquoted `$\H_X` are the unbraced
+///   `$H_X` too, and `"$\{H_X}y"` is a braced reference that this scan of the bytes as written
+///   does not see. Other escapes cannot: one that yields `$` is `\$`, which leaves `$H_` or
+///   `${H_` in the bytes as written; an escaped byte of a braced name makes it a name of other
+///   bytes (below); and the rest, `\n` or `\"` for example, yield no byte of a reference. A
+///   `\` in a comment, a key, a single-quoted string, a heredoc or a macro VALUE, which decode
+///   no escapes before expansion or expand nothing (§7.2, §9.2), is matched all the same;
 /// - a name of other bytes than letters, digits and `_`.
 ///
 /// A `$$` needs no such care: it matters only in a string where a reference was replaced (§7.5),
@@ -90,7 +96,8 @@ pub fn handler_names(flags: &[String], input: &[u8], units: &[Vec<u8>]) -> Optio
         .collect();
     let mut names: Vec<String> = Vec::new();
     for text in std::iter::once(input).chain(units.iter().map(Vec::as_slice)) {
-        if text.contains(&b'\\') || text.windows(3).any(|w| w == b"$H_") {
+        let escape = |w: &[u8]| w[0] == b'\\' && matches!(w[1], b'u' | b'H' | b'_' | b'{' | b'}');
+        if text.windows(2).any(escape) || text.windows(3).any(|w| w == b"$H_") {
             return None;
         }
         for at in 0..text.len() {
@@ -885,10 +892,27 @@ mod tests {
             handler_names(&handler, b"a = \"x${H_X}$$\"\nb = \"$${H_Y}\"", &[]),
             Some(vec!["H_X".to_string(), "H_Y".to_string()])
         );
-        // Registering could change other text: an unbraced `$H_`, a backslash, or another name.
+        // Escapes that yield no byte of a reference, and a backslash in a comment, leave the
+        // names registered.
+        for text in [
+            "a = \"x${H_X}\"\nb = \"\\n\\t\\\"\\\\\\/\\$\"",
+            "a = \"x${H_X}\"\nb = x\\;y\\q # \\",
+        ] {
+            assert_eq!(
+                handler_names(&handler, text.as_bytes(), &[]),
+                Some(vec!["H_X".to_string()]),
+                "{text}"
+            );
+        }
+        // Registering could change other text: an unbraced `$H_`, an escape that can make or
+        // hide a reference, or another name.
         for text in [
             "a = \"x${H_X}\"\nb = $H_X",
-            "a = \"x${H_X}\"\nb = \"\\n\"",
+            "a = \"x${H_X}\"\nb = \"\\u0041\"",
+            "a = \"x${H_X}\"\nb = \"$\\Hz\"",
+            "a = \"x${H_X}\"\nb = \"$H\\_X\"",
+            "a = \"x${H_X}\"\nb = \"$\\{H_Z}\"",
+            "a = \"x${H_X}\"\nb = \"${H_Z\\}\"",
             "a = \"x${H_X.y}\"",
             "a = \"x${H_$ABI}\"",
         ] {
@@ -1268,6 +1292,40 @@ mod tests {
             input,
         );
         assert!(values_differ(&changed.verdict));
+    }
+
+    /// Re-review of the C14 classifier gaps, finding 1 (§7.7): a `\` that cannot make or hide a
+    /// reference, in a comment or in an unrelated string, leaves the handler's names registered,
+    /// so the include of `crate-accepts-e04659ea272d36c7` keeps the substituted result as its
+    /// expectation. The dumps are the oracle's with `H_` registered; under the handler alone it
+    /// rejects both documents, which is now reported. An unbraced `$H_` still stops the
+    /// registration, and libucl's undefined rejection is then reported (`fuzz/README.md`, *Known
+    /// limits*).
+    #[test]
+    fn escapes_that_make_no_reference_keep_the_handlers_names_registered() {
+        let run_flags = flags(&["string-input", "variable-handler"]);
+        let registered = flags(&["string-input", "variable-handler", "var:H_=[handled]"]);
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/conformance/cases/spec/09-macros");
+        let in_comment = ".include(g=true)\"${H_}*/\"1\n# \\";
+        let in_string = "a = \"\\n\"\n.include(g=true)\"${H_}*/\"";
+        let empty = serde_json::json!({"t": "object", "entries": []});
+        let newline = serde_json::json!({"t": "object", "entries": [
+            {"k": "a", "v": [{"t": "string", "v": "\n"}]}
+        ]});
+        for (input, dump) in [(in_comment, empty), (in_string, newline)] {
+            let checked =
+                check_against(OracleResult::Dump(dump), input.as_bytes(), &run_flags, &dir);
+            assert_eq!(checked.oracle_flags, registered, "{input:?}");
+            assert!(matches!(checked.verdict, Verdict::Agree), "{input:?}");
+            let rejected = check_against(OracleResult::Error, input.as_bytes(), &run_flags, &dir);
+            assert!(crate_accepts(&rejected.verdict), "{input:?}");
+        }
+        let unbraced = "a = $H_\n.include(g=true)\"${H_}*/\"";
+        assert_eq!(handler_names(&run_flags, unbraced.as_bytes(), &[]), None);
+        let checked = check_against(OracleResult::Error, unbraced.as_bytes(), &run_flags, &dir);
+        assert_eq!(checked.oracle_flags, run_flags);
+        assert!(crate_accepts(&checked.verdict));
     }
 
     /// A string that shares a handler result with other text: libucl's handler result
