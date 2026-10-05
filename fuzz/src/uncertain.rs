@@ -418,8 +418,9 @@ fn entry_key(entry: &J) -> Option<Vec<u8>> {
 
 /// §13.2, *The test macros*: under `no-implicit-arrays`, the collection of a repeated name in
 /// ARGUMENTS keeps the length of its key in `.seen`'s copy, not its bytes, which depend on memory
-/// contents (NUL, a space, `0xc0` on the oracle's machine). `actual_entry` is the crate's entry,
-/// whose value is that collection.
+/// contents (NUL, a space, `0xc0` on the oracle's machine). `.priority` runs `.seen`'s handler
+/// under `registered-priority-override`. `actual_entry` is the crate's entry, whose value is that
+/// collection.
 fn seen_collected_key(golden: &[u8], actual: &str, actual_entry: &J, ctx: &Context<'_>) -> bool {
     let collection = actual_entry
         .get("v")
@@ -428,11 +429,9 @@ fn seen_collected_key(golden: &[u8], actual: &str, actual_entry: &J, ctx: &Conte
         .and_then(|value| value.get("t"))
         .and_then(J::as_str)
         == Some("array");
-    ctx.has_flag("registered-macros")
-        && ctx.has_flag("no-implicit-arrays")
-        && ctx.input_has(b".seen")
-        && collection
-        && golden.len() == actual.len()
+    let seen = (ctx.has_flag("registered-macros") && ctx.input_has(b".seen"))
+        || (ctx.has_flag("registered-priority-override") && ctx.input_has(b".priority"));
+    seen && ctx.has_flag("no-implicit-arrays") && collection && golden.len() == actual.len()
 }
 
 /// §5.4: with `kb`, `mb` or `gb`, a float outside the 64-bit signed range is truncated in a way
@@ -897,6 +896,15 @@ mod tests {
             )
             .0
         );
+        // `.priority` under `registered-priority-override`, which runs `.seen`'s handler
+        // (`cases/spec/09-macros/macro_args_no_implicit_arrays_repeated_name_error`).
+        let input = ".priority(priority=1, priority=2);\na = 1";
+        let overridden = strings(&["registered-priority-override", "no-implicit-arrays"]);
+        let ctx = context(input, &overridden, &[]);
+        assert!(excused(entry("a\0\0\0\0\0\0\0"), &entry("priority"), &ctx).0);
+        let built_in = strings(&["registered-macros", "no-implicit-arrays"]);
+        let ctx = context(input, &built_in, &[]);
+        assert!(!excused(entry("a\0\0\0\0\0\0\0"), &entry("priority"), &ctx).0);
     }
 
     #[test]

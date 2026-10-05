@@ -110,7 +110,8 @@ other bytes than letters, digits and `_`.
     copies, or `.priority` under `registered-priority-override`, which runs `.seen`'s handler,
     stands in some unit of the document: the input, a file it reads, or text parsed in place
     (§9.7, §13.2; any such string of that document is excused, copied or not);
-  - the key of a collection in `.seen`'s copy of ARGUMENTS (§13.2);
+  - the key of a collection in `.seen`'s copy of ARGUMENTS, also where `.priority` runs `.seen`'s
+    handler (§13.2);
   - an included file or text in place that starts with `[` (§9.4, §13.2), which the crate
     rejects there.
 
