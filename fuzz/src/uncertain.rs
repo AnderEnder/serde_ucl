@@ -419,8 +419,8 @@ fn entry_key(entry: &J) -> Option<Vec<u8>> {
 /// §13.2, *The test macros*: under `no-implicit-arrays`, the collection of a repeated name in
 /// ARGUMENTS keeps the length of its key in `.seen`'s copy, not its bytes, which depend on memory
 /// contents (NUL, a space, `0xc0` on the oracle's machine). `.priority` runs `.seen`'s handler
-/// under `registered-priority-override`. `actual_entry` is the crate's entry, whose value is that
-/// collection.
+/// under `registered-priority-override`. The macro may stand in any unit of the document, as for
+/// [`Context::copies`]. `actual_entry` is the crate's entry, whose value is that collection.
 fn seen_collected_key(golden: &[u8], actual: &str, actual_entry: &J, ctx: &Context<'_>) -> bool {
     let collection = actual_entry
         .get("v")
@@ -429,8 +429,8 @@ fn seen_collected_key(golden: &[u8], actual: &str, actual_entry: &J, ctx: &Conte
         .and_then(|value| value.get("t"))
         .and_then(J::as_str)
         == Some("array");
-    let seen = (ctx.has_flag("registered-macros") && ctx.input_has(b".seen"))
-        || (ctx.has_flag("registered-priority-override") && ctx.input_has(b".priority"));
+    let seen = (ctx.has_flag("registered-macros") && ctx.some_unit_has(b".seen"))
+        || (ctx.has_flag("registered-priority-override") && ctx.some_unit_has(b".priority"));
     seen && ctx.has_flag("no-implicit-arrays") && collection && golden.len() == actual.len()
 }
 
@@ -905,6 +905,32 @@ mod tests {
         let built_in = strings(&["registered-macros", "no-implicit-arrays"]);
         let ctx = context(input, &built_in, &[]);
         assert!(!excused(entry("a\0\0\0\0\0\0\0"), &entry("priority"), &ctx).0);
+        // In an included file, or text parsed in place (re-review of the C14 classifier gaps,
+        // finding 2): `.seen`, and `.priority` under the override.
+        let input = ".include \"seen.inc\"";
+        let seen = [b".seen(n = 1; n = 2) \"v\"".to_vec()];
+        let ctx = Context {
+            units: &seen,
+            ..context(input, &built_in, &[])
+        };
+        assert!(excused(entry("\0"), &entry("n"), &ctx).0);
+        let priority = [b".priority(n = 1; n = 2) \"v\"".to_vec()];
+        let ctx = Context {
+            units: &priority,
+            ..context(input, &overridden, &[])
+        };
+        assert!(excused(entry(" "), &entry("n"), &ctx).0);
+        let ctx = Context {
+            units: &priority,
+            ..context(input, &built_in, &[])
+        };
+        assert!(!excused(entry(" "), &entry("n"), &ctx).0);
+        let plain = [b"n = 1".to_vec()];
+        let ctx = Context {
+            units: &plain,
+            ..context(input, &built_in, &[])
+        };
+        assert!(!excused(entry("\0"), &entry("n"), &ctx).0);
     }
 
     #[test]

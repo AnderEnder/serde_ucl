@@ -150,10 +150,13 @@ It excuses more than the rule allows:
     crate dropped, is excused whenever it was created, also before the replaced value. The
     crate's public notes do not say where a value was created, and no hidden note in `src/` is
     kept for it.
-- §9.7 and §13.2, bytes after a NUL in a copy: once a copying macro stands in some unit of the
-  document, any string of that document that differs only after its first NUL, at the same
-  length, is excused, copied or not. A file that `.load` reads counts as a unit, since the
-  loader is not told why it reads.
+- §9.7 and §13.2, bytes after a NUL in a copy: once the name of a copying macro (`.inherit`,
+  `.seen`, `.ctx`, or `.priority` under `registered-priority-override`) appears anywhere in some
+  unit of the document, also in a comment or a string, any string of that document that differs
+  only after its first NUL, at the same length, is excused, copied or not. A file that `.load`
+  reads counts as a unit, since the loader is not told why it reads. The key of a collection in
+  `.seen`'s copy (§13.2) is excused the same way, when `.seen`, or `.priority` under the
+  override, appears in some unit.
 
 It reports what the rule allows:
 
