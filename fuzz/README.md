@@ -142,7 +142,10 @@ It excuses more than the rule allows:
 - §12.5, comments of a replaced value:
   - The crate's notes do not say why a comment was dropped. In a document that can replace a
     value, a comment of a value discarded at a lower priority, or one pending at a silent stop
-    (§9.4), is excused as a replaced value's would be when libucl gives it to a later value.
+    (§9.4), is excused as a replaced value's would be when libucl gives it to a later value. So
+    is a crate bug that attaches a pending comment to a value that §8 then replaces: the crate
+    drops the comment with that value, libucl gives it to the next value created, as §12.5 says,
+    and the difference is excused.
     Whether the document can replace a value is read from the bytes as written: `rewrite` or
     `priority` anywhere in a unit counts, also in a comment or a string, and so does `.priority`
     under `registered-priority-override`, which sets no priority.
