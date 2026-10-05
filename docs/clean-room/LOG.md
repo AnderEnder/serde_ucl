@@ -7279,3 +7279,85 @@ publication. Work item:C15; final integration commit recorded in handover.
     after the new cases; `scripts/ci.sh golden` at the draft commit: golden files are current.
   - Commits: `docs(spec): draft C14 brace takeover end and cross-unit skip rules` and this entry.
     Not released or tagged; an independent spec review comes first. Not pushed.
+
+- 2026-10-05 — Role: independent spec reviewer, oracle side. Item: C14 questions #91, #92 and
+  #93, the spec-v23 draft (`80b7785..05a4a40` on `c14/spec-v23`, worktree `c14-spec-v23`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, `QUESTIONS.md` #83 and
+    #86 to #93 with the draft answers, `git diff origin/main...HEAD` (§§9.2, 9.4, 13.1 and 13.2,
+    `docs/spec/README.md`, the conformance and pending READMEs, the 29 new cases with their
+    fixtures and golden files, the spec-team entry above), released §9.2 *ARGUMENTS*, §9.4 and
+    §13.1, the pinned libucl source (read as the oracle-side role allows), the usage text of
+    `tools/ucl-dump/ucl_dump.c`, `scripts/regen-golden.sh`, `scripts/ci.sh` and
+    `fuzz/README.md`; black-box runs of this worktree's `target/libucl-oracle/ucl-dump` and of
+    `ucl-differential --check` on probe files in this session's scratchpad. Below, MISS is
+    `.include(path=["", "files/v4/p1"]) "pa.inc"` and SKIP `.load(try=true, key="t") "missing.txt"`.
+  - Result: not approved, one blocking finding. The spec text and the answers state behaviour
+    only, and every example of the new §9.4 bullets and quirk matches the oracle in my own runs.
+    1. Blocking. A first-directory miss inside a macro argument document, or in a file that such
+       a document includes, is not an error and needs no skip, and the macro gets its ARGUMENTS:
+       `.priority(MISS; priority=3);⏎a = 1` → `a: int 1 @3`, the same with
+       `.priority(.include "files/v23/first_miss.inc"; priority=3);`, `.priority(MISS) 2⏎a = 1`
+       → `a: int 1 @2`, and `.emit {.priority(MISS) 2}⏎a = 1` (`registered-macros`) is accepted.
+       Released §9.2 says that everything applies inside that document and that an error of a
+       macro inside it rejects it, and the draft sets argument documents apart only for the
+       skip, so the spec gives an error for all four; the crate rejects them (`crate-rejects`,
+       `/pa.inc` missing). Fix: state it in the new §9.4 quirk, or next to §9.2's *Quirk: a
+       rejected argument document inside an argument document*, with a pending case. The list
+       such a miss sets stays in the argument document:
+       `.priority(.include(path=["files/v4/p1"]) "pa.inc"; priority=3);⏎.include "pa.inc"⏎a = 1`
+       is an error in the oracle and the crate, so §9.4's "every later include of the whole
+       parse" could say that it does not reach out of an argument document.
+    2. Should fix (since spec-v20 and spec-v21; not new in this draft). After a first-directory
+       miss or a rejected argument document, an include with `try=true` of a directory, which
+       the §9.4 table says is skipped, ends the parse with that error, so a later skip is never
+       read. `MISS⏎.include(try=true, path=["files"]) "v4"⏎SKIP⏎b = 2` is an error, while with
+       `path=["files/v4/p1"]` in the first include, no miss, it gives `{ pa: int 1, b: int 2 }`;
+       `.priority(x) 3⏎a = 1⏎.include(try=true) "files/v4"⏎SKIP⏎b = 2` is an error, and without
+       the `(x) 3` it gives `{ a: int 1, b: int 2 }`. The crate accepts the miss form
+       (`crate-accepts`). Fix: a sentence in §9.4 and §9.2 with cases, or a new question.
+    3. Should fix. The spec-team entry above names two libucl source files and parts of their
+       internals among its inputs, and words #93 as an error that "stays set" and that a skip
+       "clears". The log is an implementer input (PROTOCOL.md, *Allowed inputs*), and earlier
+       spec-team entries say only "the pinned libucl source"; generalize those lines.
+    4. Not blocking. (a) The #91 and #92 answers change the #87 answer's "after each macro" and
+       "until then"; as #88 did for #83, they could say that they refine it. (b) The §9.4 first
+       name quirk gives "the first key the file then reads, after comments and macros" a brace
+       and does not except a `}` of the file's own before it, and the new bullet's "(above)" in
+       "gets no brace of its own (above)" points at the rule it reverses; the oracle agrees with
+       the new bullet (`{ }⏎p "q{" r⏎}` is an error at the `}` after `r`), so a forward reference
+       in the earlier quirk would remove the doubt. (c) The #93 answer's "On the runs that
+       disagreed" refers to runs the question does not hold (an earlier review in this log).
+       (d) `macro_args_rejected_then_load_try_in_included_file` also needs §9.2 (`spec-v21`)
+       before it can pass; `pending/README.md` could say so. (e) VT, FF and CR count as the
+       whitespace of #91 (`{ .include "files/v4/braced.inc"⏎<VT>⏎`, the same with FF, and CRLF
+       take nothing over); a reference to §9.2's list of whitespace bytes would make it explicit.
+  - Probes that match the draft: after the last macro, tabs, spaces, `;;;⏎;` and blank lines
+    take nothing over, while `# c` on the same line, `⏎# c`, `⏎/* c */`, `⏎.priority 1`, and a
+    known macro name ignored at the end (`⏎.include⏎`) take the brace over again; a last-byte
+    `#`, `,` or NUL there is an error as §9.2 says; `.include "files/v4/braced.inc"` or
+    `close_brace.inc` as the last macro takes nothing over. A file's own `}` before its first
+    key: `{ }⏎p "q{" r⏎}` and `{ # c⏎}⏎p "q{" r⏎}` are errors at the last `}`, `{ }⏎k = 1` and
+    `{ }⏎.include "files/v4/left_open.inc"` accept `.include "…"⏎q = 1`, and the error lines of
+    the four `own_brace` error files are those the bullet names. Across units: a skip in a file
+    or in `.emit` text of a later input, and a miss in an included file or in text with the
+    skip in a later input, are accepted; a skip in a file included with `key`, `glob=true`,
+    `.try_include` or inside `x { … }` covers a miss before it; a skip in a file included from
+    an argument document, or in an argument document after a rejected one, does not count; a
+    skip before a miss in a later input covers nothing; a plain include of a file outside the
+    list after a miss is an error.
+  - Checks: `cargo test --test conformance` at `05a4a40`: all three tests pass, 1,731 cases,
+    1,727 pass, the four expected failures; `git diff --check` is clean. In a `git archive` copy
+    with the nine pending cases and `url_skip.inc` moved into `cases/spec/09-macros/`: 1,740
+    cases, 1,727 pass, and the only new failures are the nine (`src/` compiled, not read).
+    `ucl-differential --check`, which adds `string-input`: the twenty active cases agree, the
+    nine pending ones are `crate-rejects`. `scripts/ci.sh golden` with `LIBUCL_DIR` set to the
+    main checkout's libucl at `24c8b39`, the pin: "golden files are current", the pending golden
+    files included, and the worktree clean afterwards. 1,731 active and 23 pending cases
+    (fourteen `spec-v21`, nine `spec-v23`), 1,754 coverage rows, one per case, the new rows in
+    order; `pending/README.md` lists all nine; the three pending fixtures shared with active
+    cases are identical. The new lines are within 100 columns, except one coverage row of 101,
+    as for other table rows.
+  - Commits: this reviewer log entry only, on `c14/spec-v23`. Not tagged or pushed.
+  - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
+    This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
+    names or source structure.
