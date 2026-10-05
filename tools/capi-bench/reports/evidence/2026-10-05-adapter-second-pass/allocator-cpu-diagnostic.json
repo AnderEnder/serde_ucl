@@ -1,0 +1,20 @@
+[
+  {
+    "label": "baseline",
+    "total_samples": 8315,
+    "malloc_library_leaf_samples_at_least_5": 1250,
+    "malloc_library_percent": 15.03,
+    "copy_zero_leaf_samples_at_least_5": 392,
+    "copy_zero_percent": 4.71,
+    "caveat": "sample flat table omits leaf symbols below five samples; counts are diagnostic, include Rust counting-allocator overhead"
+  },
+  {
+    "label": "candidate",
+    "total_samples": 8296,
+    "malloc_library_leaf_samples_at_least_5": 416,
+    "malloc_library_percent": 5.01,
+    "copy_zero_leaf_samples_at_least_5": 363,
+    "copy_zero_percent": 4.38,
+    "caveat": "sample flat table omits leaf symbols below five samples; counts are diagnostic, include Rust counting-allocator overhead"
+  }
+]

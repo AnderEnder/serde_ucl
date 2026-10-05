@@ -1,0 +1,12 @@
+{
+  "source": "Independent clean-room implementation author counting harness",
+  "compiler": "Rust 1.99.0, LLVM 23.1.1",
+  "baseline_commit": "80b77854472e81be5354d33fd559ccc3ef1f0f6a",
+  "candidate_commit": "db08f32ce601aa134b20ef045cc61732fd468dd6",
+  "lifecycle_statistic": "arithmetic mean, three warmups, 100 measured lifecycles",
+  "read_statistic": "arithmetic mean, three warmups, 20000 measured traversals",
+  "scope": "Rust global allocation layout requests including reallocations; libc allocations excluded; requested bytes are not malloc usable capacity",
+  "records10k_input_bytes": 706670,
+  "primary_public_input_bytes": 691127,
+  "note": "Own generated counting input differs from public comparison records10k. Timing is diagnostic; use interleaved public samples for acceptance. RustObserved is an owned observation path, not borrowed Rust."
+}

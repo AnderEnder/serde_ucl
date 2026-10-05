@@ -313,9 +313,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     names = []
     if args.kind in ("source", "all"):
-        names.append(f"serde-ucl-c-{version}-source.tar.gz")
+        names.append(f"serde-ucl-capi-{version}-source.tar.gz")
     if args.kind in ("sdk", "all"):
-        names.append(f"serde-ucl-c-{version}-{target.name}.tar.gz")
+        names.append(f"serde-ucl-capi-{version}-{target.name}.tar.gz")
     checksum_name = "SHA256SUMS" if args.kind == "all" else "SHA256SUMS-" + (
         "source" if args.kind == "source" else target.name)
     unexpected = {p.name for p in output.iterdir()} - set(names) - {checksum_name}
@@ -323,7 +323,7 @@ def main():
         raise RuntimeError(f"Use a dedicated output directory; unexpected entries: {sorted(unexpected)}")
     with tempfile.TemporaryDirectory(prefix="c15-distribution-") as temp:
         work = Path(temp)
-        source = work / f"serde-ucl-c-{version}-source"
+        source = work / f"serde-ucl-capi-{version}-source"
         source.mkdir()
         source_tree(source)
         third_party_licenses(source)
@@ -332,7 +332,7 @@ def main():
         checksums(source)
         if args.kind in ("source", "all"):
             archive(source, output / f"{source.name}.tar.gz")
-        sdk = work / f"serde-ucl-c-{version}-{target.name}"
+        sdk = work / f"serde-ucl-capi-{version}-{target.name}"
         if args.kind in ("sdk", "all"):
             if candidate is None:
                 install(source, sdk, target)

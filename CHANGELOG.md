@@ -23,7 +23,30 @@ longer copy or allocate complete traversal sequences. Arena owner pointers are
 published from final owner provenance, with a maintained ownership regression
 checked in ordinary CI and with Miri.
 
+The second pass uses Rust 1.99 and parses memory submissions from one adapter-owned
+immutable input copy, reusing the existing borrowed reader instead of allocating
+unchanged Rust keys and strings individually. Caller storage remains reusable after
+submission; retained trees keep their backing text, emission facts and terminated
+C strings alive. Public headers occupy 64 bytes per node, with container-only metadata,
+contiguous child ranges, duplicate head tables and a sparse forced-string cache.
+The generated 10,000-record counting profile reduces C requests further from 70,059
+to 10,060 and peak extra live storage from 9.920 MB to 8.949 MB. Same-toolchain lifecycle
+and iterator measurements are documented in `capi/README.md`; input-dependent
+representation and cwd costs remain. The 1.99 non-null Box ownership APIs support
+explicit backing-storage transfer, with retained/mutated-input regressions checked
+by Miri and sanitizers. Ordinary Rust owned/default parsing is unchanged.
+The independent interleaved public-caller comparison reduces original 10k-record
+C parsing/cleanup from 8.953 ms to 7.717 ms, versus owned Rust 6.296 ms; the remaining
+22.6% overhead leaves the near-zero target open. Smaller/other-shaped inputs retain
+15.6–29.4% overhead and tiny parses still pay cwd capture. Diagnostic counting means
+are reported separately from these primary same-input timings.
+
 ### C distribution
+
+Rename the C Cargo package and distribution archives from `serde-ucl-c` to
+`serde-ucl-capi`. The `ucl` library, `ucl.h` header and `serde-ucl` pkg-config
+module retain their released identities. Historical profiling evidence retains
+its original labels.
 
 C validation strips terminal styling from Cargo native-link diagnostics, so forced
 color in Linux/macOS CI no longer corrupts the final linker argument.

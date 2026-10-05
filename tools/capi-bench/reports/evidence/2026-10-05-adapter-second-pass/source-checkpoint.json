@@ -1,0 +1,13 @@
+{
+  "implementation_commit": "db08f32ce601aa134b20ef045cc61732fd468dd6",
+  "review_checkpoint_commit": "059dfa029faf0ddde86a941d82368e107918bfe4",
+  "reviewed_source_blobs": {
+    "capi/src/object.rs": "37305b2b720179bd9b233512e49ecb50dd378006",
+    "capi/src/parser.rs": "965ce4f89c820647bf82f1276dab66a6631c8494",
+    "capi/src/iteration.rs": "1af465996c2559cfc7d5f0f56271dc4c77e048e4",
+    "src/parse/mod.rs": "bb9c661468d2c004acd677090aae93790469b864",
+    "src/parse/facts.rs": "93906ed8348606064bcbafbf5b1b71ad3489a08e"
+  },
+  "measurement_note": "Candidate source frozen before measurements; results preserve pre-implementation-commit HEAD and dirty flag. Reviewed blobs match committed implementation exactly.",
+  "compiler_only_source_identity": "git diff --quiet dfefd2c 80b7785 -- src capi scripts/ci.sh Cargo.toml passed"
+}

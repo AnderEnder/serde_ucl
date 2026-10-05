@@ -18,7 +18,7 @@
 #                              Cargo.toml and CHANGELOG.md has a section for it, which it writes
 #                              to target/release-notes.md
 #
-# The active toolchain is used. The crate targets the latest stable Rust (1.98 at this release,
+# The active toolchain is used. The crate targets the latest stable Rust (1.99 at this release,
 # rust-version in Cargo.toml), and CI runs the checks with stable only.
 #
 # The golden check needs git, cmake and a C compiler, and network access on its first run

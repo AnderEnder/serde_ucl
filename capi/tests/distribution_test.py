@@ -182,7 +182,7 @@ class CollectionTests(unittest.TestCase):
 
     def write(self, kind):
         info, files = self.payloads[kind]
-        name = f"serde-ucl-c-{self.version}-{kind}"
+        name = f"serde-ucl-capi-{self.version}-{kind}"
         archive = self.incoming / (name + ".tar.gz")
         with tarfile.open(archive, "w:gz") as tar:
             for path, data in {"BUILD-INFO.json": json.dumps(info).encode(), **files}.items():
@@ -196,7 +196,9 @@ class CollectionTests(unittest.TestCase):
 
     def test_complete_collection_has_four_archives_one_checksum(self):
         self.collect()
-        self.assertEqual(len(list(self.output.iterdir())), 5)
+        self.assertEqual({path.name for path in self.output.iterdir()},
+                         {f"serde-ucl-capi-{self.version}-{kind}.tar.gz"
+                          for kind in ["source", *TARGETS]} | {"SHA256SUMS"})
         self.assertEqual(len((self.output / "SHA256SUMS").read_text().splitlines()), 4)
 
     def test_missing_extra_and_corrupt_inputs_reject(self):
@@ -206,7 +208,7 @@ class CollectionTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.collect()
         checksum.write_text(original)
-        extra = self.incoming / "unexpected.tar.gz"
+        extra = self.incoming / f"serde-ucl-c-{self.version}-source.tar.gz"
         extra.write_bytes(b"extra")
         with self.assertRaises(RuntimeError):
             self.collect()

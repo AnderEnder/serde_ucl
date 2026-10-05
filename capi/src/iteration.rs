@@ -34,7 +34,7 @@ pub unsafe extern "C" fn ucl_object_iterate_with_error(
                 handle.cast::<OldObject>()
             };
             let cursor = unsafe { &mut *handle };
-            let out = unsafe { node(p) }.heads().get(cursor.index).copied();
+            let out = unsafe { node(p) }.head(cursor.index);
             if let Some(out) = out {
                 cursor.index += 1;
                 unsafe {
@@ -118,6 +118,30 @@ unsafe fn next(it: *mut c_void, mode: c_int) -> *const UclObject {
     let i = unsafe { &mut *it.cast::<Iterator>() };
     // The first call selects the traversal until reset, as in the released matrix.
     let mode = *i.mode.get_or_insert(mode);
+    if mode == 0 {
+        let current = i.current;
+        if current.is_null() {
+            return ptr::null();
+        }
+        let kind = unsafe { (*current).r#type };
+        if kind > 1 {
+            i.current = unsafe { (*current).next };
+            return current;
+        }
+        let container = unsafe { node(current) };
+        let child = if kind == 0 {
+            container.head(i.index)
+        } else {
+            container.children().get(i.index)
+        };
+        if let Some(child) = child {
+            i.index += 1;
+            return child.cast_const();
+        }
+        i.current = ptr::null();
+        i.index = 0;
+        return ptr::null();
+    }
     loop {
         let current = i.current;
         if current.is_null() {
@@ -133,15 +157,15 @@ unsafe fn next(it: *mut c_void, mode: c_int) -> *const UclObject {
             return current;
         }
         let container = unsafe { node(current) };
-        let children = if kind == 0 {
-            container.heads()
-        } else {
-            container.children()
-        };
-        if mode == 1 && kind == 0 && !children.is_empty() {
+        if mode == 1 && kind == 0 && container.head_count() != 0 {
             i.restart = current;
         }
-        if let Some(&child) = children.get(i.index) {
+        let child = if kind == 0 {
+            container.head(i.index)
+        } else {
+            container.children().get(i.index)
+        };
+        if let Some(child) = child {
             i.index += 1;
             return child.cast_const();
         }

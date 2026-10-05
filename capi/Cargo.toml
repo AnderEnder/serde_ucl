@@ -1,8 +1,8 @@
 [package]
-name = "serde-ucl-c"
+name = "serde-ucl-capi"
 version = "0.6.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.99"
 license = "MIT OR Apache-2.0"
 description = "Stage A read-only C ABI for serde_ucl"
 publish = false

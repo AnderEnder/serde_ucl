@@ -58,12 +58,12 @@ serde_ucl = "0.6"
 serde = { version = "1", features = ["derive"] }
 ```
 
-It targets the latest stable Rust (1.98 at this release). See [Cargo features](#cargo-features)
+It targets the latest stable Rust (1.99 at this release). See [Cargo features](#cargo-features)
 for `fs` and `load`.
 
 ## C API
 
-The opt-in [serde-ucl-c package](capi/README.md) supports cargo-c installation,
+The opt-in [serde-ucl-capi package](capi/README.md) supports cargo-c installation,
 source archives and native SDK release automation for Linux amd64/arm64 and
 macOS arm64, with target-specific reference gates before binary attachment. C/C++
 consumers need no Rust toolchain. Its

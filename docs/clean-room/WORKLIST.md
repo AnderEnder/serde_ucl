@@ -510,3 +510,59 @@ about 142x without prebuilding traversal; full flat-object traversal regresses
 about 12%. Full required Rust/C checks, sanitizers, independent conformance and
 Miri passed. These are local Darwin arm64 results; Linux CI execution remains
 for future submission. No push, merge or publication was performed.
+
+### C15 further adapter optimization (owner request, 2026-10-05)
+
+After merging PR #30 as 80b7785, the owner requested further performance work.
+Continue toward zero or near-zero adapter overhead relative to the equivalent
+Rust API, with before/after CPU and allocation profiles and independent same-input
+measurements. Current original-input records10k baseline is C8.868ms versus
+Rust6.169ms and libucl10.958ms; flat inputs retain35% overhead, floats33%,
+escaped strings28%, small Rspamd52%, and tiny default parses retain creation-time
+cwd cost. These are measured goals, not an implementation design.
+
+A fresh clean-room implementation participant must derive its own plan and
+profile current own code from released spec-v22. Seek material further gains,
+including remaining read-path regressions, without moving cost into normal
+lookup/iteration/emission. Preserve all 43 functions/aliases, public ABI fields,
+stable addresses/strings, parser environment semantics, partial results, errors,
+retained ownership, emitter facts and deep-stack behavior. Core changes must
+preserve Rust behavior. Validate full Rust/C checks, static/shared installed
+linkage, sanitizer and Miri ownership regressions; obtain independent clean
+review. Coordinator handles oracle and public comparison tooling separately.
+
+Use branch perf/c-api-adapter-second-pass in a separate worktree based on
+merged80b7785. Plans remain local and excluded. Update public docs/changelog and
+provenance; commit stable completed improvements with measured residual costs.
+No new push, PR, merge, tag or package publication is authorized for this pass.
+
+Owner steering: use the latest stable Rust version. On 2026-10-05 official
+release notes and rustup confirm Rust1.99.0 (released2026-10-01); stable was
+updated from1.98.1. Evaluate new stabilized APIs and compiler changes using
+official Rust documentation, adopt only changes justified by ownership or
+measured performance, and synchronize manifests/docs if new APIs require1.99.
+Remeasure merged baseline and final candidate on the same1.99 compiler before
+attributing any gain to adapter code. New implementation remains stable Rust;
+nightly is limited to existing sanitizer/Miri validation.
+
+### C15 second-pass checkpoint (2026-10-05)
+
+Completed reviewed source db08f32, independent tests059dfa0/review6e2ed75 and
+public acceptance docs a77a6c0. Lateststable Rust1.99 synchronized across packages.
+Same-compiler interleaved original10k C8.953→7.717ms (1.160×throughput,13.8%less
+time), normal Rust6.296ms, libucl11.130ms. Residual22.6%C/Rustgap: near-zero
+target remains unmet, though performance and read paths materially improve.
+Generated requests70059→10060; peak storage9.920→8.949MB. Public native CPU
+allocator leaf16.08→7.27%; emission stable and flat traversal regression recovered.
+Same-source compiler-only comparison shows no broad parsing gain from1.99.
+
+Full Rust/C gates, four static/shared direct/installed linkages, sanitizers and
+six native/Miri ownership tests passed; no independent correctness blocker.
+Report and hashed raw evidence: tools/capi-bench/reports/2026-10-05-adapter-second-pass.md.
+Local Darwin execution only; Linux CI awaits future submission. No push, PR,
+merge, tag or publication; plans stay local and excluded.
+
+Owner follow-up: open a PR for the completed second pass. Pushing the completed
+branch and opening a PR against main are now authorized. Keep plans local; do
+not merge, create release tags or publish packages. GitHub CI should validate
+the submitted head on Linux/macOS and under coverage.

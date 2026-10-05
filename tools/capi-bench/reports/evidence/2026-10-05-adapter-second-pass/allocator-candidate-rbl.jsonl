@@ -1,0 +1,3 @@
+{"mode":"Rust","input_bytes":13404,"warmup":3,"rounds":100,"setup_ns":21,"submit_ns":48082,"destroy_ns":9161,"alloc_requests":643,"requested_bytes":54553,"peak_extra_live_bytes":39554,"remaining_live_bytes":0}
+{"mode":"RustObserved","input_bytes":13404,"warmup":3,"rounds":100,"setup_ns":7659,"submit_ns":50641,"destroy_ns":8878,"alloc_requests":645,"requested_bytes":55106,"peak_extra_live_bytes":39595,"remaining_live_bytes":0}
+{"mode":"C","input_bytes":13404,"warmup":3,"rounds":100,"setup_ns":8266,"submit_ns":54397,"destroy_ns":5124,"alloc_requests":214,"requested_bytes":100227,"peak_extra_live_bytes":82187,"remaining_live_bytes":0}

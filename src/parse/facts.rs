@@ -519,6 +519,10 @@ impl Eq for OutputFacts {}
 pub struct FactsCursor(Option<std::num::NonZeroUsize>);
 
 impl FactsCursor {
+    /// No recorded facts for this value or its descendants.
+    pub const fn empty() -> Self {
+        Self(None)
+    }
     /// Facts of the root value.
     pub fn root() -> Self {
         Self(std::num::NonZeroUsize::new(ROOT + 1))

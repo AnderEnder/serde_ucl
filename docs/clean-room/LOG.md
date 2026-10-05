@@ -6452,3 +6452,220 @@ contract, clean independent review and benchmark evidence. No src/ or capi/
 implementation authored. Plans remain local and excluded. The PR branch alone
 will be pushed under this explicit authorization; no main update, spec/release
 tag, merge or package publication is authorized.
+
+### 2026-10-05 — spec coordinator — C15 further optimization authorization
+
+The owner confirmed PR #30 was merged and requested further performance work.
+Verified merged origin/main80b7785 and successful prior Linux/macOS/coverage CI,
+latest local released specification spec-v22, clean separate implementation and
+measurement worktrees, writable git metadata and shared exclusion of local plans.
+Original unrelated changes and earlier worktrees remain untouched. Inputs:
+current CLAUDE.md/protocol, branch metadata, public CI metadata and existing
+observable benchmark goals. No implementation code authored. Fresh clean-room
+implementation delegation will receive rules verbatim and released/allowed
+inputs only. This entry supplies goals/provenance, no implementation design;
+no new spec behavior or publication.
+
+2026-10-05 owner steering: latest stable Rust is explicitly authorized. Official
+Rust1.99 announcement/release notes and rustup stable channel were checked;
+installedstable is now rustc1.99.0/LLVM23.1.1. General language/library docs
+only were consulted, with no upstreamlibucl materials. Baseline and candidate
+measurements will both use1.99 to distinguish compiler effects from code gains.
+
+### 2026-10-05 — independent implementation reviewer — C15 adapter second pass
+
+Read current CLAUDE.md and PROTOCOL.md first; confirmed latest release spec-v22.
+Independently reviewed the author's frozen compact-node/immutable-input adapter
+checkpoint, with no implementation edits. Added three independent retained-memory,
+mixed-source, partial-error and scalar-facts regression tests; native Rust1.99,
+focused clippy/fmt and final nightly Miri runs pass. A temporary post-submission
+variable replacement stress also passed, but is outside Stage A and excluded
+from maintained tests. Report: reviews/c15-adapter-second-pass.md; source blobs
+identify the checkpoint pending the author's final implementation commit and
+broader Rust/C/linkage/sanitizer validation.
+
+Inputs: current instructions/protocol and clean-room provenance; released spec-v22
+C contract; current own adapter/parser/emitter/value sources, tests, profile
+example, distribution checks and public docs/manifests. No tools, coordinator
+benchmark artifacts, research/plans or upstream implementation. Produced reviewer
+test/report/provenance commit with Work item:C15 footer; final hash recorded in
+handover. No push, PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — fresh clean implementer — C15 further adapter optimization
+
+Worktree `ucl-rust-lexer-c-opt2`, branch `perf/c-api-adapter-second-pass`, based on
+merged `80b7785` and goals-only authorization. Verified the latest released tag
+is `spec-v22`; inspected unreleased spec differences only to confirm they update
+conformance references. Consulted current CLAUDE.md and PROTOCOL, released C API
+behavior/header/snapshots, WORKLIST goals/provenance, current own Rust/C adapter,
+implementation tests/profile example, allowed standalone corpus documents, current
+CI and distribution checks, and official Rust 1.99 release/Box documentation.
+Used the writing-plans skill for a local excluded plan; no coordinator plans,
+benchmark/oracle tooling or reference implementation sources were inputs.
+
+Independent before/after release CPU/allocation profiles identified individual
+unchanged key/string allocations, repeated scalar walks and per-scalar metadata.
+The retained implementation parses memory text from one privately owned immutable
+copy using the existing borrowed reader; public 64-byte headers remain eager,
+container metadata supplies child ranges/head counts/fact cursors, duplicate entry
+keys are terminated once, and forced conversions use a sparse stable-buffer cache.
+Rust owned/default APIs retain their behavior. Latest stable Rust 1.99 is explicitly
+owner-authorized; all four rust-version manifests and current build documentation
+were synchronized. Its new non-null Box transfer APIs establish backing allocation
+ownership without round-trip leaking; other new APIs were assessed and not adopted
+without a relevant measured use.
+
+Generated 10k requests fall 70,059 → 10,060; requested bytes 11.887 → 10.916 MB;
+peak extra live storage 9.920 → 8.949 MB; all lifecycle scopes release their live
+allocations. One counting run gives C 6.405 ms versus default Rust 6.423 ms, while
+rbl retains about 18% overhead and tiny inputs retain creation-time cwd cost.
+Frozen implementation-owned CPU profiles show allocator-library leaf share
+15.03% → 5.01% in the flat tables (which omit symbols below five samples). These
+are diagnostic local Darwin arm64 measurements with an instrumented allocator;
+independent interleaved public timings are coordinated separately. No universal
+zero-cost or equal-memory claim is made. Rejected intermediate experiments were
+not committed; construction is not deferred to normal reads or emission.
+
+Validation: full scripts/ci.sh passes all Rust features, optimized/unoptimized
+stack depth, tests/examples/benches/docs and C distribution checks. Exact shipping
+and installed header, 43 symbols/signatures, C11/C++11, ten snapshots, retained
+lifetimes/partial graphs and 1023-container depth pass direct/installed static/shared
+linkage. Nightly Rust ASan plus C ASan/UBSan pass direct static/shared; separate C
+ASan/UBSan passes all four direct/installed linkage variants (Darwin has no leak
+sanitizer). Three maintained arena regressions pass native and nightly Miri;
+independent reviewer tests compare memory/file/include/load/variable, partial graph
+and scalar cursor behavior, and pass native/clippy/Miri. Refreshed C all-target
+clippy and all C tests include those new review tests. Independent clean review
+`059dfa0` found no correctness blocker; final source commit verification follows.
+
+Commit produced: `perf(capi): borrow owned input and compact public arenas` (this
+commit), with independent test/review commit `059dfa0` immediately before it.
+Plans/profile scratch remain excluded. No push, PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — independent implementation reviewer — C15 final checkpoint
+
+Final implementation reviewed: db08f32ce601aa134b20ef045cc61732fd468dd6.
+All five previously recorded own source blobs match exactly. Reviewer test/report
+commit059dfa0 remains unchanged; final closeout edits review/provenance only.
+Independently reran all six native capi tests, all-target clippy with warnings
+denied, fmt, and combined nightly Miri (three arena + three review tests), all
+passing. Reviewed final public docs: Rust1.99 minimum, historical first-pass
+labels, combined Miri command and owned/default-vs-borrowed performance
+qualification are consistent. No correctness blocker remains.
+
+Additional allowed inputs were the author's named implementation-owned validation
+outputs target/adapter-second/{ci,asan,c-sanitize}.log and final own source/docs.
+Author confirms exit0; logs show complete scripts/ci.sh, direct/installed
+static/shared C gates, exactly43 symbols/header/signatures/ten snapshots/depth,
+RustASan+C ASan/UBSan direct static/shared and C ASan/UBSan all four linkage
+variants. Darwin has no leak sanitizer; no leak-sanitizer claim. Broad checks
+were author-run; focused checks and all-six Miri were reviewer-run at final hash.
+Performance acceptance remains coordinator-owned paired public comparisons.
+Produced docs-only final review commit with Work item:C15 footer; hash recorded
+in handover. No src edits, push, PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+### 2026-10-05 — clean implementer — C15 final public evidence documentation
+
+After stable source `db08f32` and clean review closeout `6e2ed75`, received the
+coordinator's final public timing observables as goals/evidence only. No benchmark
+or oracle source, report artifact, coordinator plan or forbidden input was read.
+Recorded those observations in capi/README.md and CHANGELOG.md: original 10k C
+8.953 → 7.717 ms, normal owned Rust 6.296 ms, reference 11.130 ms; remaining gap
+22.6%. A 1.160× throughput increase is 13.8% less elapsed time, so the docs state
+both unambiguously. Other-shaped inputs retain 15.6–29.4% overhead; cwd capture
+remains and text emission is within about 1.5% of the frozen baseline. This primary
+interleaved public result supersedes diagnostic counting parity for acceptance.
+Additional coordinator-supplied public read observations improve full array
+26.839 → 23.112 µs and full flat traversal 3.858 → 3.095 µs (reference 3.028 µs),
+with first/lookup approximately unchanged. Separate native CPU captures have
+7,966/7,976 samples and approximate allocator/release leaf share 16.08% → 7.27%,
+copy/zero 4.39% → 2.73%; these are explicitly distinct from own counting-binary
+profiles. Source/test blobs and all validation remain unchanged. Commit produced:
+`docs(capi): record final second-pass public timing gaps` (this commit). No push,
+PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — spec coordinator — C15 completed evidence integration
+
+Integrated spec-owned measurement runner77adf26 and evidence/report69f8ff5 into
+the completed implementation branch as additive tools/docs only. Implementation
+source remains db08f32; independent review6e2ed75, acceptance documentationa77a6c0.
+Frozen interleaved C original10k8.953→7.717ms, Rust6.296ms, libucl11.130ms,22.6%
+residualgap. Record near-zero goal unmet rather than promoting instrumented parity.
+Lateststable1.99 manifests and CI policy preserved; same-source compiler-only
+measurements recorded separately. Final measured source blobs match release
+checkpoint despite raw pre-commit HEAD/dirty metadata, explained in report.
+
+Inputs: current CLAUDE/protocol, releasedspec-v22 and clean conformance, clean-room
+goals/independent review, own spec-team tools and black-box performance results,
+author-supplied counters, officialRust release docs. No src/ or capi/ changes
+authored by coordinator. Contract contains observable behavior only and remains
+unchanged. Both participants attest clean-room isolation. Full local validations
+pass; Linux CI execution remains for submission. Unrelated original changes and
+local plans preserved. No push, PR, merge, tag or publication. Work item:C15.
+
+### 2026-10-05 — spec coordinator — C15 second-pass PR submission
+
+Owner explicitly requested opening a PR after reviewing the performance and Rust
+core changes. This authorizes pushing perf/c-api-adapter-second-pass and opening
+a PR against main; earlier no-PR checkpoints describe the authorization at their
+time. Refetched origin/main:80b7785, unchanged baseline, branch is seven commits
+ahead with no divergence. Verified clean worktree, exact independent source/review
+checkpoint, complete recorded Rust/C/sanitizer/Miri gates and evidence hashes.
+Local plan files remain excluded from the PR. Original unrelated changes preserved.
+
+Inputs: current CLAUDE/protocol, clean-room independent review and gate outputs,
+current branch metadata and paths, previous merged PR30 presentation, own benchmark
+report/evidence. Coordinator edits only this provenance entry and work-item
+authorization; implementation remains db08f32 and released spec-v22 remains
+unchanged observable behavior. No merge, release tag or package publication.
+Work item:C15. Submission provenance commit and PR URL recorded in handover.
+
+### 2026-10-05 — implementation — C15 C package name selection
+
+Owner selected `serde-ucl-capi`. Renamed the C Cargo package and its lockfile,
+public C documentation, archive filenames/root directories and collector/test
+expectations. Preserved library `ucl`, pkg-config `serde-ucl`, `publish=false`,
+runtime sources and historical evidence names. Inputs: current CLAUDE.md,
+PROTOCOL.md, released tag identity spec-v22, current own capi manifests, README,
+distribution scripts/tests and writing-plans skill. Local plan remains excluded.
+
+Validation: locked Cargo metadata confirms package identity, library name and
+publication disabled; locked release build and all six adapter integration tests
+pass. All 13 distribution tests, format/diff checks and direct/installed
+static/shared gates pass: exact 43 symbols/signatures, C11/C++11 linkage, ten
+released snapshots and boundary/lifetime/depth checks. Clean source/SDK archive
+verification follows this commit, with final results recorded in handover.
+No push, tag or publication by this implementer. Commit: this package rename
+commit. Work item: C15.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+### 2026-10-05 — spec coordinator — C15 package name and PR update
+
+Owner chose serde-ucl-capi as the C Cargo package name. Clean implementer rename
+2b0acde changes manifest/lockfile, capi docs and source/SDK archive/collector names.
+Coordinator46f3800 aligns release artifact upload/download aliases, rootREADME,
+changelog and toolingREADME; historical measured keys and frozen evidence retain
+their original labels/hashes. Libraryucl, headerucl.h, pkg-configserde-ucl and
+released spec-v22/ABI1 remain unchanged. Rename alone does not enable publishing.
+
+Locked releasebuild, six capi ownership tests,13distribution tests, four direct/
+installed static/shared checks and clean macos-arm64 source+SDK verification pass.
+Verified archive names/rootdirectories serde-ucl-capi-0.6.0-{source,macos-arm64},
+clean source install, relocated C/C++ consumers,43signatures/ten snapshots, clean
+BUILD-INFO and checksums. Runtime source/test blobs remain the reviewed checkpoint.
+Inputs: current CLAUDE/protocol, clean-room implementer handover, own integration
+docs/workflow/tooling paths, currentGit/PR metadata. No src/ or capi/ implementation
+authored by coordinator. Spec contains observable behavior only and remains unchanged.
+Owner's PR32 authorization persists: push rename/provenance and update description.
+Plans stay local; unrelated original changes preserved. No merge/tag/package
+publication. Work item:C15; final integration commit recorded in handover.
