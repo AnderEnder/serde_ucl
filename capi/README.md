@@ -434,3 +434,26 @@ container metadata, terminated bytes and backing ownership over a borrowed Rust
 tree; equal total time against owned Rust does not demonstrate zero ABI marshalling
 against that borrowed representation. `RustObserved` remains an owned Rust
 observation diagnostic, not a borrowed-parser baseline.
+
+
+The final independent **interleaved public-call** comparison is the primary timing
+evidence, with frozen merged/candidate/reference binaries and Rust 1.99 throughout.
+On the original 10,000-record input, C parse plus cleanup falls from 8.953 ms to
+7.717 ms, versus normal owned Rust at 6.296 ms and pinned libucl at 11.130 ms.
+That is a 1.160× C throughput improvement (13.8% less elapsed time), with **22.6%
+remaining C overhead** over owned Rust. The flat input falls from 180.87 µs to
+151.74 µs versus Rust 131.28 µs (15.6% remaining overhead). Floats retain 18.3%,
+escaped strings 22.3%, and the small rbl document 29.4%; tiny C lifecycles remain
+about 8.04 µs with creation-time cwd capture. Text-emitter timings remain within
+about 1.5% of the merged adapter. These local Darwin arm64 results leave the
+near-zero target open across input shapes; counting-harness parity above is a
+diagnostic observation, not the acceptance result.
+
+
+Independent public read fixtures also improve: full array traversal falls from
+26.839 µs to 23.112 µs, and full flat-object traversal from 3.858 µs to 3.095 µs
+(reference 3.028 µs). First-child and lookup timings are approximately unchanged.
+Separate native public CPU captures contain 7,966 baseline and 7,976 candidate
+samples; allocator/release leaf share falls from about 16.08% to 7.27% and
+copy/zero leaf share from 4.39% to 2.73%. This is approximate leaf attribution
+from a separate experiment, not the implementation counting-binary profile above.

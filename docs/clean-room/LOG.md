@@ -6569,3 +6569,26 @@ Produced docs-only final review commit with Work item:C15 footer; hash recorded
 in handover. No src edits, push, PR, merge, tag or publication.
 
 I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.
+
+
+### 2026-10-05 — clean implementer — C15 final public evidence documentation
+
+After stable source `db08f32` and clean review closeout `6e2ed75`, received the
+coordinator's final public timing observables as goals/evidence only. No benchmark
+or oracle source, report artifact, coordinator plan or forbidden input was read.
+Recorded those observations in capi/README.md and CHANGELOG.md: original 10k C
+8.953 → 7.717 ms, normal owned Rust 6.296 ms, reference 11.130 ms; remaining gap
+22.6%. A 1.160× throughput increase is 13.8% less elapsed time, so the docs state
+both unambiguously. Other-shaped inputs retain 15.6–29.4% overhead; cwd capture
+remains and text emission is within about 1.5% of the frozen baseline. This primary
+interleaved public result supersedes diagnostic counting parity for acceptance.
+Additional coordinator-supplied public read observations improve full array
+26.839 → 23.112 µs and full flat traversal 3.858 → 3.095 µs (reference 3.028 µs),
+with first/lookup approximately unchanged. Separate native CPU captures have
+7,966/7,976 samples and approximate allocator/release leaf share 16.08% → 7.27%,
+copy/zero 4.39% → 2.73%; these are explicitly distinct from own counting-binary
+profiles. Source/test blobs and all validation remain unchanged. Commit produced:
+`docs(capi): record final second-pass public timing gaps` (this commit). No push,
+PR, merge, tag or publication.
+
+I did not read libucl source code or any forbidden input listed in docs/clean-room/PROTOCOL.md.

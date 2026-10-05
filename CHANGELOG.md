@@ -35,6 +35,11 @@ and iterator measurements are documented in `capi/README.md`; input-dependent
 representation and cwd costs remain. The 1.99 non-null Box ownership APIs support
 explicit backing-storage transfer, with retained/mutated-input regressions checked
 by Miri and sanitizers. Ordinary Rust owned/default parsing is unchanged.
+The independent interleaved public-caller comparison reduces original 10k-record
+C parsing/cleanup from 8.953 ms to 7.717 ms, versus owned Rust 6.296 ms; the remaining
+22.6% overhead leaves the near-zero target open. Smaller/other-shaped inputs retain
+15.6–29.4% overhead and tiny parses still pay cwd capture. Diagnostic counting means
+are reported separately from these primary same-input timings.
 
 ### C distribution
 
