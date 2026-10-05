@@ -7673,3 +7673,22 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
     This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
     names or source structure.
+
+- 2026-10-05 — Role: spec team (release). Item: C14 questions #91 to #93 and #97 to #99,
+  spec-v23.
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the reviewed §§6.1,
+    7.6, 9.2, 9.4 and 13.1 of the draft, the answers to #91 to #93 and #97 to #99, the
+    independent reviewer entries through `f42f955` (approved in round 4), the spec index and the
+    conformance case lists. No Claude Code sessions or memory were read.
+  - Work: after independent approval, released the draft as `spec-v23`. The answers, the spec
+    index and the conformance and pending READMEs already used the `spec-v23` wording, so no text
+    changed; the rules are those of `53c2ebf`, on `origin/main` `bdeaf15`. The fourteen `spec-v21`
+    and thirty-two `spec-v23` pending cases stay under `tests/conformance/pending/` until the
+    crate passes them.
+  - Checks: the latest previous spec tag was `spec-v22` (C15); the worktree was clean before the
+    release edit; 1,753 active and 46 pending cases; all three tests in
+    `cargo test --test conformance` passed; `git diff --check` passed.
+  - Commit: the following `docs(spec): release spec v23` commit on `c14/spec-v23`, tagged locally
+    as `spec-v23`. Not pushed.
+  - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
+    internal names or source structure.
