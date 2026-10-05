@@ -7510,3 +7510,71 @@ publication. Work item:C15; final integration commit recorded in handover.
     and 41 pending cases.
   - Commits: `docs(spec): state the waiting-error directory rule with search lists` and this
     entry. Not released or tagged. Not pushed.
+
+- 2026-10-05 — Role: independent spec reviewer, oracle side (re-review, round 3). Item: C14, the
+  spec-v23 draft (`106d69d..c090c0b` on `c14/spec-v23`).
+  - Inputs consulted: current `CLAUDE.md`, `docs/clean-room/PROTOCOL.md`, the coordinator's
+    message, `git diff 106d69d..HEAD` (§§9.2 and 9.4, `docs/spec/README.md`, the conformance and
+    pending READMEs, the #97 and #98 rows, the ten new cases with fixtures and golden files, the
+    spec-team entry), the #97 row at `a8d85b4` and the #98 and #99 rows at `41965cd` and
+    `80745c3`, the pinned libucl source (read as the oracle-side role allows), and black-box runs
+    of this worktree's `target/libucl-oracle/ucl-dump` and `ucl-differential --check` on probe
+    files in this session's scratchpad, with two probe directories of my own there: `gg/` holding
+    a directory `a/` and a file `b.inc` (`gb = 2`), `gh/` holding a file `a.inc` (`ha = 1`) and a
+    directory `b/`. MISS and SKIP are as in my first entry.
+  - Round-2 findings: (1) the restated quirk matches the oracle for one or several directories,
+    for a missing path, a directory or a readable file in the later directories, for globs whose
+    last directory has no match or a directory match, and with rejected arguments as with a
+    first-directory miss; but see 1 and 2 below. (2) The #97 question cell is the `a8d85b4` text
+    byte for byte; the #98 and #99 cells match both `41965cd` and `80745c3`. (3) "ends the input
+    early", and the argument-document clause, but see 1.
+  - Result: not approved, one blocking finding.
+    1. Blocking. The new clause "Inside a macro argument document, no error of the enclosing
+       document waits (§9.2), so such an include is skipped there as usual" is right for the
+       enclosing document's errors, but an argument document's own first-directory miss, or a
+       rejected argument document inside it, waits within it in the same way. A later
+       `.include(try=true)` of a directory there, with no later directory to go on to, fails and
+       rejects the argument document, so the document is an error unless a later skip discards
+       that rejection:
+       `.priority(MISS; .include(try=true, path=["files"]) "v4"; priority=2) 5⏎b = 1` is an
+       error, the same with a SKIP line after it gives `b: int 1 @5`, and without the MISS it
+       gives `b: int 1 @5` with no skip; so does `.priority(.priority(x) 3;`
+       `.include(try=true) "files/v4"; priority=2) 5⏎b = 1` (an error; `b: int 1 @5` after a
+       SKIP), and `.include "files/v23/first_miss.inc"` in place of MISS. A SKIP inside the
+       argument document before the include, or a list whose next directory lacks the path,
+       lets the argument document pass. The draft, with §9.2's "is not an error either. It needs
+       no skip", gives `b: int 1 @5` without a skip; the crate on origin/main already accepts the
+       nested-rejection form (`crate-accepts`). Fix: say that a miss or a nested rejection in an
+       argument document waits within that document, so the rules of this quirk apply there and
+       their failure rejects the argument document (§9.2), with cases.
+    2. Should fix. With `glob=true`, "a directory match fails that directory" does not say what
+       happens to that directory's other matches. They are taken in order: the matches before
+       the directory match are included, the ones after it are not, and the next directory is
+       tried. After MISS, `.include(try=true, glob=true, path=["gg", "nothere"]) "*"⏎SKIP⏎b = 2`
+       → `{ pa: int 1, b: int 2 }`, without `gb`, which the same include gives when no error
+       waits; with `["gh", "nothere"]` it gives `{ pa: int 1, ha: int 1, b: int 2 }`; with
+       `["gg", "gh"]` or `["gh", "gg"]` it is an error. The crate includes `gb`
+       (`values-differ`). Fix: a sentence and a case.
+    3. Not blocking. `docs/spec/README.md` line 241 is a stray short line ("A `)` that is"), left
+       by the rewrap.
+  - Also matching the draft: `["files", "files", "nothere"]` and `["files", "files/v23",
+    "files"]` (`w` included, the search stops there) after MISS; `.priority(x) 3` with
+    `["files", "files/v23"]` includes `w`; glob `["files/v4/g", "gh"]` with `"a*"` includes both
+    `a.inc` files; a MISS in an argument document followed there by a glob whose list is the one
+    the MISS set is skipped as the list rule says.
+  - Checks: `cargo test --test conformance` at `c090c0b`: all three tests pass, 1,747 cases,
+    1,743 pass, the four expected failures. In `git archive` copies with all 41 pending cases and
+    their fixtures moved into `cases/spec/` (`src/` compiled, not read): origin/main's crate,
+    1,788 cases, 1,746 pass, failing 38 pending cases (all but the three rejection cases ending in
+    `_error`) and no active one; `c14/spec21-impl`'s crate at `80745c3`, 1,762 pass, failing 22
+    pending cases and no active one; so every active case passes on both crates and every pending
+    case fails on at least one. `scripts/ci.sh golden` with `LIBUCL_DIR` at the pin `24c8b39`:
+    "golden files are current", worktree clean afterwards. 1,747 active and 41 pending cases,
+    1,788 coverage rows, one per case, in order; `pending/README.md` lists every pending case and
+    says which eight also need §9.2; the pending fixtures are identical to the active copies;
+    the case counts in the #98 answer and the README notes are right. New lines are within 100
+    columns; `git diff --check 106d69d..HEAD` is clean.
+  - Commits: this reviewer log entry only, on `c14/spec-v23`. Not tagged or pushed.
+  - Attestation: I am on the oracle side and read the pinned libucl source as this role allows.
+    This entry contains observable behaviour only, with no libucl code, pseudo-code, internal
+    names or source structure.
