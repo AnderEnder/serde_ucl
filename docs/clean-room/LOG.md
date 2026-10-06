@@ -7692,3 +7692,323 @@ publication. Work item:C15; final integration commit recorded in handover.
     as `spec-v23`. Not pushed.
   - Attestation: the spec contains observable behavior only, with no libucl code, pseudo-code,
     internal names or source structure.
+
+- 2026-10-05 — Role: implementation team (clean-room implementer). Item: C14, owner decision 3
+  of 2026-09-30 (the optional `memchr` feature), continuing an earlier implementer's unfinished
+  commit `0c4dacf` ("wip: memchr feature"), which has no LOG entry of its own.
+  - Inputs consulted: `CLAUDE.md` as given in the task, `docs/clean-room/PROTOCOL.md`, `WORKLIST.md`
+    on `origin/main` (C10 to the end: C10 to C15, the C14 decisions included, and the headings added
+    since), `QUESTIONS.md` (the opening text of the entries #91 to #93, #97 to #99, #101 and #102
+    added on `origin/main`), parts of this LOG (an implementer entry and the end, for the format;
+    lines naming memchr or C14), `capi/Cargo.toml`, the released spec diff `spec-v22..spec-v23`
+    (§6.1 and §12.5 hunks; nothing that changes the scans of comments, single-quoted strings,
+    heredocs or unquoted escapes), the crate's code, tests and benches, `benches/corpus/` and the
+    fetched JSON documents in `target/bench-corpus/` (SHA-256 as pinned in
+    `benches/fetch-documents.sh`), the implementation team's `target/perf/C14-report.md` (memchr
+    section and conclusions) and the earlier implementer's scratch scripts and logs under
+    `target/perf/c14-memchr/`, `git diff` of `origin/main` since the WIP's bases for the files the
+    rebases touched (for `CLAUDE.md` only `--stat`, no content), and memchr 2.8.3's own source in
+    the cargo registry (`src/memchr.rs`, `src/arch/aarch64/memchr.rs`: its inline attributes). The
+    oracle was not run.
+  - Rebases: onto `80b7785`, then, after an interruption and the coordinator's message to resume,
+    onto `6b1c7ff` (spec-v23). Conflicts in `scripts/ci.sh` (kept the C API test and added
+    `cargo test --features memchr` before it) and `README.md` (kept 1.99 and named `memchr`). The
+    diff against `origin/main` holds only this work.
+  - Review of the WIP against the decision: the feature is optional and off by default
+    (`memchr = ["dep:memchr"]`, `memchr = { version = "2.7", optional = true }`); with it,
+    `src/parse/scan.rs` searches with `memchr`, `memchr2` and `memchr3` the scans the C14 report
+    measured (single-quoted strings, heredoc lines, line comments, block comments, backslashes of
+    unquoted values); without it the searches are the previous byte loops, and the block comment
+    scan keeps its one-byte step under `#[cfg(not(feature = "memchr"))]`. Both `#[cfg]`s use the
+    feature. Fixed one clippy 1.99 finding (`byte_char_slices`) in a test. Filled in the README
+    and CHANGELOG figures, named the feature in the README's installation line, feature table,
+    `benches/README.md` and the CI description. Results with and without the feature: the
+    conformance runners, all other tests and the pinned result digests of every benchmark document
+    pass in both builds (455 tests each).
+  - Measurement, after the rebase onto `6b1c7ff`: Apple M4 Max, 14 cores, 36 GiB, macOS 15.8.1
+    (24H32), rustc and cargo 1.99.0, release profile (fat LTO, one codegen unit). Three builds of
+    the crate's `parse_benchmarks` and `serde_benchmarks`: `v0.6.0` (`git archive`, 266bb7b),
+    and the committed `src/` tree (`cd0b468`) without and with `--features memchr`; the bench
+    sources are identical in all three. Six rounds of eight benchmark groups; in each group the
+    three builds ran one after another, in an order rotated by round and group; each run waited
+    for a 1-minute load average below 6 (other sessions shared the machine; loads at start 2.95
+    to 5.96), on 2026-10-05 from 21:39 to 22:30. Criterion as configured (30 samples, 1 s
+    warm-up, 3 s), `--noplot`. Figure: the median over rounds of Criterion's median; in brackets
+    the range of the same-round ratios. Scripts and data in `target/perf/c14-r3/`.
+
+    | Benchmark | 0.6.0 | without | with | with vs without | with vs 0.6.0 |
+    | --- | ---: | ---: | ---: | ---: | ---: |
+    | `parse/irregular/60k` | 190.5 µs | 192.0 µs | 179.3 µs | −6.6% (−9.7..−4.7) | −5.9% |
+    | `parse/irregular/600k` | 2.102 ms | 2.135 ms | 2.084 ms | −2.4% (−3.4..−1.9) | −0.9% |
+    | `serde/irregular-60k/UclValue` | 185.4 µs | 185.6 µs | 173.8 µs | −6.4% (−8.6..−5.5) | −6.2% |
+    | `serde/irregular-60k/IgnoredAny` | 163.7 µs | 165.1 µs | 153.1 µs | −7.2% (−10.3..−5.5) | −6.4% |
+    | `serde/irregular-600k/UclValue` | 2.054 ms | 2.075 ms | 2.015 ms | −2.9% (−4.7..−1.4) | −1.9% |
+    | `serde/irregular-600k/IgnoredAny` | 1.850 ms | 1.856 ms | 1.796 ms | −3.3% (−4.0..−2.1) | −3.0% |
+    | `parse/config/1000` | 2.366 ms | 2.351 ms | 2.345 ms | −0.3% (−4.0..+0.6) | −0.9% |
+    | `parse/json/1000` | 1.381 ms | 1.382 ms | 1.369 ms | −0.9% (−2.6..+2.5) | −0.8% |
+    | `serde/deserialize-1000/from_str` | 2.256 ms | 2.269 ms | 2.234 ms | −1.6% (−3.1..−0.7) | −1.0% |
+    | `parse/json-corpus/canada` | 11.25 ms | 11.32 ms | 11.50 ms | +1.5% (−0.7..+3.2) | +2.2% |
+    | `parse/json-corpus/citm_catalog` | 4.928 ms | 4.926 ms | 4.940 ms | +0.3% (−1.6..+2.5) | +0.2% |
+    | `parse/json-corpus/twitter` | 2.577 ms | 2.557 ms | 2.571 ms | +0.6% (−0.4..+1.8) | −0.2% |
+    | `parse/corpus/rspamd-rbl_group` | 56.61 µs | 55.84 µs | 55.93 µs | +0.2% (−2.2..+1.2) | −1.2% |
+    | `parse/corpus/rspamd-composites` | 34.96 µs | 35.42 µs | 35.20 µs | −0.6% (−7.2..+5.5) | +0.7% |
+    | `parse/corpus/rspamd-groups` | 916.2 µs | 859.0 µs | 817.0 µs | −4.9% (−14.6..+6.6) | −10.8% |
+
+    The serde groups of the JSON and rspamd documents change by −2.5% to +2.3%, ranges across zero.
+    `rspamd-groups` reads 14 included files and tries 44 optional ones under the unset
+    `$LOCAL_CONFDIR` per parse; its rounds vary by ±10% and show nothing about the feature. `canada`
+    has no text the feature searches, yet was slower with the feature in all three runs made (+3.4%
+    and +1.2% on the earlier base `80b7785`, +1.5% here); on aarch64 memchr inlines its vector loop
+    at each call site (`Core::scalar` grows by 2.9 KB), but a variant with the searches out of line
+    under the feature (`#[inline(never)]`) measured the same on `canada` (+1.4%) and the same gains,
+    so it was not kept. Without the feature the crate is within −1.4% to +1.6% of 0.6.0 on the parse
+    benchmarks except the noisy `rspamd-groups`; that difference predates this item.
+  - Checks: `scripts/ci.sh` (checks mode) passed on `cce31be`, the tree of this branch without
+    this entry: fmt, the clippy matrix including `--no-default-features --features memchr`,
+    `cargo test` and `cargo test --features memchr`, the C API tests and Python checks, the
+    unoptimised stack-depth tests, `tests/features/`, the fuzzer's unit tests, examples, bench
+    build and `cargo doc`. The differential fuzzer was not run (no oracle built in this
+    worktree).
+  - Commits on `c14/memchr` (renamed from `worktree-agent-a11490e0eac8ca275`), not pushed:
+    `a26fac5` feat(parse): add an optional memchr feature for the parser's byte searches;
+    `cef89d9` ci: run every test again with the feature memchr; `cce31be` test: pin what the
+    benchmark documents parse to; and this entry.
+  - After the interruption the session's shell started in another worktree, `c16-perf`; only
+    its `git status` and last two commit subjects were seen, and nothing there was changed.
+  - Open: `CLAUDE.md` lists the features as (`fs`, `load`) in its code conventions and was not
+    changed here. No question was needed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-05 — Role: fresh clean-room implementation reviewer. Item: C14, owner decision 3 of
+  2026-09-30 (the optional `memchr` feature). Reviewed `git diff origin/main...HEAD` on
+  `c14/memchr` (HEAD `c8274b9`, base `6b1c7ff`, released spec-v23) in worktree
+  `agent-a11490e0eac8ca275`: `a26fac5`, `cef89d9`, `cce31be`, `b77a26c` and `c8274b9`.
+  - Inputs consulted: the coordinator's request with the `CLAUDE.md` rules; `PROTOCOL.md`;
+    `WORKLIST.md` (C11 to C15, owner decision 3 included); this LOG (the implementer's entry for
+    this work, one earlier reviewer entry for the format, lines naming memchr or `0c4dacf`); the
+    diff under review, including the `CLAUDE.md` hunk of `c8274b9` against `origin/main` (current
+    text, not history); `Cargo.toml`, `Cargo.lock` and its diff from `v0.6.0`, `README.md`,
+    `CHANGELOG.md`, `benches/README.md`, `scripts/ci.sh`, `.github/workflows/ci.yml`;
+    `tests/conformance.rs` (case discovery and runs), `tests/common/oracle.rs`,
+    `tests/bench_documents.rs`, `benches/common/files.rs`, the head of
+    `benches/common/irregular.rs`, `benches/fetch-documents.sh`; the implementer's
+    `target/perf/c14-r3/` (listing, `build.sh`, `measure2.sh`, `summarize.py`, `toolchain.txt`,
+    `head.src-tree`, and `summarize.py` rerun on its rounds); byte counts of the fetched JSON
+    documents; `v0.6.0`'s `Cargo.toml`, the `include_str!` line of its `src/lib.rs`, and its
+    `Cargo.toml`, `Cargo.lock`, `README.md`, `src` and `benches` through `git archive`, after
+    `git ls-tree` showed no `src/lexer.rs` or `src/parser.rs` at that tag, built only. No spec
+    section was needed: the change has no behaviour of its own. Not consulted: the C14 report
+    (`target/perf/C14-report.md`, not in this worktree), so that the converted scans are those
+    the report measured is taken from the implementer's entry. The oracle was not run.
+    Disclosures: the harness wrote the output of background commands under
+    `/private/tmp/…/tasks/`, which I did not open; each wrote its own log under
+    `target/review-c14/`, which I read. The session's context held the main checkout's
+    `git status` (file names only); nothing there was opened. No guard refusal. No libucl
+    source, `tools/`, or other forbidden input was read.
+  - Review result: approved, with three should-fix findings.
+  - Findings:
+    1. Should fix (`src/parse/core.rs`, `block_comment_end`; `README.md`, `CHANGELOG.md`): with
+       the feature, comments dense in `*`, `/` or `"` parse much slower than without it, against
+       the README's "It helps documents with long strings and comments". The `_` arm calls
+       `memchr3` once for each needle byte that changes nothing, such as every `*` of a
+       `/*****/` banner. Probe builds with the crate's release settings (fat LTO, one codegen
+       unit; ranges over three alternations of the median of 41 parses): 12,000 `/***…***/`
+       banners (2.1 MB) 6.6–6.9 ms without, 21.2–21.4 ms with (3.2×); a 1.66 MB config with one
+       such banner per 20 entries 8.5–8.6 → 11.9–12.2 ms (+41%); 1 MB of `*` in one comment
+       1.14–1.17 → 2.4–2.8 ms; `#` banners 7.22–7.38 → 6.97–7.15 ms; a 1 MB prose comment
+       0.66–0.98 ms → 66 µs; `irregular-60k` 172–178 → 160–166 µs. Linear in size (5.3, 21.3 and
+       85.4 ms for 0.54, 2.1 and 8.6 MB). A scratch variant that steps one byte and searches only
+       when the next byte is none of `"`, `/` and `*` measured 3.9–4.4 ms on the banners,
+       7.8–8.0 ms on the config, 1.33–1.75 ms on the `*` run, 66 µs on prose, 161–165 µs on
+       `irregular-60k` and 1.89–1.90 ms on `irregular-600k` (committed form 1.86–1.88 ms), and
+       gave the same results as the build without the feature on the 1.3 million generated
+       inputs below (variant built without LTO). Either change the arm or state the cost in the
+       README and CHANGELOG.
+    2. Should fix (`CHANGELOG.md`): the "Against 0.6.0" sentence gives the irregular documents
+       only. In the same data `parse/json-corpus/canada` is +2.2% against 0.6.0 with every round
+       slower (+1.1..+4.3%); in my run +2.4% (+1.0..+3.5%). The sentence is framed against the
+       release, as the decision is, so it should name that too.
+    3. Should fix (provenance, coordinator): per the implementer's entry, `a26fac5` continues
+       the WIP commit `0c4dacf` of an earlier implementer, whose session has no LOG entry or
+       attestation (I did not look at `0c4dacf`). PROTOCOL.md asks for an entry per session.
+       Add one for that session before the merge, with what is known of its role, inputs and
+       attestation.
+    4. Not blocking: the `canada` disclosure is honest. `canada.json` has no `'`, `#`, `/*`, `\`
+       or `<<`, and `decode_unquoted` runs only for an unquoted value with a backslash (after the
+       `!backslash` return in `core.rs`) or a lowercased quoted key, so there is nothing for the
+       feature to search. The loss reproduces in `parse/json-corpus/canada` (+1.4%, every round
+       slower in my run) but not in `serde/json-corpus-canada/UclValue` (−0.5% in the LOG's
+       data, −0.3% in mine), which parses the same document. That points to code layout in the
+       parse benchmark rather than work per parse; the README could add the serde figure.
+    5. Not blocking (`tests/bench_documents.rs`): the pinned digests are a reasonable guard that
+       both builds read the large documents alike, comment offsets included. Their reach:
+       successful parses only (between the builds, error kinds and positions are compared in CI
+       only through the unit tests of the searches and of `block_comment_end`; the conformance
+       runner checks only that an error case is rejected); the JSON documents only where they
+       were fetched, which CI does not do; and no backslash in an unquoted value, which the
+       irregular generator avoids. An intended change to an emitter or to comment handling for
+       these documents means re-pinning, which the failure message makes cheap.
+    6. Not blocking: without the feature, `same_offsets_as_a_loop`,
+       `near_values_are_not_needles` and `block_comment_end_as_bytewise` compare a byte loop with
+       a copy of itself; they test the feature in the `--features memchr` run, which
+       `scripts/ci.sh` has. `near_values_are_not_needles` covers `find` only, and
+       `same_offsets_as_a_loop` fills its haystacks with ASCII letters only.
+    7. Not blocking: `fuzz/` and `tests/features/` build the crate without the feature, so the
+       differential fuzzer never runs the `memchr` build against libucl. A pass-through feature
+       in `fuzz/` would allow it.
+    8. Not blocking (coordinator): `c8274b9` changes `CLAUDE.md`, so the embedded copy in the
+       local `.claude/agents/clean-implementer.md` needs regenerating after the merge.
+  - Identical results, by reading: the searches in `string.rs` and the line comment scans in
+    `core.rs` replace `position` with `find`, `find2` or `find3` on the same slice and needles,
+    so they can differ only if memchr does. The block comment arm is the one change of form: from
+    a byte at `i` that changes nothing, it jumps to the next `"`, `/` or `*` after `i`, or to the
+    end. Every byte skipped is none of the three, which the byte loop would only have stepped
+    over; the `"` arm reads `src[i - 1]` from the input, not from loop state; and at the end both
+    forms return `None` from `src.get(i)?`.
+  - Checks:
+    - `scripts/ci.sh` (checks) passed on `c8274b9`: fmt, the clippy matrix including
+      `--all-features` and `--no-default-features --features memchr`, `cargo test` (455 passed)
+      and `cargo test --features memchr` (455 passed), the C API tests, the unoptimised
+      stack-depth tests, `tests/features/`, the fuzzer's unit tests, examples, the bench build and
+      `cargo doc`. `git status` stayed clean: no lockfile of `capi/`, `fuzz/` or
+      `tests/features/` changed. `cargo test --features memchr` again on its own: 455 passed.
+      `cargo build --no-default-features --features memchr` and `--all-features` build.
+      `cargo tree -e normal` has no memchr by default and memchr 2.8.3 with the feature; the
+      default features are `["fs"]`. Every `#[cfg]` added names the feature. No added line is
+      over 100 columns except a row of the README's feature table, which matches the README's
+      other tables.
+    - Differential probe (`target/review-c14/probe/`, one source built without and with
+      `--features memchr`). For each input it records the value dump with attached comments, the
+      four formats, the config format with comments and every saved comment with line, column
+      and offset; or the error's kind, line, column, offset, file, stop and unsupported flags,
+      message and partial result; and `from_slice` into `UclValue` and `IgnoredAny`, with error
+      positions. The two builds' outputs are byte-identical for:
+      - the 1,753 conformance cases, whole as the runner parses them (flags applied, `.inputs`
+        not added), and each of their 169,628 prefixes with the case's flags and again with
+        `SAVE_COMMENTS`: 29,739 parse, 220 stop, the rest fail with 40 kinds of error, among
+        them 27,175 unterminated strings, 3,094 unterminated heredocs and 1,562 unterminated
+        comments;
+      - 221 documents (irregular 60k and 600k, seeds 1000 to 1199 at 60 KB, 16 rspamd files,
+        `twitter`, `citm_catalog`, `canada`), each whole, at 100 seeded cuts and with 100 seeded
+        one-byte replacements by `'`, `\`, LF, CR, `*`, `/`, `"`, `#`, `;`, `,` or NUL: 44,421
+        inputs, 13,607 of which parse;
+      - 300,000 inputs from fragments (`\'`, `\"`, nested and unclosed comments, banners,
+        heredocs with and without a name, NUL, 0xFF, multi-byte and truncated UTF-8, CR, LF,
+        runs of up to 140 bytes) and 1,000,000 structured documents (comments with quoted parts
+        and nesting, single-quoted strings with escapes and line breaks, heredocs, unquoted
+        values with backslashes, a fifth of them cut short): 178,933 parse; among the errors
+        122,175 unterminated comments, 100,482 unterminated heredocs and 70,619 unterminated
+        strings.
+
+      The probe finds a difference where there is one: three scratch mutants with the feature
+      (the block comment jump without `"`, the single-quoted search without `\`, the empty-name
+      heredoc end without `,`) differ on 95,850, 74,566 and 30,282 of the structured documents.
+      The probe ran on aarch64 only, where memchr uses its NEON code. On x86_64 (SSE2, AVX2)
+      the coverage is CI's Linux job: the unit tests of the searches at every length up to 140
+      bytes, across the vector blocks, and the conformance suite with `--features memchr`.
+    - Measurement method: sound. The bench sources of `v0.6.0` (`266bb7b`) and of the branch
+      are the same (`git diff v0.6.0 HEAD -- benches/` touches only `benches/README.md`, and
+      `Cargo.lock` gains only the `memchr` line), one toolchain builds all three, they run in
+      turns with the order rotated by round and group behind a load gate, and the figures are
+      medians over six rounds of Criterion's median, with the range of same-round ratios.
+      `summarize.py` rerun on the implementer's rounds gives the figures of the LOG, the commit
+      message, the README and the CHANGELOG, "−0.9%, rounds from −4.9% to +0.6%" included.
+    - My run (`target/review-c14/bench/`): the same method with my own builds of `v0.6.0` and of
+      the branch without and with the feature; Apple M4 Max, macOS 15.8.1, rustc 1.99.0; six
+      rounds from 23:04 to 23:11, loads 4.95 to 5.99 at the start of each run.
+
+      | Benchmark | 0.6.0 | without | with | with vs without | with vs 0.6.0 |
+      | --- | ---: | ---: | ---: | ---: | ---: |
+      | `parse/irregular/60k` | 189.3 µs | 189.9 µs | 179.7 µs | −5.4% (−7.7..−3.2) | −5.1% |
+      | `parse/json-corpus/canada` | 11.11 ms | 11.23 ms | 11.39 ms | +1.4% (+0.1..+3.5) | +2.4% |
+      | `serde/json-corpus-canada/UclValue` | 11.17 ms | 11.36 ms | 11.33 ms | −0.3% (−1.3..+0.3) | +1.5% |
+
+      The direction of the implementer's figures holds: the irregular gain a little smaller
+      (−5.4% against −6.6%), the `canada` parse loss the same.
+  - Commits: this LOG-only review commit. No change to `src/`; the probe, the mutants and the
+    scratch variant are under `target/review-c14/`. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-09-30 to 2026-10-01 (entry written 2026-10-05) — Role: clean-room implementer. Item:
+  C14, owner decision 3, the `memchr` feature (first session; stopped twice by the coordinator
+  on the owner's instruction, resumed once, then continued by a successor session).
+  - Inputs consulted: `docs/clean-room/PROTOCOL.md`, `docs/clean-room/WORKLIST.md` and the tail
+    of `docs/clean-room/LOG.md`; the current `CLAUDE.md` (embedded in the brief, and the
+    worktree's copy as loaded into context); the C14 report
+    `/Users/andrii/work2/ucl-rust-lexer/target/perf/C14-report.md` (its headings, *Method*,
+    *memchr and a word-at-a-time proxy for SIMD* and *Conclusions and limits*). I did not list or
+    open the report's scratch directory `target/perf/c14/` in the main checkout, so the
+    prototype's patch was not an input; I mapped the report's scan categories onto the current
+    sites myself. Crate code: `src/parse/string.rs`, `core.rs` (the scan sites,
+    `block_comment_end`, `unquoted_extent`, the tests module), `comments.rs` (`flush`), `mod.rs`
+    (module list, `Parser` comments and emitter methods), `src/emit/mod.rs` (`Emitter`),
+    `src/lib.rs` (crate docs), greps of `src/` for byte scans; `Cargo.toml`, `scripts/ci.sh`,
+    `README.md` (Cargo features, CI workflows), `CHANGELOG.md`; `benches/README.md`,
+    `benches/fetch-documents.sh`, `benches/common/mod.rs` and `files.rs`, greps of
+    `benches/*.rs`; `tests/bench_documents.rs`, `tests/conformance.rs` (the config-comments
+    emitter call), `fuzz/Cargo.toml`, greps of `fuzz/README.md` and `tests/features/Cargo.toml`.
+    Git: `git log`, the spec tag names (`spec-v18` at the start; `spec-v19` and `spec-v20` seen
+    after the fetch), `git diff --stat` from `v0.6.0` to `HEAD` and to `origin/main` (file
+    names only), and `git archive v0.6.0` limited to `src`, `benches`, `Cargo.toml`,
+    `Cargo.lock` and `README.md`, so that no earlier `CLAUDE.md` was extracted. Dependencies:
+    greps of `memchr-2.8.3/Cargo.toml` (version, licence, `rust-version`, features) and
+    `src/memchr.rs` (signatures), the listing of its `src/`; greps of `criterion-0.8.2/src/lib.rs`
+    (`CRITERION_HOME`, the filter). Network: `benches/fetch-documents.sh` fetched the three
+    JSON documents with curl's default headers. I read no file of `docs/spec/`, ran neither the
+    oracle nor the fuzzer, and did not open the Claude Code task output files under
+    `/private/tmp/`.
+  - Guard refusals and near-exposures: the worktree guard refused six commands with shell
+    variables or compound constructs (nothing ran; I split them). One `ls` with no argument in
+    the worktree root printed its top-level names (`tools` among them) against the search rule;
+    no file was opened and nothing forbidden was read. No exposure.
+  - Work (uncommitted until the resume): `src/parse/scan.rs` (`find`, `find2`, `find3`: memchr
+    with the feature, the existing `iter().position` loop without it) used by the single-quoted
+    string scans, the heredoc line and empty-name end scans, the backslash scan of
+    `decode_unquoted` and the three `#` comment scans; in `block_comment_end` the plain-byte
+    arm jumps to the next `"`, `/` or `*` under `cfg(feature = "memchr")` and stays `i += 1`
+    without it. Unit tests: each search against a loop at every length up to 140 bytes, and
+    `block_comment_end` against the byte loop on 20,000 generated comments.
+    `memchr = { version = "2.7", optional = true }` and `memchr = ["dep:memchr"]`; `scripts/ci.sh`
+    gained `cargo clippy --lib --no-default-features --features memchr` and
+    `cargo test --features memchr`; README, crate docs and a CHANGELOG `## Unreleased` entry with
+    a figures placeholder. `tests/bench_documents.rs` gained a test that pins FNV-1a digests of
+    what 11 benchmark documents parse to (JSON output, config output with saved comments, each
+    comment and its offset); it passed without the feature, with it, and on the `v0.6.0`
+    sources (a copy of the test in the `git archive` tree), before and after the rebase.
+  - Measurements (`target/perf/c14-memchr/`, Apple M4 Max, Criterion 30 samples, 1 s warm-up,
+    3 s measurement, release profile): builds of `v0.6.0` and of the branch without and with the
+    feature, at the same path depth, run in 11 benchmark chunks per round in rotated order, each
+    run gated on a 1-minute load below 3. Before the rebase (branch `src/` = `v0.6.0` plus the
+    change): rounds 1–3 and chunks 1–7 of round 4, 120 runs, load 2.17–2.99 at the start of
+    each run and up to 5.32 at the end. With vs without the feature (median; range of
+    same-round ratios): `parse/irregular/60k` −6.9% (−7.6..−6.1), `parse/irregular/600k`
+    −3.1% (−3.9..−1.7), `serde/irregular-60k` −5.8% and −6.1%, `parse/config/1000` −2.0%;
+    losses `serde/nested-mixed-1000/from_str` +3.2% (+3.2..+4.1) and `parse/json-corpus/canada`
+    +2.2% (+1.1..+3.2). The unchanged serde_json groups moved by up to +8% between builds, so
+    effects of a few percent may be code layout. Two earlier attempts were set aside: one
+    stopped after a single run, one round whose branch builds lived at another path depth than
+    `v0.6.0`'s. `target/perf/C14-memchr.md` was not written.
+  - Resume (2026-10-01): committed the work in progress as `0c4dacf` ("wip: memchr feature (to
+    be reworded)"), rebased it onto `origin/main` (`c671e72`) and resolved the `CHANGELOG.md`
+    conflict by keeping both `## Unreleased` sections. Rebuilt the builds without and with the
+    feature from the rebased sources, and a fourth scratch variant (a 16-byte loop before each
+    memchr call, never committed) to test whether the `nested-mixed` loss came from short
+    scans. Its round waited on loads of 4 to 69 from 15:40 to 17:16 without a run when the
+    coordinator stopped the session; no figures from the rebased code. `scripts/ci.sh` and a
+    fuzz run were not done in this session.
+  - Commits: `0c4dacf` only, on the worktree branch, later rewritten by a successor session
+    (into `a26fac5` on `c14/memchr`). This LOG entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-06 — Role: coordinator (oracle side; edits no `src/`). Item: C14, owner decision 3.
+  - The three entries above come from branch `c14/memchr`, which was not merged. The owner
+    withdrew decision 3 because the feature made some inputs slower (WORKLIST, decision of
+    2026-10-06). A fix round for the reviewer's finding 1 (block comments) was stopped before
+    it committed anything or wrote an entry, and its changes were discarded.
+  - The branch and its worktree were deleted, so the commits these entries name (`0c4dacf`,
+    `a26fac5`, `cef89d9`, `cce31be`, `b77a26c`, `c8274b9`, `aff0734`, `fd7cde4`) are no longer
+    reachable. The entries are kept for the measurements and the provenance of the sessions.
+  - Commits: this entry and the WORKLIST decision. Not pushed until the owner's PR review.
