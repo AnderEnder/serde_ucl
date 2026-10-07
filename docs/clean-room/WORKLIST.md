@@ -409,6 +409,12 @@ documents):
    without the feature, and the gain is measured against the latest release (0.6.0) with the
    crate's benchmarks. The README's feature list and `CHANGELOG.md` name the feature.
 
+Owner decision of 2026-10-06, replacing decision 3: the `memchr` feature is dropped. Its reviewed
+implementation gained 2–7% on the irregular documents, but `parse/json-corpus/canada` was about 2%
+slower than without it and than 0.6.0, and documents with many `*`, `/` or `"` in block comments
+were up to 3.2 times slower. An optimisation that makes any measured input slower is not taken,
+even behind an opt-in feature. The work was not merged; `LOG.md` records it.
+
 ## C15 — libucl-compatible C API (Stage A complete; later stages deferred)
 
 A C API compatible with libucl's, so that C programs written for libucl can use the crate. Owner
