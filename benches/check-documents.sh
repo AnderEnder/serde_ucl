@@ -2,17 +2,22 @@
 # Checks every benchmark document against libucl the way the differential fuzzer checks one
 # (`ucl-differential --check`, fuzz/README.md): libucl parses it, and the crate gives the same
 # result. The documents are the irregular configurations of benches/common/irregular.rs, the
-# JSON documents in target/bench-corpus/ (benches/fetch-documents.sh), and the rspamd
-# configurations of benches/corpus/ that the benchmarks use, with the settings they use
-# (benches/common/files.rs, CORPUS).
+# workloads of benches/common/workloads.rs (those parsed with save-comments with their saved
+# comments compared too, the flag dump-comments), the JSON documents in target/bench-corpus/
+# (benches/fetch-documents.sh) and their compact forms, and the rspamd configurations of
+# benches/corpus/ that the benchmarks use, with the settings they use (benches/common/files.rs,
+# CORPUS).
 #
 #   benches/check-documents.sh [EXTRA_SEEDS]
 #
 # EXTRA_SEEDS (default 0) also checks that many more generated documents of 60 000 bytes, to
 # test the generator beyond the documents the benchmarks use. A document passes when the
-# verdict is `agree` and libucl accepted it; `skipped` and a rejection by both fail too. Each
-# result is in target/bench-documents/checks/. Needs the oracle,
-# target/libucl-oracle/ucl-dump (scripts/regen-golden.sh builds it).
+# verdict is `agree` and libucl accepted it; `skipped` and a rejection by both fail too, with
+# one exception: a document nested deeper than the check's JSON reader reads, whose dump libucl
+# wrote but the check cannot compare, passes as `accepted`. The deep workloads are such
+# documents, so the same documents nested 20 deep are compared in their place. Each result is
+# in target/bench-documents/checks/. Needs the oracle, target/libucl-oracle/ucl-dump
+# (scripts/regen-golden.sh builds it).
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -54,6 +59,8 @@ check() {
 	checked=$((checked + 1))
 	if [ "$verdict" = agree ] && [ "$oracle" != "oracle: error" ]; then
 		echo "agree: $file"
+	elif [ "$verdict" = "skipped: dump deeper than serde_json reads" ]; then
+		echo "accepted (too deep to compare): $file"
 	else
 		echo "FAILED: $file: $oracle ... $verdict (see $report)"
 		failed=$((failed + 1))
@@ -63,11 +70,18 @@ check() {
 for file in "$OUT"/generated/*.ucl; do
 	check "$file" "$OUT/generated"
 done
+for file in "$OUT"/generated/dump-comments/*.ucl; do
+	check "$file" "$OUT/generated" dump-comments
+done
 
 set -- target/bench-corpus/*.json
 if [ -e "$1" ]; then
 	for file in "$@"; do
 		check "$file" target/bench-corpus
+	done
+	# Their compact forms, which write_documents writes when the documents are there.
+	for file in "$OUT"/generated/*.json; do
+		check "$file" "$OUT/generated"
 	done
 else
 	echo "no JSON documents in target/bench-corpus/; benches/fetch-documents.sh fetches them"

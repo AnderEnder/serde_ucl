@@ -1,16 +1,20 @@
-//! The irregular documents of the benchmarks (`benches/common/irregular.rs`, clean-room work
-//! item C14): the same seed gives the same document, each one parses, and each one has the
-//! variety it is meant to have.
+//! The generated documents of the benchmarks: the irregular documents
+//! (`benches/common/irregular.rs`, clean-room work item C14), where the same seed gives the same
+//! document and each one has the variety it is meant to have, and the controlled workloads
+//! (`benches/common/workloads.rs`, C16), each of which holds the values it is meant to hold.
+//! Also the compact forms of the JSON documents, and their typed forms.
 //!
 //! Each document the benchmarks use was checked against libucl with
 //! `benches/check-documents.sh`, which writes them out through `write_documents` below. The
-//! digests in `DIGESTS` pin those documents: a change to the generator changes them, and then
-//! the documents are checked again and the digests updated.
+//! digests in `DIGESTS` and `WORKLOAD_DIGESTS` pin those documents: a change to a generator
+//! changes them, and then the documents are checked again and the digests updated.
 
 #[path = "../benches/common/mod.rs"]
 mod common;
 
 use common::{IRREGULAR, irregular};
+use serde::de::DeserializeOwned;
+use serde_ucl::parse::Parser;
 use serde_ucl::value::Value;
 
 /// FNV-1a digests of the documents of `IRREGULAR`, in its order.
@@ -197,6 +201,42 @@ fn write_documents() {
         )
         .unwrap();
     }
+    // The workloads, once for each text, and those that save comments again in `dump-comments/`,
+    // which the check runs with saved comments compared too.
+    let mut written = std::collections::HashSet::new();
+    let saved = dir.join("dump-comments");
+    std::fs::create_dir_all(&saved).unwrap();
+    for workload in common::workloads() {
+        let name = format!("{}.ucl", workload.id().replace('/', "-"));
+        if !workload.flags.is_empty() {
+            assert_eq!(
+                workload.flags,
+                serde_ucl::ParserFlags::SAVE_COMMENTS,
+                "{name}"
+            );
+            std::fs::write(saved.join(&name), &workload.text).unwrap();
+        } else if written.insert(fnv1a(workload.text.as_bytes())) {
+            std::fs::write(dir.join(&name), &workload.text).unwrap();
+        }
+    }
+    // The deep chains at a depth whose dump the check can read, in place of those of the
+    // benchmarks, which it can only see libucl accept.
+    for workload in common::deep_chains(20) {
+        let name = format!("{}.ucl", workload.id().replace('/', "-"));
+        std::fs::write(dir.join(&name), &workload.text).unwrap();
+    }
+    std::fs::write(
+        dir.join("parse-json-compact-json-1000.ucl"),
+        common::compact_json(&common::json(1000)),
+    )
+    .unwrap();
+    for document in common::json_documents("write_documents") {
+        std::fs::write(
+            dir.join(format!("parse-json-compact-{}.json", document.name)),
+            common::compact_json(&document.text),
+        )
+        .unwrap();
+    }
     let extra: u64 = std::env::var("UCL_BENCH_EXTRA_SEEDS")
         .map(|n| n.parse().expect("UCL_BENCH_EXTRA_SEEDS is a number"))
         .unwrap_or(0);
@@ -206,5 +246,227 @@ fn write_documents() {
             irregular(seed, 60_000),
         )
         .unwrap();
+    }
+}
+
+/// FNV-1a digests of the workloads of `common::workloads()`, by id.
+const WORKLOAD_DIGESTS: &[(&str, u64)] = &[
+    ("parse/strings/dq-1", 3397109732585326882),
+    ("parse/strings/dq-8", 14795648265023298215),
+    ("parse/strings/dq-16", 17328732671575075726),
+    ("parse/strings/dq-24", 9625584532266748356),
+    ("parse/strings/dq-32", 8522622951650077243),
+    ("parse/strings/dq-64", 13512022318852155491),
+    ("parse/strings/dq-256", 2981947958648486740),
+    ("parse/strings/dq-4096", 8548395501389726538),
+    ("parse/strings/dq-escaped-64", 9714396491685004314),
+    ("parse/strings/dq-utf8-64", 9497408090071248287),
+    ("parse/strings/sq-64", 9505414775039453099),
+    ("parse/strings/sq-4096", 14635762553845053700),
+    ("parse/strings/unquoted-64", 15870103482988444947),
+    ("parse/strings/heredoc-1024", 10912057044031521945),
+    ("parse/keys/bare-4", 7304717182505186565),
+    ("parse/keys/bare-22", 1132878005403401589),
+    ("parse/keys/bare-23", 15831160380990138591),
+    ("parse/keys/bare-64", 4686489160442266688),
+    ("parse/keys/quoted-23", 4286967142565416537),
+    ("parse/numbers/int-1", 2260337187800645672),
+    ("parse/numbers/int-4", 6589930021543519760),
+    ("parse/numbers/int-8", 11068696499466389475),
+    ("parse/numbers/int-16", 1750737263612667202),
+    ("parse/numbers/int-19", 3910800166464211048),
+    ("parse/numbers/int-neg-8", 17615209137545929279),
+    ("parse/numbers/float-short", 6729337136903190782),
+    ("parse/numbers/float-15", 4391942830057404455),
+    ("parse/numbers/float-17", 16061665255779085473),
+    ("parse/numbers/float-exp", 6586078307175918106),
+    ("parse/numbers/float-exp-large", 3962080271503951498),
+    ("parse/numbers/suffixed", 10317600044218248446),
+    ("parse/containers/empty-objects", 14657274066200101971),
+    ("parse/containers/empty-arrays", 360974758664151123),
+    ("parse/containers/empty-values", 11868669492084191569),
+    ("parse/containers/one-key-objects", 11698831450520512560),
+    ("parse/containers/one-element-arrays", 10325554082204040652),
+    ("parse/deep/arrays-1000", 1920244486229475431),
+    ("parse/deep/json-objects-1000", 2361213540968275732),
+    ("parse/deep/repeated-16", 16365922035629414403),
+    ("parse/comments/hash-lines", 3380647026386443269),
+    ("parse/comments/hash-after-values", 17074606882882375081),
+    ("parse/comments/block-prose", 7204024078580389032),
+    ("parse/comments/block-stars", 207054414155158634),
+    ("parse/comments/block-slashes", 18237631582305121159),
+    ("parse/comments/block-quotes", 11170023285804756558),
+    ("parse/comments/block-dense", 14469326073034848378),
+    ("parse/comments/block-nested", 6917579551416904135),
+    (
+        "parse/comments/hash-after-values-saved",
+        17074606882882375081,
+    ),
+    ("parse/comments/block-prose-saved", 7204024078580389032),
+    ("parse/whitespace/compact", 6865812900897743385),
+    ("parse/whitespace/aligned", 9024777566714177723),
+    ("parse/whitespace/tabs", 9292580417843937133),
+    ("parse/whitespace/crlf", 18389909841634668026),
+    ("parse/whitespace/blank-lines", 15727568771364184782),
+    ("parse/objects/keys-8", 10286495065896882552),
+    ("parse/objects/keys-16", 1591597068586436841),
+    ("parse/objects/keys-17", 11533955280063579829),
+    ("parse/objects/keys-24", 271010278840800081),
+    ("parse/objects/keys-32", 9220386584439908044),
+    ("parse/objects/keys-16-long-prefix", 1676048990998468813),
+    ("parse/objects/keys-16-repeated", 17686712008780962455),
+];
+
+#[test]
+fn the_workloads_are_the_checked_ones() {
+    let digests: Vec<(String, u64)> = common::workloads()
+        .iter()
+        .map(|w| (w.id(), fnv1a(w.text.as_bytes())))
+        .collect();
+    let expected: Vec<(String, u64)> = WORKLOAD_DIGESTS
+        .iter()
+        .map(|&(id, digest)| (id.to_string(), digest))
+        .collect();
+    if digests != expected {
+        for (id, digest) in &digests {
+            println!("    (\"{id}\", {digest}),");
+        }
+    }
+    assert_eq!(
+        digests, expected,
+        "the workloads changed: check them with benches/check-documents.sh, then update \
+         WORKLOAD_DIGESTS (printed above)"
+    );
+}
+
+/// What a workload is meant to hold, by its id.
+fn check_workload(id: &str, value: &Value<'_>, stats: &Stats) {
+    let scalars = [
+        stats.strings,
+        stats.integers,
+        stats.floats,
+        stats.times,
+        stats.booleans,
+        stats.nulls,
+    ];
+    let only = |index: usize| {
+        assert!(scalars[index] > 0, "{id}: {stats:?}");
+        for (i, &count) in scalars.iter().enumerate() {
+            assert!(i == index || count == 0, "{id}: {stats:?}");
+        }
+    };
+    let group = id.rsplit_once('/').unwrap().0;
+    match group {
+        "parse/strings" => only(0),
+        "parse/keys" => only(1),
+        "parse/numbers" if id.contains("/int-") => only(1),
+        "parse/numbers" if id.contains("/float-") => only(2),
+        "parse/numbers" => {
+            // Multipliers keep ints and floats; time suffixes make times (spec §5.5).
+            assert!(
+                stats.strings == 0 && stats.integers > 0 && stats.times > 0,
+                "{id}"
+            );
+        }
+        "parse/containers" => {
+            assert!(
+                stats.strings == 0 && stats.objects + stats.arrays > 1000,
+                "{id}"
+            );
+        }
+        "parse/deep" => assert!(stats.depth > 16, "{id}: {stats:?}"),
+        _ => {
+            // Sections of entries `name0`, `port1`, `enabled2`, `ratio3`, … or `field_00`, …:
+            // every entry has its value, of its type, whatever comments or whitespace surround it.
+            let root = value.as_object().unwrap();
+            assert!(root.len() >= 50, "{id}");
+            for (_, section) in root {
+                for (key, entry) in section.first().as_object().unwrap() {
+                    let key: &str = key;
+                    let digits = key.trim_start_matches(|c: char| !c.is_ascii_digit());
+                    let e: usize = digits.parse().unwrap();
+                    let value = entry.first();
+                    let ok = match e % 4 {
+                        0 => matches!(value, Value::String(_)),
+                        1 => matches!(value, Value::Integer(_)),
+                        2 => matches!(value, Value::Boolean(_)),
+                        _ => matches!(value, Value::Float(_)),
+                    };
+                    let ok = ok || key.starts_with("configuration_parameter_name_");
+                    assert!(ok, "{id}: {key} = {value:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn each_workload_holds_what_it_is_meant_to() {
+    for workload in common::workloads() {
+        let id = workload.id();
+        let mut parser = Parser::with_flags(workload.flags);
+        let value = parser
+            .parse(workload.text.as_bytes())
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        let stats = Stats::of(&value);
+        println!("{id}: {} bytes, {stats:?}", workload.text.len());
+        assert!(workload.text.len() >= common::SIZE, "{id}");
+        check_workload(&id, &value, &stats);
+        if id.ends_with("-saved") {
+            assert!(parser.comments().len() > 1000, "{id}");
+        }
+        if id.starts_with("parse/deep/") && id.ends_with("-1000") {
+            assert!(stats.depth >= 1000, "{id}: {stats:?}");
+        }
+    }
+}
+
+/// The compact form of a JSON document parses to the same value as the document.
+#[test]
+fn compact_json_keeps_the_value() {
+    let mut documents = vec![("json-1000".to_string(), common::json(1000))];
+    documents.extend(
+        common::json_documents("compact_json_keeps_the_value")
+            .into_iter()
+            .map(|d| (d.name, d.text)),
+    );
+    for (name, text) in documents {
+        let compact = common::compact_json(&text);
+        assert!(compact.len() < text.len(), "{name}");
+        assert!(!compact.contains("\n"), "{name}");
+        let value = serde_ucl::parse::parse(text.as_bytes()).unwrap();
+        let compact_value = serde_ucl::parse::parse(compact.as_bytes()).unwrap();
+        assert!(value == compact_value, "{name}");
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let compact_json: serde_json::Value = serde_json::from_str(&compact).unwrap();
+        assert_eq!(json, compact_json, "{name}");
+    }
+}
+
+fn both<T: DeserializeOwned>(name: &str, text: &str) {
+    if let Err(e) = serde_ucl::from_str::<T>(text) {
+        panic!("{name}: serde_ucl: {e}");
+    }
+    if let Err(e) = serde_json::from_str::<T>(text) {
+        panic!("{name}: serde_json: {e}");
+    }
+}
+
+/// The typed forms of the JSON documents deserialize with both crates. The fetched documents
+/// are checked when they are present (`benches/fetch-documents.sh`).
+#[test]
+fn the_typed_forms_deserialize() {
+    use common::typed::{Canada, CitmCatalog, JsonItems, Twitter};
+    let json = common::json(1000);
+    both::<JsonItems>("json-1000", &json);
+    both::<JsonItems>("json-1000 compact", &common::compact_json(&json));
+    for document in common::json_documents("the_typed_forms_deserialize") {
+        let name = document.name.as_str();
+        match name {
+            "twitter" => both::<Twitter>(name, &document.text),
+            "citm_catalog" => both::<CitmCatalog>(name, &document.text),
+            "canada" => both::<Canada>(name, &document.text),
+            _ => panic!("no typed form for {name}"),
+        }
     }
 }

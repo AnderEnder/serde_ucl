@@ -1,6 +1,7 @@
 //! Documents and types shared by the benchmarks. Every generated document is valid libucl.
-//! `irregular.rs` generates irregular configurations; `files.rs` reads the documents that come
-//! from files.
+//! `irregular.rs` generates irregular configurations; `workloads.rs` the controlled workloads,
+//! each of which stresses one scan or structure; `files.rs` reads the documents that come from
+//! files; `typed.rs` has the typed forms of the JSON documents.
 
 #![allow(
     dead_code,
@@ -10,9 +11,12 @@
 
 mod files;
 mod irregular;
+pub mod typed;
+mod workloads;
 
 pub use files::{CORPUS, Corpus, Document, JSON_DOCUMENTS, corpus_documents, json_documents};
 pub use irregular::{IRREGULAR, irregular};
+pub use workloads::{DEPTH, SIZE, Workload, compact_json, deep_chains, workloads};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

@@ -184,6 +184,43 @@ fn bench_corpus(c: &mut Criterion) {
     group.finish();
 }
 
+/// The controlled workloads of `common::workloads()` (clean-room work item C16, task P1), one
+/// group for each of their groups, each parsed with its flags.
+fn bench_workloads(c: &mut Criterion) {
+    let workloads = common::workloads();
+    for workloads in workloads.chunk_by(|a, b| a.group == b.group) {
+        let mut group = c.benchmark_group(workloads[0].group);
+        for workload in workloads {
+            group.throughput(Throughput::Bytes(workload.text.len() as u64));
+            group.bench_with_input(
+                BenchmarkId::from_parameter(&workload.name),
+                &workload.text,
+                |b, input| {
+                    let mut parser = Parser::with_flags(workload.flags);
+                    b.iter(|| parser.parse(black_box(input.as_bytes())).unwrap());
+                },
+            );
+        }
+        group.finish();
+    }
+}
+
+/// The JSON documents without the whitespace outside their strings (`common::compact_json`):
+/// `json(1000)` and those in `target/bench-corpus/`.
+fn bench_json_compact(c: &mut Criterion) {
+    let name = "parse/json-compact";
+    let mut documents = vec![common::Document {
+        name: "json-1000".to_string(),
+        path: "json(1000)".into(),
+        text: common::json(1000),
+    }];
+    documents.extend(common::json_documents(name));
+    for document in &mut documents {
+        document.text = common::compact_json(&document.text);
+    }
+    bench_documents(c, name, documents);
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
@@ -191,6 +228,6 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
     targets = bench_config, bench_small, bench_flags, bench_json, bench_nested, bench_variables,
-        bench_irregular, bench_json_corpus, bench_corpus
+        bench_irregular, bench_json_corpus, bench_corpus, bench_json_compact, bench_workloads
 }
 criterion_main!(benches);
