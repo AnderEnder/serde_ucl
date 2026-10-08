@@ -682,11 +682,12 @@ P1's hotspots rank them; P11 at any time after P1.
 Owner decisions of 2026-10-08, after P1 (its record is in `LOG.md`):
 
 1. **P0 — Recover the drift since 0.6.0**, first, before the other tasks. P1 found `main` slower
-   than v0.6.0 beyond noise: section-heavy and nested parsing by 4–6% (`deep/repeated-16`,
-   `containers/empty-values`), and string emission by 3–8% (`emit/strings-*`). It bisected the
-   parse drift to `36da56c` (#29) and `80b7785` (#30), and the emit drift to `36da56c`. Neither
-   diff adds work per item, so layout or inlining is the likely cause. Find the cause and recover
-   v0.6.0's speed on these inputs, with behaviour and the C API unchanged.
+   than v0.6.0 beyond noise, and its review reproduced part of it: container-heavy parsing
+   (`containers/empty-values`) by 2–5%, and emitting short escaped strings as JSON by about 6%.
+   P1 bisected these to `80b7785` (#30) and `36da56c` (#29); its slowdown on `deep/repeated-16`
+   depended on the run mode and did not reproduce. Neither diff adds work per item, so layout or
+   inlining is the likely cause. Find the cause and recover v0.6.0's speed on these inputs, with
+   behaviour and the C API unchanged, running both builds in the same process mode.
 2. Every task reports against both v0.6.0 and its base on `main`. A change is adopted only if no
    benchmark or targeted input is slower than on `main`, and the inputs it targets gain against
    both.
