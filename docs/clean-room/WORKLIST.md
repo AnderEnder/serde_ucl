@@ -572,3 +572,109 @@ Owner follow-up: open a PR for the completed second pass. Pushing the completed
 branch and opening a PR against main are now authorized. Keep plans local; do
 not merge, create release tags or publish packages. GitHub CI should validate
 the submitted head on Linux/macOS and under coverage.
+
+## C16 — Performance experiments from the JSON research (owner request of 2026-10-01; planned)
+
+`docs/json-performance-spec.md` collects optimization candidates from four JSON crates
+(sonic-rs, simd-json, json-rust, jsonic). It was written outside the spec team and has no libucl
+content (LOG, 2026-10-01), so the implementation team may read it; ideas are taken from it, code
+is not copied from the crates. C16 turns the candidates that fit this crate into small research
+and measurement tasks. Identifiers in brackets are the document's.
+
+Already done, not repeated: double-quoted strings scanned with a byte-class table (B04); plain runs
+copied in one step by the JSON string writer (E01, partly); small objects without a hash table, 16
+keys (O01, C13); short keys stored inline (V07, C13); the last-sibling capacity hint (V05, C11);
+serde targets that borrow (A04, C13). Tried and dropped: `memchr` for the byte searches (B04), which
+made some inputs slower (C14, owner decision of 2026-10-06). Out of scope without an owner decision:
+SIMD intrinsics and other `unsafe` (B05–B07, C01, C02, C04); a tape or lazy document (A02, A03);
+path-extraction APIs (Q02); new dependencies, such as allocators or float formatters (C05, E03).
+Each of these may come back as a proposal with measurements.
+
+Rules for every task:
+
+- Research first: a throwaway prototype, measured against the latest release (0.6.0, tag
+  `v0.6.0`) with the crate's benchmarks under C11's rules: builds in turns over rounds, the load
+  recorded, and measurement only when the 1-minute load is below 3.
+- Each task ends with a record in `target/perf/C16-report.md`, as in the document's §12.4: the
+  identifier, hypothesis, change, contract kept, time and allocations, the workloads affected,
+  correctness evidence, and a decision: adopt, reject or defer.
+- An adopted change is one `perf` commit with behaviour unchanged: conformance counts and `xfail`
+  lists, emitter output byte for byte, `scripts/ci.sh`, and `scripts/ci.sh fuzz 300`.
+- Adopt a repeatable gain beyond noise on the documents a task targets; there is no fixed
+  percentage gate. Owner decision of 2026-10-06: a change that makes any benchmark, or any input
+  of the kind it targets (such as long comments for a comment scan), measurably slower than
+  without it is rejected, even with a gain elsewhere and even behind a feature. Each task measures
+  such inputs. Reject complexity without a repeatable gain.
+- Safe Rust and no new dependency. A change that needs either is a proposal with its measurements.
+- Owner decision of 2026-10-08: each task is a separate PR, from its own branch off `main`, with
+  its record from `target/perf/C16-report.md` in the PR description and in `LOG.md`. A rejected
+  or deferred task's PR holds only its LOG entry and any benchmark inputs it added.
+
+Tasks (each small; P1 first):
+
+1. **P1 — Baseline profile and workload gaps** (§12.2, §13 step 1). Profiles and a counting
+   allocator for `Parser::parse` and `from_str` (into `UclValue`, a typed struct and
+   `IgnoredAny`) on `config(1000)`, `json(1000)`, irregular 600k, `twitter`, `citm_catalog`,
+   `canada`, rspamd `groups.conf` and the three-entry document: time by function, allocations and
+   bytes per document, time per input byte. Add the cheap inputs the benchmarks lack: compact
+   forms of the JSON documents, a string-length sweep, a number sweep (short integers, long ids,
+   floats), many empty containers, deep nesting. Output: a table that maps every hotspot of 5% or
+   more to a task below or to a new candidate. Tasks whose hotspot is below about 3% are deferred
+   with that reason.
+2. **P2 — Decimal integer fast path** (N01; N02 as a variant). A plain decimal integer is scanned
+   and then converted in a second pass. Prototype one pass that returns as soon as the digits end
+   at a delimiter, keeping today's path for suffixes, hex, floats and overflow. Variant: eight
+   digits at a time with `u64::from_le_bytes`, only for runs of eight or more; the document's
+   §11.1 records such batches slowing short numbers, so measure `canada` and short integers too.
+   Tests: 1 to 20 digits, signs, the `i64` limits, suffix letters, every truncation.
+3. **P3 — Floats without a second scan** (N04, N03). A float's digits are scanned, then
+   `str::parse::<f64>` scans them again. Prototype: collect the mantissa (up to 19 digits) and
+   exponent during the scan; when the mantissa fits in 53 bits and the decimal exponent is within
+   ±22, convert with one multiplication or division by an exact power of ten; otherwise fall back
+   to `str::parse`. Correctness: bit-identical to `str::parse::<f64>` on a large generated set
+   (lengths, exponents, halfway cases, subnormals, long mantissas, overflow) and on every float of
+   the corpus. Measure `canada` and `twitter`, and the integer documents for losses.
+4. **P4 — Separator and whitespace fast paths** (B02, B03). Most values are followed by `,`, `;`
+   or a newline, and most keys by `":`, ` = ` or a space. Prototype a check of the common next
+   bytes before the general whitespace and comment loop, which stays as the fallback. Measure
+   compact and indented JSON (P1's compact forms), `config(1000)` and irregular. Tests: every
+   truncation at a separator, and comments right after values under `save-comments` (§12.5), whose
+   attachment must not change.
+5. **P5 — Key comparison in small objects** (O01, O02). An insertion into an object of up to 16
+   keys compares the key with each existing one (repeated keys merge, §8). If P1 shows that search
+   at 3% or more: prototype comparing lengths, or a per-key fingerprint, before whole keys, and
+   sweep the 16-key threshold on documents with 8 to 32 keys per object. Tests: equal fingerprints
+   of different keys, `key-lowercase`.
+6. **P6 — Parser reuse and retained capacity** (V03, V04). Measure a reused `Parser` over a
+   sequence of mixed-size documents: allocations and time in steady state, the first parse, and
+   tiny documents after a very large one; which internal buffers are rebuilt per parse and what
+   capacity stays. Prototype keeping scratch buffers across parses, with a cap on what is kept.
+7. **P7 — Empty containers and single values** (V08, V07). Count allocations on documents with
+   many empty objects and arrays and many entries with one value. Prototype allocation-free empty
+   containers where they allocate today. Measure, without changing the value model, how many
+   allocations short string values stored inline would remove; a value-model change is a proposal
+   for the owner.
+8. **P8 — Number output without temporary strings** (E02). The float writers build `String`s with
+   `format!` for each value (two for the 15-digit form). Prototype formatting into a stack buffer
+   or straight into the output. Add an emit benchmark over the JSON documents in all four formats
+   (`canada` is mostly floats). Output byte-identical: the emitter and readback conformance tests.
+9. **P9 — String escaping in the emitters** (E01). The writers test each byte with a `match`.
+   Prototype a byte-class table and a search for the next byte that needs escaping, so that plain
+   runs are found and copied in one step. Measure emitting `twitter`, `citm_catalog` and
+   `config(1000)`. Output byte-identical.
+10. **P10 — Cold error paths** (C03). Prototype moving error construction (positions, messages)
+    out of the scanning functions into `#[cold]`, `#[inline(never)]` helpers. Compare the hot
+    functions' code size, all parse benchmarks and `serde/deserialize-error-1000`. Error kinds,
+    positions and messages unchanged.
+11. **P11 — Research note: typed targets without the value tree** (A01, A04, Q01). `from_str`
+    into a typed struct builds the whole value tree first; into `IgnoredAny` it takes 3.6 to 7.8
+    times serde_json's time on the JSON documents (C14 report). Measure the split of
+    `from_str::<T>` into parsing, tree building, deserialization and drop, for typed targets and
+    `IgnoredAny`, and estimate the most a direct path could save. List the behaviours of the
+    released spec that need the whole document before a value is final (repeated keys, priorities,
+    `.inherit`, includes, variables), and whether a direct path with a fallback is possible for
+    documents that use none of them. A report only, without code; the owner decides on any
+    follow-up.
+
+Order: P1; then P2 to P5 (parser), P6 and P7 (allocation), P8 to P10 (output and error paths) as
+P1's hotspots rank them; P11 at any time after P1.
