@@ -8052,3 +8052,11 @@ publication. Work item:C15; final integration commit recorded in handover.
     and dropped" (C14, decision of 2026-10-06), and a change that makes any benchmark or targeted
     input slower is rejected. Each task is a separate PR (decision of 2026-10-08).
   - Commit: the following commit. No implementation change.
+
+- 2026-10-08 — Role: coordinator (oracle side). Item: C16.
+  - Inputs consulted: the C16 P1 report of the implementation team (`c16/p1-baseline`), and the
+    owner's answers on it.
+  - Work: recorded the owner's decisions after P1 in WORKLIST C16: P0 to recover the drift since
+    0.6.0 first, measurement against both v0.6.0 and `main`, P8 deferred, P1's candidates N1 to
+    N11 as tasks P12 to P21 except the string scans (N9), and the order of the tasks.
+  - Commit: the following commit. No implementation change.

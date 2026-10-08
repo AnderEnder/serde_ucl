@@ -678,3 +678,46 @@ Tasks (each small; P1 first):
 
 Order: P1; then P2 to P5 (parser), P6 and P7 (allocation), P8 to P10 (output and error paths) as
 P1's hotspots rank them; P11 at any time after P1.
+
+Owner decisions of 2026-10-08, after P1 (its record is in `LOG.md`):
+
+1. **P0 — Recover the drift since 0.6.0**, first, before the other tasks. P1 found `main` slower
+   than v0.6.0 beyond noise, and its review reproduced part of it: container-heavy parsing
+   (`containers/empty-values`) by 2–5%, and emitting short escaped strings as JSON by about 6%.
+   P1 bisected these to `80b7785` (#30) and `36da56c` (#29); its slowdown on `deep/repeated-16`
+   depended on the run mode and did not reproduce. Neither diff adds work per item, so layout or
+   inlining is the likely cause. Find the cause and recover v0.6.0's speed on these inputs, with
+   behaviour and the C API unchanged, running both builds in the same process mode.
+2. Every task reports against both v0.6.0 and its base on `main`. A change is adopted only if no
+   benchmark or targeted input is slower than on `main`, and the inputs it targets gain against
+   both.
+3. P8 is deferred: the `format!` temporaries it targets are 0.1–0.2% of emitting `canada`. Its
+   emit benchmarks were added by P1.
+4. P1's new candidates become tasks under the same rules, each a separate PR:
+   - **P12 — Include file-system calls** (N7). System calls take 62–74% of parsing rspamd
+     `groups.conf` (`getattrlist`, `open`, `stat`). Make fewer calls per include, with §9's
+     results, errors and file variables unchanged.
+   - **P13 — Number formatting in the emitters** (N8). std's `{:.6}` is 57–63% of emitting
+     `canada` and 13–15% of `config(1000)`; integer `Display` 8% of `citm_catalog`. Prototype a
+     formatter in safe Rust without a dependency, byte-identical on a large generated set and on
+     every number of the corpus.
+   - **P14 — Key temporaries in the emitters** (N4). Each key, or its saved spelling, is copied
+     into a `String` before it is written: 19–30% of emission. Write keys without the copy.
+   - **P15 — The UTF-8 check of `&str` input** (N1). 8.6–15.4% of irregular, 3.8–10% of
+     `twitter`, checked twice into `IgnoredAny`, although a `&str` is already UTF-8.
+   - **P16 — Frame bookkeeping** (N5). `push_frame` and `pop_frame`: 3.2–6.9% of the JSON
+     documents, 36% of `containers/empty-objects`.
+   - **P17 — The key scan** (N2). 5.6–11.7% of `config(1000)` and small documents, 20% of
+     `keys/bare-23`. C13 found byte-class tables within noise on short keys; measure long keys.
+   - **P18 — Indentation in the emitters** (N11). 9–12% of emitting `canada` and `citm_catalog`.
+   - **P19 — Output facts** (N3). 6.0–9.3% of `Parser::parse` and 3–6% of emission; a parser
+     keeps 762,560 bytes of facts after `config(1000)`.
+   - **P20 — The unquoted value scan** (N10). 5.1–5.7% of irregular.
+   - **P21 — Large objects** (N6). The size hint from the last sibling makes a 40-key object in
+     `twitter` start small and grow (`Map::grow` 3.2%).
+   - The string scans (N9, 12–16% of irregular and `twitter`) stay out of scope: with
+     `memchr` dropped and a safe word-at-a-time scan already without gain, only SIMD or `unsafe`
+     remain, which need an owner decision.
+5. Order: P0; then by P1's hotspots: P4, P3, P13, P9, P14, P7, P15, P16, P17, P12, P18, P19, P6,
+   P2, P20, P5, P21, P10. P11 at any time. A parser task and an emitter task may run at the same
+   time.
