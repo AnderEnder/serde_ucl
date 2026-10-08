@@ -8062,8 +8062,10 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commit: the following commit. No implementation change.
 
 - 2026-10-08 — Role: clean-room implementer. Item: C16 P1, baseline profile and workload gaps.
-  Branch `c16/p1-baseline` in worktree `.claude/worktrees/c16-p1`, from `origin/main`
-  `43337f0`. Report: `target/perf/C16-report.md` (not committed; its essentials are below).
+  Branch `c16/p1-baseline` in worktree `.claude/worktrees/c16-p1`, based on `origin/main`
+  `549c77e` (#36): the work started on `43337f0` (#31), whose `src/` and `benches/` are the
+  same, and the coordinator rebased it. Report: `target/perf/C16-report.md` (not committed; its
+  essentials are below).
   - Inputs consulted: the embedded current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`;
     `docs/clean-room/WORKLIST.md` (C11–C14, and C16 from branch `docs/c16-perf-experiments`,
     then from `origin/main` `549c77e` after the coordinator's note that it merged as #36: the
@@ -8092,9 +8094,10 @@ publication. Work item:C15; final integration commit recorded in handover.
     - One guard refusal: a grep for `GlobalAlloc` that also named `capi/src` and `capi/tests`,
       which are not named search directories. Nothing ran; I repeated it over the named
       directories only.
-    - The harness saved the output of `git show docs/c16-perf-experiments:docs/json-performance-spec.md`,
-      too large for the tool, to a file under `~/.claude/projects/`. I did not open it and read
-      the document from git in parts instead. Not an exposure.
+    - The harness saved the output of `git show` of
+      `docs/c16-perf-experiments:docs/json-performance-spec.md`, too large for the tool, to a
+      file under `~/.claude/projects/`. I did not open it and read the document from git in
+      parts instead. Not an exposure.
     - The background tasks' output files under `/private/tmp/` were not opened; my commands
       wrote their own logs under `target/perf/c16-p1/logs/`.
     - A process listing (`pgrep -fl`, to find a running benchmark) printed the harness's shell
@@ -8102,12 +8105,14 @@ publication. Work item:C15; final integration commit recorded in handover.
       opened.
   - Work: see the commits. After an advisor review, P1 also added the emit benchmarks over the
     JSON documents (P8, now deferred, was to add them; P9 needs them) and mapped every hotspot
-    of 5% or more to a task or a numbered candidate. A mistaken command (`cargo bench --bench parse_benchmarks --
-    --version`, meant to print a version) ran the worktree's parse benchmarks for about two
-    minutes next to the first profiling pass; I stopped it and recorded every profile again.
+    of 5% or more to a task or a numbered candidate. A mistaken command
+    (`cargo bench --bench parse_benchmarks -- --version`, meant to print a version) ran the
+    worktree's parse benchmarks for about two minutes next to the first profiling pass; I
+    stopped it and recorded every profile again.
   - Measurements: P1's record (full report, not committed: `target/perf/C16-report.md`; scratch
     in `target/perf/c16-p1/`). Apple M4 Max, macOS 15.8.1, Rust 1.99.0, criterion 0.8.2,
-    samply 0.13.1; release profile; profiles of `HEAD` (`43337f0`) with inline frames resolved
+    samply 0.13.1; release profile; profiles of `HEAD` (`43337f0`, whose `src/` is that of
+    `549c77e` and of #32, `bdeaf15`) with inline frames resolved
     (`atos -i` on a line-table build), about 20 000 samples each, attributed to operations by the
     innermost matching crate frame; allocations from `benches/alloc_counts.rs`; timings of
     v0.6.0 and `HEAD` in three interleaved rounds, each run gated on a 1-minute load below 3
@@ -8173,11 +8178,19 @@ publication. Work item:C15; final integration commit recorded in handover.
     | `citm_catalog` | 1.32 | 3.07 | 3.64 |
     | `canada` | 1.25 | 2.11 | 6.92 |
 
-    - Drift: `main` is slower than v0.6.0 on section-heavy parsing and on string emission, from
-      the C API commits; bisects of the commits that change `src/` (median and range of three
-      rounds against v0.6.0, not gated, loads 2.7–5.4):
+    - Drift (narrowed after review, see the reviewer's entry below): what reproduces is that
+      `main` is slower than v0.6.0 on container-heavy parsing (`containers/empty-values`, 2–5%:
+      +5.0% in the rounds above, +3.9% in the bisect, +1.6% to +4.4% in the reviewer's runs) and
+      on emitting short escaped strings in JSON (`strings-json/dq-escaped-64`, about 6%: +8.1%,
+      +8.4%, and the reviewer's +6.2%). Both appear with the C API commits (#29, #30). The other
+      rows below did not reproduce: `deep/repeated-16` changes sign with the process mode (the
+      whole binary, the bisect's six-benchmark filter, or alone; `HEAD` is faster alone), and
+      `strings-json/dq-64` is within the ±3% band in the reviewer's runs;
+      `strings-config/dq-escaped-64` was not rerun. Bisects of the commits that change `src/`
+      (median and range of three rounds against v0.6.0, not gated, loads 2.7–5.4; the last
+      column is `43337f0`, #31, whose `src/` is #32's):
 
-    | benchmark | v0.6.0 | c671e72 (#24) | e4dd295 (#28) | 36da56c (#29) | 80b7785 (#30) | 43337f0 (HEAD, #32) |
+    | benchmark | v0.6.0 | c671e72 (#24) | e4dd295 (#28) | 36da56c (#29) | 80b7785 (#30) | 43337f0 (#31, `src/` of #32) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: |
     | `parse/config/1000` | 2346.9 µs | -0.5% (-2.0..+0.4) | -0.9% (-1.6..+1.3) | -0.5% (-1.2..+2.7) | +0.7% (+0.7..+2.4) | +1.0% (-0.8..+1.6) |
     | `parse/containers/empty-values` | 2851.5 µs | +0.4% (-0.5..+1.5) | +0.8% (-0.1..+1.6) | +0.5% (-0.6..+3.6) | +4.6% (+2.8..+5.9) | +3.9% (+3.2..+6.0) |
@@ -8186,7 +8199,7 @@ publication. Work item:C15; final integration commit recorded in handover.
     | `parse/nested/500` | 96.1 µs | -1.5% (-3.5..+5.5) | -0.6% (-5.9..+3.2) | +1.4% (-1.6..+7.4) | +2.6% (-1.6..+6.8) | +3.6% (+1.4..+4.9) |
     | `parse/strings/dq-8` | 617.8 µs | +2.5% (+0.7..+2.8) | +3.3% (+2.4..+4.8) | +2.9% (+2.5..+4.1) | +2.7% (+2.3..+3.7) | +2.2% (+2.1..+2.3) |
 
-    | benchmark | v0.6.0 | c671e72 (#24) | e4dd295 (#28) | 36da56c (#29) | 80b7785 (#30) | 43337f0 (HEAD, #32) |
+    | benchmark | v0.6.0 | c671e72 (#24) | e4dd295 (#28) | 36da56c (#29) | 80b7785 (#30) | 43337f0 (#31, `src/` of #32) |
     | --- | ---: | ---: | ---: | ---: | ---: | ---: |
     | `emit/config-1000/json` | 1154.7 µs | -0.7% (-1.2..+1.3) | +0.2% (-0.8..+1.9) | -1.3% (-1.6..+0.6) | +1.4% (+0.2..+2.8) | +0.1% (-0.1..+1.7) |
     | `emit/strings-config/dq-escaped-64` | 455.4 µs | +0.1% (-1.6..+0.4) | -0.9% (-2.3..+0.9) | +8.8% (+7.2..+11.6) | +8.4% (+6.8..+8.7) | +6.1% (+5.6..+9.2) |
@@ -8195,19 +8208,21 @@ publication. Work item:C15; final integration commit recorded in handover.
     | `emit/strings-json/dq-escaped-64` | 409.6 µs | -0.1% (-0.9..+2.0) | +1.6% (-0.1..+2.2) | +10.3% (+9.5..+10.8) | +8.7% (+8.3..+9.1) | +8.4% (+8.2..+9.2) |
 
       No per-item work is added in those diffs; probably layout or inlining. Later tasks should
-      report against both v0.6.0 and their own base.
-  - Commits: `8aaeeae` (test(bench): add workloads, compact JSON documents and typed
-    targets), `3b41a0d` (test(bench): count allocations per document and entry point),
-    `7c69705` (docs(bench): describe the C16 P1 inputs and the allocation counts), `f9ddda7`
-    (test(bench): emit the JSON documents and string workloads), and this entry. Not pushed. The commit type is `test(bench)`, as for earlier
-    benchmark work (`f7f6d17`), since CLAUDE.md's list has no `bench` type.
-  - Checks: `scripts/ci.sh` passed (31 steps, exit 0) on the final tree (an earlier run failed on
-    clippy's `manual_is_multiple_of` in the new generator, fixed before the commit; the fix
-    leaves the documents unchanged). `benches/check-documents.sh`: 75 documents, 73 agree with
-    libucl, 2 (the 1000-deep workloads) accepted by libucl and too deep for the check's JSON
-    reader, their 20-deep stand-ins agree. No `src/` change, so no fuzz run.
-  - For the coordinator: #36 appended to this log too, so this entry will conflict at the
-    rebase (both at the end of the file).
+      report against both v0.6.0 and their own base, and run each compared benchmark the same
+      way in both builds (the whole binary, or the same filter), since allocation-heavy
+      workloads moved by about ±5% with the process mode in the reviewer's runs.
+  - Commits (after the coordinator's rebase onto `549c77e`): `122c1de` (test(bench): add
+    workloads, compact JSON documents and typed targets), `aedd51a` (test(bench): count
+    allocations per document and entry point), `d79a2f8` (docs(bench): describe the C16 P1
+    inputs and the allocation counts), `c587d07` (test(bench): emit the JSON documents and
+    string workloads), and this entry, `3332600`. Not pushed. The commit type is
+    `test(bench)`, as for earlier benchmark work (`f7f6d17`), since CLAUDE.md's list has no
+    `bench` type.
+  - Checks: `scripts/ci.sh` passed (31 steps, exit 0) on the tree before the rebase (an earlier run
+    failed on clippy's `manual_is_multiple_of` in the new generator, fixed before the commit; the
+    fix leaves the documents unchanged). `benches/check-documents.sh`: 75 documents, 73 agree with
+    libucl, 2 (the 1000-deep workloads) accepted by libucl and too deep for the check's JSON reader,
+    their 20-deep stand-ins agree. No `src/` change, so no fuzz run.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
 
@@ -8373,5 +8388,43 @@ publication. Work item:C15; final integration commit recorded in handover.
       - A first runner, gated below 3, was stopped after one pair (loads 2.97 and 6.60) and
         is not used. Scratch: `target/review-c16-p1/`.
   - Commit: this entry only. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-08 — Role: clean-room implementer (the P1 implementer). Item: C16 P1, the review's
+  findings. Branch `c16/p1-baseline` (base `549c77e`), after the review commit `1f7847a`.
+  - Inputs consulted: the coordinator's request; the reviewer's entry above; released spec-v23
+    (`docs/spec/` equals the tag) §1.2 (separators), §3.1–§3.4 (keys), §5.2, §5.3, §5.5, §5.6
+    (numbers), §6.1 (escapes) and the headings of §12, to make the new workloads valid; the
+    crate's `src/emit/text.rs` (which bytes the JSON writer escapes) and my own `benches/`,
+    `tests/bench_documents.rs` and report; criterion 0.8.2's `src/lib.rs` (its options that take
+    a value, in its registry directory); `git show` of the commits named in the drift tables.
+    The oracle as a black box through `benches/check-documents.sh`. No libucl source, `tools/`
+    or other forbidden input was read; no guard refusal.
+  - Work, by finding:
+    1. Drift: narrowed in my entry above and in the report to what reproduced, container-heavy
+       parsing (`containers/empty-values`, 2–5%) and emitting short escaped strings in JSON
+       (about 6%), with the recommendation that both builds run each compared benchmark in the
+       same process mode. `benches/README.md` states no drift. No new measurement.
+    2. My entry above corrected in place: base `549c77e`, the rebased hashes, the column
+       `43337f0` as #31 with #32's `src/`, the rebase note dropped. The report too.
+    3. Lines over 100 columns: my entry's three and `benches/README.md`'s one, wrapped.
+    4. The 22-byte limit placed: the key copies in output facts and value paths, not the value
+       tree's keys (`benches/README.md`, `benches/common/workloads.rs`).
+    5. and 6. New inputs (15 workloads, 76 in all; emit groups in all four formats for strings,
+       and over the number sweeps): see `3212a8e`. Not added: a reused parser over a mixed-size
+       sequence (P6's own measurement), and integers beyond `i64`, an error for the whole
+       document (§5.3). The new inputs have no timing baseline in P1.
+    7. `alloc_counts` skips criterion's option values (`99add39`).
+    8. and 9. The README suggests filtering by group; the check's comment says that the
+       too-deep verdict does not compare the crate's result.
+  - Checks: `benches/check-documents.sh`: 90 documents, 88 agree, 2 accepted (the 1000-deep
+    workloads; their 20-deep stand-ins agree), the new ones among the agreements, the
+    `save-comments` ones with saved comments compared and `keys-16-lowercase` with
+    `key-lowercase`. The 61 earlier digests are unchanged. `scripts/ci.sh` passed (31 steps,
+    exit 0) on the tree of `99add39`; `cargo bench --no-run` built the four bench executables.
+  - Commits: `3212a8e` (test(bench): add the inputs the C16 P1 review found missing), `99add39`
+    (fix(bench): skip criterion's option values in alloc_counts), and this entry with the
+    corrections above. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
