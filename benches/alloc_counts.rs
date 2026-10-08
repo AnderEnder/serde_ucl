@@ -171,13 +171,53 @@ fn document<T: DeserializeOwned>(name: &str, text: &str, typed: bool) {
     from_str_rows::<T>(name, text, typed);
 }
 
+/// The options of criterion's command line that take a value, which `cargo bench -- …` passes to
+/// every bench, this one included.
+const VALUE_OPTIONS: [&str; 19] = [
+    "-c",
+    "--color",
+    "-s",
+    "--save-baseline",
+    "-b",
+    "--baseline",
+    "--baseline-lenient",
+    "--format",
+    "--profile-time",
+    "--load-baseline",
+    "--sample-size",
+    "--warm-up-time",
+    "--measurement-time",
+    "--nresamples",
+    "--noise-threshold",
+    "--confidence-level",
+    "--significance-level",
+    "--plotting-backend",
+    "--output-format",
+];
+
+/// The filters among the arguments: those that are neither an option (`--bench`, which `cargo
+/// bench` passes, or one of criterion's) nor the value of one. A criterion filter is a filter
+/// here too: it selects the documents whose name contains it.
+fn filters(mut args: impl Iterator<Item = String>) -> Vec<String> {
+    let mut filters = Vec::new();
+    while let Some(arg) = args.next() {
+        if !arg.starts_with('-') {
+            filters.push(arg);
+        } else if !arg.contains('=') && VALUE_OPTIONS.contains(&arg.as_str()) {
+            args.next();
+        }
+    }
+    filters
+}
+
 fn main() {
-    // `cargo bench` passes `--bench`; anything else not starting with `--` is a filter.
-    let filters: Vec<String> = std::env::args()
-        .skip(1)
-        .filter(|a| !a.starts_with("--"))
-        .collect();
-    let wanted = |name: &str| filters.is_empty() || filters.iter().any(|f| name.contains(f));
+    let filters = filters(std::env::args().skip(1));
+    let matched = std::cell::Cell::new(false);
+    let wanted = |name: &str| {
+        let wanted = filters.is_empty() || filters.iter().any(|f| name.contains(f));
+        matched.set(matched.get() || wanted);
+        wanted
+    };
     println!(
         "| document | input bytes | entry point | allocs | reallocs | frees | bytes | peak | \
          kept | allocs/KB |"
@@ -247,5 +287,8 @@ fn main() {
                 Parser::with_flags(flags)
             });
         }
+    }
+    if !matched.get() {
+        eprintln!("alloc_counts: no document's name contains any of {filters:?}");
     }
 }

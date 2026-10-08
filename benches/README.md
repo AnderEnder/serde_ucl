@@ -153,5 +153,9 @@ cargo bench --bench alloc_counts               # every document
 cargo bench --bench alloc_counts -- twitter    # the documents whose name contains `twitter`
 ```
 
+It skips the options of criterion and their values, but takes a criterion filter as its own,
+so `cargo bench -- <filter>` gives the rows of the documents whose name contains `<filter>`, and
+a note on standard error when there are none.
+
 Criterion writes HTML reports to `target/criterion/report/index.html`. Each group runs 30 samples
 after one second of warm-up, over three seconds; results vary with the machine and its load.
