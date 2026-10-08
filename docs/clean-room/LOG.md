@@ -8012,3 +8012,43 @@ publication. Work item:C15; final integration commit recorded in handover.
     `a26fac5`, `cef89d9`, `cce31be`, `b77a26c`, `c8274b9`, `aff0734`, `fd7cde4`) are no longer
     reachable. The entries are kept for the measurements and the provenance of the sessions.
   - Commits: this entry and the WORKLIST decision. Not pushed until the owner's PR review.
+
+- 2026-10-01 — Role: external crate researcher and documentation author. Item: user-requested
+  JSON optimization research specification.
+  - Inputs consulted: the source, manifests, benchmarks, and Git histories of cloudwego/sonic-rs
+    at `7eca25c81884264043eb5434c1fa3fcba49600b1`, simd-lite/simd-json at
+    `61d649d13fae83ac6d9f587863696be2741f5b8b`, maciejhirsz/json-rust at
+    `0775592d339002ab148185264970c2a6e30b5d37`, and g1mv/jsonic at
+    `b04980393d3617538672cd04d7872c30d5f5a920`; current `CLAUDE.md`, this protocol,
+    `docs/spec/README.md` for destination context, and the existing log; the write-page skill
+    and its editorial guidance. External sources were checked out in a separate temporary
+    research directory. No libucl source or repository implementation was consulted.
+  - Work: added `docs/json-performance-spec.md` with 41 optimization candidates, semantic and
+    ownership requirements, source references, failed experiments, and benchmark acceptance
+    criteria. The document is external implementation research, separate from the behavioral
+    specification in `docs/spec/`; no behavioral spec release or implementation changes.
+  - Checks: source revisions and referenced source paths resolved in the downloaded repositories;
+    optimization identifiers and source labels were checked for completeness and uniqueness;
+    targeted jsonic/json-rust probes from the research were reviewed. No comparative throughput
+    benchmarks were run. Documentation whitespace and final diff checks recorded at delivery.
+  - Commits: none; documentation changes left uncommitted.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-01 — Role: coordinator (oracle side). Item: C16, planned performance experiments.
+  - Inputs consulted: `docs/json-performance-spec.md` and its log entry above, the C11 to C14
+    performance reports, the WORKLIST, and the crate's number, string, whitespace and emitter code
+    to see which candidates are already in place.
+  - Work: committed the research document and its log entry, which its session had left
+    uncommitted in the main checkout, and added WORKLIST C16: eleven small research and
+    measurement tasks taken from it, the candidates already covered, and those out of scope
+    without an owner decision. No implementation change.
+  - Commit: the following commit with the document, WORKLIST C16 and this entry.
+
+- 2026-10-08 — Role: coordinator (oracle side). Item: C16.
+  - The two entries above were written on 2026-10-01 on an unmerged branch and are carried here
+    with the C16 section, rebuilt on current `main`.
+  - WORKLIST C16 updated with two owner decisions. `memchr` moves from "already done" to "tried
+    and dropped" (C14, decision of 2026-10-06), and a change that makes any benchmark or targeted
+    input slower is rejected. Each task is a separate PR (decision of 2026-10-08).
+  - Commit: the following commit. No implementation change.
