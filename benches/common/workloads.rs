@@ -10,13 +10,17 @@
 //!
 //! - `parse/strings`: array elements, one string form each: double-quoted ASCII of 1 to 4096
 //!   bytes, then at 64 bytes double-quoted with an escape every eight bytes, double-quoted
-//!   non-ASCII, single-quoted, and unquoted; single-quoted of 4096 bytes; heredocs of 1024 bytes.
-//! - `parse/keys`: sections of eight entries, with bare keys of 4, 22, 23 and 64 bytes (short
-//!   keys of up to 22 bytes are stored inline) and double-quoted keys of 23 bytes.
+//!   non-ASCII, single-quoted, and unquoted; single-quoted of 4096 bytes; heredocs of 1024 bytes;
+//!   double-quoted with an escape after every one or two bytes, control characters among them.
+//! - `parse/keys`: sections of eight entries, with bare keys of 4, 22, 23 and 64 bytes and
+//!   double-quoted keys of 23 bytes. 22 bytes is the inline limit of the key copies the parser
+//!   keeps in output facts and value paths; the keys of the value tree are `String`s whatever
+//!   their length.
 //! - `parse/numbers`: arrays of numbers, 16 to a line: integers of 1, 4, 8, 16 and 19 digits,
-//!   negative integers, floats with a few digits, with 15 significant digits, with 17 (as in
-//!   `canada`), with small and with large exponents, and numbers with multiplier and time
-//!   suffixes.
+//!   negative integers, hex integers, floats with a few digits, with 15 significant digits, with
+//!   16 and an exponent within ±22, with 17 (as in `canada`), with small and with large
+//!   exponents, and numbers with multiplier and time suffixes; and integers as entry values
+//!   followed by spaces, a tab or `#`.
 //! - `parse/containers`: arrays of empty objects and of empty arrays, sections of entries whose
 //!   values are empty containers, and arrays of objects with one key and of arrays with one
 //!   element.
@@ -24,13 +28,16 @@
 //!   many sections nested 16 deep.
 //! - `parse/comments`: sections whose entries are preceded or followed by comments, about two
 //!   thirds of the bytes: `#` lines, `#` after values, block comments of prose, of `*` banners,
-//!   of text full of `/`, with quoted parts, dense in `*`, `/` and `"`, and nested; the
-//!   `-saved` variants parse with `save-comments` (spec §12.5).
+//!   of text full of `/`, with quoted parts, dense in `*`, `/` and `"`, and nested; `#` and block
+//!   comments directly after values with no `;`; comments of about 400 bytes; the `-saved`
+//!   variants parse with `save-comments` (spec §12.5).
 //! - `parse/whitespace`: the same sections without any whitespace, aligned with long runs of
-//!   spaces, indented with tabs, with CRLF line ends, and with blank lines between entries.
-//! - `parse/objects`: sections of 8, 16, 17, 24 and 32 keys, on both sides of the 16 keys of a
-//!   small object; 16 keys that share a 29-byte prefix; and 8 keys that each appear twice, which
-//!   makes implicit arrays (spec §8).
+//!   spaces, indented with tabs, with CRLF line ends, and with blank lines between entries; and
+//!   entries ended by a line break alone, with ` = `, a space alone or `: ` between key and value.
+//! - `parse/objects`: sections of 8, 16, 17, 24 and 32 keys of the same length, on both sides of
+//!   the 16 keys of a small object; 16 keys that share a 29-byte prefix; 8 keys that each appear
+//!   twice, which makes implicit arrays (spec §8); 16 keys of 3 to 40 bytes; and 16 keys in mixed
+//!   case parsed with `key-lowercase` (spec §12.1).
 
 use super::irregular::Rng;
 use serde_ucl::ParserFlags;
@@ -143,7 +150,7 @@ fn strings() -> Vec<Workload> {
         });
         all.push(Workload::new(GROUP, format!("dq-{len}"), text));
     }
-    // An escape every eight bytes, of each kind (spec §6.2); 64 bytes as written.
+    // An escape every eight bytes, of each kind (spec §6.1); 64 bytes as written.
     const ESCAPES: [&str; 7] = ["\\n", "\\t", "\\\"", "\\\\", "\\/", "\\r", "\\u00e9"];
     let text = array("strings", 1, |out, i| {
         out.push('"');
@@ -217,6 +224,30 @@ fn strings() -> Vec<Workload> {
         out.push_str("EOD\n");
     });
     all.push(Workload::new(GROUP, "heredoc-1024", text));
+    // An escape after every one or two bytes, 64 bytes as written: control characters, which
+    // the output formats write escaped (BS, FF, VT, 0x01, 0x1F, DEL), and `\n`, `\r`, `\t`,
+    // `"`, `\` and `/` (spec §6.1).
+    const DENSE: [&str; 12] = [
+        "\\\"", "\\\\", "\\n", "\\r", "\\t", "\\b", "\\f", "\\u000b", "\\u0001", "\\u001f",
+        "\\u007f", "\\/",
+    ];
+    let text = array("strings", 1, |out, i| {
+        out.push('"');
+        let mut written = 0;
+        let mut k = i;
+        while written < 64 {
+            if k.is_multiple_of(2) {
+                out.push(char::from(b'a' + (k % 26) as u8));
+                written += 1;
+            }
+            let escape = DENSE[k % DENSE.len()];
+            out.push_str(escape);
+            written += escape.len();
+            k += 1;
+        }
+        out.push('"');
+    });
+    all.push(Workload::new(GROUP, "dq-escaped-dense-64", text));
     all
 }
 
@@ -344,6 +375,49 @@ fn numbers() -> Vec<Workload> {
             }
         }),
     );
+    // Hex integers of 1 to 15 digits, in either case (spec §5.2).
+    add(
+        "hex",
+        Box::new(|r| {
+            let digits = r.between(1, 15);
+            let n = r.next_u64() >> (64 - 4 * digits);
+            if r.percent(50) {
+                format!("0x{n:x}")
+            } else {
+                format!("0X{n:X}")
+            }
+        }),
+    );
+    // 16 significant digits with an exponent within ±22: the digits are on both sides of 2^53
+    // (9 007 199 254 740 992), about half each.
+    add(
+        "float-16-exp",
+        Box::new(|r| {
+            let digits = 8_000_000_000_000_000 + r.next_u64() % 2_000_000_000_000_000;
+            let digits = digits.to_string();
+            let sign = if r.percent(50) { "-" } else { "" };
+            format!(
+                "{}.{}e{sign}{}",
+                &digits[..1],
+                &digits[1..],
+                r.between(1, 22)
+            )
+        }),
+    );
+    // Integers followed by spaces or a tab before `;`, `#` or the line end (spec §5.5), as entry
+    // values, since `#` ends the line.
+    let mut rng = Rng::new(5);
+    let text = sections(8, |out, _, e| {
+        let n = rng.between(1, 99_999_999);
+        let tail = match e % 4 {
+            0 => "  ;",
+            1 => "\t# a comment",
+            2 => " #comment",
+            _ => "   ",
+        };
+        writeln!(out, "    port{e} = {n}{tail}").unwrap();
+    });
+    all.push(Workload::new(GROUP, "int-then-space-or-hash", text));
     all
 }
 
@@ -559,7 +633,7 @@ fn comments() -> Vec<Workload> {
         entry(out, s, e, "    ", " = ");
         out.push('\n');
     });
-    vec![
+    let mut all = vec![
         Workload::new(GROUP, "hash-lines", hash_lines),
         Workload::new(GROUP, "hash-after-values", hash_after.clone()),
         Workload::new(GROUP, "block-prose", block_prose.clone()),
@@ -572,7 +646,71 @@ fn comments() -> Vec<Workload> {
             .with_flags(ParserFlags::SAVE_COMMENTS),
         Workload::new(GROUP, "block-prose-saved", block_prose)
             .with_flags(ParserFlags::SAVE_COMMENTS),
-    ]
+    ];
+    // A `#` comment directly after a value, with no `;` (spec §2.2, §5.5).
+    let hash_after_bare = sections(8, |out, s, e| {
+        let key = ["name", "port", "enabled", "ratio"][e % 4];
+        writeln!(
+            out,
+            "    {key}{e} = {} # {}",
+            plain_value(s, e),
+            prose(60, s + e)
+        )
+        .unwrap();
+    });
+    // A block comment directly after a quoted value, with no `;` (§2.4). Only quoted values:
+    // a number before a block comment is a string (§5.6), and an unquoted value ends where the
+    // comment starts.
+    let block_after_bare = sections(8, |out, s, e| {
+        writeln!(
+            out,
+            "    name{e} = \"value {s} {e}\" /* {} */",
+            prose(60, s + e)
+        )
+        .unwrap();
+    });
+    // Comments of about 400 bytes: a `#` line, and a block comment over seven lines.
+    let hash_long = sections(8, |out, s, e| {
+        writeln!(out, "    # {}", prose(400, s + e)).unwrap();
+        entry(out, s, e, "    ", " = ");
+        out.push('\n');
+    });
+    let block_long = sections(8, |out, s, e| {
+        out.push_str("    /*");
+        for line in 0..7 {
+            write!(out, " {}\n      ", prose(56, s + e + line)).unwrap();
+        }
+        out.push_str("*/\n");
+        entry(out, s, e, "    ", " = ");
+        out.push('\n');
+    });
+    all.extend([
+        Workload::new(
+            GROUP,
+            "hash-after-values-no-separator",
+            hash_after_bare.clone(),
+        ),
+        Workload::new(
+            GROUP,
+            "block-after-values-no-separator",
+            block_after_bare.clone(),
+        ),
+        Workload::new(
+            GROUP,
+            "hash-after-values-no-separator-saved",
+            hash_after_bare,
+        )
+        .with_flags(ParserFlags::SAVE_COMMENTS),
+        Workload::new(
+            GROUP,
+            "block-after-values-no-separator-saved",
+            block_after_bare,
+        )
+        .with_flags(ParserFlags::SAVE_COMMENTS),
+        Workload::new(GROUP, "hash-long", hash_long),
+        Workload::new(GROUP, "block-long", block_long),
+    ]);
+    all
 }
 
 fn whitespace() -> Vec<Workload> {
@@ -613,7 +751,20 @@ fn whitespace() -> Vec<Workload> {
         Workload::new(GROUP, "tabs", tabs),
         Workload::new(GROUP, "crlf", crlf),
         Workload::new(GROUP, "blank-lines", blank_lines),
+        Workload::new(GROUP, "newline-ends", bare_entries(" = ")),
+        Workload::new(GROUP, "space-separated", bare_entries(" ")),
+        Workload::new(GROUP, "colon-separated", bare_entries(": ")),
     ]
+}
+
+/// Sections of the entries of [`plain_entry`] ended by a line break alone, without `;`, with
+/// the separator `sep` between key and value: ` = `, a space alone, or `: ` outside JSON
+/// (spec §1.2).
+fn bare_entries(sep: &str) -> String {
+    sections(8, |out, s, e| {
+        let key = ["name", "port", "enabled", "ratio"][e % 4];
+        writeln!(out, "    {key}{e}{sep}{}", plain_value(s, e)).unwrap();
+    })
 }
 
 fn objects() -> Vec<Workload> {
@@ -635,6 +786,24 @@ fn objects() -> Vec<Workload> {
         out.push('\n');
     });
     all.push(Workload::new(GROUP, "keys-16-repeated", text));
+    // 16 keys of 3 to 40 bytes, so that their lengths tell them apart.
+    let text = sections(16, |out, s, e| {
+        let len = 3 + (e * 7) % 38;
+        let key: String = format!("k{e:02}")
+            .chars()
+            .chain("abcdefghijklmnopqrstuvwxyz".chars().cycle())
+            .take(len)
+            .collect();
+        writeln!(out, "    {key} = {};", plain_value(s, e)).unwrap()
+    });
+    all.push(Workload::new(GROUP, "keys-16-mixed-length", text));
+    // 16 keys in mixed case, parsed with `key-lowercase` (spec §12.1).
+    let text = sections(16, |out, s, e| {
+        writeln!(out, "    Field_Name_{e:02} = {};", plain_value(s, e)).unwrap()
+    });
+    all.push(
+        Workload::new(GROUP, "keys-16-lowercase", text).with_flags(ParserFlags::KEY_LOWERCASE),
+    );
     all
 }
 

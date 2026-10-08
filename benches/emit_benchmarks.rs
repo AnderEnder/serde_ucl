@@ -1,8 +1,9 @@
 //! Output throughput of the emitters (`serde_ucl::emit`), in output bytes per second.
 //!
 //! `emit/config-1000` and `emit/nested-mixed-1000` use the parser's output facts, as libucl's
-//! output does; so do `emit/json-corpus-*` (the JSON documents in every format) and
-//! `emit/strings-*` (string workloads in JSON and config output).
+//! output does; so do `emit/json-corpus-*` (the JSON documents in every format),
+//! `emit/strings-*` (string workloads in every format) and `emit/numbers-*` (the number sweeps
+//! in JSON and config output).
 
 mod common;
 
@@ -86,19 +87,22 @@ fn bench_json_corpus(c: &mut Criterion) {
     }
 }
 
-/// String workloads of `common::workloads()` in JSON and config output: short, long, escaped
-/// and non-ASCII strings, for the string writers (C16, P1).
-fn bench_strings(c: &mut Criterion) {
+/// Emits each workload of `group` named in `names` (`common::workloads()`) in each of `formats`,
+/// in the groups `emit/<prefix>-<format>`.
+fn bench_workloads(
+    c: &mut Criterion,
+    prefix: &str,
+    group: &str,
+    names: &[&str],
+    formats: &[(&str, Format)],
+) {
     let workloads: Vec<_> = common::workloads()
         .into_iter()
-        .filter(|w| {
-            w.group == "parse/strings"
-                && ["dq-8", "dq-64", "dq-4096", "dq-escaped-64", "dq-utf8-64"]
-                    .contains(&w.name.as_str())
-        })
+        .filter(|w| w.group == group && names.contains(&w.name.as_str()))
         .collect();
-    for (name, format) in [("json", Format::Json), ("config", Format::Config)] {
-        let mut group = c.benchmark_group(format!("emit/strings-{name}"));
+    assert_eq!(workloads.len(), names.len(), "{group}: {names:?}");
+    for &(name, format) in formats {
+        let mut group = c.benchmark_group(format!("emit/{prefix}-{name}"));
         for workload in &workloads {
             let mut parser = Parser::new();
             let value = parser.parse(workload.text.as_bytes()).unwrap();
@@ -113,12 +117,51 @@ fn bench_strings(c: &mut Criterion) {
     }
 }
 
+/// String workloads in every format, for the string writers (C16, P1): short, long, escaped,
+/// densely escaped (control characters among the escapes) and non-ASCII strings.
+fn bench_strings(c: &mut Criterion) {
+    bench_workloads(
+        c,
+        "strings",
+        "parse/strings",
+        &[
+            "dq-8",
+            "dq-64",
+            "dq-4096",
+            "dq-escaped-64",
+            "dq-utf8-64",
+            "dq-escaped-dense-64",
+        ],
+        &FORMATS,
+    );
+}
+
+/// The number sweeps in JSON and config output, for the number writers (C16, P1).
+fn bench_numbers(c: &mut Criterion) {
+    bench_workloads(
+        c,
+        "numbers",
+        "parse/numbers",
+        &[
+            "int-1",
+            "int-8",
+            "int-19",
+            "float-short",
+            "float-15",
+            "float-17",
+            "float-exp-large",
+            "suffixed",
+        ],
+        &[("json", Format::Json), ("config", Format::Config)],
+    );
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(30)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = bench_formats, bench_nested, bench_json_corpus, bench_strings
+    targets = bench_formats, bench_nested, bench_json_corpus, bench_strings, bench_numbers
 }
 criterion_main!(benches);

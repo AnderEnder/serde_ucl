@@ -3,7 +3,8 @@
 # (`ucl-differential --check`, fuzz/README.md): libucl parses it, and the crate gives the same
 # result. The documents are the irregular configurations of benches/common/irregular.rs, the
 # workloads of benches/common/workloads.rs (those parsed with save-comments with their saved
-# comments compared too, the flag dump-comments), the JSON documents in target/bench-corpus/
+# comments compared too, the flag dump-comments; those parsed with key-lowercase with that
+# flag), the JSON documents in target/bench-corpus/
 # (benches/fetch-documents.sh) and their compact forms, and the rspamd configurations of
 # benches/corpus/ that the benchmarks use, with the settings they use (benches/common/files.rs,
 # CORPUS).
@@ -14,8 +15,10 @@
 # test the generator beyond the documents the benchmarks use. A document passes when the
 # verdict is `agree` and libucl accepted it; `skipped` and a rejection by both fail too, with
 # one exception: a document nested deeper than the check's JSON reader reads, whose dump libucl
-# wrote but the check cannot compare, passes as `accepted`. The deep workloads are such
-# documents, so the same documents nested 20 deep are compared in their place. Each result is
+# wrote but the check cannot compare, passes as `accepted`. That verdict does not look at the
+# crate's result: tests/bench_documents.rs checks that the crate parses those documents to the
+# depth they have. The deep workloads are such documents, so the same documents nested 20 deep
+# are compared in their place. Each result is
 # in target/bench-documents/checks/. Needs the oracle, target/libucl-oracle/ucl-dump
 # (scripts/regen-golden.sh builds it).
 set -eu
@@ -70,8 +73,11 @@ check() {
 for file in "$OUT"/generated/*.ucl; do
 	check "$file" "$OUT/generated"
 done
-for file in "$OUT"/generated/dump-comments/*.ucl; do
-	check "$file" "$OUT/generated" dump-comments
+# Workloads parsed with a flag, in a directory named after the check's flag.
+for flag in dump-comments key-lowercase; do
+	for file in "$OUT/generated/$flag"/*.ucl; do
+		check "$file" "$OUT/generated" "$flag"
+	done
 done
 
 set -- target/bench-corpus/*.json

@@ -14,6 +14,7 @@ mod common;
 
 use common::{IRREGULAR, irregular};
 use serde::de::DeserializeOwned;
+use serde_ucl::ParserFlags;
 use serde_ucl::parse::Parser;
 use serde_ucl::value::Value;
 
@@ -201,20 +202,24 @@ fn write_documents() {
         )
         .unwrap();
     }
-    // The workloads, once for each text, and those that save comments again in `dump-comments/`,
-    // which the check runs with saved comments compared too.
+    // The workloads, once for each text; those parsed with a flag again in a directory named
+    // after the check's flag, which `benches/check-documents.sh` passes: `dump-comments` (saved
+    // comments compared too) for `save-comments`, and `key-lowercase`.
     let mut written = std::collections::HashSet::new();
-    let saved = dir.join("dump-comments");
-    std::fs::create_dir_all(&saved).unwrap();
     for workload in common::workloads() {
         let name = format!("{}.ucl", workload.id().replace('/', "-"));
-        if !workload.flags.is_empty() {
-            assert_eq!(
-                workload.flags,
-                serde_ucl::ParserFlags::SAVE_COMMENTS,
-                "{name}"
-            );
-            std::fs::write(saved.join(&name), &workload.text).unwrap();
+        let flag = if workload.flags.is_empty() {
+            None
+        } else if workload.flags == ParserFlags::SAVE_COMMENTS {
+            Some("dump-comments")
+        } else if workload.flags == ParserFlags::KEY_LOWERCASE {
+            Some("key-lowercase")
+        } else {
+            panic!("{name}: no check flag for {:?}", workload.flags)
+        };
+        if let Some(flag) = flag {
+            std::fs::create_dir_all(dir.join(flag)).unwrap();
+            std::fs::write(dir.join(flag).join(&name), &workload.text).unwrap();
         } else if written.insert(fnv1a(workload.text.as_bytes())) {
             std::fs::write(dir.join(&name), &workload.text).unwrap();
         }
@@ -265,6 +270,7 @@ const WORKLOAD_DIGESTS: &[(&str, u64)] = &[
     ("parse/strings/sq-4096", 14635762553845053700),
     ("parse/strings/unquoted-64", 15870103482988444947),
     ("parse/strings/heredoc-1024", 10912057044031521945),
+    ("parse/strings/dq-escaped-dense-64", 14151293141455840887),
     ("parse/keys/bare-4", 7304717182505186565),
     ("parse/keys/bare-22", 1132878005403401589),
     ("parse/keys/bare-23", 15831160380990138591),
@@ -282,6 +288,9 @@ const WORKLOAD_DIGESTS: &[(&str, u64)] = &[
     ("parse/numbers/float-exp", 6586078307175918106),
     ("parse/numbers/float-exp-large", 3962080271503951498),
     ("parse/numbers/suffixed", 10317600044218248446),
+    ("parse/numbers/hex", 3691205948734428090),
+    ("parse/numbers/float-16-exp", 11474609157145130322),
+    ("parse/numbers/int-then-space-or-hash", 1743485584541154030),
     ("parse/containers/empty-objects", 14657274066200101971),
     ("parse/containers/empty-arrays", 360974758664151123),
     ("parse/containers/empty-values", 11868669492084191569),
@@ -303,11 +312,32 @@ const WORKLOAD_DIGESTS: &[(&str, u64)] = &[
         17074606882882375081,
     ),
     ("parse/comments/block-prose-saved", 7204024078580389032),
+    (
+        "parse/comments/hash-after-values-no-separator",
+        12011899222933193410,
+    ),
+    (
+        "parse/comments/block-after-values-no-separator",
+        15390601272990565304,
+    ),
+    (
+        "parse/comments/hash-after-values-no-separator-saved",
+        12011899222933193410,
+    ),
+    (
+        "parse/comments/block-after-values-no-separator-saved",
+        15390601272990565304,
+    ),
+    ("parse/comments/hash-long", 716720701233483892),
+    ("parse/comments/block-long", 13245718204718329788),
     ("parse/whitespace/compact", 6865812900897743385),
     ("parse/whitespace/aligned", 9024777566714177723),
     ("parse/whitespace/tabs", 9292580417843937133),
     ("parse/whitespace/crlf", 18389909841634668026),
     ("parse/whitespace/blank-lines", 15727568771364184782),
+    ("parse/whitespace/newline-ends", 5002583763124634519),
+    ("parse/whitespace/space-separated", 16409844811476594847),
+    ("parse/whitespace/colon-separated", 10291780271762621525),
     ("parse/objects/keys-8", 10286495065896882552),
     ("parse/objects/keys-16", 1591597068586436841),
     ("parse/objects/keys-17", 11533955280063579829),
@@ -315,6 +345,8 @@ const WORKLOAD_DIGESTS: &[(&str, u64)] = &[
     ("parse/objects/keys-32", 9220386584439908044),
     ("parse/objects/keys-16-long-prefix", 1676048990998468813),
     ("parse/objects/keys-16-repeated", 17686712008780962455),
+    ("parse/objects/keys-16-mixed-length", 302214490445225134),
+    ("parse/objects/keys-16-lowercase", 9247650815093825118),
 ];
 
 #[test]
@@ -339,8 +371,33 @@ fn the_workloads_are_the_checked_ones() {
     );
 }
 
+/// The type an entry of a section workload holds, by its key: `name…` a string, `port…` an
+/// integer, `enabled…` a boolean, `ratio…` a float, `configuration_parameter_name_…` an
+/// integer; other keys (`field_NN`, `kNN…`, `field_name_NN`) by the entry's number `NN`, as
+/// `name`, `port`, `enabled` and `ratio` are.
+fn expected_type(key: &str) -> usize {
+    let number = |key: &str| -> usize {
+        let digits: String = key
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(char::is_ascii_digit)
+            .collect();
+        digits.parse().unwrap()
+    };
+    if key.starts_with("configuration_parameter_name_") {
+        return 1;
+    }
+    for (i, prefix) in ["name", "port", "enabled", "ratio"].iter().enumerate() {
+        if key.starts_with(prefix) {
+            return i;
+        }
+    }
+    number(key) % 4
+}
+
 /// What a workload is meant to hold, by its id.
-fn check_workload(id: &str, value: &Value<'_>, stats: &Stats) {
+fn check_workload(workload: &common::Workload, value: &Value<'_>, stats: &Stats) {
+    let id = &workload.id();
     let scalars = [
         stats.strings,
         stats.integers,
@@ -359,7 +416,7 @@ fn check_workload(id: &str, value: &Value<'_>, stats: &Stats) {
     match group {
         "parse/strings" => only(0),
         "parse/keys" => only(1),
-        "parse/numbers" if id.contains("/int-") => only(1),
+        "parse/numbers" if id.contains("/int-") || id.ends_with("/hex") => only(1),
         "parse/numbers" if id.contains("/float-") => only(2),
         "parse/numbers" => {
             // Multipliers keep ints and floats; time suffixes make times (spec §5.5).
@@ -377,22 +434,30 @@ fn check_workload(id: &str, value: &Value<'_>, stats: &Stats) {
         "parse/deep" => assert!(stats.depth > 16, "{id}: {stats:?}"),
         _ => {
             // Sections of entries `name0`, `port1`, `enabled2`, `ratio3`, … or `field_00`, …:
-            // every entry has its value, of its type, whatever comments or whitespace surround it.
+            // every section has all its entries, and every entry its value, of its type,
+            // whatever comments or whitespace surround it.
+            let entries = match id.rsplit_once("/keys-") {
+                Some((_, "16-repeated")) => 8,
+                Some((_, keys)) => keys.split('-').next().unwrap().parse().unwrap(),
+                None => 8,
+            };
             let root = value.as_object().unwrap();
             assert!(root.len() >= 50, "{id}");
             for (_, section) in root {
-                for (key, entry) in section.first().as_object().unwrap() {
+                let section = section.first().as_object().unwrap();
+                assert_eq!(section.len(), entries, "{id}");
+                for (key, entry) in section {
                     let key: &str = key;
-                    let digits = key.trim_start_matches(|c: char| !c.is_ascii_digit());
-                    let e: usize = digits.parse().unwrap();
+                    if workload.flags.contains(ParserFlags::KEY_LOWERCASE) {
+                        assert_eq!(key, key.to_lowercase(), "{id}");
+                    }
                     let value = entry.first();
-                    let ok = match e % 4 {
+                    let ok = match expected_type(key) {
                         0 => matches!(value, Value::String(_)),
                         1 => matches!(value, Value::Integer(_)),
                         2 => matches!(value, Value::Boolean(_)),
                         _ => matches!(value, Value::Float(_)),
                     };
-                    let ok = ok || key.starts_with("configuration_parameter_name_");
                     assert!(ok, "{id}: {key} = {value:?}");
                 }
             }
@@ -411,9 +476,16 @@ fn each_workload_holds_what_it_is_meant_to() {
         let stats = Stats::of(&value);
         println!("{id}: {} bytes, {stats:?}", workload.text.len());
         assert!(workload.text.len() >= common::SIZE, "{id}");
-        check_workload(&id, &value, &stats);
+        check_workload(&workload, &value, &stats);
         if id.ends_with("-saved") {
-            assert!(parser.comments().len() > 1000, "{id}");
+            // One comment for each entry: no comment swallowed an entry or another comment.
+            let entries: usize = value
+                .as_object()
+                .unwrap()
+                .into_iter()
+                .map(|(_, section)| section.first().as_object().unwrap().len())
+                .sum();
+            assert_eq!(parser.comments().len(), entries, "{id}");
         }
         if id.starts_with("parse/deep/") && id.ends_with("-1000") {
             assert!(stats.depth >= 1000, "{id}: {stats:?}");
