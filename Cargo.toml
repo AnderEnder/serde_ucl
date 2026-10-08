@@ -68,6 +68,12 @@ harness = false
 name = "serde_benchmarks"
 harness = false
 
+# Allocation counts per document and entry point, under a counting allocator: a table, not a
+# timing (benches/README.md).
+[[bench]]
+name = "alloc_counts"
+harness = false
+
 # Optimise the crate in test builds. This is for speed only: the serde round-trip, scaling and
 # generated-document tests parse and write many documents, and run about five times faster this
 # way. No test depends on it; they all pass unoptimised too, and scripts/ci.sh runs the

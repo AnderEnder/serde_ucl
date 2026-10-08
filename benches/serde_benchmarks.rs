@@ -13,7 +13,7 @@ use criterion::{
     BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main,
 };
 use serde::Deserialize;
-use serde::de::IgnoredAny;
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_ucl::{UclDeserializer, UclValue};
 use std::hint::black_box;
 use std::time::Duration;
@@ -43,6 +43,8 @@ fn bench_deserialize(c: &mut Criterion) {
             BatchSize::LargeInput,
         )
     });
+    // The same document into the untyped targets (clean-room work item C16, task P1).
+    untyped(&mut group, &input);
     group.finish();
 }
 
@@ -56,6 +58,7 @@ fn bench_deserialize_small(c: &mut Criterion) {
     group.bench_function("from_str-borrowed", |b| {
         b.iter(|| serde_ucl::from_str::<common::SmallBorrowed>(black_box(input)).unwrap())
     });
+    untyped(&mut group, input);
     group.finish();
 }
 
@@ -140,6 +143,32 @@ fn untyped(group: &mut BenchmarkGroup<'_, WallTime>, input: &str) {
     });
 }
 
+/// Deserializes `input` into `T`, with serde_json when `json` is set and with serde_ucl
+/// otherwise, as the benchmark `typed`.
+fn typed<T: DeserializeOwned>(group: &mut BenchmarkGroup<'_, WallTime>, input: &str, json: bool) {
+    if json {
+        group.bench_function("typed", |b| {
+            b.iter(|| serde_json::from_str::<T>(black_box(input)).unwrap())
+        });
+    } else {
+        group.bench_function("typed", |b| {
+            b.iter(|| serde_ucl::from_str::<T>(black_box(input)).unwrap())
+        });
+    }
+}
+
+/// [`typed`] with the typed form of the JSON document `name` (`common::typed`), if it has one.
+fn typed_document(group: &mut BenchmarkGroup<'_, WallTime>, name: &str, input: &str, json: bool) {
+    use common::typed::{Canada, CitmCatalog, JsonItems, Twitter};
+    match name {
+        "json-1000" => typed::<JsonItems>(group, input, json),
+        "twitter" => typed::<Twitter>(group, input, json),
+        "citm_catalog" => typed::<CitmCatalog>(group, input, json),
+        "canada" => typed::<Canada>(group, input, json),
+        _ => {}
+    }
+}
+
 /// The irregular configurations of `common::IRREGULAR`.
 fn bench_irregular(c: &mut Criterion) {
     for (name, seed, size) in common::IRREGULAR {
@@ -151,9 +180,16 @@ fn bench_irregular(c: &mut Criterion) {
     }
 }
 
-/// One serde_ucl and one serde_json group per JSON document. A document that does not
-/// deserialize with either crate is skipped with a message.
-fn bench_documents(c: &mut Criterion, prefix: &str, documents: Vec<common::Document>) {
+/// One serde_ucl and one serde_json group per JSON document, `<prefix><name>` and
+/// `<json_prefix><name>`, with the targets `UclValue` (serde_json: `Value`), `IgnoredAny` and
+/// the document's typed form, `typed`. A document that does not deserialize with either crate is
+/// skipped with a message.
+fn bench_documents(
+    c: &mut Criterion,
+    prefix: &str,
+    json_prefix: &str,
+    documents: Vec<common::Document>,
+) {
     for document in documents {
         if let Err(e) = serde_ucl::from_str::<UclValue>(&document.text) {
             eprintln!("{prefix}: skipping {}: {e}", document.path.display());
@@ -166,12 +202,13 @@ fn bench_documents(c: &mut Criterion, prefix: &str, documents: Vec<common::Docum
             );
             continue;
         }
-        let mut group = c.benchmark_group(format!("{prefix}-{}", document.name));
+        let mut group = c.benchmark_group(format!("{prefix}{}", document.name));
         group.throughput(Throughput::Bytes(document.text.len() as u64));
         untyped(&mut group, &document.text);
+        typed_document(&mut group, &document.name, &document.text, false);
         group.finish();
 
-        let mut group = c.benchmark_group(format!("serde_json/json-corpus-{}", document.name));
+        let mut group = c.benchmark_group(format!("{json_prefix}{}", document.name));
         group.throughput(Throughput::Bytes(document.text.len() as u64));
         group.bench_function("Value", |b| {
             b.iter(|| serde_json::from_str::<serde_json::Value>(black_box(&document.text)).unwrap())
@@ -179,14 +216,29 @@ fn bench_documents(c: &mut Criterion, prefix: &str, documents: Vec<common::Docum
         group.bench_function("IgnoredAny", |b| {
             b.iter(|| serde_json::from_str::<IgnoredAny>(black_box(&document.text)).unwrap())
         });
+        typed_document(&mut group, &document.name, &document.text, true);
         group.finish();
     }
 }
 
+/// `json(1000)`: `serde/json-1000` and `serde_json/json-1000`.
+fn bench_json(c: &mut Criterion) {
+    let document = common::Document {
+        name: "json-1000".to_string(),
+        path: "json(1000)".into(),
+        text: common::json(1000),
+    };
+    bench_documents(c, "serde/", "serde_json/", vec![document]);
+}
+
 /// The JSON documents in `target/bench-corpus/` (`benches/fetch-documents.sh`).
 fn bench_json_corpus(c: &mut Criterion) {
-    let prefix = "serde/json-corpus";
-    bench_documents(c, prefix, common::json_documents(prefix));
+    bench_documents(
+        c,
+        "serde/json-corpus-",
+        "serde_json/json-corpus-",
+        common::json_documents("serde/json-corpus"),
+    );
 }
 
 /// The rspamd configurations in `benches/corpus/`, through `UclDeserializer` with a parser set
@@ -233,6 +285,6 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
     targets = bench_deserialize, bench_deserialize_small, bench_deserialize_error, bench_serialize, bench_nested,
-        bench_irregular, bench_json_corpus, bench_corpus
+        bench_irregular, bench_json_corpus, bench_corpus, bench_json
 }
 criterion_main!(benches);

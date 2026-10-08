@@ -8060,3 +8060,371 @@ publication. Work item:C15; final integration commit recorded in handover.
     0.6.0 first, measurement against both v0.6.0 and `main`, P8 deferred, P1's candidates N1 to
     N11 as tasks P12 to P21 except the string scans (N9), and the order of the tasks.
   - Commit: the following commit. No implementation change.
+
+- 2026-10-08 — Role: clean-room implementer. Item: C16 P1, baseline profile and workload gaps.
+  Branch `c16/p1-baseline` in worktree `.claude/worktrees/c16-p1`, based on `origin/main`
+  `549c77e` (#36): the work started on `43337f0` (#31), whose `src/` and `benches/` are the
+  same, and the coordinator rebased it. Report: `target/perf/C16-report.md` (not committed; its
+  essentials are below).
+  - Inputs consulted: the embedded current `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`;
+    `docs/clean-room/WORKLIST.md` (C11–C14, and C16 from branch `docs/c16-perf-experiments`,
+    then from `origin/main` `549c77e` after the coordinator's note that it merged as #36: the
+    same text); `docs/json-performance-spec.md` (same branch, then `origin/main`); entries of
+    this log on the measurement methods of C11–C14 and on C13's byte-class tables; the
+    implementation team's `target/perf/C14-report.md` in the main checkout; released spec-v23
+    (`docs/spec/` equals the tag) §2 (comments), §3.1 (bare keys), §5 (number range, suffixes,
+    what may follow a number), §11.2 (nesting limit), read to make the workloads valid; the
+    crate's own code (`benches/`, `tests/bench_documents.rs`, `tests/conformance/**/*.flags`
+    names, `fuzz/README.md`, `fuzz/src/run.rs` for the check's verdicts, and under `src/` the
+    functions the profiles named: `parse/core.rs` key scan and size hints, `value/map.rs`,
+    `value/text.rs`, `value/string.rs`, `emit/json.rs`, `emit/mod.rs`, `emit/config.rs`);
+    criterion 0.8.2's `src/lib.rs` (a grep for `profile-time`, in its registry directory);
+    `Cargo.toml`, `Cargo.lock`, `scripts/ci.sh`; the commit list and the `src/` diffs of the
+    commits since `v0.6.0` (#24, #28, #29, #30, #32: the crate's history after the clean room,
+    none with the old lexer or parser), to bisect the drift below. The oracle as a black box:
+    `scripts/regen-golden.sh` built it (of its log I read only the last line, `exit 0`; the golden
+    files were unchanged), and `benches/check-documents.sh` ran it through the fuzzer's
+    `--check`. The JSON documents were fetched with `benches/fetch-documents.sh` (curl's default
+    headers). No libucl source, `tools/` or other forbidden input was read.
+  - Searches: grep and listings of the named directories (`src/`, `tests/`, `benches/`, `fuzz/`,
+    `docs/clean-room/`, my scratch `target/perf/c16-p1/`). The main checkout: only the listing of
+    its `target/perf/` and `target/perf/C14-report.md`; I did not touch its untracked
+    `docs/spec/drafts/` or `tools/`.
+  - Guard refusals and near-exposures:
+    - One guard refusal: a grep for `GlobalAlloc` that also named `capi/src` and `capi/tests`,
+      which are not named search directories. Nothing ran; I repeated it over the named
+      directories only.
+    - The harness saved the output of `git show` of
+      `docs/c16-perf-experiments:docs/json-performance-spec.md`, too large for the tool, to a
+      file under `~/.claude/projects/`. I did not open it and read the document from git in
+      parts instead. Not an exposure.
+    - The background tasks' output files under `/private/tmp/` were not opened; my commands
+      wrote their own logs under `target/perf/c16-p1/logs/`.
+    - A process listing (`pgrep -fl`, to find a running benchmark) printed the harness's shell
+      command line, which names a file under `~/.claude/shell-snapshots/`. Nothing there was
+      opened.
+  - Work: see the commits. After an advisor review, P1 also added the emit benchmarks over the
+    JSON documents (P8, now deferred, was to add them; P9 needs them) and mapped every hotspot
+    of 5% or more to a task or a numbered candidate. A mistaken command
+    (`cargo bench --bench parse_benchmarks -- --version`, meant to print a version) ran the
+    worktree's parse benchmarks for about two minutes next to the first profiling pass; I
+    stopped it and recorded every profile again.
+  - Measurements: P1's record (full report, not committed: `target/perf/C16-report.md`; scratch
+    in `target/perf/c16-p1/`). Apple M4 Max, macOS 15.8.1, Rust 1.99.0, criterion 0.8.2,
+    samply 0.13.1; release profile; profiles of `HEAD` (`43337f0`, whose `src/` is that of
+    `549c77e` and of #32, `bdeaf15`) with inline frames resolved
+    (`atos -i` on a line-table build), about 20 000 samples each, attributed to operations by the
+    innermost matching crate frame; allocations from `benches/alloc_counts.rs`; timings of
+    v0.6.0 and `HEAD` in three interleaved rounds, each run gated on a 1-minute load below 3
+    (14 of 18 runs; four ran ungated at 3.48–4.85 after the wait; loads at the runs' ends
+    3.1–8.9, from other sessions), and three shorter gated rounds for the emit groups P1 added
+    (start loads 2.66–2.97). The serde_json groups, identical in both builds, move by up to ±3%:
+    the noise band.
+    - Hotspots of 5% or more (percent of the profile's samples) and their task; N1–N11 are new
+      candidates outside C16:
+
+    | Hotspot | Where (share) | Task |
+    | --- | --- | --- |
+    | Whitespace and comment skipping | `citm_catalog` 15.5–18.3, `config(1000)` 8.2–12.1, `twitter` 8.4–10.3, irregular 6.7–7.5, `json(1000)` 4.8–7.0 | **P4** |
+    | Parser state machine (next-byte dispatch, entry and value steps) | 10.8–27.2 everywhere; small document 21–26 | **P4**, **P10** |
+    | Numbers | `canada` 36.1–37.6 (`float_value` 12.2 with `dec2flt` 6.8; `scan` and its digit loop 19.3), `json(1000)` 5.3–7.0, irregular 4.6–5.2, `citm_catalog` 4.3–4.9 (integers) | **P3** (`canada`), **P2** (`citm_catalog`, `json(1000)`) |
+    | Copy of keys and strings into an owned tree | 7.5–15.7 in `parse` and `UclValue`; 0.7–2.0 in borrowed targets | **P7** (inline short strings: measurement and owner proposal) |
+    | Drop of values | 12.9–22.1 in `parse` and `UclValue`, 7.3–15.9 in `IgnoredAny`, 0.8–10.6 in typed targets | **P7** (each allocation removed is also a free removed) |
+    | Containers and parser frames | `canada` 19.8–21.4, `citm_catalog` 20.3–22.3, `json(1000)` 10.9–14.8, `config(1000)` 7.2–10.3 | **P7** (the containers' allocation: `sized` 7.5 in `canada`, `with_capacity` 4.0 in `citm_catalog`), **N5** (frames) |
+    | Object insertion and key lookup | `twitter` 21.6–25.7, `json(1000)` 13.0–18.7, `config(1000)` 13.3–19.6, `citm_catalog` 11.9–14.4 | **P5** (small objects), N6 (large objects) |
+    | Deserializer and target code | typed targets 17.8 (`twitter`) – 28.4 (`config(1000)`) | **P11** |
+    | Parser setup and finish (fixed cost) | small document 18–20, plus `Document::finish` 9.0 and the frame stack's allocation 6.4 | **P6** |
+    | Emitter string escaping | `emit/json-corpus-twitter/*` 44.6–50.4, `emit/config-1000/*` 25.4–36.4, `citm_catalog` 25.8; string workloads 89–91 | **P9** |
+    | Emitter number formatting (std `{:.6}` and integer `Display`) | floats: `emit/json-corpus-canada/*` 56.6–62.7 (and 57.8–65.0 in a scratch program), `emit/config-1000/*` 12.9–14.8; integers: `citm_catalog` 8.0 | **N8** (P8 as written: deferred) |
+    | Whole-input UTF-8 check | irregular 10.8 (`parse`), 15.4 (`IgnoredAny`: checked twice), `twitter` 3.8 (`parse`), 7–10 (borrowed) | **N1** |
+    | Key scan | `config(1000)` 7.9, into `IgnoredAny` 11.7, small document 5.6–6.7 | **N2** |
+    | Output facts and paths | `config(1000)` 9.3 (of which releasing the previous parse's facts 2.9), `canada` 6.0 | **N3** |
+    | Emitter key temporaries | `emit/config-1000/*` 18.8–30.4, `emit/json-corpus-*` 21.7–27.5 (malloc and free) | **N4** |
+    | Emitter indentation | `emit/json-corpus-canada/*` 9.2–12.2, `citm_catalog` 9.6 | **N11** |
+    | Output-facts lookups in the emitters | `emit/config-1000/*` 3.0–6.0 | **N3** |
+    | Include file-system calls | `rspamd-groups` 73.4–73.7 (system calls 61.7–62.9: `getattrlist` 33.0, `open` 14.7, `stat` 10.6) | **N7** |
+    | String scans (double-quoted, single-quoted, heredoc) | irregular 14.6–16.0, `twitter` 12.1–15.3 | **N9** |
+    | Unquoted value scan | irregular 5.1–5.7 | **N10** |
+
+    - Ranking: P4 (whitespace 4.8–18.3% and the dispatch it shortcuts), P3 (numbers 36–38% of
+      `canada`, 61% of `float-17`), P9 (string escaping 25–50% of emitting the documents, 89–91%
+      of the string workloads), P7 (malloc and free 15–30% of owned parses; but empty
+      containers already allocate nothing: their time is in frames, N5), P11 (deserializer
+      18–28% of typed `from_str`; report only), P6 (fixed cost 18–20% plus `Document::finish` 9%
+      of the three-entry document; a parser keeps no scratch buffer between parses), P2
+      (numbers 4.3–7.0% of `citm_catalog` and `json(1000)`, 37% of `int-8`), P5 (small-object
+      search 3.5–4.5% of the corpus documents, 17% of `objects/keys-16`), P10 (no profile
+      share; hot functions 2.8–7.2 KB), and P8 **deferred**: the `format!` temporaries it names
+      are 0.1–0.2% even of emitting `canada`, where std's `{:.6}` takes 57–63% (N8).
+    - Time per document (`HEAD`, three-round medians; ns per input byte in brackets):
+
+    | document | bytes | `Parser::parse` | `from_str` `UclValue` | `from_str` typed | `from_str` `IgnoredAny` | serde_json `Value` | serde_json typed | serde_json `IgnoredAny` |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | `config(1000)` | 510495 | 2.37 ms (4.63) | 2.16 ms (4.23) | 2.30 ms (4.50) | 1.66 ms (3.26) | — | — | — |
+    | `json(1000)` | 144964 | 1.39 ms (9.56) | 1.38 ms (9.50) | 1.33 ms (9.14) | 1.10 ms (7.60) | 919.7 µs (6.34) | 466.7 µs (3.22) | 279.0 µs (1.92) |
+    | irregular 600k | 639049 | 2.11 ms (3.31) | 2.09 ms (3.27) | — | 1.90 ms (2.98) | — | — | — |
+    | `twitter` | 631514 | 2.61 ms (4.13) | 2.54 ms (4.02) | 2.53 ms (4.00) | 2.19 ms (3.47) | 1.59 ms (2.51) | 733.3 µs (1.16) | 428.8 µs (0.68) |
+    | `citm_catalog` | 1727204 | 4.96 ms (2.87) | 4.92 ms (2.85) | 5.00 ms (2.89) | 4.40 ms (2.55) | 3.74 ms (2.17) | 1.63 ms (0.94) | 1.21 ms (0.70) |
+    | `canada` | 2251051 | 11.38 ms (5.06) | 11.33 ms (5.03) | 11.60 ms (5.15) | 11.61 ms (5.16) | 9.05 ms (4.02) | 5.49 ms (2.44) | 1.68 ms (0.75) |
+    | rspamd `groups.conf` | 55215 | 803.8 µs (14.56) | 799.5 µs (14.48) | — | 944.4 µs (17.10) | — | — | — |
+    | three entries | 38 | 515 ns (13.55) | 570 ns (15.01) | 542 ns (14.27) | 460 ns (12.10) | — | — | — |
+
+    Ratios to serde_json, same target (`UclValue` to `Value`):
+
+    | document | `UclValue`/`Value` | typed/typed | `IgnoredAny`/`IgnoredAny` |
+    | --- | ---: | ---: | ---: |
+    | `json(1000)` | 1.50 | 2.84 | 3.95 |
+    | `twitter` | 1.60 | 3.45 | 5.11 |
+    | `citm_catalog` | 1.32 | 3.07 | 3.64 |
+    | `canada` | 1.25 | 2.11 | 6.92 |
+
+    - Drift (narrowed after review, see the reviewer's entry below): what reproduces is that
+      `main` is slower than v0.6.0 on container-heavy parsing (`containers/empty-values`, 2–5%:
+      +5.0% in the rounds above, +3.9% in the bisect, +1.6% to +4.4% in the reviewer's runs) and
+      on emitting short escaped strings in JSON (`strings-json/dq-escaped-64`, about 6%: +8.1%,
+      +8.4%, and the reviewer's +6.2%). Both appear with the C API commits (#29, #30). The other
+      rows below did not reproduce: `deep/repeated-16` changes sign with the process mode (the
+      whole binary, the bisect's six-benchmark filter, or alone; `HEAD` is faster alone), and
+      `strings-json/dq-64` is within the ±3% band in the reviewer's runs;
+      `strings-config/dq-escaped-64` was not rerun. Bisects of the commits that change `src/`
+      (median and range of three rounds against v0.6.0, not gated, loads 2.7–5.4; the last
+      column is `43337f0`, #31, whose `src/` is #32's):
+
+    | benchmark | v0.6.0 | c671e72 (#24) | e4dd295 (#28) | 36da56c (#29) | 80b7785 (#30) | 43337f0 (#31, `src/` of #32) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+    | `parse/config/1000` | 2346.9 µs | -0.5% (-2.0..+0.4) | -0.9% (-1.6..+1.3) | -0.5% (-1.2..+2.7) | +0.7% (+0.7..+2.4) | +1.0% (-0.8..+1.6) |
+    | `parse/containers/empty-values` | 2851.5 µs | +0.4% (-0.5..+1.5) | +0.8% (-0.1..+1.6) | +0.5% (-0.6..+3.6) | +4.6% (+2.8..+5.9) | +3.9% (+3.2..+6.0) |
+    | `parse/deep/json-objects-1000` | 5365.8 µs | -1.0% (-1.8..+0.1) | -1.1% (-2.6..-0.6) | -0.2% (-0.4..+5.2) | +1.5% (+1.2..+2.4) | +2.1% (-0.7..+5.5) |
+    | `parse/deep/repeated-16` | 4140.4 µs | +0.7% (-0.9..+1.8) | +0.7% (-0.2..+1.1) | +6.3% (+2.1..+7.0) | +5.2% (+4.9..+6.0) | +6.1% (+4.5..+7.0) |
+    | `parse/nested/500` | 96.1 µs | -1.5% (-3.5..+5.5) | -0.6% (-5.9..+3.2) | +1.4% (-1.6..+7.4) | +2.6% (-1.6..+6.8) | +3.6% (+1.4..+4.9) |
+    | `parse/strings/dq-8` | 617.8 µs | +2.5% (+0.7..+2.8) | +3.3% (+2.4..+4.8) | +2.9% (+2.5..+4.1) | +2.7% (+2.3..+3.7) | +2.2% (+2.1..+2.3) |
+
+    | benchmark | v0.6.0 | c671e72 (#24) | e4dd295 (#28) | 36da56c (#29) | 80b7785 (#30) | 43337f0 (#31, `src/` of #32) |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+    | `emit/config-1000/json` | 1154.7 µs | -0.7% (-1.2..+1.3) | +0.2% (-0.8..+1.9) | -1.3% (-1.6..+0.6) | +1.4% (+0.2..+2.8) | +0.1% (-0.1..+1.7) |
+    | `emit/strings-config/dq-escaped-64` | 455.4 µs | +0.1% (-1.6..+0.4) | -0.9% (-2.3..+0.9) | +8.8% (+7.2..+11.6) | +8.4% (+6.8..+8.7) | +6.1% (+5.6..+9.2) |
+    | `emit/strings-json/dq-64` | 297.9 µs | -0.7% (-1.0..+6.0) | +0.7% (+0.1..+1.0) | +8.5% (+8.0..+11.5) | +5.1% (+5.0..+6.5) | +3.2% (+2.9..+3.3) |
+    | `emit/strings-json/dq-8` | 334.0 µs | +0.6% (-0.4..+2.2) | +0.6% (+0.5..+3.5) | +6.7% (+6.6..+8.8) | +8.6% (+3.9..+9.0) | +6.6% (+5.2..+6.9) |
+    | `emit/strings-json/dq-escaped-64` | 409.6 µs | -0.1% (-0.9..+2.0) | +1.6% (-0.1..+2.2) | +10.3% (+9.5..+10.8) | +8.7% (+8.3..+9.1) | +8.4% (+8.2..+9.2) |
+
+      No per-item work is added in those diffs; probably layout or inlining. Later tasks should
+      report against both v0.6.0 and their own base, and run each compared benchmark the same
+      way in both builds (the whole binary, or the same filter), since allocation-heavy
+      workloads moved by about ±5% with the process mode in the reviewer's runs.
+  - Commits (after the coordinator's rebase onto `549c77e`): `122c1de` (test(bench): add
+    workloads, compact JSON documents and typed targets), `aedd51a` (test(bench): count
+    allocations per document and entry point), `d79a2f8` (docs(bench): describe the C16 P1
+    inputs and the allocation counts), `c587d07` (test(bench): emit the JSON documents and
+    string workloads), and this entry, `3332600`. Not pushed. The commit type is
+    `test(bench)`, as for earlier benchmark work (`f7f6d17`), since CLAUDE.md's list has no
+    `bench` type.
+  - Checks: `scripts/ci.sh` passed (31 steps, exit 0) on the tree before the rebase (an earlier run
+    failed on clippy's `manual_is_multiple_of` in the new generator, fixed before the commit; the
+    fix leaves the documents unchanged). `benches/check-documents.sh`: 75 documents, 73 agree with
+    libucl, 2 (the 1000-deep workloads) accepted by libucl and too deep for the check's JSON reader,
+    their 20-deep stand-ins agree. No `src/` change, so no fuzz run.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-08 — Role: fresh clean-room implementation reviewer. Item: C16 P1, baseline profile
+  and workload gaps. Reviewed `git diff origin/main...HEAD` on `c16/p1-baseline` (HEAD
+  `3332600`, base `549c77e`, released spec-v23) in worktree `.claude/worktrees/c16-p1`:
+  `122c1de`, `aedd51a`, `d79a2f8`, `c587d07` and `3332600`.
+  - Inputs consulted: the coordinator's request with the `CLAUDE.md` rules, and the embedded
+    current `CLAUDE.md`; `PROTOCOL.md`; `WORKLIST.md` (header, C14, C16); this LOG (the
+    implementer's C16 P1 entry, and the C14 `memchr` reviewer entry for the format); the diff
+    under review, every file; `benches/common/files.rs` (head), `scripts/ci.sh`, the URL and
+    digest lines of `benches/fetch-documents.sh`, `fuzz/src/run.rs` (the verdicts of
+    `compare_results`); the file names in `src/emit`, `src/parse` and `src/value`, and a grep of
+    `src/parse/*.rs` for the whitespace and comment functions' names, to group profile frames;
+    released spec-v23 (`docs/spec/` equals the tag): §2.2, §2.3, the headings of §5, §5.6. The
+    implementer's report, `target/perf/C16-report.md`, in full; of its scratch
+    `target/perf/c16-p1/`: the listing, `alloc-head.md` (diffed with mine),
+    `scripts/bisect_rounds.sh` (how the bisect ran), and its two timing builds, compared with
+    mine by `diff -rq` (sources) and `cmp` (bench binaries). Git: the log of `origin/main` since
+    `v0.6.0`; `git diff --stat` of `src/` between `v0.6.0`, `bdeaf15`, `43337f0` and `HEAD`; the
+    top-level names of `src/` at `v0.6.0` (`git ls-tree --name-only v0.6.0 src/`: no old lexer
+    or parser); `git archive v0.6.0 src` into a scratch build, built and not read. Tool output:
+    criterion, samply profiles, `atos` symbols of my profiled bench binaries. The oracle as a
+    black box, through `benches/check-documents.sh`, whose output I read (verdict lines).
+  - Guard refusals and disclosures: one guard refusal, a `git ls-tree -r --name-only v0.6.0`
+    that named the old lexer's and parser's paths, meant to show that the tag has neither;
+    nothing ran, so nothing was read, and it is not an exposure. I listed the top-level names of
+    `v0.6.0`'s `src/` instead. The harness wrote the output of my background commands under
+    `/private/tmp/…/tasks/`, which I did not open; each command wrote its own log under
+    `target/review-c16-p1/`. The session's context held the main checkout's `git status` (file
+    names only); nothing there was opened. `benches/check-documents.sh` rewrote its own output
+    directory, `target/bench-documents/`. No libucl source, `tools/` or other forbidden input
+    was read.
+  - Review result: approved, with five should-fix findings (1–5). The bench code is correct,
+    deterministic and pinned; my profiles agree with the hotspot table; the drift claim holds
+    for one of its two parse workloads and for escaped string emission only (finding 1).
+  - Findings:
+    1. Should fix (LOG entry *Drift*, report *Drift since v0.6.0* and *Unresolved* 1): the drift
+       reproduces only in part (figures under *Checks*). `parse/containers/empty-values` is
+       slower at `HEAD` in every round of three runs: +4.4%, +3.6%, +1.6%.
+       `parse/deep/repeated-16` is not: `HEAD` is faster when it runs alone in a process
+       (−3.2%, 6 of 7 rounds; −3.0%, 6 of 6), and mixed with the bisect's six-benchmark filter
+       (+1.6%, −10.2..+8.3). v0.6.0's own time on it moves with the run mode (4.29 ms with the
+       filter, 4.39–4.46 ms alone; the report's 4.14–4.16 ms), so its sign depends on what runs
+       before it in the process, and its bisect to `36da56c` (#29) is not established. The flat
+       section workloads do not move (`objects/keys-8` +0.5%, −0.1%; `config/1000` −0.7%), so
+       "section-heavy parsing by 4–6%" should read "container-heavy (`empty-values`) by 2–5%".
+       String emission: `strings-json/dq-escaped-64` +6.2% (7 of 7) reproduces;
+       `strings-json/dq-64` +2.9% is within the report's ±3% band, and
+       `json-corpus-twitter/json`, half string escaping, is −0.7%; so "string emission by 3–8%"
+       should name escaped short strings. The recommendation to report against both v0.6.0 and
+       the task's base stands; add that both builds run each compared benchmark in the same
+       process mode (whole binary, or the same filter), since allocation-heavy workloads moved
+       by about ±5% with it. Load differed too (the report's runs near 3, mine at 2.9–11.1),
+       but v0.6.0 was fastest with the filter at loads 5.1–10.1 (4.29 ms) and slower alone at
+       lower loads (4.39 ms at 2.9–5.4), while `HEAD` stayed at 4.24–4.38 ms. Not blocking: the
+       entry hands the drift to the owner as unresolved, and the recommendation it leads to is
+       conservative.
+    2. Should fix (LOG entry): stale after the rebase. The base is `549c77e`, not `43337f0`; the
+       commits are `122c1de`, `aedd51a`, `d79a2f8`, `c587d07` and `3332600`, not `8aaeeae`,
+       `3b41a0d`, `7c69705`, `f9ddda7`; the note that the entry "will conflict at the rebase"
+       no longer applies. The report cites the old hashes and `e5ec4ca`; the PR description,
+       which carries the record (decision of 2026-10-08), should use the new ones. The drift
+       column "`43337f0` (HEAD, #32)" is #31, whose `src/` equals #32's (`bdeaf15`); say so.
+    3. Should fix (100 columns): `benches/README.md` line 113 (124 columns) and three prose lines
+       of the LOG entry, 8087 (105), 8097 (113) and 8194 (141). I exempt table rows, which
+       Markdown cannot wrap and which both files had over 100 columns before.
+    4. Should fix (`benches/README.md` line 63, `benches/common/workloads.rs` line 15): "keys of
+       up to 22 bytes are stored inline" does not hold for the value tree: `Parser::parse` makes
+       about 10 allocations per section of eight entries for both `keys/bare-22` (7 170 for 716
+       sections) and `bare-23` (6 970 for 696). The report says why: keys in the value model
+       are `String`s, and the 22-byte limit is that of the key copies in output facts and paths.
+       Say where the limit applies, so that the 22/23 pair is not read as a value-model bound.
+    5. Should fix (gaps for P9 and P4; add the inputs now, or list them in the PR description
+       for the tasks to add before prototyping, under the owner decision of 2026-10-06):
+       - P9: no emit string workload dense in bytes to escape (one every 1–2 bytes, control
+         characters other than `\n`, `\t`, `\r`). A search for the next byte to escape has the
+         shape that lost on dense comments in C14. `emit/strings-*` covers JSON and config
+         output only, not YAML or compact JSON.
+       - P4: no comment directly after a value without a separator (`a = 1 # c`,
+         `a = 1 /* c */`), with or without `save-comments`: `hash-after-values` writes `;`
+         first. No entry ends with a line break alone (every workload entry ends with `;`), and
+         no key and value are separated by a space alone or by `:` outside JSON.
+    6. Not blocking (other gaps, for the tasks): P2: no hex integers and no integers beyond
+       the `i64` range (the paths P2 keeps), and no number followed by spaces or `#` (§5.5); P3:
+       no float of 16 significant digits within ±22 (mantissas on both sides of 2^53, the fast
+       path's unpredictable branch); P5: objects of 8–32 keys only with keys of one length (a
+       length check's worst case; mixed lengths would show its best), none with `key-lowercase`;
+       P6: no reused parser over a mixed-size sequence (P6's own measurement); N8: no emit
+       benchmark over the number sweeps (integers, short and 15-digit floats); comment scans:
+       no comment longer than about 150 bytes.
+    7. Not blocking (`benches/alloc_counts.rs`): every argument not starting with `--` is a
+       filter, so the README's quick run `cargo bench -- --warm-up-time 0.1 --measurement-time
+       0.5`, or `cargo bench -- <criterion filter>`, makes it print only its header (checked: 2
+       lines). Skip the values of criterion's options, or say so in the README.
+    8. Not blocking (cost): the inputs are cheap (the 61 workloads, 12.2 MB, generate in 39 ms;
+       `alloc_counts` runs in 0.9 s), but `parse_benchmarks` grows from 24 to 89 benchmarks,
+       about 7 minutes a run (the report's rounds: 419–424 s), so a full interleaved round of
+       the three binaries for two builds takes about half an hour. The README could suggest
+       filtering by group for a task's measurements.
+    9. Not blocking (`benches/check-documents.sh`): `accepted` passes on the fuzzer's verdict
+       "dump deeper than serde_json reads", which `fuzz/src/run.rs` returns whatever the crate
+       did. The crate's side of the two 1000-deep workloads is covered by
+       `each_workload_holds_what_it_is_meant_to` (depth of at least 1000) and the 20-deep
+       stand-ins agree, so the entry's claim holds; the script's comment could say that the
+       crate is not compared there.
+  - Checks and figures (Apple M4 Max, 14 cores, Rust 1.99.0, criterion 0.8.2, samply 0.13.1):
+    - `scripts/ci.sh` (checks) passed on `3332600`: 31 steps, exit 0 (load 2.70 at the start,
+      4.30 at the end), `tests/bench_documents.rs` 9 tests among them. `cargo bench --no-run`
+      passed (41 s, four bench executables).
+    - `alloc_counts`, every document: 0.91 s, 256 rows, identical to the implementer's
+      `alloc-head.md`. The counter, by reading: the bench process's global allocator; `alloc`,
+      `alloc_zeroed`, `dealloc` and `realloc` forwarded to `System` unchanged and counted
+      (`realloc` as one call, its new size added to the bytes, live bytes moved from the old
+      size to the new); atomic counters with `fetch_max` for the peak, nothing allocated by
+      the counter, one thread. `peak` is above the live bytes at the call's start, as
+      documented, so the reused parser's row starts from a base that still holds the previous
+      parse's facts (`config-1000` 1 256 932 against 1 987 460 for `parse-new`).
+    - Typed forms: a scratch copy of `common/typed.rs` with `#[serde(deny_unknown_fields)]` on
+      all 25 structs deserializes `json(1000)`, `twitter`, `citm_catalog` and `canada` with
+      both serde_json and serde_ucl, so each form covers every field.
+    - Workloads, parsed with `save-comments`: every section of the key, comment, whitespace and
+      object workloads holds its intended entries (8; 16, 17, 24 or 32 in `keys-N`; 8 keys of
+      two values in `keys-16-repeated`), and each comment workload saves one comment per entry
+      (`block-dense`: 1 296 for 1 296 entries), so no comment swallows an entry.
+      `benches/check-documents.sh`: 75 documents, 73 agree, 2 accepted (36 s).
+    - Profiles: my own line-table build, samply at 4 kHz on criterion's `--profile-time 5`,
+      symbolised with `atos -i`, samples under `Bencher::iter`, loads 4.9–6.3. Shares are
+      inclusive (a sample counts if any frame matches), where the report takes the innermost
+      matching frame. Mine (report's):
+      - parse `canada`, 19 937 samples: numbers 37.0 (36.1), drop 15.9 (17.0), whitespace and
+        comments 2.8 (3.0), `dec2flt` 11.0 inclusive (6.8 as leaf frames; `float_value` 12.2).
+      - parse `citm_catalog`, 12 330: whitespace and comments 14.6 (15.5), drop 17.6 (19.0),
+        insertion 11.2 (11.9), numbers 5.2 (4.3).
+      - parse `twitter`, 19 822: insertion 19.8 (21.6), SipHash 5.3 (5.2), double-quoted scan
+        12.1 (12.6), UTF-8 validation 5.1 (3.8), whitespace 8.4 (8.4), drop 16.8 (16.7).
+      - `emit/json-corpus-canada/json`, 19 711: float formatting 61.1 (62.7), `write_g15` 0.2
+        and `format!` 0.2 (0.1–0.2), `indent` 13.4 (12.2): P8's deferral holds.
+      - `emit/json-corpus-twitter/json`, 19 847: `emit/text.rs` 52.6 (escaping 50.4), malloc
+        leaves 18.0.
+      Nothing here reorders the ranking.
+    - Timing builds: two trees from `git archive HEAD`, one with `src/` from `v0.6.0`
+      (`266bb7b`, 6 files differ), with `HEAD`'s `Cargo.toml`, `Cargo.lock` and `benches/`,
+      paths of the same length, each with its own target directory. Their bench binaries have
+      the sizes of the implementer's (`parse_benchmarks` 3 107 984 and 3 107 136 bytes) and
+      differ from them in 5 000–6 300 bytes. Change of `HEAD` against v0.6.0, median (range) of
+      the same-round ratios:
+      - (a) 7 rounds, each benchmark alone in a process, the two builds back to back, ABBA by
+        round; each round waited up to 120 s for a load below 3, which never came (loads at
+        the runs' starts 4.8–11.1): `containers/empty-values` +4.4% (+2.5..+5.8),
+        `deep/repeated-16` −3.2% (−7.2..+5.9), `config/1000` −0.7% (−3.0..+0.6),
+        `objects/keys-8` +0.5% (−9.1..+4.9), `emit/strings-json/dq-escaped-64` +6.2%
+        (+0.9..+24.3), `emit/strings-json/dq-64` +2.9% (+0.1..+7.3),
+        `emit/json-corpus-twitter/json` −0.7% (−1.7..+0.5), `emit/config-1000/json` +1.4%
+        (+0.3..+36.4; two rounds at loads 6.4–8.3).
+      - (b) 5 rounds of the bisect's six-benchmark filter, one process per build, ABBA, loads
+        5.1–10.1: `empty-values` +1.6% (+1.5..+2.4), `repeated-16` +1.6% (−10.2..+8.3),
+        `deep/json-objects-1000` −1.7% (−6.2..+16.2), `nested/500` +0.0% (−6.1..+6.5),
+        `strings/dq-8` +1.6% (+0.3..+6.7), `config/1000` +0.3% (−1.6..+11.5).
+      - (c) 6 rounds as in (a), of three benchmarks, each round waiting for a load below 3.5
+        (rounds started at 3.28–4.22; runs at 2.9–5.4): `empty-values` +3.6% (+0.2..+5.7),
+        `repeated-16` −3.0% (−4.9..−1.6), `keys-8` −0.1% (−1.1..+0.9).
+      - A first runner, gated below 3, was stopped after one pair (loads 2.97 and 6.60) and
+        is not used. Scratch: `target/review-c16-p1/`.
+  - Commit: this entry only. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-08 — Role: clean-room implementer (the P1 implementer). Item: C16 P1, the review's
+  findings. Branch `c16/p1-baseline` (base `549c77e`), after the review commit `1f7847a`.
+  - Inputs consulted: the coordinator's request; the reviewer's entry above; released spec-v23
+    (`docs/spec/` equals the tag) §1.2 (separators), §3.1–§3.4 (keys), §5.2, §5.3, §5.5, §5.6
+    (numbers), §6.1 (escapes) and the headings of §12, to make the new workloads valid; the
+    crate's `src/emit/text.rs` (which bytes the JSON writer escapes) and my own `benches/`,
+    `tests/bench_documents.rs` and report; criterion 0.8.2's `src/lib.rs` (its options that take
+    a value, in its registry directory); `git show` of the commits named in the drift tables.
+    The oracle as a black box through `benches/check-documents.sh`. No libucl source, `tools/`
+    or other forbidden input was read; no guard refusal.
+  - Work, by finding:
+    1. Drift: narrowed in my entry above and in the report to what reproduced, container-heavy
+       parsing (`containers/empty-values`, 2–5%) and emitting short escaped strings in JSON
+       (about 6%), with the recommendation that both builds run each compared benchmark in the
+       same process mode. `benches/README.md` states no drift. No new measurement.
+    2. My entry above corrected in place: base `549c77e`, the rebased hashes, the column
+       `43337f0` as #31 with #32's `src/`, the rebase note dropped. The report too.
+    3. Lines over 100 columns: my entry's three and `benches/README.md`'s one, wrapped.
+    4. The 22-byte limit placed: the key copies in output facts and value paths, not the value
+       tree's keys (`benches/README.md`, `benches/common/workloads.rs`).
+    5. and 6. New inputs (15 workloads, 76 in all; emit groups in all four formats for strings,
+       and over the number sweeps): see `3212a8e`. Not added: a reused parser over a mixed-size
+       sequence (P6's own measurement), and integers beyond `i64`, an error for the whole
+       document (§5.3). The new inputs have no timing baseline in P1.
+    7. `alloc_counts` skips criterion's option values (`99add39`).
+    8. and 9. The README suggests filtering by group; the check's comment says that the
+       too-deep verdict does not compare the crate's result.
+  - Checks: `benches/check-documents.sh`: 90 documents, 88 agree, 2 accepted (the 1000-deep
+    workloads; their 20-deep stand-ins agree), the new ones among the agreements, the
+    `save-comments` ones with saved comments compared and `keys-16-lowercase` with
+    `key-lowercase`. The 61 earlier digests are unchanged. `scripts/ci.sh` passed (31 steps,
+    exit 0) on the tree of `99add39`; `cargo bench --no-run` built the four bench executables.
+  - Commits: `3212a8e` (test(bench): add the inputs the C16 P1 review found missing), `99add39`
+    (fix(bench): skip criterion's option values in alloc_counts), and this entry with the
+    corrections above. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
