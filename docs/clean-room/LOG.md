@@ -8441,3 +8441,67 @@ publication. Work item:C15; final integration commit recorded in handover.
     - Checked that the command-line flags override the in-code settings: `parse/json-corpus/canada`
       took 2.2 s with them instead of about 6.4 s.
   - Commit: the following commit. No implementation change.
+
+- 2026-10-12 — Role: clean-room implementer. Item: C16 P0, recover the drift since 0.6.0.
+  Branch `c16/p0-drift` in worktree `.claude/worktrees/c16-p0`, started 2026-10-08 on
+  `c16/p1-baseline`, rebased onto its review commits, then moved by the coordinator onto
+  `main` `53083ad` (#38). Record: `target/perf/C16-report.md` (not committed; essentials below).
+  - Inputs consulted: the embedded `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`; `WORKLIST.md`
+    C16 (this branch, and `origin/docs/c16-after-p1` for the decisions of 2026-10-08); P1's
+    report copy and LOG entries; the coordinator's messages; the `src/` diffs since `v0.6.0`
+    (#24, #28, #29, #30, #32: after the clean room, none with the old lexer or parser) and
+    `src/` at `v0.6.0` as a build input; the crate's `src/parse/{core,inputs,mod,error}.rs`,
+    `src/emit/{mod,json,config,text}.rs`, `src/error.rs`, `benches/`, `scripts/ci.sh`,
+    `capi/Cargo.toml`, `fuzz/README.md`. No spec section was read: the change keeps the writer's
+    documented §10.2 rule. Tools: `llvm-nm`, `llvm-objdump`, `llvm-objcopy` of the toolchain's
+    `llvm-tools`, samply. The oracle as a black box: `scripts/ci.sh fuzz 300` ran
+    `scripts/regen-golden.sh`, which cloned and built libucl under `target/libucl-oracle/`
+    (not opened; golden files unchanged), and I read the fuzzer's findings (`report.txt`, the
+    inputs and the oracle's dumps). The JSON documents came from `benches/fetch-documents.sh`.
+    No libucl source, `tools/` or other forbidden input was read; no guard refusal.
+  - Near-exposures and process notes: `ps` listings, to find my own waiting processes, printed
+    the harness's command lines, which name files under `~/.claude/shell-snapshots/`; nothing
+    there was opened. Once I stopped a run with `pkill -f "parse_benchmarks-"`, which matches
+    any process with that name: it may have stopped another session's benchmark (possible
+    interference, not an exposure); afterwards I stopped only my own processes by PID. A zsh
+    word-splitting mistake deleted my own scratch build trees once; they were rebuilt.
+  - Cause, emit: `write_json_string` has the same machine code in v0.6.0 and `main`; only its
+    address moved (+0x210), because the C API's code before it grew (`Reader::fail` 300 → 3 232
+    bytes, `Document::read_unit` 3 712 → 4 596). Its byte loop was a tree of compares, three
+    taken branches per plain byte, whose speed depended on placement: with every function
+    aligned to 64 bytes, v0.6.0 and `main` are equally slow; with one more benchmark function
+    in the executable, v0.6.0 became the slower one; with the benches merged in #38, `main` is
+    up to 12% faster than v0.6.0 on the string workloads.
+  - Change (`dcbbc22`): the writer tests for a plain byte first; the escapes are unchanged.
+    Final run (every benchmark, full settings, 3 interleaved rounds; loads 2.7–5.5 at the
+    starts, 15 of 27 runs at 3 or above, so not all gated): against `main` and v0.6.0, plain and
+    lightly escaped strings 36–50% faster in every format (`strings-json/dq-escaped-64`
+    -36.2% against `main`, -43.9% against v0.6.0), `dq-escaped-dense-64` 10–14%,
+    `emit/config-1000/json` -12%; strings made only of escapes (a scratch group, 8 of 9 runs
+    gated) from -20% to +0.4%. Byte-class table variant left to P9 (37–68% in the prototype).
+  - Parse: no code change. `containers/empty-values` and `deep/repeated-16` against v0.6.0
+    change sign with the run (+4.9% and +5.4% in the whole suite at full settings, -3.5% and
+    -3.7% in the screen, within ±1% in filtered gated runs), and byte-identical copies of one
+    executable differ by up to 1.8–3%. Candidates `cold` (C API cursor and failure
+    observation in `#[cold]` helpers) and `boxv` (also the C API state boxed) gained nothing
+    beyond that spread: rejected. The drift is not recovered and not shown to come from code.
+  - No-regression check, the owner's two stages: screen (short settings, 2 rounds, with a copy
+    of `main`; loads up to 64 in serde round 2, so it decided nothing), then the full run as
+    confirmation and a full-settings rerun with `main`, its copy and this commit for the 30
+    benchmarks over 1% slower in the full run without an earlier recheck (27 runs, loads
+    2.4–4.5, 5 at 3 or above). By the rule "slower than `main` by more than the copy", 4 of 18
+    parse rows (identical machine code in `main` and this commit) and 3 of 11 serde rows
+    (+0.3% to +0.8%, ranges spanning zero, not running the writer) meet it: the same rate, read
+    as the rule's false positives at three rounds. `serde/nested-mixed-1000/to_string` (+12% in
+    loaded runs) against a copy of `main`: the copy +2.9% (-0.8..+12.8), this commit -2.9%
+    (-33.7..+86.0) at loads up to 23; its hot function is unchanged and at the same address.
+  - Checks: `scripts/ci.sh` 31 steps, exit 0 (conformance, emitter and readback byte for byte,
+    C API tests, every feature set); the new test fails on a mutation. `scripts/ci.sh fuzz 300`:
+    1 088 870 inputs, 19 findings, each with the same verdict replayed against `main`'s crate:
+    15 the spec-v21 §9.2 gap (`.priority` then `.load(try=true)`, or `.include` in its
+    argument), 2 v23 include-miss files, 1 `.emit .seen(x)""` then `.load(try=true)`, 1
+    `zerocopy` value difference (`"$ABI"`). None involves the emitters.
+  - Commits: `dcbbc22` (perf(emit): test for plain bytes first in the JSON string writer) and
+    this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
