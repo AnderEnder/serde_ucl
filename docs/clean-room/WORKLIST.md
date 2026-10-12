@@ -595,6 +595,20 @@ Rules for every task:
 - Research first: a throwaway prototype, measured against the latest release (0.6.0, tag
   `v0.6.0`) with the crate's benchmarks under C11's rules: builds in turns over rounds, the load
   recorded, and measurement only when the 1-minute load is below 3.
+- Owner decision of 2026-10-12: measurement runs in two stages, so that a task's runs take
+  less time.
+  1. Screen: every benchmark with criterion's `--warm-up-time 0.5 --measurement-time 1
+     --sample-size 10`. The builds run in turns over two rounds, with a byte-identical copy of
+     the base build's executable among them, and the load is logged. A benchmark is flagged when
+     a build is slower than the base, in any round, by more than the base and its copy differ on
+     that benchmark. A benchmark on which the base and its copy differ by more than about 2% is
+     always flagged. The screen decides nothing.
+  2. Confirmation: the flagged benchmarks, and always the inputs the task targets, at the
+     benchmarks' own settings. Three rounds in turns, five where three disagree, under the load
+     rule above. Adoption and rejection rest on this stage.
+
+  A record states which of its results were measured above that load, each with the spread
+  between identical builds on the same benchmark.
 - Each task ends with a record in `target/perf/C16-report.md`, as in the document's §12.4: the
   identifier, hypothesis, change, contract kept, time and allocations, the workloads affected,
   correctness evidence, and a decision: adopt, reject or defer.
