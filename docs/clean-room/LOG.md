@@ -8428,3 +8428,16 @@ publication. Work item:C15; final integration commit recorded in handover.
     corrections above. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-12 — Role: coordinator (oracle side). Item: C16.
+  - Inputs consulted: the C16 P0 implementer's run logs in `target/perf/c16-p0/` (wall time per
+    benchmark, pass and round), `benches/*.rs` (criterion settings), and the owner's request to
+    make the measurement faster.
+  - Work:
+    - Recorded the owner's decision in WORKLIST C16: screen every benchmark with short criterion
+      settings, then confirm the flagged benchmarks and the targeted inputs at full settings.
+    - Why: P0's final run measured 218 benchmarks on 3 builds over 3 rounds, 1,962 runs of 4–6 s
+      each, about 3 h 20 min. The screen takes about a third of that per pass.
+    - Checked that the command-line flags override the in-code settings: `parse/json-corpus/canada`
+      took 2.2 s with them instead of about 6.4 s.
+  - Commit: the following commit. No implementation change.
