@@ -8764,3 +8764,88 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commits: `57caa84` (this entry while paused) and its update to this record. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-13 — Role: clean-room implementer. Item: C16 P3, floats without a second scan (N04).
+  Branch `c16/p3-floats` in worktree `.claude/worktrees/c16-p3`, base `main` `6bc0883`, released
+  spec-v23. Record: `target/perf/C16-report.md` (not committed; essentials below), data in
+  `target/perf/c16-p3/`.
+  - Inputs consulted: the coordinator's task message, with the owner decision of 2026-10-13 (the
+    1% floor, PR #40, not merged) quoted in it; `PROTOCOL.md`; `WORKLIST.md` C16 (the rules for
+    every task, P3, the decisions of 2026-10-06, -08 and -12); this LOG's C16 entries of
+    2026-10-08 to 2026-10-13 (P1's number hotspots, P0's and its review's measurement notes);
+    `docs/json-performance-spec.md` §5 (N01–N05); `src/parse/number.rs`, the `number::scan` call
+    in `src/parse/core.rs`, `benches/common/{workloads,files}.rs`, the header of
+    `benches/alloc_counts.rs`, `fuzz/README.md` (replay), `Cargo.toml`; the prepared scripts in
+    `target/perf/c16-p3/scripts/`. No spec section was read: the behaviour kept is the existing
+    code's, and the tests compare with it. Tools: `llvm-nm`, `llvm-objdump`. The oracle as a black
+    box: `scripts/ci.sh fuzz 300` ran `scripts/regen-golden.sh`, which built libucl under
+    `target/libucl-oracle/` (not opened; golden files unchanged); of the findings I read the
+    replay verdicts only. No libucl source, `tools/` or other forbidden input was read; no guard
+    refusal.
+  - Process notes: two of my waits were moved to the background by the harness, which wrote
+    their output under `/private/tmp/`; neither was opened. `ps` listings, to find my own
+    processes and the cause of the load, showed other sessions' processes (`node`, Chrome,
+    `claude`); nothing of theirs was opened or stopped. I stopped only my own runs, by PID: the
+    variant 2 screens `t2` and `t3` (loads 7–32) and confirmation `c2` (300 s load waits at loads
+    4–8, too slow for the time limit). `target/bench-corpus/` was copied from the prepared base
+    build.
+  - Hypothesis and change: a float's text is read three times (the general scan, `float_text_end`,
+    `str::parse::<f64>`). Variant 1 reads a float of the usual form once (digits, a `.` and
+    digits, an exponent with digits, with no `.`, `e`, `E`, `x`, `X` after it), collecting the
+    mantissa and the decimal exponent; with at most 19 digits, a mantissa up to 2⁵³ and an
+    exponent within ±22, one multiplication or division by an exact power of ten gives the value,
+    otherwise `float_value` (`str::parse`) of the known text; other forms keep the general scan.
+    Variant 2 puts the float handling out of line and lets integers skip the general scan.
+    `canada`'s floats mostly have 17 significant digits (100,717 of 111,080; 9,742 fit in 53
+    bits), so most of them still go to `str::parse`; `twitter` has 44 floats.
+  - Correctness (variant 2): new tests compare `scan` with the general scan (a `const` switch,
+    the whole `Number`, floats by bits) on 200,000 generated numbers and every prefix of each
+    (signs, lengths, leading zeros, exponents to 400, suffixes, followers, `no-time`, with and
+    without the `&str`), on edge cases (2⁵³ ± 1, ±22/±23, 19/20 digits, halfway cases of the
+    multiplication, subnormals, `MIN_POSITIVE`, overflow, signed zeros, exponents of 2⁶⁴ + 5,
+    the length limit), and at every digit and `-` of 9,402 files (`tests/conformance/cases/`,
+    `benches/corpus/`, the JSON documents: 301,390 offsets that read as a float, 133,603 through
+    the fast path); and the fast value with `str::parse::<f64>` on 1,000,000 mantissa and exponent
+    pairs. Mutation check: 10 mutations caught (2⁵³ → 2⁵⁴, reciprocal multiplication, sign of
+    zero, 19 → 20 digits, `x` after the float, unsaturated exponent, fraction exponent off by one,
+    length limit on either path, `E` not sent to the float path); one equivalent mutant (the `.`
+    counted as a digit only narrows the fast path). `cargo test --test conformance`: 3 passed.
+    `scripts/ci.sh`: 31 steps, all completed with no failure output, 740 tests passed (exit status
+    not captured). `scripts/ci.sh fuzz 300`: 744,125 inputs, 21 findings, the same verdicts
+    replayed with a fuzzer built on `main`'s `number.rs` (no verdict names a number).
+    Allocation counts (`alloc_counts`) identical to `main` on every row.
+  - Measurements (another session's `node` used 650–870% CPU from about 15:30 to 16:15; results
+    with the copy spread, `bcpy` byte-identical to `base`, checked):
+    - Screen of variant 1 (targeted rows, short settings, 2 rounds, loads 2.96–6.57 at the
+      starts, 15 of 16 runs at 3 or above): `canada` −5.3/−9.2% (compact) and −5.7/−8.3% against
+      `main` (copy ≤ 0.7%), −3.8..−10.1% against v0.6.0; `float-15` −30%, `float-short` −21%,
+      `float-exp` −20%, `float-16-exp` −11%, `float-17` −6.5/−9.8%; serde `canada` −3.6..−7.2%.
+      Flagged: `hex` +7.6, +6.6 (copy 1.5%), `int-19` +5.5, `int-8` +1.8, `int-neg-8` +1.4,
+      `json-compact/json-1000` +3.8 in one round.
+    - Variant 2, confirmation 1 (loss rows, own settings, 5 rounds, `GATE=60`, loads 2.46–29.34,
+      14 of 15 runs at 3 or above): copy spread up to 61%; decides nothing.
+    - Variant 2, confirmation 2 (own settings, 3 rounds with v0.6.0, `GATE=60`, loads 2.74–7.40,
+      11 of 12 runs at 3 or above), `verdict.py`: faster against `main` (and v0.6.0) beyond the
+      copy in every round: `float-15` −24.5% (−23.3%), `float-exp` −15.6% (−15.0%),
+      `float-short` −14.9% (−12.8%), `float-17` −3.5% (−2.0%), `json-corpus/canada` −3.9%
+      (−3.8%); `json-compact/canada` −3.2% (−2.5%), copy −1.4%; integers: no row slower, `int-4`
+      −5.0%. Slower: `parse/numbers/hex` +6.8% (+6.0..+7.8; copy −0.3%), above the copy in 3 of 3
+      rounds; +4.9% against v0.6.0.
+    - Cause of the `hex` loss, from the machine code: `main` tests `x`/`X` after the integer
+      digits with one case-folded compare; in both variants LLVM folds that test and the new
+      `.`/`e`/`E` test into one compare tree in which `x` and `X` branch differently, and the
+      `hex` workload picks the case at random per number, so that branch would be mispredicted
+      about half the time. Not measured: no counter data, no run with hex numbers in one case.
+      The hex loop's instructions are unchanged.
+    - No valid variant 2 data (the screens at loads 7–32 were discarded): `twitter` and
+      `citm_catalog` in both forms, `json/1000`, the serde rows of the JSON documents,
+      `float-16-exp`, `float-exp-large`, `suffixed`, `int-then-space-or-hash`, and the screen of
+      all benchmarks.
+  - Decision: variant 2 rejected under the owner decision of 2026-10-06 (`hex` measurably slower);
+    `src/` left as on `main`, the variants kept in `target/perf/c16-p3/` (`variant1.diff`,
+    `variant2.diff`). P3 deferred for the owner: a third variant that keeps the hex test as one
+    compare (beyond this task's two-variant limit), or a waiver for mixed-case `hex`; either way
+    the full screen remains. No benchmark input added.
+  - Commits: this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
