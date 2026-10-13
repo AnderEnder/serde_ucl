@@ -10,7 +10,8 @@ use std::fmt::Write;
 ///
 /// A byte written as it is takes one test before the next byte (clean-room work item C16, P0):
 /// with the escapes as the only test, the loop compiled to a tree of branches whose speed
-/// depended on where the linker placed it, by 5–9% between builds of the same code.
+/// depended on where the linker placed it, by up to 12% either way between builds of the same
+/// code.
 pub(crate) fn write_json_string(out: &mut String, s: &str) {
     out.push('"');
     let mut plain = 0;
