@@ -609,6 +609,20 @@ Rules for every task:
 
   A record states which of its results were measured above that load, each with the spread
   between identical builds on the same benchmark.
+- Owner decision of 2026-10-13: a 1% floor for "measurably slower" in these rules.
+  - In the confirmation stage, a benchmark counts as slower only if both hold:
+    - the change's median is slower than the base's by more than 1%, and by more than the copy's
+      median differs from the base;
+    - the change is slower than the copy in at least four of five rounds, or in all three when
+      three are run.
+  - Smaller or less consistent differences count as code placement and don't reject a change; the
+    record lists them.
+  - In the screen, a benchmark is flagged only when a build is slower than the base by more than
+    1%, in either round, and by more than the base and its copy differ. The 2% rule above stays.
+  - P0 was decided before this rule. The owner waived its placement effects:
+    - `emit/numbers-config/float-short`, +0.6% in the median;
+    - three serde rows of +0.2% to +0.7%, with means near zero;
+    - four parse rows, whose executables are byte-identical.
 - Each task ends with a record in `target/perf/C16-report.md`, as in the document's §12.4: the
   identifier, hypothesis, change, contract kept, time and allocations, the workloads affected,
   correctness evidence, and a decision: adopt, reject or defer.

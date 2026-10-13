@@ -8686,3 +8686,15 @@ publication. Work item:C15; final integration commit recorded in handover.
     comment) and this entry with the corrections above. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-13 — Role: coordinator (oracle side). Item: C16.
+  - Inputs consulted: the C16 P0 implementer's report and its review (branch `c16/p0-drift`),
+    and the owner's answers on them.
+  - Work: recorded the owner's decision in WORKLIST C16, a 1% floor for "measurably slower":
+    - a change counts as slower only by more than 1% and more than an identical copy of the base
+      differs, and in at least four of five rounds;
+    - the screen flags only differences above 1%;
+    - P0's placement effects are waived.
+  - Why: P0's confirmation flagged benchmarks whose executables were byte-identical to `main`'s,
+    and verdicts below 1% changed between three and five rounds.
+  - Commit: the following commit. No implementation change.
