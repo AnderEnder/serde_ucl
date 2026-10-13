@@ -8441,3 +8441,248 @@ publication. Work item:C15; final integration commit recorded in handover.
     - Checked that the command-line flags override the in-code settings: `parse/json-corpus/canada`
       took 2.2 s with them instead of about 6.4 s.
   - Commit: the following commit. No implementation change.
+
+- 2026-10-12 — Role: clean-room implementer. Item: C16 P0, recover the drift since 0.6.0. Branch
+  `c16/p0-drift` in worktree `.claude/worktrees/c16-p0`, started 2026-10-08 on `c16/p1-baseline`,
+  rebased onto its review commits, then moved by the coordinator onto `main` `53083ad` (#38).
+  Record: `target/perf/C16-report.md` (not committed; essentials below).
+  - Inputs consulted: the embedded `CLAUDE.md`; `docs/clean-room/PROTOCOL.md`; `WORKLIST.md` C16
+    (this branch, and `origin/docs/c16-after-p1` for the decisions of 2026-10-08); P1's report copy
+    and LOG entries; the coordinator's messages; the `src/` diffs since `v0.6.0` (#24, #28, #29,
+    #30, #32: after the clean room, none with the old lexer or parser) and `src/` at `v0.6.0` as a
+    build input; the crate's `src/parse/{core,inputs,mod,error}.rs`,
+    `src/emit/{mod,json,config,text}.rs`, `src/error.rs`, `benches/`, `scripts/ci.sh`,
+    `capi/Cargo.toml`, `fuzz/README.md`; released spec-v23 §10.2 (the JSON form), through the
+    writer's doc comment, which the new test's reference follows; the owner decision of 2026-10-12
+    on two-stage measurement (WORKLIST C16, docs PR #39), from the coordinator. Tools: `llvm-nm`,
+    `llvm-objdump`, `llvm-objcopy` of the toolchain's `llvm-tools`, samply. The oracle as a black
+    box: `scripts/ci.sh fuzz 300` ran `scripts/regen-golden.sh`, which cloned and built libucl under
+    `target/libucl-oracle/` (not opened; golden files unchanged), and I read the fuzzer's findings
+    (`report.txt`, the inputs and the oracle's dumps). The JSON documents came from
+    `benches/fetch-documents.sh`. No libucl source, `tools/` or other forbidden input was read; no
+    guard refusal.
+  - Near-exposures and process notes: `ps` listings, to find my own waiting processes, printed the
+    harness's command lines, which name files under `~/.claude/shell-snapshots/`; nothing there was
+    opened. Once, at about 11:22 local time on 2026-10-12, I stopped a run with `pkill -f
+    "parse_benchmarks-"`, which matches any process of this user with that name: it may have stopped
+    another session's benchmark (possible interference, not an exposure); afterwards I stopped only
+    my own processes by PID. A zsh word-splitting mistake deleted my own scratch build trees once;
+    they were rebuilt.
+  - Cause, emit: `write_json_string` has the same machine code in v0.6.0 and `main`; only its
+    address moved (+0x210), because the C API's code before it grew (`Reader::fail` 300 → 3 232
+    bytes, `Document::read_unit` 3 712 → 4 596). Its byte loop was a tree of compares, three taken
+    branches per plain byte, whose speed depended on placement: with every function aligned to 64
+    bytes, v0.6.0 and `main` are equally slow; with one more benchmark function in the executable,
+    v0.6.0 became the slower one; with the benches merged in #38, `main` is up to 12% faster than
+    v0.6.0 on the string workloads.
+  - Change (`dcbbc22`): the writer tests for a plain byte first; the escapes are unchanged. Final
+    run (every benchmark, full settings, 3 interleaved rounds; loads 2.7–5.5 at the starts, 15 of 27
+    runs at 3 or above, so not all gated): against `main` and v0.6.0, plain and lightly escaped
+    strings 36–50% faster in every format (`strings-json/dq-escaped-64` -36.2% against `main`,
+    -43.9% against v0.6.0), `dq-escaped-dense-64` 10–14%, `emit/config-1000/json` -12%; strings made
+    only of escapes (a scratch group, 8 of 9 runs gated, measured on build `fwce`, the writer change
+    with the rejected `cold` parse helpers; the reviewer found with `nm` the writer and its callees
+    at the commit's addresses) from -20% to +0.4%. Byte-class table variant left to P9 (37–68% in
+    the prototype).
+  - Parse: no code change. `containers/empty-values` and `deep/repeated-16` against v0.6.0 change
+    sign with the run (+4.9% and +5.4% in the whole suite at full settings, -3.5% and -3.7% in the
+    screen, within ±1% in filtered gated runs), and byte-identical copies of one executable differ
+    by up to 1.8–3%; there is no parse-side placement control. Candidates `cold` (C API cursor and
+    failure observation in `#[cold]` helpers) and `boxv` (also the C API state boxed) gained nothing
+    beyond that spread: rejected. The drift is not recovered and not shown to come from code: P0's
+    parse goal is unmet.
+  - No-regression check, the owner's two stages: screen (short settings, 2 rounds, with a copy of
+    `main`; loads up to 64 in serde round 2, so it decided nothing), then the full run as
+    confirmation and a full-settings rerun with `main`, its copy and this commit for the 30
+    benchmarks over 1% slower in the full run without an earlier recheck (27 runs, loads 2.4–4.5, 5
+    at 3 or above). By the rule "slower than `main` by more than the copy", 4 of 18 parse rows
+    (identical machine code in `main` and this commit) and 3 of 11 serde rows (+0.3% to +0.8%,
+    ranges spanning zero; their code moved by 180–192 bytes) meet it: the same rate. The other rows
+    rest on the final run, which had no copy; the screen's copy/`main` spreads for them: parse 86
+    rows, median 1.9% (0.2–32.7%); serde 36 rows, 33–90% (round 2 at loads up to 64); emit 58 rows,
+    median 3.3% (0.3–16.3%). `serde/nested-mixed-1000/to_string` (+12% in loaded runs) against a
+    copy of `main`: the copy +2.9% (-0.8..+12.8), this commit -2.9% (-33.7..+86.0) at loads up to
+    23; its hot function is unchanged and at the same address.
+  - Checks: `scripts/ci.sh` 31 steps, exit 0 (conformance, emitter and readback byte for byte, C API
+    tests, every feature set); the new test fails on a mutation. `scripts/ci.sh fuzz 300`: 1 088 870
+    inputs, 19 findings, each with the same verdict replayed against `main`'s crate: 15 the spec-v21
+    §9.2 gap (`.priority` then `.load(try=true)`, or `.include` in its argument), 2 v23 include-miss
+    files, 1 `.emit .seen(x)""` then `.load(try=true)`, 1 `zerocopy` value difference (`"$ABI"`).
+    None involves the emitters.
+  - Commits: `dcbbc22` (perf(emit): test for plain bytes first in the JSON string writer) and this
+    entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-12 — Role: fresh clean-room implementation reviewer. Item: C16 P0, recover the drift
+  since 0.6.0. Reviewed `dcbbc22` (perf(emit): test for plain bytes first in the JSON string
+  writer) and `5436d34` (the implementer's entry above) on `c16/p0-drift` (base `main`
+  `53083ad`, released spec-v23) in worktree `.claude/worktrees/c16-p0`, with the implementer's
+  record (P0 section of `target/perf/C16-report.md`) and its data in `target/perf/c16-p0/`.
+  - Inputs consulted: the coordinator's request with the `CLAUDE.md` rules, and the embedded
+    current `CLAUDE.md`; `PROTOCOL.md`; `WORKLIST.md` C16 on this branch, and the owner decision
+    of 2026-10-12 from `WORKLIST.md` on branch `docs/c16-two-stage` (`4d9a1c5`, that file
+    only); this LOG (the P0 entry; the P1 reviewer's entry for the format); the diff under
+    review; `src/emit/text.rs` in full; a grep of `src/` for the writer's callers and for
+    "clean-room work item"; released spec-v23 (`docs/spec/` equals the tag) §10.2;
+    `benches/common/files.rs` (where the benches find their documents); the names of the §10
+    string cases and a grep of `tests/conformance/xfail-*.txt`; criterion 0.8.2's `src/lib.rs`
+    (output directory), in its registry directory. Of the record: the P0 section in full; of
+    `target/perf/c16-p0/`: the listing, `scripts/` (`ab2.sh`, `confirm.sh`, `screen.sh`,
+    `flags.py`, `assemble.py`, `collect.py`, `mkbuild.sh`), `runs/` (final, screen, stage 2,
+    recheck, align, confirm-emit, the escape run's log), the tails of `ci.log` and `fuzz.log`,
+    `replay-*.txt`, `commit-msg.txt`, `escapes-bench.rs`; build trees compared with `diff -rq`;
+    executables with `cmp`, `otool -l`, `nm`, `objdump -d` and `xxd`. The oracle was not run.
+    No libucl source, `tools/` or other forbidden input was read.
+  - Guard refusals and disclosures: three refusals, so nothing ran and nothing was read: two
+    commands that named the harness's scratchpad under `/private/tmp/` (I used
+    `target/review-c16-p0/` instead), and a `git cat-file -e` of the old lexer's path at
+    `v0.6.0`, meant to show the tag lacks it (I listed the implementer's scratch copy of
+    `v0.6.0`'s `src/` instead: neither old file). The harness saved one long tool output (part
+    of the report) under `~/.claude/projects/…/tool-results/` and my background commands' output
+    under `/private/tmp/…/tasks/`; I opened neither (I re-read the report from its file in
+    parts; my commands logged to `target/review-c16-p0/`). A `ps` of my own runner printed the
+    harness's command line, which names a file under `~/.claude/shell-snapshots/`; not opened.
+    I stopped my own runners twice, by PID: once to shorten the load wait, once at the
+    coordinator's request (escape run after one round). The session's context held the main
+    checkout's `git status` (file names only, among them `tools/` and `docs/spec/drafts/`
+    paths); nothing there was opened.
+  - Measurements (scratch `target/review-c16-p0/`; about 11–12 minutes of benchmark runs, 32
+    minutes of wall time with the load waits and one 37 s build; every run ungated but one,
+    loads 2.97–6.37 at the starts, logged in `*.tsv.log`): serde stage 2
+    rounds 4–5 with the implementer's script, filter and builds (`base`, `bcpy`, `fixf`);
+    `emit/numbers-{config,json}/float-short`, 3 rounds, same builds; the escape group on the
+    commit, one round: tree `bld1/rvce` is `bwce`'s tree with `src/` of `dcbbc22` (only
+    `src/emit/text.rs` differs), against `bwce` and a byte-identical copy `bld1/bwcp`.
+  - Behaviour: unchanged. The guard at `src/emit/text.rs:18` sends exactly 0x00–0x1F, `"`, `\`
+    and DEL to the match, whose arms are unchanged except that `0x00..=0x1F | 0x7F` became `_`
+    (line 31), which only those bytes reach; bytes 0x20–0x7E other than `"` and `\`, and every
+    byte 0x80–0xFF, are copied as before. The test covers each code point 0–0xFF alone and in
+    three embeddings, U+0100, U+07FF, U+0800, U+FFFD, U+1F600 and all of ASCII: the boundaries
+    0x1F/0x20 and 0x7E/0x7F, quotes, backslash, DEL, lead and continuation bytes. Its reference
+    matches §10.2 of spec-v23 row for row. My own check, the old and new writers copied verbatim
+    from `53083ad` and `dcbbc22` on every string of one to three units drawn from the 128 ASCII
+    bytes and 13 non-ASCII characters, and on 200 000 random strings: 3 023 244 strings, equal.
+    The diff touches no xfail list; no §10 string case is xfailed; `ci.log` (tree of `ca4014e`,
+    equal to `53083ad`'s, with this `src/`) ran the new test and the three conformance tests.
+  - Code: safe Rust, no dependency, one file, the same plain-run bookkeeping as the other
+    writers; the doc comment cites §10.2.
+  - Claims recomputed, all hold: the final table (`assemble.py` on `runs/final-*`, and my own
+    script) reproduces the report's lines 1100–1317; plain and lightly escaped strings 36.0–47.8%
+    faster than `main` and 35.9–49.9% than v0.6.0, dense 10.6–12.7% and 10.2–14.1%;
+    `write_json_string` is 948 bytes with the same instructions in `v060` and `base` (only
+    addresses differ, +0x210 in these builds too), 768 in `fixf`, whose plain-byte path is 13
+    instructions with one taken branch; the 64-byte alignment control (`align-emit.tsv`);
+    1 122 serde and 1 039 emit functions moved; `empty-values` `main`/v0.6.0 +4.9% (+3.6..+4.9)
+    in the full run and -3.5% in the screen; the load counts of every run the record quotes;
+    `fuzz.log` and the two replays (identical).
+  - The seven rows meeting "slower than `main` by more than the copy":
+    - `parse/comments/block-long`, `parse/containers/empty-arrays`, `parse/nested/10`,
+      `parse/strings/dq-32`: not slowdowns. The `base` and `fixf` parse executables differ in 84
+      bytes: 16 of `LC_UUID`, 64 of the code signature and 4 of the build path ("base"/"fixf")
+      in `__TEXT,__const`; `__text` is byte-identical, every function at the same address, and
+      the writer is not linked in. The measured differences are between identical programs.
+      `dq-32` meets the rule in every stage-2 round (+2.2, +0.9, +3.6), and `block-long`'s own
+      copy differs from `main` by -8.3..+3.3: the rule's false-positive rate at three rounds.
+    - `serde/corpus-rspamd-rbl_group/UclValue`, `serde/deserialize-1000/from_value`,
+      `serde/deserialize-small/UclValue`: not measurable slowdowns. Five rounds pooled (the
+      implementer's three and my two), commit/`main` against copy/`main`: `rbl_group` -0.4%
+      (2 of 5 rounds above zero) against -0.8%, now "not slower"; `from_value` +0.5% (3 of 5;
+      -1.3..+0.9, mean 0.0%) against +0.0% (mean +0.3%); `small` +0.2% (3 of 5; -1.9..+1.7,
+      mean -0.1%) against -0.1% (mean +0.1%). The rule still reads the last two as slower, by
+      0.5 and 0.3 points, and at five rounds it newly reads `deserialize-1000/from_str` as
+      slower (+0.7% against +0.5%), which it cleared at three: at these sizes its verdicts
+      flip with two more rounds. Their code did move, though (finding 3).
+  - Findings:
+    1. Blocking (no-regression evidence, report lines 1331–1336, LOG line 8475): the
+       confirmation selected reruns by a +1% cut on the final run's median, which the owner's
+       rule of 2026-10-12 does not have, and stopped at three rounds where they disagreed (6 of
+       the 7 rows; the rule says five). One flagged row fell through:
+       `emit/numbers-config/float-short`, flagged by the screen (+2.2%, +2.9% against an A/A of
+       0.5%), +0.2, +1.3, +0.9 in the final run (no copy), never confirmed against a copy. Its
+       functions after the writer (`Writer::scalar`, `exact_scalar`, `strip_zeros`,
+       `write_json_number`, `write_key`, `enter_entry`) moved by 180 bytes. My three rounds:
+       commit/`main` +0.6% (+0.6, -0.5, +0.6), copy/`main` -0.8%, so the rule clears it, but
+       the commit is slower than the copy in each round (+1.4, +0.3, +0.7) and slower than
+       `main` in 5 of 6 full-settings rounds (final run and mine). Blocking because the owner's
+       rule asks for five rounds where three disagree, not because a slowdown was measured: run
+       rounds 4–5 (`START=4`, `base bcpy fixf`, about 2 minutes) before the PR, or the
+       coordinator waives them. Pass criterion, the one applied to the serde rows above: at five
+       rounds it clears if the commit's per-round ratios to `main` do not sit above the copy's
+       (median against the copy's median, rounds above zero, mean); otherwise it reads as slower
+       and falls under the rejection rule of 2026-10-06. The json form is clear (-0.5% against
+       -0.2%, 0 of 3 rounds above zero). The other rows the cut left out rest on the final
+       run, which had no copy, so the record lacks the A/A spread the 2026-10-12 decision asks
+       for on results above load 3 (15 of 27 runs): should fix in the record.
+    2. Should fix, not blocking (report lines 992–1016, LOG line 8467, commit message lines
+       17–18): the all-escape worst case was measured on `fwce`, whose `src/` is `src-fix1`:
+       the writer change plus the rejected `cold` parse helpers (`parse/core.rs` and
+       `parse/inputs.rs` differ from `main`), not `dcbbc22`. Not blocking because the emitter
+       functions sit at the same addresses in `fwce` and in the commit with the same group
+       (`nm`: the writer, `write_key`, `json_value`, `config_entries`, `scalar`, `enter_entry`,
+       `Emitter::emit`), so the figures carry over; name the build in the record. My one
+       ungated round on `rvce` (copy spread up to 12.8%) agrees on the large gains (quotes,
+       backslashes, DEL) and does not resolve the near-zero rows (`escapes-json/newlines` +3.5%
+       against a copy +0.3%, `mixed` +5.2% against +4.0%); stopped there as requested.
+    3. Should fix (report line 1361, LOG line 8481): "on benchmarks that do not run
+       `write_json_string`" is no argument that they cannot slow down. In the serde executable
+       every `parse::core` function moved by 192 bytes, `Reader::read` and `finish_grow` by
+       180; the record's own finding is that placement alone moves this code by 5–12%. The
+       verdict above rests on the pooled rounds, not on this.
+    4. Should fix (report line 1079): "It is code and data placement" has no parse-side
+       placement control, unlike the emit side; "not shown to come from code" (LOG line 8474)
+       is what the data supports. In the whole-suite full run the drift does exceed that run's
+       spread between identical code (`empty-values` +4.9% in every round, `fixf`/`main` +0.7%),
+       and the screen shows the opposite sign. P0's parse goal stays unmet; the PR should say
+       so plainly, for the owner.
+    5. Should fix (LOG line 8442): "No spec section was read", while the test's doc comment
+       (`src/emit/text.rs:276`) and the commit message (lines 19–20) say the test applies the
+       rule "as §10.2 states it". List §10.2 as read, or say the reference models the writer's
+       doc comment. It does match §10.2.
+    6. Should fix (LOG line 8437): the source of the 2026-10-12 decision the entry applies is
+       not listed (branch `docs/c16-two-stage`, or the coordinator's message).
+    7. Not blocking (LOG lines 8451–8453): the `pkill` note is accurate. `pkill -f
+       "parse_benchmarks-"` signals every process of this user whose command line contains the
+       string, and this user's other worktrees run the same benches (`c16-p1`, the C API
+       bench worktrees). Add the time, so that other sessions can tell which runs it could have
+       cut, and tell the coordinator.
+    8. Not blocking (code): `src/emit/text.rs:31` is right only through the guard at line 18;
+       the comment at line 30 says so and the new test catches a drift. Lines 10–13 put the
+       placement spread at "5–9% between builds of the same code"; the record measured up to
+       12% either way. `json_by_byte` (lines 276–277) says "byte by byte" but walks `chars()`,
+       which is equivalent because every escaped byte is ASCII.
+  - Verdict: the code change is correct and its gains are real; not ready for a PR until
+    finding 1's `float-short` rounds 4–5 are run (or the coordinator decides on them) and the
+    record carries findings 2–6. None of the seven rows is a real slowdown.
+  - Commits: this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-13 — Role: clean-room implementer (the P0 implementer). Item: C16 P0, the review's
+  findings. Branch `c16/p0-drift`, after the review commit `c8397c5`.
+  - Inputs consulted: the coordinator's messages (the review's fixes; the owner's waiver of
+    2026-10-13); the reviewer's entry above and its `float-short` rounds in
+    `target/review-c16-p0/float-short.tsv`; my own record and runs. No libucl source, `tools/` or
+    other forbidden input was read; no guard refusal.
+  - Finding 1, `emit/numbers-{config,json}/float-short`: rounds 4–5 at full settings with `base`,
+    `bcpy` and `fixf` (loads 2.90–3.40 at the starts, 4 of 6 runs below 3), pooled with the
+    reviewer's rounds 1–3 (same builds and filter). Config: commit/`main` +0.6, -0.5, +0.6, -0.5,
+    +1.8 (median +0.6%, mean +0.39%), copy/`main` median -0.3% (mean -0.28%), commit/copy +1.4,
+    +0.3, +0.7, -0.1, +1.0: slower by the rule, a placement effect of under 1% (the writer is not
+    on its path; the float writers after it moved by 180 bytes). JSON: -0.5% against -0.1%, 0 of
+    5 rounds above zero: not slower. I stopped and reported it.
+  - Owner decision of 2026-10-13 (from the coordinator): the slowdowns are waived and `dcbbc22`
+    stays: `emit/numbers-config/float-short` (+0.6%), the serde rows meeting the rule
+    (`deserialize-1000/from_value`, `deserialize-small/UclValue`, and `deserialize-1000/from_str`
+    at five rounds), and the four parse rows, whose executables have byte-identical code. Context
+    only: the owner also adopted a 1% floor for later tasks; P0 is decided by the waiver.
+  - Findings 2–7: my entry above corrected in place (§10.2 and the decision's source among the
+    inputs, the `pkill` time, the all-escape figures labelled as measured on `fwce` with the
+    reviewer's `nm` check, the serde argument about the writer dropped, the parse drift "not shown
+    to come from code" with P0's parse goal unmet, the screen's copy spreads for the rows below the
+    1% cut), and the same in the record. Finding 8: the writer's comment gives the measured
+    placement spread, up to 12% either way (`cbce671`); `cargo test --lib emit`: 18 passed.
+  - Commits: `cbce671` (docs(emit): give the measured placement spread in the JSON writer's
+    comment) and this entry with the corrections above. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.

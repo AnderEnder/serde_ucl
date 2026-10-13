@@ -7,10 +7,18 @@ use std::fmt::Write;
 /// and FF escaped, VT written `\u000B`, and every other byte 0x00–0x1F and DEL written `\uFFFD`
 /// (the original byte is lost, a quirk of libucl kept here). All other bytes are written as they
 /// are.
+///
+/// A byte written as it is takes one test before the next byte (clean-room work item C16, P0):
+/// with the escapes as the only test, the loop compiled to a tree of branches whose speed
+/// depended on where the linker placed it, by up to 12% either way between builds of the same
+/// code.
 pub(crate) fn write_json_string(out: &mut String, s: &str) {
     out.push('"');
     let mut plain = 0;
     for (i, b) in s.bytes().enumerate() {
+        if b >= 0x20 && b != b'"' && b != b'\\' && b != 0x7F {
+            continue;
+        }
         let escape = match b {
             b'"' => "\\\"",
             b'\\' => "\\\\",
@@ -20,8 +28,8 @@ pub(crate) fn write_json_string(out: &mut String, s: &str) {
             0x08 => "\\b",
             0x0C => "\\f",
             0x0B => "\\u000B",
-            0x00..=0x1F | 0x7F => "\\uFFFD",
-            _ => continue,
+            // The other bytes 0x00–0x1F, and DEL.
+            _ => "\\uFFFD",
         };
         out.push_str(&s[plain..i]);
         out.push_str(escape);
@@ -264,6 +272,48 @@ mod tests {
         assert_eq!(json("a\"b\\c/é"), r#""a\"b\\c/é""#);
         assert_eq!(json("\n\r\t\x08\x0c"), r#""\n\r\t\b\f""#);
         assert_eq!(json("\x0b\0\x01\x7f"), r#""\u000B\uFFFD\uFFFD\uFFFD""#);
+    }
+
+    /// The JSON form byte by byte, as §10.2 states it: what `write_json_string` writes, one byte
+    /// at a time.
+    fn json_by_byte(s: &str) -> String {
+        let mut out = String::from("\"");
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\x08' => out.push_str("\\b"),
+                '\x0c' => out.push_str("\\f"),
+                '\x0b' => out.push_str("\\u000B"),
+                '\0'..='\x1f' | '\x7f' => out.push_str("\\uFFFD"),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    #[test]
+    fn json_form_every_character() {
+        let samples = (0..=0xFF)
+            .chain([0x100, 0x7FF, 0x800, 0xFFFD, 0x1F600])
+            .filter_map(char::from_u32);
+        for c in samples {
+            for s in [
+                c.to_string(),
+                format!("a{c}b"),
+                format!("{c}{c}x{c}"),
+                format!("\u{e9}{c}\"\n{c}"),
+            ] {
+                assert_eq!(json(&s), json_by_byte(&s), "{s:?}");
+            }
+        }
+        let all: String = (0..=0x7F).filter_map(char::from_u32).collect();
+        assert_eq!(json(&all), json_by_byte(&all));
+        assert_eq!(json(""), "\"\"");
     }
 
     #[test]
