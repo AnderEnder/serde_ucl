@@ -8698,3 +8698,61 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Why: P0's confirmation flagged benchmarks whose executables were byte-identical to `main`'s,
     and verdicts below 1% changed between three and five rounds.
   - Commit: the following commit. No implementation change.
+
+- 2026-10-13 — Role: clean-room implementer. Item: C16 P4, separator and whitespace fast paths
+  (B02, B03). Branch `c16/p4-separators` in worktree `.claude/worktrees/c16-p4`, based on `main`
+  `6bc0883` (#41). Paused at the decision on the coordinator's request; record not written.
+  - Inputs consulted: the embedded current `CLAUDE.md`; `PROTOCOL.md`; `WORKLIST.md` (header and
+    C16, with the decisions of 2026-10-06, -08 and -12); this LOG (the C16 P1 and P0 entries);
+    the owner decision of 2026-10-13 on the 1% floor (PR #40, not merged; its text from the
+    coordinator) and the coordinator's messages; `docs/json-performance-spec.md` §4 (B02, B03);
+    the crate's `src/parse/core.rs`, parts of `src/parse/{mod,error,inputs}.rs` and
+    `src/emit/mod.rs` (API only), `benches/parse_benchmarks.rs`, `benches/common/` (generators),
+    `Cargo.toml`; the conformance inputs (read by the new test); P0's measurement scripts in
+    `target/perf/c16-p4/scripts/`; the JSON documents, copied from the prepared v0.6.0 build tree.
+    No spec section was read: the new doc comments cite sections as the surrounding code's
+    comments do. The oracle was not run. No libucl source, `tools/` or other forbidden input was
+    read; no guard refusal. The background tasks' output files under `/private/tmp/` were not
+    opened; my commands logged to `target/perf/c16-p4/logs/` and `runs/`.
+  - Prototype (`src/parse/core.rs`, uncommitted): a fast path in `after_key` (`=` or `:` with at
+    most one space on each side, then a byte that starts a value on the line, or a bracket after
+    at most one space; anything else to the unchanged general path); a fast path in
+    `after_value` (one `,` or `;`, one line feed, spaces, then a byte that ends the skipping
+    without a comment); spaces skipped eight at a time in `skip_space` and `leading_comments`.
+    Tests: a switch in test builds only turns the fast paths off; two tests compare the value or
+    error, the saved comments and their attachment (§12.5) and the config output with comments,
+    on and off, over 51 seeds (every truncation and every split into two inputs, without and with
+    `save-comments`) and over every conformance input (whole, and every truncation up to 256
+    bytes). Mutations (accepting `#` after a separator; skipping `#` with spaces) fail them.
+    `cargo test --test conformance`: 3 of 3 pass.
+  - Screens (owner decision of 2026-10-12, targeted inputs only: `json/1000`, `json-corpus/*`,
+    `json-compact/*`, `config/1000`, `irregular/*`, `comments/*`; 2 rounds against `main`
+    (`base`), a byte-identical copy (`bcpy`) and v0.6.0; loads 2.8–10.4 at the starts, 20 of 24
+    runs ungated). Candidate/main per round, copy/main in brackets:
+    - `p4a1`, all three parts: `citm_catalog` -13.7, -8.9 (-1.1, -0.1); `twitter` -4.9, -7.5
+      (+0.5, +3.5); `irregular/60k` -3.6, -4.2 (+1.0, -1.9); compact JSON no gain;
+      `json-corpus/canada` +2.0, +3.4 (+0.3, +1.6), flagged.
+    - `p4a2`, the space skip only where a space follows: `citm_catalog` -8.7, -7.6 (-1.5, +1.3);
+      `twitter` -1.2, -5.0 (-0.6, -0.2); `irregular/60k` -4.5, -4.5 (+1.4, -0.3);
+      `json-corpus/canada` +3.4, +2.2 (-1.2, -1.3) and `json-compact/canada` +2.2, +0.8 (-0.4,
+      -2.0): slower than `main` and its copy in every round of both screens. Flagged beyond the
+      1% floor: both `canada` forms, `json/1000`, `irregular/600k`,
+      `comments/block-prose-saved`, `comments/block-stars`.
+    - `p4a3`, without the `after_value` fast path (the coordinator's last variant):
+      `citm_catalog` -2.3, -3.3 (+1.8, +2.4), still a gain beyond the copy; `twitter` +4.4, -0.9
+      (-2.0, +4.5), no gain; `canada` +4.8, +1.0 (+2.2, -0.1) and +2.7, -3.0 (-1.3, -4.1).
+      Flagged beyond the 1% floor and the copy's spread: `comments/block-slashes` (+1.1, A/A
+      0.8%), `comments/block-stars` (+2.3, A/A 0.3%), `comments/hash-after-values-no-separator-saved`
+      (+4.7, A/A 1.9%), `irregular/60k` (+2.3, A/A 1.6%); 17 more flagged for an A/A spread above
+      2%. Tables: `target/perf/c16-p4/runs/t{1,2,3}-gain.md`, `t{2,3}-flags.txt`.
+  - Decision: defer. Every variant has benchmarks flagged as slower beyond the 1% floor; the
+    gain is on indented JSON (`citm_catalog`, `twitter` in `p4a1`/`p4a2`) and shrinks without
+    the `after_value` part, which is what slows `canada`. The screens decide nothing under the
+    owner's rule, and none of the flags was confirmed at full settings.
+  - What remains: a confirmation at full settings of the flagged benchmarks, if P4 is taken up
+    again; the full screen, `scripts/ci.sh` and `scripts/ci.sh fuzz 300` were not run. The
+    variants' diffs are in `target/perf/c16-p4/p4a{1,2,3}.diff`; `src/parse/core.rs` keeps
+    `p4a3`, uncommitted.
+  - Commits: this entry only. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
