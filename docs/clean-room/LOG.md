@@ -8908,3 +8908,73 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commits: `4ef45a6` (perf(parse): read the usual floats in one pass) and this entry. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-14 — Role: clean-room implementer (a second P3 implementer, taking over from the first,
+  who was stopped). Item: C16 P3, variant 3: the measurements that decide adoption. Branch
+  `c16/p3-floats` in worktree `.claude/worktrees/c16-p3`, after `a95fe70`. Record:
+  `target/perf/C16-report.md`, sections "Completion of the variant 3 measurements" and "Final
+  decision" (not committed; essentials below), data in `target/perf/c16-p3/` (`runs/c5-*`,
+  `runs/f3-*`, `runs/d1-*` to `runs/d3-*`, `confirm/`).
+  - Inputs consulted: the coordinator's task message, with the owner decision of 2026-10-13 on
+    what counts as slower quoted in it (not yet on this branch); `PROTOCOL.md`; `WORKLIST.md` C16;
+    this LOG's C16 P3 entries; the P3 section of `target/perf/C16-report.md`; the scripts in
+    `target/perf/c16-p3/scripts/`; `benches/common/files.rs` (the corpus path) and the criterion
+    settings in `benches/{parse,serde,emit}_benchmarks.rs`. The `src/` trees of the builds were
+    compared with `diff -r` against `git archive` of their commits. No spec section was read and
+    the oracle was not run. No libucl source, `tools/` or other forbidden input was read; no guard
+    refusal.
+  - Process notes: two of my waits were moved to the background by the harness, which wrote
+    their output under `/private/tmp/`; neither was opened. `ps` listings were filtered to my own
+    scripts. I stopped only my own driver shells, by PID (41658, then 59631), so that the
+    remaining stages ran in another order and the emit stage did not start; the benchmark runs
+    themselves were never interrupted. No `cargo` command ran during the benchmarks.
+  - Builds, checked and not rebuilt: `base` and `bcpy` executables byte-identical (`cmp`,
+    SHA-256, all three benches); `p3v3`, `base` and `v060` sources equal to `4ef45a6`, `6bc0883`
+    and `v0.6.0`. Every counted run started below load 7 (the rule: discard at 8 or above); the
+    load stayed at 3–6 from other sessions, so almost no run is below C11's 3.
+  - `canada` (own settings, `v060`, `base`, `bcpy`, `p3v3`, 3 rounds; round 1 from the stopped
+    run, its partial round 2 moved to `runs/void/`): `json-corpus/canada` −4.7% against `main`
+    (−5.5..−2.6; copy +1.1%, −1.3..+1.7) and −3.2% against v0.6.0, beyond the copy in every
+    round. `json-compact/canada` −3.1% against `main` (−5.1..−3.0) and −3.8% against v0.6.0,
+    faster than the copy in every round, but not beyond the copy in round 1, where the copy was
+    +15.6% (copy median +0.6%).
+  - Screen: serde round 1 run again, round 2 of all three benches (short settings, `base`, `bcpy`,
+    `p3v3`). `flags.py`: 218 rows, 61 cleared, 157 flagged (21 slower beyond 1% and the largest
+    copy spread, 136 for a copy spread above 2%, up to 74%); per round, 63 rows slower than `main`
+    by more than 1% and that round's copy (19 parse, 14 serde and serde_json, 30 emit), including
+    the 14 one-round flags of round 1.
+  - Confirmation (own settings, 3 rounds, 5 where three disagree), in priority order because the
+    whole set did not fit the budget: the 19 parse rows flagged as slower; the targeted rows with
+    v0.6.0 (both `twitter` forms, `citm_catalog`, `json/1000`, `json-compact/json-1000`, the 15
+    number sweeps); the 14 serde rows flagged as slower. Verdicts (`verdict.py`), with `main`'s
+    copy spread (median):
+    - slower: `parse/irregular/600k`, +3.1% against `main` over 5 rounds (per round −0.1, +1.8,
+      +4.1, +1.4, +1.1; copy −0.0%, −3.3..+2.8), slower than the copy in 4 of 5 rounds (rounds
+      1–3 with 19 rows in the process, 4–5 with this row alone). Marginal: a later 3-round run of
+      this row alone with v0.6.0 (d5) reads not slower, −1.1% against `main` (copy −1.3%), with
+      `p3v3` slower than the copy in 3 of 3, and −0.9% against v0.6.0; over all 8 rounds the
+      median is +1.0% against `main` and `p3v3` is slower than the copy in 7. The verdict is the
+      procedure's (3 rounds, then 5); d5 is reported, not used to overturn it.
+      `serde/irregular-600k/UclValue` (the same document) is not slower: −0.9% (copy −0.2%);
+    - needs 5, not run: `serde/nested-mixed-1000/to_string` +7.2% (copy +5.8%, 2 of 3 rounds,
+      one of them under a load surge to 15);
+    - placement, at most +1%: `containers/empty-values` +0.7% (copy +0.5%), `strings/dq-64` +0.1%
+      (copy −1.5%), `json-compact/twitter` +0.1% (copy −0.4%), `numbers/hex` +0.0% (copy −0.6%),
+      `serde/serialize-1000/to_json_string` +0.0% (copy −0.8%);
+    - all other confirmed rows not slower or faster. Faster beyond the copy in every round:
+      the float sweeps −3.0..−25.8% against `main` (−2.2..−24.0% against v0.6.0), the integer
+      sweeps and `suffixed` −2.3..−6.2% (−1.0..−5.1%), `json-compact/json-1000` −2.2%,
+      `json-compact/citm_catalog` −2.0%, `whitespace/compact` −1.4%.
+    - Not confirmed: the 30 emit rows flagged as slower and the 95 rows flagged only for the
+      copy spread.
+  - Decision: deferred. `parse/irregular/600k` is slower by the owner decision of 2026-10-13, if
+    marginally (above), and the decision of 2026-10-06 rejects a change that makes any benchmark
+    slower. `src/` restored to
+    `main` (`git restore --source=6bc0883 -- src`) in `1ffca42`; variant 3 kept in
+    `target/perf/c16-p3/variant3.diff` and `src-v3/`. For the owner: a variant that removes the
+    `irregular` loss, after finding its cause (not investigated), or a waiver; either way the emit
+    and spread-only rows remain to be confirmed. No benchmark input added.
+  - Commits: `1ffca42` (chore(parse): restore src/ to main, C16 P3 variant 3 deferred) and this
+    entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
