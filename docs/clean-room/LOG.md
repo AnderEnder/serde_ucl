@@ -8764,3 +8764,217 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commits: `57caa84` (this entry while paused) and its update to this record. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-13 — Role: clean-room implementer. Item: C16 P3, floats without a second scan (N04).
+  Branch `c16/p3-floats` in worktree `.claude/worktrees/c16-p3`, base `main` `6bc0883`, released
+  spec-v23. Record: `target/perf/C16-report.md` (not committed; essentials below), data in
+  `target/perf/c16-p3/`.
+  - Inputs consulted: the coordinator's task message, with the owner decision of 2026-10-13 (the
+    1% floor, PR #40, not merged) quoted in it; `PROTOCOL.md`; `WORKLIST.md` C16 (the rules for
+    every task, P3, the decisions of 2026-10-06, -08 and -12); this LOG's C16 entries of
+    2026-10-08 to 2026-10-13 (P1's number hotspots, P0's and its review's measurement notes);
+    `docs/json-performance-spec.md` §5 (N01–N05); `src/parse/number.rs`, the `number::scan` call
+    in `src/parse/core.rs`, `benches/common/{workloads,files}.rs`, the header of
+    `benches/alloc_counts.rs`, `fuzz/README.md` (replay), `Cargo.toml`; the prepared scripts in
+    `target/perf/c16-p3/scripts/`. No spec section was read: the behaviour kept is the existing
+    code's, and the tests compare with it. Tools: `llvm-nm`, `llvm-objdump`. The oracle as a black
+    box: `scripts/ci.sh fuzz 300` ran `scripts/regen-golden.sh`, which built libucl under
+    `target/libucl-oracle/` (not opened; golden files unchanged); of the findings I read the
+    replay verdicts only. No libucl source, `tools/` or other forbidden input was read; no guard
+    refusal.
+  - Process notes: two of my waits were moved to the background by the harness, which wrote
+    their output under `/private/tmp/`; neither was opened. `ps` listings, to find my own
+    processes and the cause of the load, showed other sessions' processes (`node`, Chrome,
+    `claude`); nothing of theirs was opened or stopped. I stopped only my own runs, by PID: the
+    variant 2 screens `t2` and `t3` (loads 7–32) and confirmation `c2` (300 s load waits at loads
+    4–8, too slow for the time limit). `target/bench-corpus/` was copied from the prepared base
+    build.
+  - Hypothesis and change: a float's text is read three times (the general scan, `float_text_end`,
+    `str::parse::<f64>`). Variant 1 reads a float of the usual form once (digits, a `.` and
+    digits, an exponent with digits, with no `.`, `e`, `E`, `x`, `X` after it), collecting the
+    mantissa and the decimal exponent; with at most 19 digits, a mantissa up to 2⁵³ and an
+    exponent within ±22, one multiplication or division by an exact power of ten gives the value,
+    otherwise `float_value` (`str::parse`) of the known text; other forms keep the general scan.
+    Variant 2 puts the float handling out of line and lets integers skip the general scan.
+    `canada`'s floats mostly have 17 significant digits (100,717 of 111,080; 9,742 fit in 53
+    bits), so most of them still go to `str::parse`; `twitter` has 44 floats.
+  - Correctness (variant 2): new tests compare `scan` with the general scan (a `const` switch,
+    the whole `Number`, floats by bits) on 200,000 generated numbers and every prefix of each
+    (signs, lengths, leading zeros, exponents to 400, suffixes, followers, `no-time`, with and
+    without the `&str`), on edge cases (2⁵³ ± 1, ±22/±23, 19/20 digits, halfway cases of the
+    multiplication, subnormals, `MIN_POSITIVE`, overflow, signed zeros, exponents of 2⁶⁴ + 5,
+    the length limit), and at every digit and `-` of 9,402 files (`tests/conformance/cases/`,
+    `benches/corpus/`, the JSON documents: 301,390 offsets that read as a float, 133,603 through
+    the fast path); and the fast value with `str::parse::<f64>` on 1,000,000 mantissa and exponent
+    pairs. Mutation check: 10 mutations caught (2⁵³ → 2⁵⁴, reciprocal multiplication, sign of
+    zero, 19 → 20 digits, `x` after the float, unsaturated exponent, fraction exponent off by one,
+    length limit on either path, `E` not sent to the float path); one equivalent mutant (the `.`
+    counted as a digit only narrows the fast path). `cargo test --test conformance`: 3 passed.
+    `scripts/ci.sh`: 31 steps, all completed with no failure output, 740 tests passed (exit status
+    not captured). `scripts/ci.sh fuzz 300`: 744,125 inputs, 21 findings, the same verdicts
+    replayed with a fuzzer built on `main`'s `number.rs` (no verdict names a number).
+    Allocation counts (`alloc_counts`) identical to `main` on every row.
+  - Measurements (another session's `node` used 650–870% CPU from about 15:30 to 16:15; results
+    with the copy spread, `bcpy` byte-identical to `base`, checked):
+    - Screen of variant 1 (targeted rows, short settings, 2 rounds, loads 2.96–6.57 at the
+      starts, 15 of 16 runs at 3 or above): `canada` −5.3/−9.2% (compact) and −5.7/−8.3% against
+      `main` (copy ≤ 0.7%), −3.8..−10.1% against v0.6.0; `float-15` −30%, `float-short` −21%,
+      `float-exp` −20%, `float-16-exp` −11%, `float-17` −6.5/−9.8%; serde `canada` −3.6..−7.2%.
+      Flagged: `hex` +7.6, +6.6 (copy 1.5%), `int-19` +5.5, `int-8` +1.8, `int-neg-8` +1.4,
+      `json-compact/json-1000` +3.8 in one round.
+    - Variant 2, confirmation 1 (loss rows, own settings, 5 rounds, `GATE=60`, loads 2.46–29.34,
+      14 of 15 runs at 3 or above): copy spread up to 61%; decides nothing.
+    - Variant 2, confirmation 2 (own settings, 3 rounds with v0.6.0, `GATE=60`, loads 2.74–7.40,
+      11 of 12 runs at 3 or above), `verdict.py`: faster against `main` (and v0.6.0) beyond the
+      copy in every round: `float-15` −24.5% (−23.3%), `float-exp` −15.6% (−15.0%),
+      `float-short` −14.9% (−12.8%), `float-17` −3.5% (−2.0%), `json-corpus/canada` −3.9%
+      (−3.8%); `json-compact/canada` −3.2% (−2.5%), copy −1.4%; integers: no row slower, `int-4`
+      −5.0%. Slower: `parse/numbers/hex` +6.8% (+6.0..+7.8; copy −0.3%), above the copy in 3 of 3
+      rounds; +4.9% against v0.6.0.
+    - Cause of the `hex` loss, from the machine code: `main` tests `x`/`X` after the integer
+      digits with one case-folded compare; in both variants LLVM folds that test and the new
+      `.`/`e`/`E` test into one compare tree in which `x` and `X` branch differently, and the
+      `hex` workload picks the case at random per number, so that branch would be mispredicted
+      about half the time. Not measured: no counter data, no run with hex numbers in one case.
+      The hex loop's instructions are unchanged.
+    - No valid variant 2 data (the screens at loads 7–32 were discarded): `twitter` and
+      `citm_catalog` in both forms, `json/1000`, the serde rows of the JSON documents,
+      `float-16-exp`, `float-exp-large`, `suffixed`, `int-then-space-or-hash`, and the screen of
+      all benchmarks.
+  - Decision: variant 2 rejected under the owner decision of 2026-10-06 (`hex` measurably slower);
+    `src/` left as on `main`, the variants kept in `target/perf/c16-p3/` (`variant1.diff`,
+    `variant2.diff`). P3 deferred for the owner: a third variant that keeps the hex test as one
+    compare (beyond this task's two-variant limit), or a waiver for mixed-case `hex`; either way
+    the full screen remains. No benchmark input added. Followed the same day by variant 3 (next
+    entry).
+  - Commits: this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-13 — Role: clean-room implementer (the P3 implementer). Item: C16 P3, variant 3. Branch
+  `c16/p3-floats`, after `650b792`. Record: `target/perf/C16-report.md`, section "Variant 3" (not
+  committed; essentials below).
+  - Inputs consulted: the coordinator's message with the owner's choice of a third variant (one
+    narrow fix keeping the `x`/`X` test a single compare, about 1.5 hours, measure only below load
+    8); `WORKLIST.md` C16 on `origin/main` for the 1% floor (#40, `3b3b323`); my own record, runs
+    and code. Tools: `llvm-objdump`. The oracle as a black box through `scripts/ci.sh fuzz 300`
+    (libucl under `target/libucl-oracle/` not opened); of the findings, the replay verdicts only.
+    No libucl source, `tools/` or other forbidden input was read; no guard refusal. No spec
+    section was read: the section numbers in the `perf` commit message and in the doc comment of
+    `Decimal::exact` come from the existing doc comments of `number.rs`.
+  - Process notes: the harness reported the end of an earlier backgrounded wait, whose output is
+    under `/private/tmp/`; not opened. A `ps` listing showed that wait still looping, with the
+    harness's command line naming a file under `~/.claude/shell-snapshots/` (not opened); I
+    stopped it by PID, as every other process of mine. The environment named
+    `.claude/worktrees/c16-p4` as working directory during this session; I worked only in
+    `c16-p3`.
+  - Change (`4ef45a6`, perf(parse): read the usual floats in one pass): variant 2 with the test for
+    `x` or `X` after the integer digits written as `at(i).map(|b| b | 0x20) == Some(b'x')`. Machine
+    code of the screened executable: one compare again (`and #0xffffffdf; cmp #0x58; b.ne`), as on
+    `main`; the `.`/`e`/`E` test after it became a bit test.
+  - Checks: the four new tests pass; mutation check: the 11 mutations that change a result are
+    caught (the ten of variant 2 and dropping the case fold), the equivalent one survives; `cargo
+    test --test conformance` 3 passed; `scripts/ci.sh` 31 steps, exit 0, 740 tests passed;
+    `scripts/ci.sh fuzz 300`: 1,100,597 inputs, 27 findings, the same verdicts replayed with a
+    fuzzer built on `main`'s `number.rs` (no verdict names a number; the 3 value differences are
+    the known `zerocopy` `"$ABI"` case).
+  - Measurements (runs starting above load 8 discarded, as the coordinator asked; all others
+    ungated or gated at loads 2.65–7.01):
+    - Screen, parse rows of the numbers, both forms of the JSON documents and `json/1000`, rounds
+      2–3 (round 1 void): against `main`, `float-15` −25.1/−24.5%, `float-exp` −15.5/−14.0%,
+      `float-short` −15.6/−13.0%, `float-16-exp` −7.0/−6.2%, `json-corpus/canada` −6.3/+1.0%
+      (copy −3.3/+2.4, so not beyond it; `json-compact/canada` −2.6/+0.2%, copy +3.1/+3.7);
+      against v0.6.0 −22.0/−20.6%, −15.7/−13.7%, −12.4/−11.3%, −7.6/−6.6%, −6.5/+0.8%.
+      Flagged as slower beyond the floor: `hex` only (+0.4, +1.7; copy +0.2, +0.2);
+      16 rows for copy spreads above 2%.
+    - Confirmation of `hex` (own settings; rounds 1, 4, 5 valid, 2 and 3 void): −0.3% against
+      `main` (copy +0.1%), faster than the copy in all three rounds, −1.0% against v0.6.0: not
+      slower. Variant 2's loss is gone.
+    - Full screen (every benchmark, `base`, `bcpy`, `p3v3`): stopped at the end of the budget
+      after round 1. Parse and emit valid, serde void (`bcpy` started at 9.74). 88 of 164 rows
+      flagged, 74 only for copy spreads above 2%; 14 slower than `main` beyond 1% and the copy in
+      that one round (parse: `comments/block-dense`, `containers/empty-arrays`, `irregular/600k`,
+      `nested/1000`, `strings/dq-24`, `strings/dq-256`, which run the changed `Core::scalar`;
+      emit: two `config-1000` and five `numbers-*` rows and `json-corpus-canada/config`, which
+      parse outside the measured closure). Not run: round 2, serde's round 1, and the
+      confirmation of the flagged rows and targeted inputs.
+  - Decision: adopt candidate, committed as `4ef45a6`, not yet adopted under the rules. The
+    `canada` gain is not shown for variant 3 (within the copy's spread in the screen; variant 2's
+    confirmed −3.9% only supports it), and the decision of 2026-10-08 needs it against `main` and
+    v0.6.0: its confirmation comes first, then the full screen's second round and the
+    confirmation of the flagged rows. A confirmed slowdown, or no confirmed `canada` gain, drops
+    the commit. The coordinator asked for the record and LOG to read as adopted; they do not,
+    because these steps did not run within the budget. The decision on variants 1 and 2 stands.
+  - Commits: `4ef45a6` (perf(parse): read the usual floats in one pass) and this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-14 — Role: clean-room implementer (a second P3 implementer, taking over from the first,
+  who was stopped). Item: C16 P3, variant 3: the measurements that decide adoption. Branch
+  `c16/p3-floats` in worktree `.claude/worktrees/c16-p3`, after `a95fe70`. Record:
+  `target/perf/C16-report.md`, sections "Completion of the variant 3 measurements" and "Final
+  decision" (not committed; essentials below), data in `target/perf/c16-p3/` (`runs/c5-*`,
+  `runs/f3-*`, `runs/d1-*` to `runs/d3-*`, `confirm/`).
+  - Inputs consulted: the coordinator's task message, with the owner decision of 2026-10-13 on
+    what counts as slower quoted in it (not yet on this branch); `PROTOCOL.md`; `WORKLIST.md` C16;
+    this LOG's C16 P3 entries; the P3 section of `target/perf/C16-report.md`; the scripts in
+    `target/perf/c16-p3/scripts/`; `benches/common/files.rs` (the corpus path) and the criterion
+    settings in `benches/{parse,serde,emit}_benchmarks.rs`. The `src/` trees of the builds were
+    compared with `diff -r` against `git archive` of their commits. No spec section was read and
+    the oracle was not run. No libucl source, `tools/` or other forbidden input was read; no guard
+    refusal.
+  - Process notes: two of my waits were moved to the background by the harness, which wrote
+    their output under `/private/tmp/`; neither was opened. `ps` listings were filtered to my own
+    scripts. I stopped only my own driver shells, by PID (41658, then 59631), so that the
+    remaining stages ran in another order and the emit stage did not start; the benchmark runs
+    themselves were never interrupted. No `cargo` command ran during the benchmarks.
+  - Builds, checked and not rebuilt: `base` and `bcpy` executables byte-identical (`cmp`,
+    SHA-256, all three benches); `p3v3`, `base` and `v060` sources equal to `4ef45a6`, `6bc0883`
+    and `v0.6.0`. Every counted run started below load 7 (the rule: discard at 8 or above); the
+    load stayed at 3–6 from other sessions, so almost no run is below C11's 3.
+  - `canada` (own settings, `v060`, `base`, `bcpy`, `p3v3`, 3 rounds; round 1 from the stopped
+    run, its partial round 2 moved to `runs/void/`): `json-corpus/canada` −4.7% against `main`
+    (−5.5..−2.6; copy +1.1%, −1.3..+1.7) and −3.2% against v0.6.0, beyond the copy in every
+    round. `json-compact/canada` −3.1% against `main` (−5.1..−3.0) and −3.8% against v0.6.0,
+    faster than the copy in every round, but not beyond the copy in round 1, where the copy was
+    +15.6% (copy median +0.6%).
+  - Screen: serde round 1 run again, round 2 of all three benches (short settings, `base`, `bcpy`,
+    `p3v3`). `flags.py`: 218 rows, 61 cleared, 157 flagged (21 slower beyond 1% and the largest
+    copy spread, 136 for a copy spread above 2%, up to 74%); per round, 63 rows slower than `main`
+    by more than 1% and that round's copy (19 parse, 14 serde and serde_json, 30 emit), including
+    the 14 one-round flags of round 1.
+  - Confirmation (own settings, 3 rounds, 5 where three disagree), in priority order because the
+    whole set did not fit the budget: the 19 parse rows flagged as slower; the targeted rows with
+    v0.6.0 (both `twitter` forms, `citm_catalog`, `json/1000`, `json-compact/json-1000`, the 15
+    number sweeps); the 14 serde rows flagged as slower. Verdicts (`verdict.py`), with `main`'s
+    copy spread (median):
+    - slower: `parse/irregular/600k`, +3.1% against `main` over 5 rounds (per round −0.1, +1.8,
+      +4.1, +1.4, +1.1; copy −0.0%, −3.3..+2.8), slower than the copy in 4 of 5 rounds (rounds
+      1–3 with 19 rows in the process, 4–5 with this row alone). Marginal: a later 3-round run of
+      this row alone with v0.6.0 (d5) reads not slower, −1.1% against `main` (copy −1.3%), with
+      `p3v3` slower than the copy in 3 of 3, and −0.9% against v0.6.0; over all 8 rounds the
+      median is +1.0% against `main` and `p3v3` is slower than the copy in 7. The verdict is the
+      procedure's (3 rounds, then 5); d5 is reported, not used to overturn it.
+      `serde/irregular-600k/UclValue` (the same document) is not slower: −0.9% (copy −0.2%);
+    - needs 5, not run: `serde/nested-mixed-1000/to_string` +7.2% (copy +5.8%, 2 of 3 rounds,
+      one of them under a load surge to 15);
+    - placement, at most +1%: `containers/empty-values` +0.7% (copy +0.5%), `strings/dq-64` +0.1%
+      (copy −1.5%), `json-compact/twitter` +0.1% (copy −0.4%), `numbers/hex` +0.0% (copy −0.6%),
+      `serde/serialize-1000/to_json_string` +0.0% (copy −0.8%);
+    - all other confirmed rows not slower or faster. Faster beyond the copy in every round:
+      the float sweeps −3.0..−25.8% against `main` (−2.2..−24.0% against v0.6.0), the integer
+      sweeps and `suffixed` −2.3..−6.2% (−1.0..−5.1%), `json-compact/json-1000` −2.2%,
+      `json-compact/citm_catalog` −2.0%, `whitespace/compact` −1.4%.
+    - Not confirmed: the 30 emit rows flagged as slower and the 95 rows flagged only for the
+      copy spread.
+  - Decision: deferred. `parse/irregular/600k` is slower by the owner decision of 2026-10-13, if
+    marginally (above), and the decision of 2026-10-06 rejects a change that makes any benchmark
+    slower. `src/` restored to
+    `main` (`git restore --source=6bc0883 -- src`) in `1ffca42`; variant 3 kept in
+    `target/perf/c16-p3/variant3.diff` and `src-v3/`. For the owner: a variant that removes the
+    `irregular` loss, after finding its cause (not investigated), or a waiver; either way the emit
+    and spread-only rows remain to be confirmed. No benchmark input added.
+  - Commits: `1ffca42` (chore(parse): restore src/ to main, C16 P3 variant 3 deferred) and this
+    entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
