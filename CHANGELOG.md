@@ -4,6 +4,13 @@ All notable changes to this crate are recorded here.
 
 ## Unreleased
 
+### Faster number output
+
+The emitters write integers, whole floats (`%.1f`) and floats in the `%f` form of spec §10.3
+with integer arithmetic instead of Rust's formatting, with the same bytes: the six decimals of a
+float are computed exactly from its bits and rounded ties to even. Values of 2^64 and above, and
+the `%.15g` form, still use Rust's formatting. Round-trip output (serde) is unchanged.
+
 ### C adapter performance
 
 C15 replaces per-node allocations, duplicate key paths and lookup maps with compact
