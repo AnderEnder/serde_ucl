@@ -31,6 +31,11 @@ jobs:
           components: clippy, rustfmt, llvm-tools
       - uses: Swatinem/rust-cache@v2
       - name: Install pinned cargo-c
-        run: cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
+        # The cache can restore a binary built on another runner image, linked against a
+        # library this image lacks; `cargo install` then skips it as installed. Rebuild it.
+        run: |
+          cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked
+          cargo cinstall --version > /dev/null ||
+            cargo install cargo-c --version 0.10.25+cargo-0.99.0 --locked --force
       - name: scripts/ci.sh
         run: scripts/ci.sh
