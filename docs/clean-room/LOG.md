@@ -8978,3 +8978,527 @@ publication. Work item:C15; final integration commit recorded in handover.
     entry. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-14 — Role: clean-room implementer. Item: C16 P13, number formatting in the emitters
+  (N8). Branch `c16/p13-number-format` in worktree `.claude/worktrees/c16-p13`, based on `main`
+  `ee0271f` (#42). Record: `target/perf/C16-report.md` (not committed; essentials below).
+  - Inputs consulted: the embedded current `CLAUDE.md`; `PROTOCOL.md`; `WORKLIST.md` C16 (the
+    rules for every task, the owner decisions of 2026-10-06, -08, -12 and -13); this LOG (the
+    newest entries: C16 P0, P4); the coordinator's messages; the implementation team's plan and
+    review `target/perf/c16-p13/plan-P13.md` and `plans-README.md`; released spec-v23 §10.2 and
+    §10.3; the crate's `src/emit/{number,mod,config,json}.rs`, `src/lib.rs` (attributes only),
+    `benches/emit_benchmarks.rs`, `benches/common/{mod,files,workloads}.rs` (generators and
+    settings), the head of `tests/bench_documents.rs`, `scripts/ci.sh`, `Cargo.toml`,
+    `CHANGELOG.md`, `fuzz/README.md`, `git show --stat 6bc0883`; the conformance inputs (read by
+    a scratch test); the measurement scripts in `target/perf/c16-p13/scripts/`; the JSON
+    documents, copied from the prepared `base` build tree. Tools: `llvm-nm`, `llvm-objdump`,
+    `llvm-objcopy` of the toolchain. The oracle as a black box: `scripts/ci.sh fuzz 300` ran
+    `scripts/regen-golden.sh`, which cloned and built libucl under `target/libucl-oracle/`; no
+    file there was opened, and the golden files were unchanged. No libucl source, `tools/` or
+    other forbidden input was read; no guard refusal. Background tasks' output files under
+    `/private/tmp/` were not opened; commands logged to `target/perf/c16-p13/logs/` and `runs/`.
+  - Change (`83e6488`, cherry-picked onto this branch as `18881d8` after the owner's waiver;
+    also on the local branch `c16/p13-number-format-prototype` and in
+    `target/perf/c16-p13/p13i-commit.patch`):
+    `write_fixed6` for the `%f` row of §10.3 (a normal double m·2^−k: for 1 ≤ k ≤ 127 the integer
+    part m >> k and the six decimals (m mod 2^k)·10^6 / 2^k exact in u128, ties to even, with
+    the carry; for −11 ≤ k ≤ 0 a whole number below 2^64; otherwise `{:.6}`), `write_whole` for
+    the `%.1f` row and `write_int` for integers in `Writer::scalar` (libucl mode only), each out
+    of line, writing digit pairs into a 32-byte stack buffer. Floats reaching `{:.6}` (the
+    review's fix): truncation outside the i32 range, or |v − t| ≥ 1e−7; never NaN, ±∞, ±0,
+    subnormals or the `%.15g` values. Variants `p13f` (floats only) and `p13i` (with
+    `write_int`); `p13i` chosen (integer gains; 6 rows flagged as slower in the screen against
+    18).
+  - Correctness: tests against std (every exponent field around the fast path, the ties
+    N + j/128 up to N = 2^46 − 1, decimal texts of 1–17 digits, carries, bounds, wholes,
+    integers) and against a copy of `main`'s `write_float`; 0.23 s for all library tests at
+    opt-level 0 in `scripts/ci.sh`; once 100-fold in release (sizes in the record), 7.25 s, passed.
+    12 mutants of the writers all fail the tests. The emitters' output, with and without output
+    facts, for every benchmark workload, the JSON documents (`canada`'s 111,128 `%f` floats), the
+    rspamd corpus and 946 conformance inputs, in all four formats, `diff -r` identical to
+    `main`'s. `cargo test --test conformance` 3 of 3; `scripts/ci.sh` on `83e6488` exit 0;
+    `scripts/ci.sh fuzz 300` exit 1 with 22 findings (crate-rejects, crate-accepts, one
+    values-differ: includes, macros, variables), replayed with the fuzzer built from `main`'s
+    `src/` with the same 22 verdicts.
+  - Machine code: `main` inlines `write_float` and `write_g15` into `Writer::scalar` (frame
+    0xb0); `p13i` keeps that shape with calls to the new writers (frame 0xa0), and every emitter
+    function up to `scalar` at the same address; the parse executables are function-for-function
+    `main`'s code in another order.
+  - Measurement: builds `base` (`main`), `bcpy` (byte-identical copy), `v060`, `p13f`, `p13i`,
+    all rebuilt in this tree from `ee0271f`'s `benches/` (the prepared ones carried other
+    worktrees' paths). No bench commit: the plan's new workloads were not added; coverage of each
+    path by existing rows is in the record. Machine rule: runs start below a 1-minute load of 7
+    (none above 8); 3 of the 95 screen and confirmation runs started below 3. Screen (2 rounds,
+    short settings): emit and serde with all five builds, parse with `base`, `bcpy`, `p13i`; A/A
+    spreads median 3.1% (emit), 2.6% (serde), 1.8% (parse); `p13i` flagged on 77 emit and serde
+    rows (6 as slower) and 78 parse rows (30 as slower).
+  - Targeted gains, `p13i` against `main` (screen, both rounds; against v0.6.0 in brackets):
+    emit `canada` −36 to −53% (−35 to −53%), `config-1000` −12 to −17% (−16 to −27%), float
+    sweeps −47 to −57%, `suffixed` −66 to −72%, `float-exp-large` (fallback) ±0.3%. Confirmed
+    (3 rounds, own settings): `int-1` −24.8% (config), −31.1% (JSON); `int-8` −8.6%, −7.9%;
+    `int-19` −1.4%, −3.8%; `citm_catalog` not slower (JSON −6.1%, faster); `twitter` and
+    `nested-mixed-1000` not slower, except `twitter/config` +1.0% against +0.2% (placement); copy spreads within ±1.7% on the integer rows.
+  - Confirmation of the flagged rows (`verdict.py`): pass c1, emit (18 rows), and pass c2, serde
+    (24 rows): none slower. Parse, the 30 rows flagged as slower: **four slower by the rule**, by placement only
+    (the code is `main`'s): `parse/containers/one-element-arrays` +3.2% (copy +1.1%; per round
+    against the copy +33.7, +2.1, +2.4), `parse/deep/arrays-1000` +5.1% (copy +1.4%; +0.0,
+    +0.6, +4.4), `parse/numbers/float-15` +2.7% (+0.4%; +5.2, +1.3, +0.5),
+    `parse/strings/dq-escaped-64` +3.2% (+0.4%; +21.5, +2.8, +0.2). `p13i`'s round-1 parse run
+    started at a load of 5.60 and ended at 12.39 (another session), the source of the +20% to
+    +53% round-1 ratios; it stands under the machine rule.
+  - Decision under the rule alone, at this point: deferred (`dec0a31`), since under the owner
+    decisions of 2026-10-06 and 2026-10-13 a benchmark slower by the rule rejects the change,
+    even though the four rows run `main`'s parse code in another layout. No new variant was
+    tried: a placement effect on unchanged parse code has no single-row mechanism to fix.
+    Superseded: the coordinator's re-check and the owner's waiver below; P13 is **adopted**.
+  - Data (local, not committed): `target/perf/C16-report.md` (the record, with every verdict
+    table); `target/perf/c16-p13/` — `p13i-commit.patch`, `p13i.diff`, `src-p13{f,i}/`, the
+    screens and confirmations `runs/{s1,s2,c1,c2,c3,c5,c6}-*.tsv{,.log,.clean,.clean8}`, flags and verdicts
+    `runs/*-flags-*.txt`, `runs/c*-verdict.md`, logs (`ci.txt`, `fuzz.txt`,
+    `replay-{p13i,main}.txt`, `mutate.txt`, `large-set.txt`, `addrs.txt`,
+    `parse-{functions,moved}.txt`), the dumps
+    `out-main/`, `out-p13i/` and the scratch test `p13_dump.rs`. No benchmark inputs were added.
+  - Commits: see the addendum below. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-14 — Role: clean-room implementer. Item: C16 P13, the coordinator's re-check of the
+  four parse rows, and corrections to the entry above. Same branch and worktree.
+  - Inputs consulted: the coordinator's message (re-check the four rows with 5 fresh rounds of
+    `base`, `bcpy` and `p13i`, discarding runs whose start or end load is above 8; decide on the
+    fresh verdicts; note how the parse executables differ); my own runs. Also, for the replay in
+    the entry above: `target/fuzz-differential/summary.txt` and the saved findings, outside
+    `target/perf/`. No libucl source, `tools/` or other forbidden input was read; no guard
+    refusal.
+  - Corrections to the entry above:
+    - `p13f` is no alternative: its parse executables are `p13i`'s (the same disassembly,
+      addresses included), so the four rows are the same for both variants.
+    - Not every flagged row was confirmed: 22 `emit/strings-*` rows, 12 serde and 48 parse rows
+      flagged for their A/A spread were not run at full settings (time). (Corrected after the
+      review: only the 12 serde rows had `p13i`'s worst screen round at or below +1%.) "emit (18 rows)" above is pass c1 only.
+    - Rounds 4–5 of the rows whose three rounds disagreed: `serde/corpus-rspamd-groups/UclValue`
+      +1.7% against the copy's +1.4% (placement), `parse/nested-mixed-1000/save-comments` +0.8%
+      (placement), `parse/numbers/float-exp` −0.2% (not slower).
+    - The float targets were confirmed after the entry (pass c3, 3 rounds, `v060`, `base`,
+      `bcpy`, `p13i`): every row faster than `main` in every round beyond the copy;
+      `canada` −41.6 to −53.3% (v0.6.0: −41.2 to −53.3%), `config-1000` −11.8 to −15.9%
+      (v0.6.0: −16.6 to −24.4%), `float-short`, `float-15`, `float-17` −48.2 to −56.2%,
+      `suffixed` −65.8% and −70.7%; copy spreads within ±2.6%.
+    - Parse executables: the `__text` sections differ (the coordinator's hashes 3940c973
+      against dcf75807). Of 2,917 functions each, 2,901 have the same instructions (addresses,
+      immediates and trailing padding ignored), 10 are std functions under another symbol
+      suffix, and 6 (`copy_value`, `push_frame`, `open_in_object`, `open_in_array`,
+      `include_candidate`, `add_entry`) differ only in the page offset of one constant load.
+      151 functions moved: `read_unit`, `after_value`, `object_value`, `push_frame`,
+      `skip_space_checking_hash`, `array_step`, `comment_group` and 7 others by −0x20; the value
+      model's insertion and drop functions and 10 hash-map functions by +0x380 and +0x3a0;
+      `Core::error`, `Error::new` and 80 `grow_one` and error-path functions by +0x20 and +0x40.
+  - Re-check (pass c6): the four rows at their own settings, 5 fresh rounds of `base`, `bcpy`
+    and `p13i` (`83e6488`) in turns, start loads 3.51–6.99 and end loads 3.51–5.88 (no run
+    above 8, none discarded), `verdict.py` on these rounds only:
+    - `parse/containers/one-element-arrays`: **slower**, +3.9% (copy +1.3%; against the copy
+      +2.6, +6.4, −0.1, +2.5, +2.1, 4 of 5);
+    - `parse/deep/arrays-1000`: not slower, −0.4% (copy −0.5%);
+    - `parse/numbers/float-15`: not slower, −1.3% (copy −0.1%);
+    - `parse/strings/dq-escaped-64`: not slower, −0.0% (copy −0.1%).
+    Pass c5's verdicts above are unchanged.
+  - After the re-check, the deferral stood under the rule on `parse/containers/one-element-arrays`
+    alone, and I reported it with the question of a waiver.
+  - **Owner decision of 2026-10-14** (from the coordinator): `parse/containers/one-element-arrays`
+    is waived as a code-placement effect, as for P0, and P13 is adopted.
+  - Decision: **adopted with the owner's waiver of 2026-10-14** for
+    `parse/containers/one-element-arrays`: +3.9% against `main` with the copy at +1.3%, slower
+    than the copy in 4 of 5 rounds (c6; in c5 +3.2% against +1.1%, 3 of 3); its parse code is
+    `main`'s instructions but for one constant load's page offset in six functions, with the
+    parse path's functions 32 bytes earlier. (Superseded by the review entry below.) Gains, confirmed against `main`
+    (and v0.6.0): emit `canada` −41.6 to −53.3% (−41.2 to −53.3%), `config-1000` −11.8 to
+    −15.9% (−16.6 to −24.4%), the float sweeps −48.2 to −56.2% (−48.8 to −56.5%), `suffixed`
+    −65.8 and −70.7% (−66.0 and −71.1%), `int-1` −24.8 and −31.1% (−25.5 and −31.3%), `int-8`
+    −8.6 and −7.9% (−8.9 and −7.3%), `int-19` −1.4 and −3.8% (−2.4 and −1.6%).
+  - Every flagged row's verdict (`verdict.py`, the 1% floor and the copy rule):
+    - c1, emit (18 rows, `p13i`'s integer targets and the at-risk documents): 7 faster, 10 not
+      slower, 1 placement (`emit/json-corpus-twitter/config`, +1.0% against +0.2%).
+    - c2, serde (24 rows): 5 faster, 17 not slower, 2 placement
+      (`serde/corpus-rspamd-groups/UclValue` after 5 rounds, `serde_json/json-1000/typed`).
+    - c3, emit float targets (16 rows): 16 faster.
+    - c5, parse (30 rows flagged as slower in the screen): 20 not slower; 6 placement
+      (`parse/config/10`, `parse/nested-mixed-1000/save-comments` after 5 rounds,
+      `parse/numbers/{float-16-exp,float-short,int-neg-8,int-then-space-or-hash}`); 4 slower
+      (`parse/containers/one-element-arrays`, `parse/deep/arrays-1000`,
+      `parse/numbers/float-15`, `parse/strings/dq-escaped-64`).
+    - c6, the re-check of those four: 1 slower (`one-element-arrays`, waived), 3 not slower.
+    - Not confirmed (time), flagged in the screen for their A/A spread above 2%: 82 rows, the
+      22 `emit/strings-*` rows, 12 serde and 48 parse rows (lists in
+      `target/perf/c16-p13/runs/s{1,2}-flags-p13i.txt`). (Corrected after the review: 41 of
+      them had a worst screen round above +1%; they are confirmed in the review entry below.)
+  - Final tree: `cargo test --lib emit` 21 passed, `cargo test --test conformance` 3 of 3;
+    `src/` is byte-identical to the measured `p13i` tree.
+  - Commits: `dec0a31` (the entry and this addendum, as deferred), `18881d8` (perf(emit): write
+    numbers with integer arithmetic; `83e6488` cherry-picked), and the commit that records P13
+    as adopted (this text). Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-14 — Role: fresh clean-room implementation reviewer. Item: C16 P13, number formatting
+  in the emitters. Reviewed `18881d8` (perf(emit): write numbers with integer arithmetic) and the
+  implementer's entries above (`dec0a31`, `6e4e5e3`) on `c16/p13-number-format` (base `main`
+  `ee0271f`, released spec-v23) in worktree `.claude/worktrees/c16-p13`, with the record (P13
+  section of `target/perf/C16-report.md`) and its data in `target/perf/c16-p13/`.
+  - Inputs consulted: the coordinator's request with the `CLAUDE.md` rules, and the embedded
+    current `CLAUDE.md`; `PROTOCOL.md`; `WORKLIST.md` (its head and C16); this LOG (the two P13
+    entries; the P0 reviewer's entry for the format; earlier C16 entries for `fuzz 300` and the
+    load rule); `git show` of the three commits, `git diff ee0271f 6e4e5e3`,
+    `git show ee0271f:src/emit/number.rs`, `git diff --stat 83e6488 18881d8`;
+    `src/emit/number.rs` in full, `src/emit/mod.rs` 440–475 and a grep of `src/emit/` for the
+    writers' callers; the head of `CHANGELOG.md`; spec-v23 `docs/spec/10-output.md` §10.3 by
+    `git show spec-v23:`; the names of the conformance files (counts by suffix). Of the record:
+    the P13 section in full. Of `target/perf/c16-p13/`: the listing; `runs/` (every `.tsv` and
+    `.tsv.log`, both `s*-flags-p13i.txt`, the head of `c6-verdict.md`); `scripts/verdict.py`,
+    `flags.py`, `clean.py`, `clean8.py`; `logs/mutate.txt` and `large-set.txt` (tails),
+    `chain.out`, `switch.out`, `restart-r2.out`, `fuzz.txt` (summary); `p13_dump.rs` 136–150;
+    `src-p13i/` against `src/` with `diff -r`. My own scripts: `target/review-p13/{screen,conf,
+    strings}.py`, run with `python3 -I`. I did not run the oracle or `scripts/regen-golden.sh`;
+    `scripts/ci.sh` ran only its checks mode, and no file under `target/libucl-oracle/` was
+    opened. No libucl source, `tools/` or other forbidden input was read; no guard refusal.
+  - Disclosures: the harness wrote my background `scripts/ci.sh` run's output under
+    `/private/tmp/…/tasks/`; not opened (the run logged to `target/review-p13/ci.log`). The
+    session's context held the main checkout's `git status` (file names only, among them
+    `tools/capi-conformance/` and `docs/spec/drafts/`); nothing there was opened.
+  - Checks:
+    - Property check, a scratch crate (`target/review-p13/prop/`, deleted) that included the new
+      `number.rs` and `ee0271f`'s by path, release build with overflow checks and debug
+      assertions: 4,366,967,224 values, 0 differences, in 69 s on 14 threads. `write_float`: every
+      whole value in the i32 range (2^32), and 48M floats from eight distributions, each with its
+      negation and both neighbours: uniform bits; exponent fields 940–1095 (k from 135 to −20,
+      past both fallback bounds); decimal texts of 1–17 digits with exponents −12 to 17; dyadic
+      a/2^j up to j = 89; the ties N + c/128 for N < 2^46; values around whole numbers and the
+      1e−7 bound within ±2^33; f32 values; 2^31 to 2^70 with offsets. Specials and bounds
+      (±0, NaN, ±∞, subnormals, 2^−75, 2^63, 2^64 − 2^11, 2^64, `f64::MAX`). `write_int` against
+      `{i}`: every value in ±2·10^7, ±10^e ± 1000, ±2^e ± 100, `i64::MIN`/`MAX`, and 24M random
+      values of every bit length.
+    - Mutants, a scratch copy (`target/review-p13/mut/`, deleted) running the committed tests:
+      ten of my own, all killed: the fallback guard `k < -12`, the upper guard `k > 128`, the
+      tie parity from the integer part, and from bit 1 of the decimals, `rest + 1 > half`, the
+      carry at 999,999, the fallback without its sign, the sign of −1 dropped, `n > 10` in
+      `put_u64`, and the sign of `%.1f` by value (`v < 0.0`). The unmutated copy passes. The
+      committed tests would catch a wrong writer.
+    - `scripts/ci.sh` on `6e4e5e3`, a clean tree: exit 0 (226 library tests at opt-level 2 and
+      0, conformance 3 of 3, every feature set, fuzzer unit tests, C API checks, examples, docs).
+    - Recomputed from the raw TSVs with my own scripts, all as recorded: c3 `canada` −41.6,
+      −42.2, −42.4, −53.3%; `config-1000` −11.8 to −15.9%; `float-{short,15,17}` −48.2 to
+      −56.2%; `suffixed` −65.8 and −70.7%; v0.6.0 ratios; c1's integer rows; the waived row (c5
+      +3.2%, copy +1.1%, 3 of 3; c6 +3.9%, copy +1.3%, 4 of 5); the start loads of all 95 runs (3
+      below 3); the screen's 77 and 78 flagged rows of 218. The fuzz figures reconcile (75
+      differing inputs saved as 22 findings).
+  - Findings, blocking:
+    1. The unconfirmed rows are misstated. `target/perf/C16-report.md:256-259` and this LOG at
+       lines 8862–8864 say the 12 serde and 48 parse rows had `p13i`'s worst screen round at
+       or below +1%, and name the 22 `emit/strings-*` rows apart. `C16-report.md:338-340` and
+       LOG lines 8915–8918 extend that to all 82. It holds for the 12 serde rows only (c2
+       filtered serde that way). 24 of the 48 parse rows have a worst round above +1%, and so
+       do 17 of the 22 string rows: 41 of 82, unrounded. The flags files show it, as in
+       `parse/comments/block-dense` +2.0% and `emit/strings-yaml/dq-utf8-64` +20.8%. c5 took
+       only the 30 parse rows labelled "slower". And "They could only add to a rejection, not
+       remove one" (`C16-report.md:259`) argued for the deferral; for an adoption it is the
+       reason they needed confirming.
+    2. The adoption does not rest on the confirmation stage. `WORKLIST.md:600-608` (owner
+       decision of 2026-10-12): flagged benchmarks are confirmed, the screen decides nothing,
+       and adoption rests on the confirmation. The waiver of 2026-10-14 covers one row. Among
+       the unconfirmed rows:
+       - `emit/strings-*/dq-escaped-64`: `p13i`/`main` is positive in all four formats over
+         the two screen rounds (means +4.6% compact JSON, +4.7% JSON, +6.2% config, +8.2% YAML)
+         and above the copy in 6 of 8 rounds. This change altered the code those rows run:
+         `Writer::scalar`'s frame went from 0xb0 to 0xa0, and its string arm's prologue and
+         epilogue changed (`C16-report.md:74-77`). Short escaped strings in JSON were P0's drift
+         row.
+       - `parse/containers/one-key-objects` (worst +4.6%, mean +3.8%, above the copy in both
+         rounds) looks like a sibling of the waived `one-element-arrays`. Also
+         `parse/comments/block-dense` (mean +1.7%) and `parse/comments/hash-after-values`
+         (+3.0%).
+
+       The screen's copy spreads (−15% to +16% on the string rows) cannot decide these, and I
+       ran no benchmark. To resolve: confirm the 22 string rows and the 24 parse rows above +1%
+       (or all 82) under the rules, or get an owner decision on them with these figures. Then
+       correct the record and this LOG.
+  - Findings, not blocking:
+    3. `18881d8`'s message says the emitters' output for "every conformance input" is
+       identical to `main`'s. `target/perf/c16-p13/p13_dump.rs:141-148` parses with
+       `Parser::new()` only, so it covers the 946 inputs that parse with default flags, as
+       `C16-report.md:59-60` says. The emitter conformance test covers the `.flags` cases
+       against libucl's files.
+    4. The load disclosure is incomplete. Only c5's end load of 12.39 is named. c2 round 3's
+       `bcpy` ended at 14.07 (likely `rspamd-groups/UclValue`'s +15.0% copy round), and c3
+       round 3's `p13i` at 8.88; c6's rule would have dropped both. The machine rule (start
+       below 7, discard above 8; `C16-report.md:98-102`, LOG line 8816) is not in
+       `WORKLIST.md`: state who set it.
+    5. "Function-for-function identical" (`C16-report.md:83-84` and `:204`, LOG lines
+       8811–8812) conflicts with `C16-report.md:264-267`: six functions differ in one constant
+       load, and four of them (`push_frame`, `open_in_array`, `copy_value`, `add_entry`) are on
+       the waived row's path. So "its parse code is `main`'s" (LOG line 8897) is not exact.
+    6. The history has `dec0a31` ("defer", "the prototype is kept outside the tree") before
+       the `perf` commit, but `WORKLIST.md:629` asks for one `perf` commit. Squash-merge with
+       `18881d8`'s message, or reword before the PR.
+    7. `citm_catalog` is in the hypothesis (`C16-report.md:7-9`, `WORKLIST.md:728-730`) but
+       gained beyond noise in JSON only (−6.1%; config, compact JSON and YAML −0.9 to −1.3%,
+       "not slower"). The decision should say so.
+    8. The waiver of 2026-10-14 is in this LOG only. P0's waiver is in `WORKLIST.md:622-625`;
+       the coordinator should add this one there.
+    9. The stray `c3` pass at 16:05 (`C16-report.md:139-142`, as in `logs/chain.out`) is not
+       in the implementer's LOG entries. The c5 load incident is described accurately.
+  - Code: no findings. Correct under spec-v23 §10.2 and §10.3:
+    - k = 1075 − biased;
+    - the decimals stay below 10^6, ties at 2^(k−1) are broken by the parity of the 6th
+      decimal, and a carry gives at most 2^53;
+    - −11 ≤ k ≤ 0 gives m << −k < 2^64;
+    - the fallbacks are |v| ≥ 2^64, and |v| < 2^−75, which the `%f` row never reaches since
+      §10.3's table gives it |v| ≥ 10^−7;
+    - the sign comes from the sign bit (`-1e-7` → `-0.000000`; `-0.0` → `-0.0` in `%.1f`);
+      `write_int` uses `unsigned_abs` for `i64::MIN`;
+    - the buffer needs at most 28 of its 32 bytes.
+
+    Safe Rust, no new dependency, doc comments cite the sections, and the code matches the
+    module's style. The CHANGELOG entry is under `## Unreleased` (`CHANGELOG.md:7-12`) and is
+    accurate. `src/` equals `src-p13i/`, and `83e6488` and `18881d8` have the same `src/` and
+    CHANGELOG. Both implementer entries list inputs, commits and the attestation.
+  - Verdict: not ready for a PR. The writers are correct and well tested, but the decision is
+    not yet supported: findings 1 and 2 first.
+  - Commits: this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-14 — Role: clean-room implementer. Item: C16 P13, the review's findings (`3aa5916`).
+  Same branch and worktree.
+  - Inputs consulted: the reviewer's entry above; the coordinator's message (confirm the 22
+    `emit/strings-*` rows and the 24 unconfirmed parse rows whose worst screen round was above
+    +1%, `verdict.py`, 3 rounds, 5 where three disagree, `base`, `bcpy` and the candidate;
+    discard runs whose start or end load is above 8; one narrow fix if a string row is slower;
+    correct the record and this LOG); the reviewer's scripts `target/review-p13/screen.py` and
+    `strings.py`, read for their row lists (not run); my own runs. No libucl source, `tools/` or
+    other forbidden input was read; no guard refusal.
+  - Corrections to the entries above (the reviewer's findings 1, 3, 4, 5, 7 and 9):
+    1. The unconfirmed rows were misstated: of the 82, only the 12 serde rows had `p13i`'s worst
+       screen round at or below +1%; 17 of the 22 `emit/strings-*` rows and 24 of the 48 parse
+       rows were above it. Those 46 rows (all 22 string rows and the 24 parse rows) are
+       confirmed below; the 12 serde and 24 parse rows at or below +1% remain unconfirmed.
+    2. `18881d8`'s message says the output for "every conformance input" is identical to
+       `main`'s: the scratch dump parsed with default flags only, so it covers the 946
+       conformance inputs that parse with them; the emitter conformance test covers the `.flags`
+       cases against libucl's files.
+    3. End loads above 8, which the entries above did not all name: c2 round 3 `bcpy` ended at
+       14.07, c3 round 3 `p13i` at 8.88 and c5 round 1 `p13i` at 12.39. Under the rule of the
+       coordinator's re-check (start or end above 8) all three runs would be discarded; c3's
+       gains hold in its rounds 1–2 (`p13i`/`main` −39.1 to −54.0% on `canada`, −10.5 to −16.3%
+       on `config-1000`), and c2's rows have 2 or 4 rounds left, none slower. The machine rule (start
+       below 7, discard above 8) came from the coordinator's task message, not `WORKLIST.md`.
+    4. "Function-for-function identical" was wrong: six parse functions (`copy_value`,
+       `push_frame`, `open_in_object`, `open_in_array`, `include_candidate`, `add_entry`) differ
+       from `main`'s in the page offset of one constant load (`ldr q0, [x8]` against
+       `[x8, #off]`); `push_frame` and `open_in_array` are on `one-element-arrays`' path. So "its parse code is
+       `main`'s" means: the same instructions except for that offset, in another layout.
+    5. `citm_catalog`, in the hypothesis, gained beyond the copy in JSON only (−6.1%); config,
+       compact JSON and YAML were not slower (−0.9 to −1.3%), with no gain.
+    6. The stray `c3` pass at 16:05 (an emit pass started after the script that changed the pass
+       order had listed its processes; it overlapped the first `c2` run for about a minute; both
+       were stopped by PID, nothing of either was kept, `c2` was restarted) was in the record
+       only.
+  - d1, the 22 `emit/strings-*` rows on `p13i` (`18881d8`), `base`, `bcpy`, `p13i`, 3 rounds at
+    their own settings, start loads 2.95–5.69, end loads 2.64–5.27 (none discarded): 4 slower by
+    the rule (`strings-json-compact/dq-4096` +12.6% against the copy's −2.7%,
+    `strings-json-compact/dq-64` +1.6% against −0.2%, `strings-json/dq-utf8-64` +8.2% against
+    −2.9%, `strings-yaml/dq-64` +11.5% against −0.7%), 2 needing 5 rounds
+    (`strings-config/dq-64`, `strings-config/dq-utf8-64`), 4 placement, 12 not slower. The copy
+    differed from `main` by up to ±23% on these rows.
+  - Mechanism: `18881d8` changed `Writer::scalar`, whose string arm the JSON and YAML string rows
+    run: `main` saves six register pairs in a 0xb0-byte frame on every call, `p13i` six pairs in
+    0xa0 bytes, because `write_float` (with `write_g15`) is inlined into it.
+  - Narrow fix, `p13s`: `write_float` `#[inline(never)]`, nothing else. `scalar` becomes a
+    dispatch with tail calls, three register pairs in a 0x40-byte frame on the string arm; every
+    emitter function up to `scalar` keeps its address; the parse executables are `p13i`'s (same
+    disassembly, addresses included), so c5, c6 and d2 hold for it; its emit and serde
+    executables differ from `p13i`'s after `scalar`.
+  - e1, `p13s`: the 22 string rows, `canada` and `config-1000`, `base`, `bcpy`, `p13s`, 3 rounds,
+    start loads 2.86–4.88, end loads 2.86–4.88 (none discarded): none slower. `canada` −39.8 to
+    −52.4% and `config-1000` −12.5 to −15.8% (medians), faster in every round beyond the copy;
+    strings: 3 faster, 13 not slower, 2 placement (`strings-config/dq-escaped-dense-64`,
+    `strings-json-compact/dq-utf8-64`), 4 needing 5 rounds (below).
+    After rounds 4–5 (start loads 2.45–2.92): `strings-config/dq-4096` placement (+0.2%, copy
+    −4.3%), `strings-config/dq-8` not slower, `strings-json-compact/dq-4096` placement (+4.7%,
+    copy +5.2%), `strings-json/dq-escaped-dense-64` placement (+1.1%, copy +0.6%). In all, 32
+    rows: 11 faster, 16 not slower, 5 placement, none slower.
+  - d2, the 24 unconfirmed parse rows whose worst screen round was above +1%, `base`, `bcpy`,
+    `p13s`, 3 rounds (5 for two), start loads 2.93–4.07, end loads 2.85–4.07 (none discarded):
+    11 not slower (among them `parse/containers/one-key-objects`, −0.1% against the copy's
+    +0.0%), 12 placement, **1 slower**: `parse/strings/dq-256` +1.1% against the copy's −0.1%,
+    slower than the copy in 3 of 3 rounds (+1.3, +1.2, +0.7). Mechanism: placement, as for
+    `one-element-arrays`: the parse executables run `main`'s instructions (but for the one
+    constant load above) with the parse path's functions (`read_unit`, `after_value`,
+    `array_step` and others) 32 bytes earlier; nothing in the string scan changed.
+  - Not confirmed: the 12 serde and 24 parse rows whose worst screen round was at or below +1%.
+    Also, c1 (emit integer targets, `citm_catalog`, `twitter`, `nested-mixed-1000`) and c2
+    (serde) were measured on `p13i`; `p13s`'s emit and serde executables differ from `p13i`'s
+    after `Writer::scalar` and were not measured on those rows.
+  - Final tree (`12e4cf5`): `cargo fmt --check`, `cargo clippy --all-targets --all-features
+    -D warnings`, `cargo test --lib emit` (21 passed), `cargo test --test conformance` (3 of 3),
+    the output dump identical to `main`'s; `scripts/ci.sh` exit 0 (run on this commit's tree,
+    `target/perf/c16-p13/logs/ci-12e4cf5.txt`).
+  - Decision: not adopted past `parse/strings/dq-256`. With the fix the string rows are clear;
+    `parse/strings/dq-256` (+1.1%, 3 of 3, placement) is a second parse row slower by the rule,
+    besides the waived `one-element-arrays`. The owner decides whether to waive it.
+  - Commits: `12e4cf5` (perf(emit): keep the float writer out of Writer::scalar) and this entry
+    (docs(clean-room): address the C16 P13 review). Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-15 — Role: clean-room implementer. Item: C16 P13, the measurement of the final build
+  `p13s` (`12e4cf5`) after the owner's waivers (`b12d48b`). Same branch and worktree; `main` is
+  `18e372a`, which differs from `ee0271f` in this LOG only, so the `base` and `bcpy` builds stand
+  (their sources checked file by file against `ee0271f`; `bcpy` `cmp`-identical to `base`).
+  Record: `target/perf/C16-report.md`, sections "Final build `p13s`" and "Decision of
+  2026-10-15" (not committed; essentials below).
+  - Inputs consulted: the coordinator's message with the `CLAUDE.md` rules; `PROTOCOL.md`;
+    `WORKLIST.md` C16; this LOG (the P13 entries); the P13 record; of `target/perf/c16-p13/`:
+    the listing, the scripts (`screen-p13.sh`, `screen.sh`, `chain5.sh` to `chain7.sh`,
+    `ab3.sh`, `confirm3.sh`, `collect.py`, `verdict.py`, `flags.py`, `clean.py`, `clean8.py`,
+    `rows.py`, `mkbuild.sh`, `gain.py`, `disasm.sh`, `disasm.py`, `addrs.py`), the flags files and
+    TSVs of s1, s2, c1, c2, c5, c6, d2, e1, `logs/{fuzz.txt,replay-*.txt,addrs-p13s.txt}` and the
+    heads of `logs/parse-{functions,moved}.txt`; `fuzz/README.md`, `fuzz/Cargo.toml` and a grep of
+    `fuzz/src/` for its paths; `scripts/ci.sh` (fuzz mode); the Criterion settings in `benches/`;
+    a grep of `src/emit/{json,mod}.rs` for `json_value`, `member` and `scalar`; `git log`,
+    `git diff --stat ee0271f 18e372a`. Tools: `llvm-objdump`, `llvm-nm`, `otool`. The oracle as
+    a black box: the fuzz run and the replays ran `target/libucl-oracle/ucl-dump`; nothing under
+    `target/libucl-oracle/` was opened and `regen-golden.sh` did not run. No libucl source,
+    `tools/` or other forbidden input was read.
+  - Disclosures: one guard refusal, of a command with a stray `/tmp/../dev/null` redirection I
+    typed by mistake; nothing ran. The harness saved two large outputs (the P13 entries of this
+    LOG, and a diffstat against the stale local `main` ref, `c497f7e`) under `~/.claude/`; neither
+    was opened (the LOG was read directly). Background tasks' output under `/private/tmp/` was not
+    opened; the chain logged to `target/perf/c16-p13/runs/chain-f.done` and `logs/`.
+  - Parse not re-screened: `p13s`'s parse executable has `p13i`'s disassembly, addresses included
+    (`llvm-objdump -d`, `cmp` identical, SHA-1 a131dc1f… for both); the files differ in 80 bytes:
+    the UUID, one byte of the build path (`p13i`/`p13s`) in a `__TEXT,__const` string, and the
+    code signature (`target/perf/c16-p13/logs/parse-p13s-p13i.txt`).
+  - Runner (`scripts/ab4.sh`, `scripts/chain-f.sh`, one benchmark process at a time): builds in
+    turns, order reversed in even rounds; start below 3, or with no wait below 7; a run whose
+    1-minute load at the start or the end is above 8 discarded and repeated. 17 discarded: s3 8,
+    f1 7, f4 2 (end loads 8.01 to 21.06; all listed in the record). Of the 73 kept runs one
+    started below 3 (f4 round 1 `p13s`, 2.91 to 3.68) and none started and ended below 3: every
+    result was measured above the WORKLIST's load of 3; the spread between identical builds on
+    each row is the copy/main column of the record's tables.
+  - s3, screen of emit and serde, `base`, `bcpy`, `p13s`, `v060`, 2 rounds, screen settings, 16
+    runs, start loads 5.61–6.98, end 5.12–7.84: A/A spread median 3.1% (emit), 2.9% (serde);
+    flagged 87 of 114 (43 emit, 44 serde), 78 for the A/A spread, 9 as slower than 1% and it.
+  - Confirmation, own settings, 3 rounds in turns, 5 where three disagreed, `verdict.py`:
+    - f1, the emit rows P13 targets in every format (`numbers-*` floats, `suffixed`, `int-*`;
+      `canada`, `config-1000`, `citm_catalog`, `twitter`, `nested-mixed-1000`), less 4 confirmed
+      in e1 and not flagged again, with `v060`: 32 rows, 12 runs, start 3.49–6.92, end
+      3.49–7.34; 17 faster, 11 not slower, 3 placement, 1 slower.
+    - f2, the other flagged emit rows (`strings-*`): 23 rows, 15 runs, start 4.20–6.29, end
+      4.20–7.96; 3 faster, 9 not slower, 10 placement (4 after 5 rounds), 1 slower.
+    - f3, the 44 flagged serde rows (the 12 unconfirmed among them): 15 runs, start 3.31–6.97,
+      end 3.31–8.00; 1 faster, 25 not slower, 8 placement, 10 slower (one after 5 rounds).
+    - f4, the 24 unconfirmed parse rows: 15 runs, start 2.91–6.92, end 2.91–6.92; 1 faster, 10
+      not slower (3 after 5 rounds), 7 placement, 6 slower.
+    - e1's verdicts (faster) stand for the five rows not flagged again: `strings-json/dq-8`,
+      `config-1000/{config,json,yaml}`, `canada/config`.
+  - Slower by the rule, `p13s`/main median (copy/main; `p13s`/copy per round), 18 rows:
+    - changed code (`Writer::scalar`, and `write_int` for integers):
+      `emit/nested-mixed-1000/json` +6.5% (−6.2%; +11.5, +14.5, +4.2), a targeted row;
+      `emit/strings-json/dq-utf8-64` +3.0% (−1.9%; +5.9, +7.6, +2.3).
+    - serde, `main`'s instructions in another layout: `corpus-rspamd-composites/IgnoredAny`
+      +7.8% (−2.3%; +10.3, +9.1, +1.5), `corpus-rspamd-composites/UclValue` +13.6% (+2.2%; +5.3,
+      +12.1, +1.1), `corpus-rspamd-groups/IgnoredAny` +24.8% (−0.6%; +16.4, +25.5, +8.4),
+      `corpus-rspamd-groups/UclValue` +20.2% (+8.2%; −5.0, +20.6, +3.1, +12.0, +2.8),
+      `json-1000/IgnoredAny` +1.6% (−0.1%; +2.4, +1.8, +1.1), `json-corpus-canada/UclValue`
+      +5.4% (−0.6%; +6.9, +5.4, +1.8), `json-corpus-canada/typed` +1.0% (−0.7%; +4.5, +1.0,
+      +1.7), `json-corpus-citm_catalog/UclValue` +2.2% (−0.3%; +2.5, +2.2, +1.0),
+      `nested-mixed-1000/from_str` +1.0% (+0.3%; +0.5, +2.5, +0.4); and serde_json's own code,
+      `serde_json/json-corpus-citm_catalog/Value` +2.3% (−2.1%; +0.1, +5.7, +2.6).
+    - parse, `main`'s instructions in another layout: `comments/block-prose` +8.4% (+2.3%; +0.8,
+      +4.6, +6.0), `json-compact/twitter` +1.6% (+0.3%; +1.0, +4.1, +0.1), `json-corpus/canada`
+      +1.9% (−0.6%; +0.7, +5.5, +2.4), `json/1000` +1.3% (−1.1%; +0.9, +1.4, +3.2),
+      `keys/bare-4` +1.6% (+0.4%; +0.3, +2.6, +1.1), `objects/keys-16-mixed-length` +2.1%
+      (+1.0%; +2.0, +1.0, +0.9).
+  - Placement, `p13s`/main median (copy/main), 28 rows:
+    - f1: `twitter/json` +0.1% (−0.9%), `twitter/yaml` +0.8% (−0.2%),
+      `numbers-config/float-exp-large` +0.1% (−0.0%).
+    - f2 (`emit/strings-*`): `config/dq-4096` +2.8% (−4.0%), `config/dq-64` +3.2% (−3.6%),
+      `config/dq-8` +2.1% (+0.4%), `config/dq-escaped-dense-64` +0.2% (−1.2%),
+      `config/dq-utf8-64` +0.3% (−1.4%), `json-compact/dq-4096` +0.4% (−0.4%),
+      `json-compact/dq-escaped-dense-64` +0.8% (+0.8%), `json-compact/dq-utf8-64` +4.4% (+3.3%),
+      `json/dq-4096` +0.4% (+0.2%), `json/dq-escaped-dense-64` +1.5% (+1.4%).
+    - f3: `serde/irregular-60k/IgnoredAny` +0.7% (+0.3%), `serde/json-1000/UclValue` +0.3%
+      (−0.3%), `serde/json-1000/typed` +0.7% (+0.5%),
+      `serde/json-corpus-citm_catalog/IgnoredAny` +0.9% (+0.9%),
+      `serde/json-corpus-twitter/typed` +0.1% (+0.8%), `serde/nested-mixed-1000/to_string`
+      +24.5% (+28.0%), `serde_json/json-1000/Value` +0.1% (+0.6%),
+      `serde_json/json-corpus-twitter/Value` +0.6% (−0.7%).
+    - f4 (`parse/`): `json-compact/citm_catalog` +0.5% (+0.1%), `keys/bare-64` +0.2% (−0.7%),
+      `keys/quoted-23` +0.3% (+0.2%), `numbers/int-16` +0.3% (−0.4%), `numbers/int-19` +0.9%
+      (+0.3%), `numbers/int-4` +0.2% (−1.5%), `strings/sq-4096` +0.1% (−0.6%).
+  - What the slower rows run (`scripts/fncmp.py`; `logs/{serde,parse}-functions-p13s.txt`): in
+    the serde executable 3,509 of 3,511 functions have `main`'s instructions and, of the crate's,
+    only `Writer::scalar` differs; the deserializer's parse path (`read_unit`, `after_value`,
+    `array_step`, `object_value`, `push_frame` and others, 24) moved by +0x8e0, 32 bytes off its
+    former position in a 64-byte line, as in the parse executable (−0x20), the mechanism of the
+    two waived rows. Over all rows, `p13s`/copy (geometric mean per round) was +2.4, +1.2, +0.7%
+    in f3 (serde_json's 8 rows +0.8, +0.4, +0.4%) and +0.8, +1.7, +0.5% in f4. In f3 the
+    `p13s` runs of rounds 1 and 2 ran back to back at 18:38 and 18:52, after waits of 450 and
+    585 s for the load to fall below 7; the rspamd rows' largest ratios are in those rounds.
+    `emit/nested-mixed-1000/json` is noisy: `main` 1,666 to 2,083 µs over the rounds, copy/main
+    −12.6, +7.2, −12.3%; on `p13i` (c1) −7.6%; its compact JSON, through the same `json_value`,
+    `member` and `scalar`, −1.2% (copy +0.9%). `emit/strings-json/dq-utf8-64` was not slower in
+    e1 (−2.8%).
+  - Targeted gains, `p13s` against `main` (f1; e1 for the rows not re-confirmed) and, after the
+    semicolon, against v0.6.0 (f1; the screen s3 for the e1 rows), config and JSON:
+    `float-short` −53.9, −55.9% (−55.1, −57.2%); `float-15` −49.1, −50.1% (−49.3, −51.4%);
+    `float-17` −48.7, −51.2% (−50.1, −52.7%); `suffixed` −65.8, −71.2% (−66.8, −71.1%); `int-1`
+    −27.0, −30.0% (−28.8, −31.2%); `int-8` −10.1, −9.0% (−9.6, −10.6%); `int-19` −0.9, −4.5%,
+    not slower (−4.1, −7.8%); `float-exp-large` (std fallback) +0.1% placement, +0.2% not
+    slower. Four formats (config, JSON, compact JSON, YAML): `canada` −39.8 (e1), −41.5, −51.4,
+    −41.9% (−40.3 s3, −43.2, −51.1, −43.2%); `config-1000` −13.7 (e1), −15.7 (e1), −16.1,
+    −12.5% (e1) (s3 −20.7/−20.3, s3 −22.3/−26.5, −24.9, s3 −17.3/−18.2%); `citm_catalog` −0.3,
+    +0.0, −0.0, −2.4%, not slower (−0.2, −8.3, −10.3, −0.6%); `twitter` −1.8% faster, +0.1%
+    placement, −0.0% not slower, +0.8% placement (−12.3, −20.6, −18.8, −8.4%);
+    `nested-mixed-1000` +1.6% not slower, **+6.5% slower**, −1.2% and −1.4% not slower (+1.6,
+    −7.4, +0.2, −10.9%). Rows given without a verdict are faster than `main` beyond the copy.
+  - Fuzz, after the benchmarks: `scripts/ci.sh fuzz 300` on `12e4cf5`, exit 1, seed
+    1792086478586773000, 761,393 inputs, 73 differ (64 crate-rejects, 7 crate-accepts, 2
+    values-differ), 25 findings. Replayed with the `p13s` fuzzer and one built from `ee0271f`'s
+    tree (`target/perf/c16-p13/fuzzmain/`, with `--oracle`): the same 25 verdicts, byte for byte.
+    Against the run of 2026-10-14 (22 findings; 64, 10 and 1): the same classes, plus
+    MissingDelimiter and UnmatchedClose (one input each) and a values-differ in an array length,
+    which `main`'s fuzzer reports the same; the earlier 22 findings replay with both fuzzers as
+    in `logs/replay-p13i.txt`. None comes from this change.
+  - Decision: **not adopted under the rule**. 18 rows other than the two waived ones are slower
+    by the rule after their rounds. `emit/nested-mixed-1000/json` is an input P13 targets and
+    runs the changed code, so it is not a placement question like the waived rows; the
+    2026-10-06 rule rejects a change that makes a targeted input measurably slower.
+    `emit/strings-json/dq-utf8-64` also runs changed code. The ten serde and six parse rows run
+    `main`'s instructions in another layout, one of them serde_json's code. The first slower row
+    appeared in f1 while f2 ran; no code was changed, and the remaining passes and the fuzz run
+    were completed so that the owner has every verdict at once. The owner decides on waivers.
+  - Data (local, not committed): the record; `target/perf/c16-p13/` — `runs/{s3,f1,f2,f3,f4}-*`
+    (TSVs, `.log`, `.discarded`, flags, `f*-verdict.md`, `s3-gain-p13s.md`), `runs/chain-f.done`,
+    `f/` (row lists), `scripts/{ab4.sh,chain-f.sh,rowsf.py,complete.py,summf.py,shift.py,
+    fncmp.py}`, `logs/{fuzz-p13s.txt,fuzz-summary-p13{i,s}.txt,replay2-*.txt,
+    parse-p13s-p13i.txt,{serde,parse}-functions-p13s.txt}`, `fuzz-findings-p13s/`.
+  - Commits: this entry (docs(clean-room): confirm C16 P13 on the final build). Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-16 — Role: coordinator (oracle side). Item: C16 P13.
+  - Inputs consulted: the P13 implementers' and reviewer's reports and entries above, and the
+    owner's answers on them.
+  - Owner decisions:
+    - 2026-10-15: `parse/strings/dq-256` is waived as code placement, like
+      `parse/containers/one-element-arrays` on 2026-10-14; both are recorded in WORKLIST C16.
+    - 2026-10-16, after the final-build run above: open the PR with the implementation. The 18
+      rows slower in that run, and the targets without a confirmed gain (`citm_catalog`,
+      `int-19`), are not waived; the merge decision is the owner's.
+  - By its implementer's report, the final-build entry's inputs leave out
+    `target/fuzz-differential/summary.txt` and searches of `src/lib.rs`, `Cargo.toml` and
+    `benches/common/workloads.rs`, all allowed inputs.
+  - Work: squashed the branch's eight commits into one `perf` commit on `main` `18e372a` (#43
+    changed only this LOG). `src/` and `CHANGELOG.md` are `12e4cf5`'s, on which `scripts/ci.sh`
+    passed.
+  - Commit: the PR's commit. No implementation change by this role.

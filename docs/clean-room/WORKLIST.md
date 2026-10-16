@@ -623,6 +623,12 @@ Rules for every task:
     - `emit/numbers-config/float-short`, +0.6% in the median;
     - three serde rows of +0.2% to +0.7%, with means near zero;
     - four parse rows, whose executables are byte-identical.
+  - P13: the owner waived two parse rows as code placement. P13 changes only the emitters; the
+    parse executables run `main`'s instructions, with functions moved by 32 bytes and one
+    constant load at another offset:
+    - `parse/containers/one-element-arrays`, +3.9% against the copy's +1.3%, 4 of 5 rounds
+      (2026-10-14);
+    - `parse/strings/dq-256`, +1.1% against the copy's −0.1%, 3 of 3 rounds (2026-10-15).
 - Each task ends with a record in `target/perf/C16-report.md`, as in the document's §12.4: the
   identifier, hypothesis, change, contract kept, time and allocations, the workloads affected,
   correctness evidence, and a decision: adopt, reject or defer.

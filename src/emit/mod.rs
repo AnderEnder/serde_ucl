@@ -461,10 +461,7 @@ impl<'a> Writer<'a> {
             return;
         }
         match value {
-            Value::Integer(i) => {
-                use std::fmt::Write;
-                let _ = write!(self.out, "{i}");
-            }
+            Value::Integer(i) => number::write_int(&mut self.out, *i),
             Value::Float(f) | Value::Time(f) => number::write_float(&mut self.out, *f),
             Value::String(s) => text::write_json_string(&mut self.out, s),
             Value::Boolean(b) => self.out.push_str(if *b { "true" } else { "false" }),
