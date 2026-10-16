@@ -9577,3 +9577,17 @@ publication. Work item:C15; final integration commit recorded in handover.
   - Commits: this entry. Not pushed.
   - Attestation: I did not read libucl source code or any forbidden input listed in
     docs/clean-room/PROTOCOL.md.
+
+- 2026-10-16 — Role: coordinator (oracle side). Item: C16.
+  - Inputs consulted: the P13 record and PR #44, the plans of 2026-10-14 (entry above), and the
+    owner's answers.
+  - P13: the owner merged #44 (`c4236ad`) on 2026-10-16. The PR listed as open the 18 rows that
+    the final-build run called slower by the rule, and the targets without a confirmed gain
+    (`citm_catalog`, `int-19`). The waivers recorded in WORKLIST remain the two parse rows.
+  - Recorded in WORKLIST C16 the owner decisions of 2026-10-16:
+    - P14 before P9 on the emitter track, as the plans suggest;
+    - the confirmation stage runs only when the 1-minute load is below 3; the screen at any
+      load, logged.
+  - The plans' entry above was committed on branch `c16/plans` (`65cb38c`) and is carried here
+    unchanged.
+  - Commits: this entry and the WORKLIST change. No implementation change.
