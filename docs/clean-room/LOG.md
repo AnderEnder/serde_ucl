@@ -9502,3 +9502,92 @@ publication. Work item:C15; final integration commit recorded in handover.
     changed only this LOG). `src/` and `CHANGELOG.md` are `12e4cf5`'s, on which `scripts/ci.sh`
     passed.
   - Commit: the PR's commit. No implementation change by this role.
+
+- 2026-10-14 — Role: clean-room implementers, planning. Item: C16 P13, P9, P14, P7, P15, P16.
+  Worktree `.claude/worktrees/c16-plans`, branch `c16/plans`, base `origin/main` `ee0271f`;
+  released spec-v23 (`docs/spec/` equals the tag: the diff against it is empty).
+  - Inputs consulted by the recorder:
+    - the coordinator's task message with the `CLAUDE.md` rules;
+    - `PROTOCOL.md`;
+    - `WORKLIST.md` C16, with the owner decisions of 2026-10-06, -08, -12 and -13;
+    - this LOG's C16 entries: P1, its review and fixes; P0, its review and fixes; P4; the
+      coordinator's entries;
+    - the C16 P3 entries of `.claude/worktrees/c16-p3/docs/clean-room/LOG.md`, read only;
+    - `target/perf/c16-plans/plans-and-reviews.json`;
+    - released spec-v23: the headings of §8 and §10-§13, and the text of §8.1 and §11.2. Other
+      section numbers in the P7 and P16 records come from those headings and from the code's doc
+      comments.
+  - The crate's code, read by the recorder to check the plans' line references:
+    - `src/parse/core.rs`: frames, `Sizes`, container opening and closing, `insert`, `read_key`,
+      `Document::read_unit` and `finish`;
+    - `src/value.rs`: `Slots`, `add_by_priority`, `collect`, `Entry::merge`, `insert_slot_at`,
+      `Array`, `Object` and their drops;
+    - `src/value/{map,string,text}.rs`;
+    - parts of `src/parse/{facts,comments,inputs,mod,registered,string}.rs` and `src/de.rs`
+      (attributes);
+    - `src/emit/{number,mod,text,json,config}.rs`;
+    - `benches/common/{workloads,mod,irregular}.rs`, the header of `benches/alloc_counts.rs` and
+      parts of `benches/parse_benchmarks.rs`;
+    - two lines of `tests/bench_documents.rs`, and the names of the conformance cases' `.flags`
+      files.
+  - Read beyond the coordinator's list for this round:
+    - `Cargo.toml`'s profiles, for the P15 note on debug assertions and P16's fallback 1;
+    - two lines of `scripts/ci.sh` (73-74), the opt-level-0 test step that the P13 review cites.
+
+    Both are the crate's own files, which `CLAUDE.md` gives to either team; they are not forbidden
+    inputs under `PROTOCOL.md`.
+  - What the recorder did not do:
+    - read libucl source, `tools/` or any other forbidden input;
+    - read anything under `target/` other than `target/perf/c16-plans/`, or `docs/spec/drafts/`;
+    - run cargo, a build or a benchmark.
+
+    There was no guard refusal.
+  - Process notes:
+    - The harness saved one oversized tool output, the P13 part of the JSON, under
+      `~/.claude/projects/…/tool-results/`. I did not open it, and re-read the JSON in parts.
+    - The session's context held the main checkout's `git status`, which names untracked paths
+      under `docs/spec/drafts/` and `tools/`. I saw the file names only; nothing there was
+      opened.
+  - Work:
+    - On 2026-10-13, implementation-team agents drafted the six plans and adversarially reviewed
+      P13, P9, P14 and P15, in read-only rounds (no cargo, nothing edited, no LOG entry).
+    - Their records in the JSON list inputs within the coordinator's list, with two exceptions:
+      the P13 plan read `Cargo.toml` (its head), and the P13 review cites `scripts/ci.sh` lines.
+      Neither is a forbidden input.
+    - The P13 and P7 plans give the protocol's attestation, and the P15 plan states that no
+      forbidden input was read. The others give their scope without one.
+    - The reviews of P7 and P16 did not run. I reviewed both adversarially, then recorded all six,
+      with the required fixes merged into each "Plan after review".
+  - Files (not committed): `target/perf/c16-plans/{P13,P9,P14,P7,P15,P16}.md` and `README.md`,
+    which holds the summary table and a suggested order in two tracks.
+  - Per task (every plan found not sound as written; recommendation for all six: prototype with
+    fixes):
+    - P13: an exact `%f` and `%.1f` writer with std as the out-of-line fallback, built after a
+      bench commit and checked against `main`'s inlining shape.
+    - P9: a byte-class table for the plain-byte test, after an all-escape workload, a decision on
+      scan-then-copy, and a step 0 showing the writer at 3% or more.
+    - P14: borrow the key spelling instead of copying it, with a workload that reaches the
+      spelling facts and the allocation test in the `perf` commit.
+    - P7: step 0 (the `alloc_counts` diff and the V07 census) decides whether V08 is timed, with
+      the check in `open_in_object` only; V08 is likely deferred.
+    - P15: carry the caller's `&str` to `read_unit`, passed by reference, with variant A in the
+      same screen and new `from_slice` rows.
+    - P16: box the case index, and give each fallback its own step-0 gate, with the alloc contract
+      corrected and the targets separated from the must-not-slow rows.
+  - Commits: this entry. Not pushed.
+  - Attestation: I did not read libucl source code or any forbidden input listed in
+    docs/clean-room/PROTOCOL.md.
+
+- 2026-10-16 — Role: coordinator (oracle side). Item: C16.
+  - Inputs consulted: the P13 record and PR #44, the plans of 2026-10-14 (entry above), and the
+    owner's answers.
+  - P13: the owner merged #44 (`c4236ad`) on 2026-10-16. The PR listed as open the 18 rows that
+    the final-build run called slower by the rule, and the targets without a confirmed gain
+    (`citm_catalog`, `int-19`). The waivers recorded in WORKLIST remain the two parse rows.
+  - Recorded in WORKLIST C16 the owner decisions of 2026-10-16:
+    - P14 before P9 on the emitter track, as the plans suggest;
+    - the confirmation stage runs only when the 1-minute load is below 3; the screen at any
+      load, logged.
+  - The plans' entry above was committed on branch `c16/plans` (`65cb38c`) and is carried here
+    unchanged.
+  - Commits: this entry and the WORKLIST change. No implementation change.

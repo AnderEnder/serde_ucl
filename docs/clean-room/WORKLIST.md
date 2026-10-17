@@ -609,6 +609,11 @@ Rules for every task:
 
   A record states which of its results were measured above that load, each with the spread
   between identical builds on the same benchmark.
+- Owner decision of 2026-10-16, after P13: the screen may run at any load, with the load logged.
+  The confirmation stage runs only when the 1-minute load is below 3, at the start and at the end
+  of each run, waiting for quiet windows or the night if needed; a run outside it is discarded
+  and repeated. P13's last confirmation, gated only below 8, called 18 rows slower with copy
+  spreads of up to 8%.
 - Owner decision of 2026-10-13: a 1% floor for "measurably slower" in these rules.
   - In the confirmation stage, a benchmark counts as slower only if both hold:
     - the change's median is slower than the base's by more than 1%, and by more than the copy's
@@ -755,3 +760,5 @@ Owner decisions of 2026-10-08, after P1 (its record is in `LOG.md`):
 5. Order: P0; then by P1's hotspots: P4, P3, P13, P9, P14, P7, P15, P16, P17, P12, P18, P19, P6,
    P2, P20, P5, P21, P10. P11 at any time. A parser task and an emitter task may run at the same
    time.
+   Owner decision of 2026-10-16: P14 before P9. P9 first needs a decision on scan-then-copy and
+   an all-escape workload (the implementation team's plans of 2026-10-14); P14 does not.
